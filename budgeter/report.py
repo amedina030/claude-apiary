@@ -3,12 +3,12 @@
 Summary of claude-apis budgeter usage log.
 
 Usage:
-    python report.py                    # non-zero entries, grouped by session
+    python report.py                    # default: grouped by session > task
     python report.py --all              # include zero-delta entries
     python report.py --date 2026-03-14  # single date
     python report.py --since 2026-03-01 # from date onwards
-    python report.py --flat             # flat list, no session grouping
-    python report.py --by-turn          # grouped by session > task (chains continuation turns)
+    python report.py --flat             # flat list, no grouping
+    python report.py --grouped          # group by session only (no task breakdown)
 """
 import json
 import argparse
@@ -197,7 +197,8 @@ def main():
     parser.add_argument("--date", help="Show only entries from this date (YYYY-MM-DD)")
     parser.add_argument("--since", help="Show entries from this date onwards (YYYY-MM-DD)")
     parser.add_argument("--flat", action="store_true", help="Flat list instead of session grouping")
-    parser.add_argument("--by-turn", action="store_true", help="Group by session and user turn")
+    parser.add_argument("--grouped", action="store_true", help="Group by session only (no task breakdown)")
+    parser.add_argument("--by-turn", action="store_true", help="Alias for default (session > task grouping)")
     parser.add_argument("--all", action="store_true", help="Include zero-delta entries")
     args = parser.parse_args()
 
@@ -219,10 +220,10 @@ def main():
 
     if args.flat:
         print_flat(entries)
-    elif args.by_turn:
-        print_by_turn(entries)
-    else:
+    elif args.grouped:
         print_grouped(entries)
+    else:
+        print_by_turn(entries)
 
 
 if __name__ == "__main__":
