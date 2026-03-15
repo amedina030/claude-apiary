@@ -69,7 +69,7 @@ claude-apis/
 ├── budgeter/                    # Token usage monitoring tool
 │   ├── hooks/
 │   │   ├── pre_tool_use.py      # Main hook: logs previous tool cost, warns if expensive
-│   │   ├── post_tool_use.py     # No-op (kept for install compatibility)
+│   │   ├── post_tool_use.py     # Logs Agent token cost from tool_response.totalTokens
 │   │   └── stop_session.py      # Logs final tool cost, cleans up temp files
 │   ├── lib/
 │   │   ├── logger.py            # All file I/O: log, baseline, snapshot, session JSONL
@@ -124,12 +124,15 @@ Claude Code fires hooks at tool lifecycle events. Budgeter uses three:
 ```
 User turn → Claude responds → [PRE hook fires before each tool call]
                            → Tool runs
+                           → [POST hook fires after Agent — logs exact subagent token cost]
                            → [PRE hook fires before next tool call — logs cost of previous]
                            → ...
                            → Session ends → [Stop hook fires — logs final tool cost]
 ```
 
 The PRE-to-PRE delta pattern is key: tokens can't be measured during a tool call, so each PRE hook saves a baseline and the *next* PRE computes the delta. The Stop hook captures the last call's cost.
+
+**Agent calls are a special case.** Subagents run in a separate transcript, so their token usage is invisible to the PRE-to-PRE delta. Instead, the POST hook reads `tool_response.totalTokens` from the payload — the exact cost reported by Claude Code — and logs it directly. The following PRE hook skips logging to avoid double-counting.
 
 ### Task chaining (`[CONT]`)
 

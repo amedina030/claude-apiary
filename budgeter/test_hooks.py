@@ -8,6 +8,8 @@ Covers:
   - PRE-to-PRE baseline: PRE saves prev_tool_name for next PRE to attribute correctly
   - task_turn: baseline stores task_turn; [CONT] prefix causes continuation to inherit task_turn
   - count_tasks: counts unique (session_id, task_turn) pairs, not raw entries
+  - Agent PostToolUse: logs Agent token cost from tool_response.totalTokens
+  - No double-count: PRE skips logging when prev_tool_name == "Agent"
 """
 import sys
 import json
@@ -221,6 +223,90 @@ def test_cont_continuation_inherits_task_turn(log_path):
 
 
 # ---------------------------------------------------------------------------
+# Agent PostToolUse tests
+# ---------------------------------------------------------------------------
+
+def test_post_agent_logs_total_tokens(log_path):
+    """PostToolUse hook must log an Agent entry with tokens_delta == totalTokens."""
+    import budgeter.lib.logger as lg
+    session_id = make_session_id()
+
+    # Write a baseline so the hook has task_turn / user_message context
+    orig_tmp = lg.TMP_DIR
+    try:
+        lg.save_baseline(
+            session_id, tokens=5000,
+            prev_tool_name="Bash",
+            prev_assistant_message="About to spawn agent",
+            turn_number=3,
+            task_turn=3,
+            user_message="do something",
+        )
+
+        before = log_entry_count(log_path)
+        payload = {
+            "tool_name": "Agent",
+            "session_id": session_id,
+            "cwd": "",
+            "tool_response": {"totalTokens": 12345},
+        }
+        r = run_hook("post_tool_use.py", payload)
+        assert r.returncode == 0, f"POST failed: {r.stderr}"
+        assert log_entry_count(log_path) == before + 1, "POST must write one Agent entry"
+
+        entries = lg.read_log()
+        agent_entries = [e for e in entries if e.get("session_id") == session_id and e.get("tool_name") == "Agent"]
+        assert len(agent_entries) == 1
+        assert agent_entries[0]["tokens_delta"] == 12345
+        assert agent_entries[0]["net_tokens_delta"] == 12345
+        assert agent_entries[0]["task_turn"] == 3
+    finally:
+        lg.TMP_DIR = orig_tmp
+        lg.cleanup_session(session_id)
+
+
+def test_post_agent_zero_tokens_not_logged(log_path):
+    """PostToolUse hook must not log an Agent entry when totalTokens == 0."""
+    session_id = make_session_id()
+    before = log_entry_count(log_path)
+    payload = {
+        "tool_name": "Agent",
+        "session_id": session_id,
+        "cwd": "",
+        "tool_response": {"totalTokens": 0},
+    }
+    r = run_hook("post_tool_use.py", payload)
+    assert r.returncode == 0, f"POST failed: {r.stderr}"
+    assert log_entry_count(log_path) == before, "Zero-token Agent entry must not be written"
+
+
+def test_pre_skips_logging_after_agent(log_path):
+    """PRE hook must not log a duplicate entry when prev_tool_name == 'Agent'."""
+    import budgeter.lib.logger as lg
+    session_id = make_session_id()
+    orig_tmp = lg.TMP_DIR
+    try:
+        # Simulate baseline left by Agent's PRE hook
+        lg.save_baseline(
+            session_id, tokens=10000,
+            prev_tool_name="Agent",
+            prev_assistant_message="agent ran",
+            turn_number=5,
+            task_turn=5,
+            user_message="run agent",
+        )
+
+        before = log_entry_count(log_path)
+        payload = {"tool_name": "Bash", "session_id": session_id, "transcript_path": "", "cwd": ""}
+        r = run_hook("pre_tool_use.py", payload)
+        assert r.returncode == 0, f"PRE failed: {r.stderr}"
+        assert log_entry_count(log_path) == before, "PRE must not log an Agent entry (PostToolUse already did)"
+    finally:
+        lg.TMP_DIR = orig_tmp
+        lg.cleanup_session(session_id)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -262,6 +348,18 @@ def main():
 
         print("Unit: [CONT] continuation inherits task_turn  ", end="")
         test_cont_continuation_inherits_task_turn(log_path)
+        print("OK")
+
+        print("Integration: POST Agent logs totalTokens ....... ", end="")
+        test_post_agent_logs_total_tokens(log_path)
+        print("OK")
+
+        print("Integration: POST Agent skips zero tokens ...... ", end="")
+        test_post_agent_zero_tokens_not_logged(log_path)
+        print("OK")
+
+        print("Integration: PRE skips log after Agent ......... ", end="")
+        test_pre_skips_logging_after_agent(log_path)
         print("OK")
 
     print("\nAll tests passed.")

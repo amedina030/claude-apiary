@@ -31,7 +31,7 @@ def main():
 
     if session_id and flags.is_enabled("budgeter-log"):
         baseline = logger.load_baseline(session_id)
-        if baseline is not None and baseline.get("prev_tool_name"):
+        if baseline is not None and baseline.get("prev_tool_name") and baseline.get("prev_tool_name") != "Agent":
             session_entries = logger.read_session_jsonl(transcript_path)
             tokens_now = logger.get_cumulative_tokens(session_entries)
             tokens_delta = max(0, tokens_now - baseline["tokens"])

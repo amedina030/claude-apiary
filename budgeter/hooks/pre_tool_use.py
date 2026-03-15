@@ -91,7 +91,7 @@ def main():
         user_message = baseline.get("user_message", "") if baseline is not None else ""
 
     if flags.is_enabled("budgeter-log"):
-        if baseline is not None:
+        if baseline is not None and baseline.get("prev_tool_name") != "Agent":
             tokens_delta = max(0, tokens_now - baseline["tokens"])
             context_tokens = baseline.get("context_tokens", 0)
             net_tokens_delta = max(0, tokens_delta - context_tokens)
