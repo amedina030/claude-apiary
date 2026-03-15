@@ -57,16 +57,19 @@ def build_budgeter_hooks():
 
 
 def check_claude_md(claude_dir: Path):
-    """Warn if the clarifier rules are not present in ~/.claude/CLAUDE.md."""
+    """Append clarifier rules to ~/.claude/CLAUDE.md if not already present."""
     claude_md = claude_dir / "CLAUDE.md"
-    marker = "clarifier-enabled"  # distinctive string from the clarifier rules section
+    rules_src = CLARIFIER_DIR / "CLAUDE.md"
+    marker = "clarifier-enabled"  # distinctive string present in the clarifier rules
+
     if claude_md.exists() and marker in claude_md.read_text(encoding="utf-8"):
         print(f"  CLAUDE.md        : clarifier rules detected OK")
-    else:
-        print()
-        print("  WARNING: Clarifier rules not found in ~/.claude/CLAUDE.md")
-        print(f"  Action required  : append the contents of {CLARIFIER_DIR / 'CLAUDE.md'}")
-        print(f"                     to {claude_md}")
+        return
+
+    rules = rules_src.read_text(encoding="utf-8")
+    with open(claude_md, "a", encoding="utf-8") as f:
+        f.write("\n" + rules)
+    print(f"  CLAUDE.md        : clarifier rules appended to {claude_md}")
 
 
 def install_clarifier(claude_dir: Path):
@@ -82,13 +85,14 @@ def install_clarifier(claude_dir: Path):
     shutil.copy2(CLARIFIER_DIR / "commands" / "clarifier.md", commands_dir / "clarifier.md")
     shutil.copy2(CLARIFIER_DIR / "commands" / "run-clarifier-tests.md", commands_dir / "run-clarifier-tests.md")
     shutil.copy2(CLARIFIER_DIR / "write_log.py", clarifier_bin_dir / "write_log.py")
+    shutil.copy2(CLARIFIER_DIR / "log_cost.py", clarifier_bin_dir / "log_cost.py")
 
     # Budgeter commands
     for cmd_file in (BUDGETER_DIR / "commands").glob("*.md"):
         shutil.copy2(cmd_file, commands_dir / cmd_file.name)
 
     print(f"  Clarifier agent  : {agents_dir / 'clarifier.md'}")
-    print(f"  Clarifier script : {clarifier_bin_dir / 'write_log.py'}")
+    print(f"  Clarifier scripts: {clarifier_bin_dir}")
     print(f"  Commands         : {commands_dir}")
 
 
