@@ -50,6 +50,7 @@ import json
 import os
 import random
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -81,9 +82,17 @@ def determine_log_dir(cwd: str | None, explicit: str | None) -> str:
     return str(Path.home() / ".claude" / "clarifier-logs")
 
 
+def normalize_path(path: str) -> str:
+    """Normalize /tmp/ paths to the real temp dir (needed on Windows)."""
+    p = Path(path)
+    if p.parts[:2] == ('/', 'tmp'):
+        return str(Path(tempfile.gettempdir()) / Path(*p.parts[2:]))
+    return path
+
+
 def load_json(path: str | None) -> dict:
     if path:
-        with open(path, encoding="utf-8") as f:
+        with open(normalize_path(path), encoding="utf-8") as f:
             return json.load(f)
     return json.load(sys.stdin)
 

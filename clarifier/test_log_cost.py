@@ -31,15 +31,18 @@ def run_tally(session_id: str, tokens: int, tools: int, duration: int,
 
 
 def run_finalize(session_id: str, log_file: str, prompt: str,
-                 logs_dir: Path) -> tuple[int, str]:
-    result = subprocess.run(
-        [PYTHON, str(SCRIPT), "finalize",
-         "--id", session_id,
-         "--log", log_file,
-         "--prompt", prompt,
-         "--logs-dir", str(logs_dir)],
-        text=True, capture_output=True,
-    )
+                 logs_dir: Path, explicit_session_id: str = None,
+                 budgeter_tmp: Path = None) -> tuple[int, str]:
+    cmd = [PYTHON, str(SCRIPT), "finalize",
+           "--id", session_id,
+           "--log", log_file,
+           "--prompt", prompt,
+           "--logs-dir", str(logs_dir)]
+    if explicit_session_id:
+        cmd += ["--session-id", explicit_session_id]
+    if budgeter_tmp:
+        cmd += ["--budgeter-tmp", str(budgeter_tmp)]
+    result = subprocess.run(cmd, text=True, capture_output=True)
     return result.returncode, result.stdout + result.stderr
 
 
@@ -155,6 +158,34 @@ def test_finalize_works_without_prior_tally(tmp_path):
     assert "total_tokens: 0" in entry
 
 
+def test_finalize_writes_explicit_session_id(tmp_path):
+    sid = make_id()
+    claude_sid = str(uuid.uuid4())
+    run_finalize(sid, "clarifier-test.md", "test", tmp_path, explicit_session_id=claude_sid)
+    entry = (tmp_path / "cost.log").read_text()
+    assert f"session_id: {claude_sid}" in entry
+
+
+def test_finalize_autodetects_session_id_from_budgeter_tmp(tmp_path):
+    sid = make_id()
+    claude_sid = str(uuid.uuid4())
+    budgeter_tmp = tmp_path / "budgeter_tmp"
+    budgeter_tmp.mkdir()
+    (budgeter_tmp / f"{claude_sid}_baseline.json").write_text("{}")
+    run_finalize(sid, "clarifier-test.md", "test", tmp_path, budgeter_tmp=budgeter_tmp)
+    entry = (tmp_path / "cost.log").read_text()
+    assert f"session_id: {claude_sid}" in entry
+
+
+def test_finalize_writes_unknown_when_no_session_id(tmp_path):
+    sid = make_id()
+    empty_tmp = tmp_path / "empty"
+    empty_tmp.mkdir()
+    run_finalize(sid, "clarifier-test.md", "test", tmp_path, budgeter_tmp=empty_tmp)
+    entry = (tmp_path / "cost.log").read_text()
+    assert "session_id: unknown" in entry
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -170,6 +201,9 @@ def main():
         test_finalize_truncates_prompt_to_80_chars,
         test_finalize_appends_to_existing_cost_log,
         test_finalize_works_without_prior_tally,
+        test_finalize_writes_explicit_session_id,
+        test_finalize_autodetects_session_id_from_budgeter_tmp,
+        test_finalize_writes_unknown_when_no_session_id,
     ]
 
     passed = 0

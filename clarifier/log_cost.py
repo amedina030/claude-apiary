@@ -29,6 +29,16 @@ def tally_path(logs_dir: Path, session_id: str) -> Path:
     return logs_dir / f".tally-{session_id}.json"
 
 
+def detect_session_id(budgeter_tmp: Path = None) -> str:
+    """Auto-detect Claude session ID from budgeter tmp baseline file."""
+    search_dir = budgeter_tmp if budgeter_tmp else Path.cwd() / "budgeter" / "tmp"
+    if search_dir.is_dir():
+        files = list(search_dir.glob("*_baseline.json"))
+        if files:
+            return files[0].name.split("_baseline.json")[0]
+    return "unknown"
+
+
 def cmd_tally(args):
     logs_dir = Path(args.logs_dir) if args.logs_dir else default_logs_dir()
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -66,11 +76,18 @@ def cmd_finalize(args):
     else:
         data = {"total_tokens": 0, "total_tools": 0, "total_duration_ms": 0}
 
+    if args.session_id:
+        session_id = args.session_id
+    else:
+        budgeter_tmp = Path(args.budgeter_tmp) if args.budgeter_tmp else None
+        session_id = detect_session_id(budgeter_tmp)
+
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     prompt_snippet = args.prompt[:80].replace('"', "'")
 
     entry = (
-        f'{ts} | id: {args.id} | total_tokens: {data["total_tokens"]} | '
+        f'{ts} | id: {args.id} | session_id: {session_id} | '
+        f'total_tokens: {data["total_tokens"]} | '
         f'tool_uses: {data["total_tools"]} | duration_ms: {data["total_duration_ms"]} | '
         f'log: {args.log} | prompt: "{prompt_snippet}"'
     )
@@ -101,6 +118,8 @@ def main():
     fin_p.add_argument("--id", required=True, help="Clarifier session UUID")
     fin_p.add_argument("--log", required=True, help="Log filename (e.g. clarifier-2026-03-14-214013-a3f2.md)")
     fin_p.add_argument("--prompt", required=True, help="Original prompt text")
+    fin_p.add_argument("--session-id", help="Claude session ID (overrides auto-detection)")
+    fin_p.add_argument("--budgeter-tmp", help="Path to budgeter/tmp for session_id auto-detection (for testing)")
     fin_p.add_argument("--logs-dir", help="Override default logs directory (for testing)")
 
     args = parser.parse_args()
