@@ -10,9 +10,14 @@ Usage:
   python log_cost.py finalize --id <uuid> --log <filename> --prompt "<text>"
       Write the final cost entry to cost.log using summed totals.
       Cleans up the tally file.
+      Optional: --session-id <id>       explicit Claude session ID
+                --budgeter-tmp <path>   path to budgeter/tmp for auto-detection (testing)
+      If --session-id is omitted, session_id is auto-detected from budgeter/tmp/*_baseline.json
+      relative to cwd. Falls back to "unknown" if no baseline file is found.
 
 Tally files are stored at ~/.claude/clarifier-logs/.tally-<uuid>.json.
 Cost log is written to ~/.claude/clarifier-logs/cost.log.
+Cost log format: timestamp | id | session_id | total_tokens | tool_uses | duration_ms | log | prompt
 """
 
 import argparse

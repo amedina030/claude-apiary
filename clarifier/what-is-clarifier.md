@@ -48,7 +48,18 @@ After every approval, the clarifier saves a log of the session — all rounds of
 
 Log filenames use the format `clarifier-YYYY-MM-DD-HHMMSS-XXXX.md` (timestamp + 4 random hex chars) to stay human-readable and avoid collisions when multiple sessions run concurrently. Each log also contains a UUIDv7 that serves as its canonical unique identifier.
 
-After the clarifier returns, the executing agent appends a cost entry to `~/.claude/clarifier-logs/cost.log` containing the token usage, duration, and a reference to the session log by both filename and UUIDv7 — so you can cross-reference cost data with full session details at any time.
+After the clarifier returns, the executing agent appends a cost entry to `~/.claude/clarifier-logs/cost.log` containing the token usage, duration, Claude session ID, and a reference to the session log by both filename and UUIDv7 — so you can cross-reference cost data with full session details at any time.
+
+The budgeter report reads this log and shows a per-session clarifier attribution line directly below the session header:
+
+```
+Session 17c0c0df  2026-03-15 14:59:30  (1,763,590 tokens)
+  [clarifier: 41,766 tokens | main: 1,721,824 tokens]
+```
+
+**Why clarifier runs as a subagent (not inline)**
+
+Clarifier is intentionally implemented as a separate subagent rather than an inline prompt in the main session. This keeps the clarification dialogue — all the back-and-forth questions and answers — out of the main session context. If clarification happened inline, those tokens would be carried forward in every subsequent tool call for the rest of the session, compounding the cost significantly. As a subagent, the clarifier's token usage is fully isolated: only the final approved prompt is returned to the main session.
 
 ### Non-trivial requests without ambiguity
 

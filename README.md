@@ -93,6 +93,11 @@ claude-apis/
 │   ├── test-suite/
 │   │   ├── clarifier-test-suite.md  # 24 automated + 6 manual test cases
 │   │   └── fixtures/            # Test fixture markdown files
+│   ├── write_log.py             # Session log writer (init/append/complete modes)
+│   ├── test_write_log.py        # Tests for write_log.py (14 cases)
+│   ├── log_cost.py              # Token cost tracker (tally/finalize subcommands)
+│   ├── test_log_cost.py         # Tests for log_cost.py (12 cases)
+│   ├── CLAUDE.md                # Clarifier trigger rules (synced to ~/.claude/CLAUDE.md)
 │   └── what-is-clarifier.md     # User-facing overview doc
 │
 ├── setup.py                     # Unified installer for all tools
@@ -142,8 +147,10 @@ The clarifier is implemented as a Claude Code sub-agent (defined in `clarifier/a
 2. Spawns the clarifier sub-agent with the original prompt, its interpretation, detected ambiguities, and intended plan
 3. The clarifier questions the user interactively, refines the prompt, and asks for explicit approval
 4. Returns the approved prompt to the executing agent
-5. The executing agent logs the clarifier session cost to `~/.claude/clarifier-logs/cost.log`
+5. The executing agent logs the clarifier session cost to `~/.claude/clarifier-logs/cost.log`, including the Claude session ID for attribution
 6. Proceeds using the approved prompt, not the original
+
+The clarifier is implemented as a subagent (not an inline prompt) so that the clarification dialogue stays out of the main session context. If it ran inline, every subsequent tool call in the session would carry those extra tokens forward — compounding cost for the remainder of the session. As a subagent, only the final approved prompt is returned.
 
 ### Setup
 
@@ -178,6 +185,15 @@ python budgeter/report.py --all              # include zero-delta entries
 python budgeter/report.py --date 2026-03-14  # single date
 python budgeter/report.py --since 2026-03-01 # from date onwards
 ```
+
+When the clarifier is in use, sessions that triggered it will show a token attribution breakdown:
+
+```
+Session 17c0c0df  2026-03-15 14:59:30  (1,763,590 tokens)
+  [clarifier: 41,766 tokens | main: 1,721,824 tokens]
+```
+
+This is sourced from `~/.claude/clarifier-logs/cost.log`, which records session ID, token usage, and duration for every clarifier invocation.
 
 ---
 
