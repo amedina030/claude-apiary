@@ -1,0 +1,7 @@
+{
+  "min_tasks": 50,
+  "expensive_token_threshold": null,
+  "expensive_percentile": 90,
+  "similarity_top_n": 10,
+  "monitored_tools": ["Agent", "Bash", "Read", "Write"]
+}

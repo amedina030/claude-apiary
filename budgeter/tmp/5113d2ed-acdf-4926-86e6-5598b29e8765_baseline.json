@@ -1,0 +1,1 @@
+{"tokens": 9654777, "context_tokens": 112467, "prev_tool_name": "Bash", "prev_assistant_message": "All hooks now point to `claude-apis`. Let me run the tests and init git.", "turn_number": 15, "task_turn": 15}
