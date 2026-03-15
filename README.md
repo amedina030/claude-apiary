@@ -57,6 +57,27 @@ Claude tends to make assumptions when a request is unclear — it picks one inte
 
 ---
 
+### Notetaker
+
+Capture ideas mid-session without interrupting your work.
+
+While working on a task, you often have ideas you want to pursue later but don't want to lose focus or pollute the current context. Notetaker lets you save a note in one command and get back to work immediately.
+
+**What it does:**
+- Appends a timestamped, numbered note to `.claude/notes.md` in the current project
+- Records the session ID so you can trace back to what you were working on
+- Stays out of your way — no response, no back-and-forth
+
+**Commands:**
+```
+/note <text>   # save a note mid-session
+/notes         # review all saved notes
+```
+
+**Notes are stored in** `.claude/notes.md` per project — git-ignored, scoped to the project, out of the repo root.
+
+---
+
 ## Repository Structure
 
 ```
@@ -99,6 +120,11 @@ claude-apis/
 │   ├── test_log_cost.py         # Tests for log_cost.py (12 cases)
 │   ├── CLAUDE.md                # Clarifier trigger rules (synced to ~/.claude/CLAUDE.md)
 │   └── what-is-clarifier.md     # User-facing overview doc
+│
+├── notetaker/                   # Mid-session idea capture tool
+│   └── commands/
+│       ├── note.md              # /note command — appends a note to .claude/notes.md
+│       └── notes.md             # /notes command — lists all saved notes
 │
 ├── setup.py                     # Unified installer for all tools
 ├── SETUP.md                     # Setup instructions

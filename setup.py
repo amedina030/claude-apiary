@@ -21,6 +21,7 @@ from pathlib import Path
 APIS_DIR = Path(__file__).parent.resolve()
 BUDGETER_DIR = APIS_DIR / "budgeter"
 CLARIFIER_DIR = APIS_DIR / "clarifier"
+NOTETAKER_DIR = APIS_DIR / "notetaker"
 
 sys.path.insert(0, str(APIS_DIR))
 from core.hooks import to_bash_path, hook_cmd, load_settings, save_settings, register_hooks
@@ -89,6 +90,10 @@ def install_clarifier(claude_dir: Path):
 
     # Budgeter commands
     for cmd_file in (BUDGETER_DIR / "commands").glob("*.md"):
+        shutil.copy2(cmd_file, commands_dir / cmd_file.name)
+
+    # Notetaker commands
+    for cmd_file in (NOTETAKER_DIR / "commands").glob("*.md"):
         shutil.copy2(cmd_file, commands_dir / cmd_file.name)
 
     print(f"  Clarifier agent  : {agents_dir / 'clarifier.md'}")

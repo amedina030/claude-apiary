@@ -3,3 +3,4 @@ __pycache__/
 *.pyo
 budgeter/tmp/
 budgeter/data/
+.claude/notes.md
