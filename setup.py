@@ -70,21 +70,25 @@ def check_claude_md(claude_dir: Path):
 
 
 def install_clarifier(claude_dir: Path):
-    """Copy clarifier agent and command files into the Claude Code directories."""
+    """Copy clarifier agent, command files, and write_log.py into the Claude Code directories."""
     agents_dir = claude_dir / "agents"
     commands_dir = claude_dir / "commands"
+    clarifier_bin_dir = claude_dir / "clarifier"
     agents_dir.mkdir(parents=True, exist_ok=True)
     commands_dir.mkdir(parents=True, exist_ok=True)
+    clarifier_bin_dir.mkdir(parents=True, exist_ok=True)
 
     shutil.copy2(CLARIFIER_DIR / "agents" / "clarifier.md", agents_dir / "clarifier.md")
     shutil.copy2(CLARIFIER_DIR / "commands" / "clarifier.md", commands_dir / "clarifier.md")
     shutil.copy2(CLARIFIER_DIR / "commands" / "run-clarifier-tests.md", commands_dir / "run-clarifier-tests.md")
+    shutil.copy2(CLARIFIER_DIR / "write_log.py", clarifier_bin_dir / "write_log.py")
 
     # Budgeter commands
     for cmd_file in (BUDGETER_DIR / "commands").glob("*.md"):
         shutil.copy2(cmd_file, commands_dir / cmd_file.name)
 
     print(f"  Clarifier agent  : {agents_dir / 'clarifier.md'}")
+    print(f"  Clarifier script : {clarifier_bin_dir / 'write_log.py'}")
     print(f"  Commands         : {commands_dir}")
 
 
