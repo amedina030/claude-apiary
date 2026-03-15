@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*.pyo
+budgeter/tmp/
+budgeter/data/
