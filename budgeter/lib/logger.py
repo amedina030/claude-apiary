@@ -102,6 +102,27 @@ def get_user_turn_number(session_entries):
     return count
 
 
+def get_user_message_at_turn(session_entries, turn_number):
+    """Return the text of the user message at the given turn number (1-indexed)."""
+    count = 0
+    for entry in session_entries:
+        msg = entry.get("message", {})
+        if msg.get("role") == "user":
+            content = msg.get("content", [])
+            text = ""
+            if isinstance(content, str) and content.strip():
+                text = content.strip()
+                count += 1
+            elif isinstance(content, list):
+                text_blocks = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                if text_blocks:
+                    text = " ".join(text_blocks).strip()
+                    count += 1
+            if count == turn_number:
+                return text
+    return ""
+
+
 def get_last_assistant_message(session_entries):
     """Return the text content of the last assistant message in the session."""
     last_text = ""
@@ -173,7 +194,7 @@ def load_baseline(session_id):
         return json.load(f)
 
 
-def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None):
+def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message=""):
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     path = TMP_DIR / f"{session_id}_baseline.json"
     with open(path, "w", encoding="utf-8") as f:
@@ -184,6 +205,7 @@ def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_
             "prev_assistant_message": prev_assistant_message,
             "turn_number": turn_number,
             "task_turn": task_turn if task_turn is not None else turn_number,
+            "user_message": user_message,
         }, f)
 
 

@@ -43,6 +43,7 @@ def main():
                 "session_id": session_id,
                 "tool_name": baseline.get("prev_tool_name", ""),
                 "assistant_message": baseline.get("prev_assistant_message", ""),
+                "user_message": baseline.get("user_message", ""),
                 "tokens_delta": tokens_delta,
                 "context_tokens": context_tokens,
                 "net_tokens_delta": net_tokens_delta,

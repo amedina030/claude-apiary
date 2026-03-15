@@ -84,6 +84,12 @@ def main():
         if is_new_turn and not is_continuation:
             task_turn = turn_number
 
+    # Capture user prompt on the first tool call of a new task; inherit it otherwise.
+    if is_new_turn and not is_continuation:
+        user_message = logger.get_user_message_at_turn(session_entries, turn_number)
+    else:
+        user_message = baseline.get("user_message", "") if baseline is not None else ""
+
     if flags.is_enabled("budgeter-log"):
         if baseline is not None:
             tokens_delta = max(0, tokens_now - baseline["tokens"])
@@ -95,6 +101,7 @@ def main():
                 "session_id": session_id,
                 "tool_name": baseline.get("prev_tool_name", ""),
                 "assistant_message": baseline.get("prev_assistant_message", ""),
+                "user_message": baseline.get("user_message", ""),
                 "tokens_delta": tokens_delta,
                 "context_tokens": context_tokens,
                 "net_tokens_delta": net_tokens_delta,
@@ -112,6 +119,7 @@ def main():
         prev_assistant_message=clean_message,
         turn_number=turn_number,
         task_turn=task_turn,
+        user_message=user_message,
     )
 
     # Build context to inject — always include the [CONT] instruction.

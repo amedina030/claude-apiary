@@ -121,11 +121,13 @@ def print_by_turn(entries):
             task_entries = tasks[task_num]
             task_total = sum(net_delta(e) for e in task_entries)
             all_task_totals.append(task_total)
-            first_msg = task_entries[0].get("assistant_message", "")[:52].replace("\n", " ")
             t = task_entries[0]["timestamp"][11:19]
             user_turns = sorted(set(e.get("turn_number", task_num) for e in task_entries))
             turns_label = f"turns {user_turns[0]}-{user_turns[-1]}" if len(user_turns) > 1 else f"turn {user_turns[0]}"
-            print(f"  Task {task_num:<3}  {t}  {task_total:>10,} tokens  [{turns_label}]  {first_msg}")
+            user_prompt = task_entries[0].get("user_message", "")
+            print(f"  Task {task_num:<3}  {t}  {task_total:>10,} tokens  [{turns_label}]")
+            if user_prompt:
+                print(f"    > {user_prompt[:76].replace(chr(10), ' ')}")
             print(f"    {'TURN':<5} {'TOOL':<7} {'DELTA':>10}  MESSAGE")
             for e in task_entries:
                 turn = e.get("turn_number", task_num)
