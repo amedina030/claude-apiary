@@ -56,6 +56,19 @@ def build_budgeter_hooks():
     }
 
 
+def check_claude_md(claude_dir: Path):
+    """Warn if the clarifier rules are not present in ~/.claude/CLAUDE.md."""
+    claude_md = claude_dir / "CLAUDE.md"
+    marker = "clarifier-enabled"  # distinctive string from the clarifier rules section
+    if claude_md.exists() and marker in claude_md.read_text(encoding="utf-8"):
+        print(f"  CLAUDE.md        : clarifier rules detected OK")
+    else:
+        print()
+        print("  WARNING: Clarifier rules not found in ~/.claude/CLAUDE.md")
+        print(f"  Action required  : append the contents of {CLARIFIER_DIR / 'CLAUDE.md'}")
+        print(f"                     to {claude_md}")
+
+
 def install_clarifier(claude_dir: Path):
     """Copy clarifier agent and command files into the Claude Code directories."""
     agents_dir = claude_dir / "agents"
@@ -145,6 +158,7 @@ def main():
         install_clarifier(claude_dir)
         if args.with_test_suite:
             install_test_suite(claude_dir)
+        check_claude_md(claude_dir)
 
     scope = "global" if args.global_install else f"project ({claude_dir.parent})"
     print(f"\n  Scope            : {scope}")
