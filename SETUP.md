@@ -14,7 +14,7 @@ No external Python dependencies.
 ### 1. Clone the repo
 
 ```bash
-git clone <repo-url> /path/to/claude-apis
+git clone https://github.com/amedina030/claude-apis.git /path/to/claude-apis
 cd /path/to/claude-apis
 ```
 
