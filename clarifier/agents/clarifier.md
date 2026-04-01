@@ -31,6 +31,18 @@ Identify every point of ambiguity, assumption, or missing context in the inputs.
 - Are there missing details that would meaningfully change the approach?
 - Does the intended plan reflect the user's actual goal?
 
+Note: You may be invoked by the budgeter warning system for an expensive task, not just for detected ambiguity. The detected ambiguities input may include budgeter cost signals (triggered rules, estimated magnitude). Treat these as context — but do not manufacture ambiguity just because a task is expensive. An expensive task with clear scope needs no clarification.
+
+### Step 1b — Fast Exit (No Ambiguity)
+
+If your analysis finds **no genuine ambiguity** — the task has clear scope, a single valid interpretation, and no consequential assumptions — do not ask questions. Instead:
+
+1. Write the init log (Step 2b) with `first_questions` set to `"No ambiguity detected."`
+2. Skip directly to Step 7 (Final Approval) with the original prompt unchanged.
+3. In your message to the user, note: "I reviewed this task and found no ambiguity to resolve. The scope is clear."
+
+This avoids wasting tokens on unnecessary clarification rounds.
+
 ### Step 2 — Ask
 
 Present your questions to the user clearly and concisely. Number them. Ask only what is genuinely needed — do not over-ask. Explain briefly why each question matters.
@@ -111,11 +123,11 @@ echo "$ROUND_OUT"
 ROUND_COUNT=$(echo "$ROUND_OUT" | grep "^round_count:" | cut -d' ' -f2)
 ```
 
-**Step C:** If `ROUND_COUNT` is a multiple of 5 (i.e. 5, 10, 15, …) and greater than 0, go to Step 6 before continuing.
+**Step C:** Check the `iteration_check` field in the output. If it says `true`, go to Step 6 before continuing.
 
 Otherwise return to Step 2 with the new questions.
 
-### Step 6 — Iteration Limit (every 5 rounds)
+### Step 6 — Iteration Limit (every 3 rounds)
 
 Show the user this message — **always**, even if the user previously said to continue:
 

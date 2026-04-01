@@ -14,7 +14,7 @@ If ambiguity is detected:
   `python ~/.claude/clarifier/log_cost.py tally --id [uuid] --tokens [total_tokens] --tools [tool_uses] --duration [duration_ms]`
 - The clarifier is multi-turn. After it returns with questions, wait for the user's response, then **resume** the clarifier (using its agentId) passing the user's answers. After each resume, call `log_cost.py tally` again with that call's metadata.
 - Continue resuming until the clarifier returns `CLARIFIER_DONE`. At that point extract the final approved prompt from the clarifier's return message.
-- Call: `python ~/.claude/clarifier/log_cost.py finalize --id [uuid] --log [log filename] --prompt "[original prompt]"`
+- Call: `python ~/.claude/clarifier/log_cost.py finalize --id [uuid] --log [log filename] --prompt "[original prompt]" --session-id [session_id from budgeter context]`
 - Execute the task using the final approved prompt, not the original.
 
 If no ambiguity is detected: proceed normally.

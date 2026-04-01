@@ -1,7 +1,18 @@
 {
-  "min_tasks": 50,
-  "expensive_token_threshold": null,
-  "expensive_percentile": 90,
-  "similarity_top_n": 10,
-  "monitored_tools": ["Agent", "Bash", "Read", "Write"]
+  "monitored_tools": ["Agent", "Bash", "Read", "Write"],
+  "scope_keywords": ["refactor", "rewrite", "migrate", "overhaul", "restructure", "redesign"],
+  "breadth_keywords": ["entire", "throughout", "across", "codebase", "everywhere"],
+  "file_count_threshold": 3,
+  "step_count_threshold": 4,
+  "investigative_keywords": ["why", "explain", "understand", "investigate", "debug", "diagnose", "analyze"],
+  "rule_weights": {
+    "scope_keywords": 1.0,
+    "breadth_keywords": 0.5,
+    "file_count": 1.0,
+    "step_count": 1.0,
+    "investigative_keywords": 1.0
+  },
+  "warn_score_threshold": 2.0,
+  "min_flagged_tasks": 10,
+  "expensive_percentile_feedback": 75
 }

@@ -36,6 +36,7 @@ Output (stdout):
   log: <filename>
   path: <full-path-to-md>
   round_count: <N>             (number of completed rounds — rounds with actual user responses)
+  iteration_check: true|false  (true when round_count > 0 and divisible by 3 — triggers Step 6)
   status: in_progress | complete
 
 State files written:
@@ -218,11 +219,13 @@ def write_markdown(log_dir: str, state: dict):
 
 def print_output(state: dict, log_dir: str):
     completed = count_completed_rounds(state.get("rounds", []))
+    iteration_check = completed > 0 and completed % 3 == 0
     log_path = Path(log_dir) / state["filename"]
     print(f"uuid: {state['uuid']}")
     print(f"log: {state['filename']}")
     print(f"path: {log_path}")
     print(f"round_count: {completed}")
+    print(f"iteration_check: {str(iteration_check).lower()}")
     print(f"status: {state.get('status', 'in_progress')}")
 
 

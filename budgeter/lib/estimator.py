@@ -1,77 +1,125 @@
-import math
 import re
-from collections import Counter
+from collections import defaultdict
 
-# Common English stop words to ignore during TF-IDF
-_STOP_WORDS = {
-    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "with", "by", "from", "is", "it", "be", "as", "was", "are",
-    "this", "that", "i", "you", "we", "they", "he", "she", "will", "have",
-    "do", "not", "so", "if", "my", "your", "its", "me", "let", "now",
-}
-
-
-def _tokenize(text):
-    tokens = re.findall(r"[a-z]+", text.lower())
-    return [t for t in tokens if t not in _STOP_WORDS and len(t) > 1]
-
-
-def _tfidf_vectors(corpus):
-    """Return list of TF-IDF dicts, one per document."""
-    tokenized = [_tokenize(doc) for doc in corpus]
-    n = len(tokenized)
-
-    # Document frequency
-    df = Counter()
-    for tokens in tokenized:
-        df.update(set(tokens))
-
-    vectors = []
-    for tokens in tokenized:
-        tf = Counter(tokens)
-        total = len(tokens) or 1
-        vec = {}
-        for term, count in tf.items():
-            tfidf = (count / total) * math.log((n + 1) / (df[term] + 1))
-            vec[term] = tfidf
-        vectors.append(vec)
-
-    return vectors
+_DEFAULT_SCOPE_KEYWORDS = [
+    "refactor", "rewrite", "migrate", "overhaul", "restructure", "redesign",
+]
+_DEFAULT_BREADTH_KEYWORDS = [
+    "entire", "throughout", "across", "codebase", "everywhere",
+]
+_DEFAULT_INVESTIGATIVE_KEYWORDS = [
+    "why", "explain", "understand", "investigate", "debug", "diagnose", "analyze",
+]
+_APPROVAL_PATTERNS = re.compile(
+    r'^\s*('
+    r'y(es|ep|eah|a)?'
+    r'|ok(ay)?'
+    r'|sure'
+    r'|proceed'
+    r'|go\s*(ahead|for\s*it)?'
+    r'|do\s*it'
+    r'|sounds?\s*good'
+    r'|that\s*works?'
+    r'|approved?'
+    r'|lgtm'
+    r'|confirm(ed)?'
+    r'|please'
+    r'|lets?\s*(do|go)'
+    r')\s*[.!,]?\s*$',
+    re.IGNORECASE
+)
 
 
-def _cosine(vec_a, vec_b):
-    if not vec_a or not vec_b:
-        return 0.0
-    dot = sum(vec_a.get(t, 0) * v for t, v in vec_b.items())
-    norm_a = math.sqrt(sum(v * v for v in vec_a.values()))
-    norm_b = math.sqrt(sum(v * v for v in vec_b.values()))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
+def is_approval_message(text):
+    """Return True if the user message is a short approval/confirmation."""
+    if not text or not text.strip():
+        return False
+    # Must be short — long messages with "yes" embedded aren't approvals
+    if len(text.split()) > 8:
+        return False
+    return bool(_APPROVAL_PATTERNS.match(text.strip()))
+_FILE_EXTENSIONS = (
+    "py|js|ts|json|md|txt|yaml|yml|css|html|jsx|tsx|go|rs|java|rb|sh|vue|php|c|cpp|h"
+)
+_FILE_PATTERN = re.compile(
+    r'\b[\w\-/\.]*[\w\-]\.(?:' + _FILE_EXTENSIONS + r')\b'
+)
+_STEP_PATTERNS = [
+    r'\bthen\b', r'\bnext\b', r'\balso\b', r'\bfirst\b', r'\bfinally\b', r'\d+\.',
+]
+
+
+def score_flags(flags, config):
+    """
+    Compute the weighted score for a list of triggered rule names.
+    Unrecognized rules default to weight 1.0.
+    Falls back to len(flags) if no rule_weights config is present.
+    """
+    weights = config.get("rule_weights", {})
+    if not weights:
+        return float(len(flags))
+    return sum(weights.get(f, 1.0) for f in flags)
 
 
 def _median(values):
     s = sorted(values)
     n = len(s)
     mid = n // 2
-    return (s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2)
+    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2
 
 
-def _percentile(values, p):
-    if not values:
-        return 0.0
-    s = sorted(values)
-    idx = (p / 100) * (len(s) - 1)
-    lo, hi = int(idx), min(int(idx) + 1, len(s) - 1)
-    return s[lo] + (s[hi] - s[lo]) * (idx - lo)
-
-
-def _group_by_response(log_entries):
+def detect_scope_flags(text, config, user_text=None):
     """
-    Group log entries by (session_id, task_turn), summing net_tokens_delta per group.
-    Falls back to turn_number for old entries that predate task_turn.
-    Returns list of (assistant_message, total_net_tokens_delta) tuples.
-    Entries without turn_number are skipped (old format).
+    Run rule-based scope detection on the assistant planning message (text) and
+    optionally the user message (user_text).
+
+    - scope_keywords, breadth_keywords, file_count, step_count fire on `text`
+    - investigative_keywords fires on `user_text` (skipped if user_text is None)
+
+    Returns a list of triggered rule names. Each rule hit = 1 point toward
+    the warn_score_threshold.
+    """
+    flags = []
+
+    if text and text.strip():
+        lower = text.lower()
+        words = set(re.findall(r'\b\w+\b', lower))
+
+        scope_kw = set(config.get("scope_keywords", _DEFAULT_SCOPE_KEYWORDS))
+        if words & scope_kw:
+            flags.append("scope_keywords")
+
+        breadth_kw = set(config.get("breadth_keywords", _DEFAULT_BREADTH_KEYWORDS))
+        if words & breadth_kw:
+            flags.append("breadth_keywords")
+
+        file_threshold = config.get("file_count_threshold", 3)
+        file_mentions = set(_FILE_PATTERN.findall(lower))
+        if len(file_mentions) >= file_threshold:
+            flags.append("file_count")
+
+        step_threshold = config.get("step_count_threshold", 4)
+        step_count = sum(len(re.findall(p, lower)) for p in _STEP_PATTERNS)
+        if step_count >= step_threshold:
+            flags.append("step_count")
+
+    if user_text is not None and user_text.strip():
+        user_lower = user_text.lower()
+        user_words = set(re.findall(r'\b\w+\b', user_lower))
+        investigative_kw = set(config.get("investigative_keywords", _DEFAULT_INVESTIGATIVE_KEYWORDS))
+        if user_words & investigative_kw:
+            flags.append("investigative_keywords")
+
+    return flags
+
+
+def _group_tasks(log_entries, config):
+    """
+    Group log entries by (session_id, task_turn). For each group, take the first
+    entry's assistant_message as the representative planning message, backfill
+    scope_flags by running rules against it, and sum net_tokens_delta.
+
+    Returns a list of (flags, total_cost) tuples.
     """
     groups = {}
     for e in log_entries:
@@ -82,42 +130,47 @@ def _group_by_response(log_entries):
         if key not in groups:
             groups[key] = {"message": e.get("assistant_message", ""), "total": 0}
         groups[key]["total"] += e.get("net_tokens_delta", 0)
-    return [(g["message"], g["total"]) for g in groups.values()]
+
+    tasks = []
+    for g in groups.values():
+        # Prefer stored scope_flags if present; otherwise backfill from message.
+        stored_flags = g.get("scope_flags")
+        task_flags = stored_flags if stored_flags is not None else detect_scope_flags(g["message"], config)
+        tasks.append((task_flags, g["total"]))
+    return tasks
 
 
-def estimate(assistant_message, log_entries, top_n=10, percentile=90, token_threshold=None):
+def estimate_magnitude(current_flags, log_entries, config):
     """
-    Compare assistant_message against historical responses using TF-IDF cosine similarity.
-    Log entries are grouped by (session_id, task_turn) so the threshold is compared
-    against total task cost, not individual tool call cost. task_turn chains
-    continuation turns (user replies to mid-task clarifying questions) back to
-    the originating request turn.
+    Given the current task's scope flags, find historical flagged tasks that share
+    at least one rule and return their median cost.
+
+    Falls back to all historically flagged tasks if the overlapping subset is too small.
 
     Returns:
-        (is_expensive, median_similar_tokens, threshold_used)
+        (median_cost, sample_size, fallback_used)
+        median_cost is 0 if there is not enough history.
     """
-    if not log_entries or not assistant_message.strip():
-        return False, 0, 0
+    if not current_flags or not log_entries:
+        return 0, 0, False
 
-    responses = _group_by_response(log_entries)
-    if not responses:
-        return False, 0, 0
+    min_flagged = config.get("min_flagged_tasks", 10)
+    current_set = set(current_flags)
 
-    historical_messages = [r[0] for r in responses]
-    response_costs = [r[1] for r in responses]
+    historical_tasks = _group_tasks(log_entries, config)
 
-    corpus = historical_messages + [assistant_message]
-    vectors = _tfidf_vectors(corpus)
+    # Primary: tasks that share at least one rule with the current task
+    matching_costs = [
+        cost for flags, cost in historical_tasks
+        if set(flags) & current_set
+    ]
 
-    current_vec = vectors[-1]
-    similarities = [_cosine(current_vec, v) for v in vectors[:-1]]
+    if len(matching_costs) >= min_flagged:
+        return _median(matching_costs), len(matching_costs), False
 
-    top_n = min(top_n, len(similarities))
-    top_indices = sorted(range(len(similarities)), key=lambda i: similarities[i])[-top_n:]
+    # Fallback: all historically flagged tasks
+    all_flagged_costs = [cost for flags, cost in historical_tasks if flags]
+    if len(all_flagged_costs) >= min_flagged:
+        return _median(all_flagged_costs), len(all_flagged_costs), True
 
-    similar_costs = [response_costs[i] for i in top_indices]
-    median_similar = _median(similar_costs)
-
-    threshold = float(token_threshold) if token_threshold is not None else _percentile(response_costs, percentile)
-
-    return median_similar > threshold, median_similar, threshold
+    return 0, 0, False

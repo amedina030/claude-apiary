@@ -17,6 +17,7 @@ from datetime import datetime
 
 BUDGETER_DIR = Path(__file__).parent
 LOG_PATH = BUDGETER_DIR / "data" / "usage_log.jsonl"
+FEEDBACK_PATH = BUDGETER_DIR / "data" / "feedback.jsonl"
 CLARIFIER_COST_LOG = Path.home() / ".claude" / "clarifier-logs" / "cost.log"
 
 
@@ -41,6 +42,20 @@ def load_clarifier_costs():
         if sid and sid != "unknown" and tokens_str:
             costs[sid] = costs.get(sid, 0) + int(tokens_str)
     return costs
+
+
+def load_feedback():
+    if not FEEDBACK_PATH.exists():
+        return []
+    entries = []
+    for line in FEEDBACK_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+    return entries
 
 
 def load_entries():
@@ -224,6 +239,90 @@ def print_grouped(entries):
     print(f"{'MEDIAN TOKENS/SESSION':>24} {med_per_session:>12,}")
 
 
+def _percentile(values, p):
+    if not values:
+        return 0
+    s = sorted(values)
+    idx = (p / 100) * (len(s) - 1)
+    lo, hi = int(idx), min(int(idx) + 1, len(s) - 1)
+    return s[lo] + (s[hi] - s[lo]) * (idx - lo)
+
+
+def print_feedback(log_entries, feedback_entries, expensive_percentile=75):
+    if not feedback_entries:
+        print("No feedback records yet.")
+        return
+
+    # Compute actual cost per task from the log
+    task_costs = {}
+    for e in log_entries:
+        if "turn_number" not in e:
+            continue
+        task_turn = e.get("task_turn", e["turn_number"])
+        key = (e.get("session_id", ""), task_turn)
+        task_costs[key] = task_costs.get(key, 0) + net_delta(e)
+
+    # Enrich feedback records with actual_cost
+    records = []
+    seen = set()
+    for f in feedback_entries:
+        key = (f.get("session_id", ""), f.get("task_turn", 0))
+        if key in seen:
+            continue  # deduplicate (PRE + Stop could both write for the same task)
+        seen.add(key)
+        actual = task_costs.get(key, 0)
+        records.append({**f, "actual_cost": actual})
+
+    if not records:
+        print("No feedback records with matching log entries.")
+        return
+
+    # Compute expensive threshold from actual costs
+    all_actual = [r["actual_cost"] for r in records]
+    threshold = _percentile(all_actual, expensive_percentile)
+
+    for r in records:
+        r["was_expensive"] = r["actual_cost"] >= threshold
+
+    flagged = [r for r in records if r.get("warning_fired")]
+    unflagged = [r for r in records if not r.get("warning_fired")]
+    true_pos = [r for r in flagged if r["was_expensive"]]
+    false_pos = [r for r in flagged if not r["was_expensive"]]
+    false_neg = [r for r in unflagged if r["was_expensive"]]
+
+    precision = len(true_pos) / len(flagged) if flagged else 0.0
+
+    print(f"FEEDBACK ANALYSIS  ({len(records)} tasks, {len(flagged)} flagged)\n")
+    print(f"  {'Overall precision:':<28} {len(true_pos)}/{len(flagged)} ({precision:.0%})")
+    print(f"  {'False positives:':<28} {len(false_pos)}")
+    print(f"  {'Missed (expensive, no warn):':<28} {len(false_neg)}")
+    print(f"  {'Expensive threshold:':<28} {expensive_percentile}th percentile = {threshold:,.0f} tokens")
+
+    # Rule combination breakdown
+    from collections import Counter
+    combo_stats = {}
+    for r in records:
+        combo = tuple(sorted(r.get("scope_flags", [])))
+        if combo not in combo_stats:
+            combo_stats[combo] = {"tasks": 0, "expensive": 0, "total_actual": 0}
+        combo_stats[combo]["tasks"] += 1
+        if r["was_expensive"]:
+            combo_stats[combo]["expensive"] += 1
+        combo_stats[combo]["total_actual"] += r["actual_cost"]
+
+    if combo_stats:
+        print(f"\n  {'Rule combination':<42} {'Tasks':>6}  {'Prec':>6}  {'Avg actual':>12}")
+        print(f"  {'-' * 70}")
+        for combo, s in sorted(combo_stats.items(), key=lambda x: -x[1]["tasks"]):
+            label = " + ".join(combo) if combo else "(no rules)"
+            prec = s["expensive"] / s["tasks"] if s["tasks"] else 0
+            avg = s["total_actual"] / s["tasks"] if s["tasks"] else 0
+            flag = "ok" if prec >= 0.75 else ("~" if prec >= 0.5 else "x")
+            print(f"  {label:<42} {s['tasks']:>6}  {prec:>5.0%}  {avg:>12,.0f}  {flag}")
+
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", help="Show only entries from this date (YYYY-MM-DD)")
@@ -232,7 +331,18 @@ def main():
     parser.add_argument("--grouped", action="store_true", help="Group by session only (no task breakdown)")
     parser.add_argument("--by-turn", action="store_true", help="Alias for default (session > task grouping)")
     parser.add_argument("--all", action="store_true", help="Include zero-delta entries")
+    parser.add_argument("--feedback", action="store_true", help="Show warning precision and rule breakdown")
     args = parser.parse_args()
+
+    if args.feedback:
+        import json as _json
+        try:
+            config = _json.loads((BUDGETER_DIR / "config.json").read_text(encoding="utf-8"))
+        except Exception:
+            config = {}
+        print_feedback(load_entries(), load_feedback(),
+                       expensive_percentile=config.get("expensive_percentile_feedback", 75))
+        return
 
     entries = load_entries()
 

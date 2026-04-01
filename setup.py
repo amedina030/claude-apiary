@@ -117,6 +117,163 @@ def install_test_suite(claude_dir: Path):
     print(f"  Test fixtures    : {fixtures_dst}")
 
 
+def run_check():
+    """Validate that the installation is correct and all files are in place."""
+    claude_dir = Path.home() / ".claude"
+    settings_path = claude_dir / "settings.json"
+    ok_count = 0
+    fail_count = 0
+
+    def ok(msg):
+        nonlocal ok_count
+        ok_count += 1
+        print(f"  OK   {msg}")
+
+    def fail(msg):
+        nonlocal fail_count
+        fail_count += 1
+        print(f"  FAIL {msg}")
+
+    def check_file(path, label):
+        if path.exists():
+            ok(f"{label}: {path}")
+        else:
+            fail(f"{label}: {path} not found")
+
+    print("INSTALL HEALTH CHECK")
+    print("=" * 52)
+    print()
+
+    # 1. Settings and hooks
+    print("[Hooks]")
+    if not settings_path.exists():
+        fail(f"Settings file: {settings_path} not found")
+    else:
+        ok(f"Settings file: {settings_path}")
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        hooks = settings.get("hooks", {})
+
+        for event in ["PreToolUse", "PostToolUse", "Stop"]:
+            entries = hooks.get(event, [])
+            apis_entries = [e for e in entries if MARKER in json.dumps(e)]
+            if apis_entries:
+                ok(f"{event} hooks: {len(apis_entries)} registered")
+            else:
+                fail(f"{event} hooks: none found for {MARKER}")
+
+        # Check that hook commands reference existing scripts
+        all_cmds = []
+        for entries in hooks.values():
+            for entry in entries:
+                for h in entry.get("hooks", []):
+                    cmd = h.get("command", "")
+                    if MARKER in cmd or "budgeter" in cmd:
+                        all_cmds.append(cmd)
+
+        for cmd in all_cmds:
+            parts = cmd.split()
+            if len(parts) >= 2:
+                # Convert bash path back to check existence
+                script_path = parts[-1]
+                # Try as-is first, then try Windows path conversion
+                sp = Path(script_path)
+                if not sp.exists():
+                    # Convert /c/Users/... to C:/Users/...
+                    import re as _re
+                    win_path = _re.sub(r'^/([a-z])/', lambda m: m.group(1).upper() + ':/', script_path)
+                    sp = Path(win_path)
+                if sp.exists():
+                    ok(f"Hook script: {sp.name}")
+                else:
+                    fail(f"Hook script: {script_path} not found")
+    print()
+
+    # 2. Budgeter
+    print("[Budgeter]")
+    check_file(BUDGETER_DIR / "config.json", "Config")
+    if (BUDGETER_DIR / "config.json").exists():
+        try:
+            config = json.loads((BUDGETER_DIR / "config.json").read_text(encoding="utf-8"))
+            required_keys = ["monitored_tools", "rule_weights", "warn_score_threshold"]
+            missing = [k for k in required_keys if k not in config]
+            if missing:
+                fail(f"Config missing keys: {', '.join(missing)}")
+            else:
+                ok(f"Config keys: all required keys present")
+        except json.JSONDecodeError:
+            fail("Config: invalid JSON")
+
+    check_file(BUDGETER_DIR / "hooks" / "pre_tool_use.py", "PRE hook script")
+    check_file(BUDGETER_DIR / "hooks" / "post_tool_use.py", "POST hook script")
+    check_file(BUDGETER_DIR / "hooks" / "stop_session.py", "Stop hook script")
+
+    data_dir = BUDGETER_DIR / "data"
+    tmp_dir = BUDGETER_DIR / "tmp"
+    if data_dir.is_dir():
+        ok(f"Data directory: {data_dir}")
+    else:
+        fail(f"Data directory: {data_dir} not found")
+    if tmp_dir.is_dir():
+        ok(f"Tmp directory: {tmp_dir}")
+    else:
+        fail(f"Tmp directory: {tmp_dir} not found")
+
+    # Flag files
+    log_flag = Path.home() / ".claude" / "budgeter-log-enabled"
+    warn_flag = Path.home() / ".claude" / "budgeter-warn-enabled"
+    print(f"  {'ON  ' if log_flag.exists() else 'OFF '} budgeter-log: {log_flag}")
+    print(f"  {'ON  ' if warn_flag.exists() else 'OFF '} budgeter-warn: {warn_flag}")
+    print()
+
+    # 3. Clarifier
+    print("[Clarifier]")
+    check_file(claude_dir / "agents" / "clarifier.md", "Agent definition")
+    check_file(claude_dir / "clarifier" / "write_log.py", "write_log.py")
+    check_file(claude_dir / "clarifier" / "log_cost.py", "log_cost.py")
+    check_file(claude_dir / "commands" / "clarifier.md", "Toggle command")
+
+    claude_md = claude_dir / "CLAUDE.md"
+    if claude_md.exists():
+        content = claude_md.read_text(encoding="utf-8")
+        if "clarifier-enabled" in content:
+            ok("CLAUDE.md: clarifier rules present")
+        else:
+            fail("CLAUDE.md: clarifier rules missing")
+    else:
+        fail(f"CLAUDE.md: {claude_md} not found")
+
+    clarifier_flag = claude_dir / "clarifier-enabled"
+    print(f"  {'ON  ' if clarifier_flag.exists() else 'OFF '} clarifier: {clarifier_flag}")
+    print()
+
+    # 4. Commands
+    print("[Commands]")
+    commands_dir = claude_dir / "commands"
+    if commands_dir.is_dir():
+        cmd_files = list(commands_dir.glob("*.md"))
+        ok(f"Commands directory: {len(cmd_files)} commands installed")
+        for f in sorted(cmd_files):
+            print(f"       /{f.stem}")
+    else:
+        fail("Commands directory not found")
+    print()
+
+    # 5. Python
+    print("[Runtime]")
+    ok(f"Python: {PYTHON}")
+    ok(f"claude-apis: {APIS_DIR}")
+    print()
+
+    # Summary
+    print("=" * 52)
+    total = ok_count + fail_count
+    if fail_count == 0:
+        print(f"All {ok_count} checks passed.")
+    else:
+        print(f"{fail_count}/{total} checks FAILED.")
+    return fail_count == 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Set up claude-apis tools.")
     group = parser.add_mutually_exclusive_group(required=True)
@@ -130,12 +287,21 @@ def main():
         "--project-path",
         help="Install budgeter hooks for a specific project (absolute path to project root)",
     )
+    group.add_argument(
+        "--check",
+        action="store_true",
+        help="Validate the installation without making changes",
+    )
     parser.add_argument(
         "--with-test-suite",
         action="store_true",
         help="Also install the clarifier test suite files (global install only)",
     )
     args = parser.parse_args()
+
+    if args.check:
+        success = run_check()
+        sys.exit(0 if success else 1)
 
     if args.global_install:
         claude_dir = Path.home() / ".claude"
