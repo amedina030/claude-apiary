@@ -16,89 +16,58 @@ Also pass the **full text of the user's first message** to the agent as `<first_
 
 **Agent prompt:**
 
-You are a session startup agent. Your job is to declare session identity, generate handoff notes from previous sessions, and load active notes/learnings. Return a concise summary at the end — keep it short, this output will persist in the main conversation context.
+You are a session startup agent. Your job is to initialize the session, process any unseen transcripts, and return a summary. Most of the work is done by `core/startup.py` — you only need LLM reasoning for transcript analysis.
 
-### Step 1: Declare session identity
+### Step 1: Initialize session and detect unseen sessions
 
-1. Check if `<first_message>` matches a structured identity format. Look for fields like `role:`, `mission:`, `wants:` in the message. Example structured message:
-   ```
-   role: attacker
-   mission: project X
-   wants: defender project X
-   ```
-
-2. If structured format is found, parse `role`, `mission`, and `wants` (where wants is `{role, mission}`).
-   If NOT structured, default to: `role: user`, `mission: general`, `wants: {role: user, mission: general}`.
-
-3. Validate role and mission against the registry at `<repo_dir>/core/config/session-registry.json` (contains `{"roles": [...], "missions": [...]}`). Set `registered: true` if both values are in the registry, `registered: false` if either is not.
-
-4. Write the identity file (use Python so it matches the pre-approved permission pattern):
-   ```bash
-   python -c "import json,pathlib; pathlib.Path(pathlib.Path.home()/'.claude'/'.session-identity-<session_id>.json').write_text(json.dumps({'role':'<role>','mission':'<mission>','registered':<true|false>,'wants_role':'<wants.role>','wants_mission':'<wants.mission>'}))"
-   ```
-
-### Step 2: Generate handoff notes for unseen sessions
-
-1. Read `~/.claude/.session-history.json` to get the array of recent sessions. If missing or empty, skip to Step 3.
-
-2. Filter the history:
-   - Remove entries where `session_id` starts with `<session_id>` (current session)
-   - Keep entries where `role` matches this session's `wants_role` AND `mission` matches `wants_mission`
-   - These are "matching sessions"
-
-3. Get existing handoff session IDs: run `python <repo_dir>/scribe/notes.py handoff-sessions` — this returns one session ID per line (no content, no parsing needed).
-
-4. Filter matching sessions to only "unseen" ones — those whose `session_id` (first 8 chars) does NOT appear in the handoff-sessions output.
-
-5. For each unseen matching session (oldest first):
-   a. Get its `transcript_path`. Run `python <repo_dir>/core/hooks/extract_transcript.py <transcript_path>` to extract clean messages (each line: JSON with `role` and `text`). If output is empty, skip this session.
-   b. **Important:** Read the ENTIRE transcript before classifying a session. Early messages are often startup boilerplate — the real work typically starts midway through. Do NOT classify a session as "startup-only" unless the transcript truly contains nothing beyond startup initialization and brief status checks. Look for: file edits, bug fixes, design discussions, config changes, commits, or any substantive technical work.
-   d. Analyze the transcript and produce a handoff with these sections:
-      ```
-      ## Session <prev-id> Handoff
-      **Role:** <role> | **Mission:** <mission>
-      ### What was done
-      ### Key decisions
-      ### What's pending
-      ### Where it stopped
-      ```
-      Be concise but specific — file names, function names, concrete details. Focus on what a future session needs.
-   e. Save the handoff:
-      ```bash
-      python <repo_dir>/scribe/notes.py add --type handoff --session-id <prev-id> --auto --if-no-handoff-for <prev-id> --content "<handoff>"
-      ```
-
-### Step 3: Load active notes, learnings, and latest handoff
-
-Run in parallel:
+Run:
 ```bash
-python <repo_dir>/scribe/notes.py list
-python <repo_dir>/scribe/notes.py learnings
+python <repo_dir>/core/startup.py init --session-id "<session_id>" --first-message "<first_message>" --repo-dir "<repo_dir>"
 ```
 
-Then fetch the most recent handoff note (highest ID from the list with type=handoff) using:
+This returns JSON with `identity` and `unseen_sessions`. Parse the output.
+
+### Step 2: Process unseen sessions (only if unseen_sessions is non-empty)
+
+For each unseen session from the init output:
+1. Run `python <repo_dir>/core/hooks/extract_transcript.py <transcript_path>` to extract clean messages.
+2. If output is empty, skip this session.
+3. **Important:** Read the ENTIRE transcript before classifying. Early messages are often startup boilerplate — the real work typically starts midway through. Do NOT classify a session as "startup-only" unless it truly contains nothing beyond startup initialization and brief status checks.
+4. Produce a handoff with these sections:
+   ```
+   ## Session <prev-id> Handoff
+   **Role:** <role> | **Mission:** <mission>
+   ### What was done
+   ### Key decisions
+   ### What's pending
+   ### Where it stopped
+   ```
+   Be concise but specific — file names, function names, concrete details.
+5. Save the handoff:
+   ```bash
+   python <repo_dir>/scribe/notes.py add --type handoff --session-id <prev-id> --auto --if-no-handoff-for <prev-id> --content "<handoff>"
+   ```
+
+### Step 3: Load summary
+
+Run:
 ```bash
-python <repo_dir>/scribe/notes.py get <id>
+python <repo_dir>/core/startup.py summary --repo-dir "<repo_dir>"
 ```
 
 ### Step 4: Return summary
 
-Return a message with EXACTLY this structure (no extras):
+Compose and return a message with EXACTLY this structure (no extras):
 
 ```
-**Identity:** role=<role>, mission=<mission>, registered=<true|false>, wants=<wants_role>/<wants_mission>
+**Identity:** role=<role>, mission=<mission>, registered=<registered>, wants=<wants_role>/<wants_mission>
 
 **Handoffs generated:** <count> — <list of session IDs, or "None">
 
-**Active items:** <count> notes — <brief list of IDs and types, e.g. "#5 todo, #6 wishlist, #7 todo">
-
-**Learnings:** <count> — <brief list or "None">
-
-**Last session (#<handoff-id>, <session-id>):**
-<full content of the most recent handoff note>
+<paste the full output from the summary command here>
 ```
 
-Keep the entire output under 300 words. Do NOT include full note contents for the active items list — just IDs, types, and a few words each. The exception is the last session handoff, which should be included in full.
+Keep the entire output under 300 words.
 
 ---
 
