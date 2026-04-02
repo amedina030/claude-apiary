@@ -5,6 +5,8 @@ Scribe — structured note management for LLM session continuity.
 Storage: JSONL files (.claude/notes.jsonl active, .claude/notes_archive.jsonl archived).
 Notes are operational state — deferred work, handoffs, decisions — not permanent facts.
 
+Requires PYTHONUTF8=1 environment variable on Windows (set by setup.py).
+
 Usage:
     notes.py add --type todo --content "..." --session-id X [--auto]
     notes.py list [--type X] [--session X] [--search X] [--last N] [--all] [--archive]
@@ -15,7 +17,6 @@ Usage:
     notes.py migrate <notes.md path>
 """
 import argparse
-import io
 import json
 import re
 import sys
@@ -26,11 +27,6 @@ from pathlib import Path as _PathImport
 sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
 from core.utils.filelock import FileLock
 
-# Force UTF-8 output on Windows (cp1252 can't handle → and other Unicode)
-if sys.stdout.encoding != "utf-8":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-if sys.stderr.encoding != "utf-8":
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 from pathlib import Path
 
 CLAUDE_DIR = Path.home() / ".claude"

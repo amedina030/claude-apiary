@@ -367,6 +367,13 @@ def run_check():
     print("[Runtime]")
     ok(f"Python: {PYTHON}")
     ok(f"claude-apis: {APIS_DIR}")
+    import os
+    if os.environ.get("PYTHONUTF8") == "1":
+        ok("PYTHONUTF8=1 (UTF-8 mode enabled)")
+    elif sys.platform == "win32":
+        fail("PYTHONUTF8 not set — run: [System.Environment]::SetEnvironmentVariable('PYTHONUTF8', '1', 'User')")
+    else:
+        ok("PYTHONUTF8 not needed (non-Windows)")
     print()
 
     # Summary
