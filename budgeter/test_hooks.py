@@ -33,7 +33,19 @@ from budgeter.lib import logger as _logger_module
 # ---------------------------------------------------------------------------
 
 def make_session_id():
-    return f"test-{uuid.uuid4().hex[:8]}"
+    """Generate a valid UUID-format session ID for testing."""
+    u = uuid.uuid4()
+    return str(u)
+
+
+def make_test_project(tmp_dir):
+    """Create a fake project directory with .claude/budgeter.json so hooks
+    redirect all data paths to tmp_dir instead of real budgeter/data/."""
+    claude_dir = tmp_dir / ".claude"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+    config = {"monitored_tools": ["Agent", "Bash", "Read", "Write"]}
+    (claude_dir / "budgeter.json").write_text(json.dumps(config))
+    return tmp_dir
 
 
 def run_hook(script, payload):
@@ -133,16 +145,20 @@ def test_snapshot_save_load_delete(tmp_dir):
 # Integration tests: hook pipeline
 # ---------------------------------------------------------------------------
 
-def test_pre_post_stop_pipeline(log_path, tmp_path):
+def test_pre_post_stop_pipeline(tmp_dir):
     """PRE -> POST -> STOP with empty transcript. Verifies plumbing end-to-end."""
+    project_dir = make_test_project(tmp_dir / "project")
+    log_path = project_dir / ".claude" / "budgeter-log.jsonl"
+    tmp_path = project_dir / ".claude" / "budgeter-tmp"
+    cwd = str(project_dir)
     session_id = make_session_id()
-    payload = {"tool_name": "Bash", "session_id": session_id, "transcript_path": "", "cwd": ""}
+    payload = {"tool_name": "Bash", "session_id": session_id, "transcript_path": "", "cwd": cwd}
 
     # PRE — no prior baseline, so no entry logged. Should write baseline.
     before = log_entry_count(log_path)
     r = run_hook("pre_tool_use.py", payload)
     assert r.returncode == 0, f"PRE failed: {r.stderr}"
-    baseline_path = BUDGETER_DIR / "tmp" / f"{session_id}_baseline.json"
+    baseline_path = tmp_path / f"{session_id}_baseline.json"
     assert baseline_path.exists(), "PRE should write a baseline"
     assert log_entry_count(log_path) == before, "PRE with no prior baseline must not write an entry"
 
@@ -151,38 +167,46 @@ def test_pre_post_stop_pipeline(log_path, tmp_path):
     assert r.returncode == 0, f"POST failed: {r.stderr}"
 
     # STOP — logs final entry (empty transcript -> delta=0 -> not written), cleans up
-    r = run_hook("stop_session.py", {"session_id": session_id, "transcript_path": "", "cwd": ""})
+    r = run_hook("stop_session.py", {"session_id": session_id, "transcript_path": "", "cwd": cwd})
     assert r.returncode == 0, f"STOP failed: {r.stderr}"
-    leftover = list((BUDGETER_DIR / "tmp").glob(f"{session_id}_*"))
+    leftover = list(tmp_path.glob(f"{session_id}_*")) if tmp_path.exists() else []
     assert not leftover, f"STOP left tmp files: {[f.name for f in leftover]}"
 
 
-def test_pre_to_pre_baseline(log_path):
+def test_pre_to_pre_baseline(tmp_dir):
     """PRE saves prev_tool_name in baseline so the next PRE can attribute costs correctly."""
     import budgeter.lib.logger as lg
+    project_dir = make_test_project(tmp_dir / "project_pre2pre")
+    cwd = str(project_dir)
     session_id = make_session_id()
-    payload = {"tool_name": "Write", "session_id": session_id, "transcript_path": "", "cwd": ""}
+    payload = {"tool_name": "Write", "session_id": session_id, "transcript_path": "", "cwd": cwd}
 
     r = run_hook("pre_tool_use.py", payload)
     assert r.returncode == 0
 
-    b = lg.load_baseline(session_id)
-    assert b is not None
-    assert b["prev_tool_name"] == "Write", "Baseline must record the tool that just ran"
-    assert b["tokens"] == 0  # empty transcript
-    assert "task_turn" in b, "Baseline must include task_turn"
+    # Point logger at the same project paths the subprocess used
+    orig_tmp = lg.TMP_DIR
+    lg.configure_for_project(cwd)
+    try:
+        b = lg.load_baseline(session_id)
+        assert b is not None
+        assert b["prev_tool_name"] == "Write", "Baseline must record the tool that just ran"
+        assert b["tokens"] == 0  # empty transcript
+        assert "task_turn" in b, "Baseline must include task_turn"
+    finally:
+        lg.TMP_DIR = orig_tmp
+        lg.configure_for_project(cwd)
+        lg.cleanup_session(session_id)
 
-    # Cleanup
-    lg.cleanup_session(session_id)
 
-
-def test_cont_continuation_inherits_task_turn(log_path):
+def test_cont_continuation_inherits_task_turn(tmp_dir):
     """A turn whose assistant message starts with [CONT] must inherit task_turn from the prior baseline."""
     import budgeter.lib.logger as lg
     session_id = make_session_id()
 
     # Simulate an existing baseline from turn 1, task_turn=1
     orig_tmp = lg.TMP_DIR
+    lg.TMP_DIR = tmp_dir
     try:
         lg.save_baseline(
             session_id, tokens=1000,
@@ -226,13 +250,17 @@ def test_cont_continuation_inherits_task_turn(log_path):
 # Agent PostToolUse tests
 # ---------------------------------------------------------------------------
 
-def test_post_agent_logs_total_tokens(log_path):
+def test_post_agent_logs_total_tokens(tmp_dir):
     """PostToolUse hook must log an Agent entry with tokens_delta == totalTokens."""
     import budgeter.lib.logger as lg
+    project_dir = make_test_project(tmp_dir / "project_agent")
+    cwd = str(project_dir)
+    log_path = project_dir / ".claude" / "budgeter-log.jsonl"
     session_id = make_session_id()
 
-    # Write a baseline so the hook has task_turn / user_message context
-    orig_tmp = lg.TMP_DIR
+    # Point logger at project paths and write a baseline
+    orig_tmp, orig_log = lg.TMP_DIR, lg.LOG_PATH
+    lg.configure_for_project(cwd)
     try:
         lg.save_baseline(
             session_id, tokens=5000,
@@ -247,7 +275,7 @@ def test_post_agent_logs_total_tokens(log_path):
         payload = {
             "tool_name": "Agent",
             "session_id": session_id,
-            "cwd": "",
+            "cwd": cwd,
             "tool_response": {"totalTokens": 12345},
         }
         r = run_hook("post_tool_use.py", payload)
@@ -262,17 +290,22 @@ def test_post_agent_logs_total_tokens(log_path):
         assert agent_entries[0]["task_turn"] == 3
     finally:
         lg.TMP_DIR = orig_tmp
+        lg.LOG_PATH = orig_log
+        lg.configure_for_project(cwd)
         lg.cleanup_session(session_id)
 
 
-def test_post_agent_zero_tokens_not_logged(log_path):
+def test_post_agent_zero_tokens_not_logged(tmp_dir):
     """PostToolUse hook must not log an Agent entry when totalTokens == 0."""
+    project_dir = make_test_project(tmp_dir / "project_agent_zero")
+    cwd = str(project_dir)
+    log_path = project_dir / ".claude" / "budgeter-log.jsonl"
     session_id = make_session_id()
     before = log_entry_count(log_path)
     payload = {
         "tool_name": "Agent",
         "session_id": session_id,
-        "cwd": "",
+        "cwd": cwd,
         "tool_response": {"totalTokens": 0},
     }
     r = run_hook("post_tool_use.py", payload)
@@ -280,11 +313,16 @@ def test_post_agent_zero_tokens_not_logged(log_path):
     assert log_entry_count(log_path) == before, "Zero-token Agent entry must not be written"
 
 
-def test_pre_skips_logging_after_agent(log_path):
+def test_pre_skips_logging_after_agent(tmp_dir):
     """PRE hook must not log a duplicate entry when prev_tool_name == 'Agent'."""
     import budgeter.lib.logger as lg
+    project_dir = make_test_project(tmp_dir / "project_skip_agent")
+    cwd = str(project_dir)
+    log_path = project_dir / ".claude" / "budgeter-log.jsonl"
     session_id = make_session_id()
-    orig_tmp = lg.TMP_DIR
+
+    orig_tmp, orig_log = lg.TMP_DIR, lg.LOG_PATH
+    lg.configure_for_project(cwd)
     try:
         # Simulate baseline left by Agent's PRE hook
         lg.save_baseline(
@@ -297,12 +335,13 @@ def test_pre_skips_logging_after_agent(log_path):
         )
 
         before = log_entry_count(log_path)
-        payload = {"tool_name": "Bash", "session_id": session_id, "transcript_path": "", "cwd": ""}
+        payload = {"tool_name": "Bash", "session_id": session_id, "transcript_path": "", "cwd": cwd}
         r = run_hook("pre_tool_use.py", payload)
         assert r.returncode == 0, f"PRE failed: {r.stderr}"
         assert log_entry_count(log_path) == before, "PRE must not log an Agent entry (PostToolUse already did)"
     finally:
         lg.TMP_DIR = orig_tmp
+        lg.LOG_PATH = orig_log
         lg.cleanup_session(session_id)
 
 
@@ -448,35 +487,45 @@ def test_baseline_stores_predicted_cost_and_warning_fired(tmp_dir):
         lg.cleanup_session(session_id)
 
 
-def test_feedback_written_at_session_end(log_path):
-    """Stop hook writes a feedback record for the last task. Uses real feedback path."""
+def test_feedback_written_at_session_end(tmp_dir):
+    """Stop hook writes a feedback record for the last task."""
     import budgeter.lib.logger as lg
+    project_dir = make_test_project(tmp_dir / "project_feedback")
+    cwd = str(project_dir)
     session_id = make_session_id()
-    before = sum(
-        1 for e in lg.read_feedback() if e.get("session_id") == session_id
-    )
-    lg.save_baseline(
-        session_id, tokens=3000,
-        prev_tool_name="Write",
-        prev_assistant_message="Updating all configs.",
-        turn_number=2,
-        task_turn=2,
-        user_message="update configs",
-        scope_flags=["breadth_keywords"],
-        predicted_cost=0,
-        warning_fired=False,
-    )
-    r = run_hook("stop_session.py", {
-        "session_id": session_id,
-        "transcript_path": "",
-        "cwd": "",
-    })
-    assert r.returncode == 0, f"STOP failed: {r.stderr}"
-    after = [e for e in lg.read_feedback() if e.get("session_id") == session_id]
-    assert len(after) == before + 1, "Stop hook must write one feedback record"
-    assert after[-1]["task_turn"] == 2
-    assert after[-1]["scope_flags"] == ["breadth_keywords"]
-    assert after[-1]["warning_fired"] is False
+
+    orig_tmp, orig_log, orig_feedback = lg.TMP_DIR, lg.LOG_PATH, lg.FEEDBACK_PATH
+    lg.configure_for_project(cwd)
+    try:
+        before = sum(
+            1 for e in lg.read_feedback() if e.get("session_id") == session_id
+        )
+        lg.save_baseline(
+            session_id, tokens=3000,
+            prev_tool_name="Write",
+            prev_assistant_message="Updating all configs.",
+            turn_number=2,
+            task_turn=2,
+            user_message="update configs",
+            scope_flags=["breadth_keywords"],
+            predicted_cost=0,
+            warning_fired=False,
+        )
+        r = run_hook("stop_session.py", {
+            "session_id": session_id,
+            "transcript_path": "",
+            "cwd": cwd,
+        })
+        assert r.returncode == 0, f"STOP failed: {r.stderr}"
+        after = [e for e in lg.read_feedback() if e.get("session_id") == session_id]
+        assert len(after) == before + 1, "Stop hook must write one feedback record"
+        assert after[-1]["task_turn"] == 2
+        assert after[-1]["scope_flags"] == ["breadth_keywords"]
+        assert after[-1]["warning_fired"] is False
+    finally:
+        lg.TMP_DIR = orig_tmp
+        lg.LOG_PATH = orig_log
+        lg.FEEDBACK_PATH = orig_feedback
 
 
 def test_is_approval_message(tmp_dir):
@@ -664,9 +713,6 @@ def main():
     if not flag.exists():
         print("Note: budgeter-log-enabled not set — integration tests will skip logging checks.")
 
-    log_path = BUDGETER_DIR / "data" / "usage_log.jsonl"
-    log_path.parent.mkdir(exist_ok=True)
-
     with tempfile.TemporaryDirectory() as td:
         tmp_dir = Path(td)
 
@@ -687,27 +733,27 @@ def main():
         print("OK")
 
         print("Integration: PRE -> POST -> STOP ........ ", end="")
-        test_pre_post_stop_pipeline(log_path, tmp_dir)
+        test_pre_post_stop_pipeline(tmp_dir)
         print("OK")
 
         print("Integration: PRE-to-PRE baseline ....... ", end="")
-        test_pre_to_pre_baseline(log_path)
+        test_pre_to_pre_baseline(tmp_dir)
         print("OK")
 
         print("Unit: [CONT] continuation inherits task_turn  ", end="")
-        test_cont_continuation_inherits_task_turn(log_path)
+        test_cont_continuation_inherits_task_turn(tmp_dir)
         print("OK")
 
         print("Integration: POST Agent logs totalTokens ....... ", end="")
-        test_post_agent_logs_total_tokens(log_path)
+        test_post_agent_logs_total_tokens(tmp_dir)
         print("OK")
 
         print("Integration: POST Agent skips zero tokens ...... ", end="")
-        test_post_agent_zero_tokens_not_logged(log_path)
+        test_post_agent_zero_tokens_not_logged(tmp_dir)
         print("OK")
 
         print("Integration: PRE skips log after Agent ......... ", end="")
-        test_pre_skips_logging_after_agent(log_path)
+        test_pre_skips_logging_after_agent(tmp_dir)
         print("OK")
 
         print("Unit: feedback append/read roundtrip ............ ", end="")
@@ -719,7 +765,7 @@ def main():
         print("OK")
 
         print("Integration: feedback written at session end ..... ", end="")
-        test_feedback_written_at_session_end(log_path)
+        test_feedback_written_at_session_end(tmp_dir)
         print("OK")
 
         print("Unit: detect_scope_flags scope_keyword ......... ", end="")
