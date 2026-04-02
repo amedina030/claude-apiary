@@ -8,7 +8,7 @@ Launch a startup agent to handle session initialization. Do NOT execute these st
 
 ## What to do
 
-Spawn an agent (subagent_type: "general-purpose", run_in_background: true) with the following prompt. Replace `<repo_dir>` with the current repo working directory, and `<session_id>` with the current session ID from budgeter context (first 8 chars).
+Spawn an agent (subagent_type: "general-purpose", run_in_background: true) with the following prompt. Replace `<repo_dir>` with the current repo working directory, and `<session_id>` with the current session ID from the `[session]` context (first 8 chars). If `[session]` context is not available, check `[budgeter]` context as a fallback.
 
 Also pass the **full text of the user's first message** to the agent as `<first_message>`.
 
@@ -46,9 +46,9 @@ You are a session startup agent. Your job is to declare session identity, genera
    - Keep entries where `role` matches this session's `wants_role` AND `mission` matches `wants_mission`
    - These are "matching sessions"
 
-3. Get existing handoff session IDs: run `python <repo_dir>/scribe/notes.py list --type handoff` and extract the session IDs from handoff notes.
+3. Get existing handoff session IDs: run `python <repo_dir>/scribe/notes.py handoff-sessions` — this returns one session ID per line (no content, no parsing needed).
 
-4. Filter matching sessions to only "unseen" ones — those whose `session_id` (first 8 chars) does NOT appear in any existing handoff's session ID.
+4. Filter matching sessions to only "unseen" ones — those whose `session_id` (first 8 chars) does NOT appear in the handoff-sessions output.
 
 5. For each unseen matching session (oldest first):
    a. Get its `transcript_path`. Run `python <repo_dir>/core/hooks/extract_transcript.py <transcript_path>` to extract clean messages (each line: JSON with `role` and `text`). If output is empty, skip this session.
@@ -68,12 +68,17 @@ You are a session startup agent. Your job is to declare session identity, genera
       python <repo_dir>/scribe/notes.py add --type handoff --session-id <prev-id> --auto --if-no-handoff-for <prev-id> --content "<handoff>"
       ```
 
-### Step 3: Load active notes and learnings
+### Step 3: Load active notes, learnings, and latest handoff
 
 Run in parallel:
 ```bash
 python <repo_dir>/scribe/notes.py list
 python <repo_dir>/scribe/notes.py learnings
+```
+
+Then fetch the most recent handoff note (highest ID from the list with type=handoff) using:
+```bash
+python <repo_dir>/scribe/notes.py get <id>
 ```
 
 ### Step 4: Return summary
@@ -88,9 +93,12 @@ Return a message with EXACTLY this structure (no extras):
 **Active items:** <count> notes — <brief list of IDs and types, e.g. "#5 todo, #6 wishlist, #7 todo">
 
 **Learnings:** <count> — <brief list or "None">
+
+**Last session (#<handoff-id>, <session-id>):**
+<full content of the most recent handoff note>
 ```
 
-Keep the entire output under 200 words. Do NOT include full note contents — just IDs, types, and a few words each.
+Keep the entire output under 300 words. Do NOT include full note contents for the active items list — just IDs, types, and a few words each. The exception is the last session handoff, which should be included in full.
 
 ---
 

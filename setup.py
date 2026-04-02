@@ -66,13 +66,15 @@ def file_hash(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def build_install_check_hooks():
-    """Build PreToolUse and Stop hook entries for the install checker."""
-    pre_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install.py", PYTHON)
+def build_core_hooks():
+    """Build PreToolUse and Stop hook entries for core hooks (install check, session injection)."""
+    install_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install.py", PYTHON)
+    session_cmd = hook_cmd(CORE_DIR / "hooks" / "inject_session.py", PYTHON)
     stop_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install_stop.py", PYTHON)
     return {
         "PreToolUse": [
-            {"matcher": "", "hooks": [{"type": "command", "command": pre_cmd}]}
+            {"matcher": "", "hooks": [{"type": "command", "command": install_cmd}]},
+            {"matcher": "", "hooks": [{"type": "command", "command": session_cmd}]},
         ],
         "Stop": [
             {"hooks": [{"type": "command", "command": stop_cmd}]}
@@ -424,7 +426,7 @@ def main():
 
     # Merge all hooks into one dict, then register once to avoid stripping each other.
     all_hooks = {}
-    for hooks_dict in [build_budgeter_hooks(), build_install_check_hooks(), build_scribe_hooks()]:
+    for hooks_dict in [build_budgeter_hooks(), build_core_hooks(), build_scribe_hooks()]:
         for event, entries in hooks_dict.items():
             all_hooks.setdefault(event, []).extend(entries)
     register_hooks(settings_path, all_hooks, MARKER, also_strip=["claude-budgeter"])

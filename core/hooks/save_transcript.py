@@ -19,21 +19,11 @@ HISTORY_PATH = CLAUDE_DIR / ".session-history.json"
 MAX_HISTORY = 10
 
 
-def _read_session_identity(session_id):
-    """Read role/mission from the session identity file written by startup."""
-    identity_path = CLAUDE_DIR / f".session-identity-{session_id[:8]}.json"
-    if identity_path.exists():
-        try:
-            data = json.loads(identity_path.read_text(encoding="utf-8"))
-            return data.get("role", "user"), data.get("mission", "general"), data.get("registered", True)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return "user", "general", True
-
-
 def _append_to_history(session_id, transcript_path):
     """Append session to history ring buffer with identity tags."""
-    role, mission, registered = _read_session_identity(session_id)
+    from core.session import load_identity
+    identity = load_identity(session_id)
+    role, mission, registered = identity["role"], identity["mission"], identity["registered"]
 
     with FileLock(HISTORY_PATH):
         if HISTORY_PATH.exists():

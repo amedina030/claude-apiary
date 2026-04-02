@@ -39,15 +39,10 @@ AUTO_ARCHIVE_DAYS = 30
 
 
 def _load_session_identity():
-    """Load role/mission from the most recent session identity file."""
-    identity_files = sorted(CLAUDE_DIR.glob(".session-identity-*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
-    if not identity_files:
-        return "", ""
-    try:
-        data = json.loads(identity_files[0].read_text(encoding="utf-8"))
-        return data.get("role", ""), data.get("mission", "")
-    except (json.JSONDecodeError, OSError):
-        return "", ""
+    """Load role/mission/session_id from the most recent session identity file."""
+    from core.session import load_identity
+    identity = load_identity()
+    return identity["role"], identity["mission"], identity["session_id"]
 
 
 def _project_key_from_path(p):
@@ -463,6 +458,20 @@ def cmd_learnings(args):
         print(line)
 
 
+def cmd_handoff_sessions(args):
+    """Print session IDs of existing handoff notes, one per line."""
+    notes = _read_jsonl(args.notes_path)
+    seen = set()
+    for n in notes:
+        if n.get("type") == "handoff" and n.get("status") != "done":
+            sid = n.get("session_id", "").strip()
+            if sid and sid not in seen:
+                seen.add(sid)
+                print(sid)
+    if not seen:
+        print("(none)")
+
+
 def cmd_unlearn(args):
     """Remove a learning by ID."""
     learnings = _read_jsonl(args.learnings_path)
@@ -542,19 +551,25 @@ def main():
     p_learnings.add_argument("--role", help="Filter by session role")
     p_learnings.add_argument("--mission", help="Filter by session mission")
 
+    # handoff-sessions
+    sub.add_parser("handoff-sessions")
+
     # unlearn
     p_unlearn = sub.add_parser("unlearn")
     p_unlearn.add_argument("id", type=int)
 
     args = parser.parse_args()
 
-    # Auto-fill role/mission from session identity if not provided
-    if hasattr(args, "role") or hasattr(args, "mission"):
-        default_role, default_mission = _load_session_identity()
-        if hasattr(args, "role") and not args.role:
-            args.role = default_role
-        if hasattr(args, "mission") and not args.mission:
-            args.mission = default_mission
+    # Auto-fill role/mission/session_id from session identity if not provided
+    default_role, default_mission, default_sid = _load_session_identity()
+    if hasattr(args, "role") and not getattr(args, "role", ""):
+        args.role = default_role
+    if hasattr(args, "mission") and not getattr(args, "mission", ""):
+        args.mission = default_mission
+    # Auto-fill session_id for handoffs so manual handoffs get tagged correctly
+    if (hasattr(args, "session_id") and not getattr(args, "session_id", "")
+            and getattr(args, "type", "") == "handoff"):
+        args.session_id = default_sid
 
     # Resolve project-scoped paths
     pk = _project_key(args.project)
@@ -565,7 +580,7 @@ def main():
     notes_commands = {
         "add": cmd_add, "list": cmd_list, "get": cmd_get,
         "done": cmd_done, "update": cmd_update, "archive": cmd_archive,
-        "migrate": cmd_migrate,
+        "migrate": cmd_migrate, "handoff-sessions": cmd_handoff_sessions,
     }
     learnings_commands = {
         "learn": cmd_learn, "learnings": cmd_learnings, "unlearn": cmd_unlearn,

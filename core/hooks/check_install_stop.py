@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-Stop hook — cleans up the session flag file written by check_install.py.
+Stop hook — cleans up session flag files written by core PreToolUse hooks
+(check_install.py, inject_session.py).
 """
 import sys
 import json
 from pathlib import Path
 
 SESSION_FLAG_DIR = Path.home() / ".claude" / "tmp"
+
+FLAG_SUFFIXES = ["_install_checked", "_session_injected"]
 
 
 def main():
@@ -17,9 +20,10 @@ def main():
 
     session_id = payload.get("session_id", "")
     if session_id:
-        flag_file = SESSION_FLAG_DIR / f"{session_id}_install_checked"
-        if flag_file.exists():
-            flag_file.unlink()
+        for suffix in FLAG_SUFFIXES:
+            flag_file = SESSION_FLAG_DIR / f"{session_id}{suffix}"
+            if flag_file.exists():
+                flag_file.unlink()
 
 
 if __name__ == "__main__":
