@@ -1,8 +1,15 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Budgeter runtime data
 budgeter/tmp/
 budgeter/data/
+
+# Session runtime artifacts
+.claude-session-identity.json
+
+# Scribe / clarifier runtime
 .claude/notes.md
 .claude/clarifier-logs/
 .claude/issues.md
