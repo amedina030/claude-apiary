@@ -376,6 +376,52 @@ def run_check():
         fail("PYTHONUTF8 not set — run: [System.Environment]::SetEnvironmentVariable('PYTHONUTF8', '1', 'User')")
     else:
         ok("PYTHONUTF8 not needed (non-Windows)")
+
+    # Import checks — verify key modules load without errors
+    import_checks = [
+        "core.session",
+        "core.hook_context",
+        "core.flags",
+        "budgeter.lib.logger",
+        "budgeter.lib.estimator",
+        "scribe.notes",
+    ]
+    import importlib
+    for mod_name in import_checks:
+        try:
+            importlib.import_module(mod_name)
+            ok(f"import {mod_name}")
+        except Exception as e:
+            fail(f"import {mod_name}: {e}")
+
+    # Hook smoke test — run each hook with an empty payload to verify no crash
+    import subprocess
+    hook_scripts = [
+        APIS_DIR / "core" / "hooks" / "inject_session.py",
+        APIS_DIR / "core" / "hooks" / "check_install.py",
+        APIS_DIR / "budgeter" / "hooks" / "pre_tool_use.py",
+        APIS_DIR / "budgeter" / "hooks" / "post_tool_use.py",
+    ]
+    for script in hook_scripts:
+        if not script.exists():
+            fail(f"hook missing: {script.name}")
+            continue
+        try:
+            result = subprocess.run(
+                [str(PYTHON), str(script)],
+                input="{}",
+                text=True,
+                capture_output=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                ok(f"hook {script.name}: runs clean")
+            else:
+                fail(f"hook {script.name}: exit code {result.returncode}")
+        except subprocess.TimeoutExpired:
+            fail(f"hook {script.name}: timed out")
+        except Exception as e:
+            fail(f"hook {script.name}: {e}")
     print()
 
     # Summary
