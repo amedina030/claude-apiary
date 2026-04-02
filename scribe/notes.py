@@ -45,7 +45,7 @@ def _load_session_identity():
     return identity["role"], identity["mission"], identity["session_id"]
 
 
-def _project_key_from_path(p):
+def project_key_from_path(p):
     """Derive Claude's project key from an absolute path.
     E.g. D:\\Professional\\claude-apis → D--Professional-claude-apis"""
     p = Path(p).resolve()
@@ -58,18 +58,18 @@ def _project_key(project_override=None):
     """Return the project key, from --project flag or cwd."""
     if project_override:
         return project_override
-    return _project_key_from_path(Path.cwd())
+    return project_key_from_path(Path.cwd())
 
 
-def _notes_path(project_key):
+def notes_path(project_key):
     return PROJECTS_DIR / project_key / "notes.jsonl"
 
 
-def _archive_path(project_key):
+def archive_path(project_key):
     return PROJECTS_DIR / project_key / "notes_archive.jsonl"
 
 
-def _learnings_path(project_key):
+def learnings_path(project_key):
     return PROJECTS_DIR / project_key / "learnings.jsonl"
 
 
@@ -77,7 +77,7 @@ def _learnings_path(project_key):
 # Storage helpers
 # ---------------------------------------------------------------------------
 
-def _read_jsonl(path):
+def read_jsonl(path):
     if not path.exists():
         return []
     entries = []
@@ -122,7 +122,7 @@ def _parse_timestamp(ts):
         return datetime.now(timezone.utc)
 
 
-def _format_age(ts):
+def format_age(ts):
     """Return human-readable relative age string from an ISO timestamp."""
     dt = _parse_timestamp(ts)
     now = datetime.now(timezone.utc)
@@ -184,7 +184,7 @@ def _auto_archive(notes, notes_path, archive_path):
             remaining.append(n)
 
     if to_archive:
-        existing_archive = _read_jsonl(archive_path)
+        existing_archive = read_jsonl(archive_path)
         existing_archive.extend(to_archive)
         _write_jsonl(archive_path, existing_archive)
         _write_jsonl(notes_path, remaining)
@@ -193,15 +193,53 @@ def _auto_archive(notes, notes_path, archive_path):
 
 
 # ---------------------------------------------------------------------------
+# Record builders — single source of truth for JSONL schemas
+# ---------------------------------------------------------------------------
+
+def make_note(notes, *, type: str, content: str, session_id: str = "",
+              auto: bool = False, role: str = "", mission: str = "") -> dict:
+    """Build a validated note record.
+
+    *notes* is the current list (used for ID generation).
+    Raises ValueError for invalid type.
+    """
+    if type not in VALID_TYPES:
+        raise ValueError(f"Invalid note type {type!r}, must be one of {VALID_TYPES}")
+    return {
+        "id": _next_id(notes),
+        "timestamp": _now_iso(),
+        "session_id": session_id,
+        "type": type,
+        "content": content,
+        "status": "active",
+        "auto_generated": auto,
+        "role": role,
+        "mission": mission,
+    }
+
+
+def make_learning(learnings, *, content: str, session_id: str = "",
+                  role: str = "", mission: str = "") -> dict:
+    """Build a validated learning record.
+
+    *learnings* is the current list (used for ID generation).
+    """
+    return {
+        "id": _next_id(learnings),
+        "timestamp": _now_iso(),
+        "session_id": session_id,
+        "content": content,
+        "role": role,
+        "mission": mission,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
 def cmd_add(args):
-    if args.type not in VALID_TYPES:
-        print(f"Error: type must be one of {VALID_TYPES}", file=sys.stderr)
-        sys.exit(1)
-
-    notes = _read_jsonl(args.notes_path)
+    notes = read_jsonl(args.notes_path)
 
     # Duplicate handoff prevention
     if getattr(args, "if_no_handoff_for", None):
@@ -211,27 +249,31 @@ def cmd_add(args):
                     n.get("session_id", "").lower().startswith(target_sid)):
                 print(f"Handoff for session {target_sid} already exists (#{n['id']}). Skipping.")
                 return
-    note = {
-        "id": _next_id(notes),
-        "timestamp": _now_iso(),
-        "session_id": args.session_id or "",
-        "type": args.type,
-        "content": args.content,
-        "status": "active",
-        "auto_generated": args.auto,
-        "role": getattr(args, "role", "") or "",
-        "mission": getattr(args, "mission", "") or "",
-    }
+
+    try:
+        note = make_note(
+            notes,
+            type=args.type,
+            content=args.content,
+            session_id=args.session_id or "",
+            auto=args.auto,
+            role=getattr(args, "role", "") or "",
+            mission=getattr(args, "mission", "") or "",
+        )
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
     _append_jsonl(args.notes_path, note)
     print(f"Added #{note['id']} ({note['type']})")
 
 
 def cmd_list(args):
     if args.archive:
-        notes = _read_jsonl(args.archive_path)
+        notes = read_jsonl(args.archive_path)
         source = "archive"
     else:
-        notes = _read_jsonl(args.notes_path)
+        notes = read_jsonl(args.notes_path)
         # Auto-archive on every list call
         notes, archived = _auto_archive(notes, args.notes_path, args.archive_path)
         if archived:
@@ -275,7 +317,7 @@ def cmd_list(args):
     for n in notes:
         nid = n.get("id", "?")
         ntype = n.get("type", "?")[:8]
-        age = _format_age(n.get("timestamp", ""))
+        age = format_age(n.get("timestamp", ""))
         status = " [DONE]" if n.get("status") == "done" else ""
         content = n.get("content", "").replace("\n", " ")[:80]
         line = f"#{nid:<4} {ntype:<10} ({age:<9}) {content}{status}"
@@ -283,11 +325,11 @@ def cmd_list(args):
 
 
 def cmd_get(args):
-    notes = _read_jsonl(args.notes_path)
+    notes = read_jsonl(args.notes_path)
     # Also check archive
     note = next((n for n in notes if n.get("id") == args.id), None)
     if not note:
-        archive = _read_jsonl(args.archive_path)
+        archive = read_jsonl(args.archive_path)
         note = next((n for n in archive if n.get("id") == args.id), None)
         if note:
             print("[from archive]")
@@ -300,7 +342,7 @@ def cmd_get(args):
     print(f"Type: {note.get('type', '?')}")
     print(f"Status: {note.get('status', '?')}")
     print(f"Session: {note.get('session_id', '?')}")
-    print(f"Time: {note.get('timestamp', '?')} ({_format_age(note.get('timestamp', ''))})")
+    print(f"Time: {note.get('timestamp', '?')} ({format_age(note.get('timestamp', ''))})")
     if note.get("role"):
         print(f"Role: {note['role']}")
     if note.get("mission"):
@@ -311,7 +353,7 @@ def cmd_get(args):
 
 
 def cmd_done(args):
-    notes = _read_jsonl(args.notes_path)
+    notes = read_jsonl(args.notes_path)
     found = False
     for n in notes:
         if n.get("id") == args.id:
@@ -331,7 +373,7 @@ def cmd_update(args):
     if args.content is None and args.session_id is None:
         print("Error: provide --content and/or --session-id", file=sys.stderr)
         sys.exit(1)
-    notes = _read_jsonl(args.notes_path)
+    notes = read_jsonl(args.notes_path)
     found = False
     for n in notes:
         if n.get("id") == args.id:
@@ -351,7 +393,7 @@ def cmd_update(args):
 
 
 def cmd_archive(args):
-    notes = _read_jsonl(args.notes_path)
+    notes = read_jsonl(args.notes_path)
     if args.before:
         cutoff = datetime.strptime(args.before, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     else:
@@ -370,7 +412,7 @@ def cmd_archive(args):
         print("Nothing to archive.")
         return
 
-    existing_archive = _read_jsonl(args.archive_path)
+    existing_archive = read_jsonl(args.archive_path)
     existing_archive.extend(to_archive)
     _write_jsonl(args.archive_path, existing_archive)
     _write_jsonl(args.notes_path, remaining)
@@ -388,7 +430,7 @@ def cmd_migrate(args):
     # Split on note boundaries: lines starting with "N. ["
     pattern = re.compile(r'^(\d+)\.\s+\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+UTC)\]\s+\[session:\s*(\S+?)\]\s*(.*)', re.MULTILINE)
 
-    existing = _read_jsonl(args.notes_path)
+    existing = read_jsonl(args.notes_path)
     next_id = _next_id(existing)
 
     # Find all note starts
@@ -441,22 +483,21 @@ def cmd_migrate(args):
 
 def cmd_learn(args):
     """Add a new learning."""
-    learnings = _read_jsonl(args.learnings_path)
-    entry = {
-        "id": _next_id(learnings),
-        "timestamp": _now_iso(),
-        "session_id": args.session_id or "",
-        "content": args.content,
-        "role": getattr(args, "role", "") or "",
-        "mission": getattr(args, "mission", "") or "",
-    }
+    learnings = read_jsonl(args.learnings_path)
+    entry = make_learning(
+        learnings,
+        content=args.content,
+        session_id=args.session_id or "",
+        role=getattr(args, "role", "") or "",
+        mission=getattr(args, "mission", "") or "",
+    )
     _append_jsonl(args.learnings_path, entry)
     print(f"Learned #{entry['id']}")
 
 
 def cmd_learnings(args):
     """List all learnings."""
-    learnings = _read_jsonl(args.learnings_path)
+    learnings = read_jsonl(args.learnings_path)
 
     if args.role:
         learnings = [l for l in learnings if l.get("role", "").lower() == args.role.lower()]
@@ -474,7 +515,7 @@ def cmd_learnings(args):
 
     for l in learnings:
         lid = l.get("id", "?")
-        age = _format_age(l.get("timestamp", ""))
+        age = format_age(l.get("timestamp", ""))
         content = l.get("content", "").replace("\n", " ")[:80]
         line = f"#{lid:<4} ({age:<9}) {content}"
         print(line)
@@ -482,7 +523,7 @@ def cmd_learnings(args):
 
 def cmd_handoff_sessions(args):
     """Print session IDs of existing handoff notes, one per line."""
-    notes = _read_jsonl(args.notes_path)
+    notes = read_jsonl(args.notes_path)
     seen = set()
     for n in notes:
         if n.get("type") == "handoff" and n.get("status") != "done":
@@ -496,7 +537,7 @@ def cmd_handoff_sessions(args):
 
 def cmd_unlearn(args):
     """Remove a learning by ID."""
-    learnings = _read_jsonl(args.learnings_path)
+    learnings = read_jsonl(args.learnings_path)
     remaining = [l for l in learnings if l.get("id") != args.id]
 
     if len(remaining) == len(learnings):
@@ -596,9 +637,9 @@ def main():
 
     # Resolve project-scoped paths
     pk = _project_key(args.project)
-    args.notes_path = _notes_path(pk)
-    args.archive_path = _archive_path(pk)
-    args.learnings_path = _learnings_path(pk)
+    args.notes_path = notes_path(pk)
+    args.archive_path = archive_path(pk)
+    args.learnings_path = learnings_path(pk)
 
     notes_commands = {
         "add": cmd_add, "list": cmd_list, "get": cmd_get,

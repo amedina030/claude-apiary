@@ -17,8 +17,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.session import CLAUDE_DIR, SessionId, load_identity
 from scribe.notes import (
-    _read_jsonl, _notes_path, _learnings_path,
-    _project_key_from_path, _format_age,
+    read_jsonl, notes_path, learnings_path,
+    project_key_from_path, format_age,
 )
 
 HISTORY_PATH = CLAUDE_DIR / ".session-history.json"
@@ -98,7 +98,7 @@ def get_unseen_sessions(session_id, wants_role, wants_mission, project_key):
     ]
 
     # Get existing handoff session IDs from notes
-    notes = _read_jsonl(_notes_path(project_key))
+    notes = read_jsonl(notes_path(project_key))
     handoff_sids = {
         n.get("session_id", "").strip()
         for n in notes
@@ -137,7 +137,7 @@ def cmd_init(args):
     identity_file.write_text(json.dumps(identity_data), encoding="utf-8")
 
     # Find unseen sessions
-    project_key = _project_key_from_path(args.repo_dir)
+    project_key = project_key_from_path(args.repo_dir)
     unseen = get_unseen_sessions(
         args.session_id,
         identity["wants_role"],
@@ -165,12 +165,12 @@ def _matches_role_mission(note, role, mission):
 
 def cmd_summary(args):
     repo_dir = args.repo_dir or str(PROJECT_ROOT)
-    project_key = _project_key_from_path(repo_dir)
+    project_key = project_key_from_path(repo_dir)
     role = args.role or "user"
     mission = args.mission or "general"
 
-    notes = _read_jsonl(_notes_path(project_key))
-    learnings = _read_jsonl(_learnings_path(project_key))
+    notes = read_jsonl(notes_path(project_key))
+    learnings = read_jsonl(learnings_path(project_key))
 
     # Active, unresolved notes matching role/mission
     active = [
