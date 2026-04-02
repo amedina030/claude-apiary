@@ -8,8 +8,10 @@ Notes are operational state — deferred work, handoffs, decisions — not perma
 Requires PYTHONUTF8=1 environment variable on Windows (set by setup.py).
 
 Usage:
-    notes.py add --type todo --content "..." --session-id X [--auto]
-    notes.py list [--type X] [--session X] [--search X] [--last N] [--all] [--archive]
+    notes.py add --type todo --content "..." --session-id X [--auto] [--role X] [--mission X]
+    notes.py list [--type X] [--session X] [--search X] [--last N] [--all] [--archive] [--role X] [--mission X]
+    notes.py learn --content "..." [--session-id X] [--role X] [--mission X]
+    notes.py learnings [--search X] [--role X] [--mission X]
     notes.py get <id>
     notes.py done <id>
     notes.py update <id> --content "..."
@@ -34,6 +36,18 @@ PROJECTS_DIR = CLAUDE_DIR / "projects"
 
 VALID_TYPES = ["todo", "handoff", "decision", "wishlist", "reference", "blocker", "context"]
 AUTO_ARCHIVE_DAYS = 30
+
+
+def _load_session_identity():
+    """Load role/mission from the most recent session identity file."""
+    identity_files = sorted(CLAUDE_DIR.glob(".session-identity-*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
+    if not identity_files:
+        return "", ""
+    try:
+        data = json.loads(identity_files[0].read_text(encoding="utf-8"))
+        return data.get("role", ""), data.get("mission", "")
+    except (json.JSONDecodeError, OSError):
+        return "", ""
 
 
 def _project_key_from_path(p):
@@ -194,6 +208,8 @@ def cmd_add(args):
         "content": args.content,
         "status": "active",
         "auto_generated": args.auto,
+        "role": getattr(args, "role", "") or "",
+        "mission": getattr(args, "mission", "") or "",
     }
     _append_jsonl(args.notes_path, note)
     print(f"Added #{note['id']} ({note['type']})")
@@ -223,6 +239,14 @@ def cmd_list(args):
     if args.session:
         prefix = args.session.lower()
         notes = [n for n in notes if n.get("session_id", "").lower().startswith(prefix)]
+
+    # Filter by role
+    if args.role:
+        notes = [n for n in notes if n.get("role", "").lower() == args.role.lower()]
+
+    # Filter by mission
+    if args.mission:
+        notes = [n for n in notes if n.get("mission", "").lower() == args.mission.lower()]
 
     # Filter by search
     if args.search:
@@ -266,6 +290,10 @@ def cmd_get(args):
     print(f"Status: {note.get('status', '?')}")
     print(f"Session: {note.get('session_id', '?')}")
     print(f"Time: {note.get('timestamp', '?')} ({_format_age(note.get('timestamp', ''))})")
+    if note.get("role"):
+        print(f"Role: {note['role']}")
+    if note.get("mission"):
+        print(f"Mission: {note['mission']}")
     print(f"Auto: {note.get('auto_generated', False)}")
     print(f"---")
     print(note.get("content", ""))
@@ -402,6 +430,8 @@ def cmd_learn(args):
         "timestamp": _now_iso(),
         "session_id": args.session_id or "",
         "content": args.content,
+        "role": getattr(args, "role", "") or "",
+        "mission": getattr(args, "mission", "") or "",
     }
     _append_jsonl(args.learnings_path, entry)
     print(f"Learned #{entry['id']}")
@@ -410,6 +440,12 @@ def cmd_learn(args):
 def cmd_learnings(args):
     """List all learnings."""
     learnings = _read_jsonl(args.learnings_path)
+
+    if args.role:
+        learnings = [l for l in learnings if l.get("role", "").lower() == args.role.lower()]
+
+    if args.mission:
+        learnings = [l for l in learnings if l.get("mission", "").lower() == args.mission.lower()]
 
     if args.search:
         term = args.search.lower()
@@ -458,6 +494,8 @@ def main():
     p_add.add_argument("--auto", action="store_true", help="Mark as auto-generated")
     p_add.add_argument("--if-no-handoff-for", default=None,
                         help="Only add if no handoff exists for this session ID")
+    p_add.add_argument("--role", default="", help="Session role (e.g. user, attacker)")
+    p_add.add_argument("--mission", default="", help="Session mission (e.g. general, project-x)")
 
     # list
     p_list = sub.add_parser("list")
@@ -467,6 +505,8 @@ def main():
     p_list.add_argument("--last", type=int)
     p_list.add_argument("--all", action="store_true", help="Include done notes")
     p_list.add_argument("--archive", action="store_true", help="Search archive instead")
+    p_list.add_argument("--role", help="Filter by session role")
+    p_list.add_argument("--mission", help="Filter by session mission")
 
     # get
     p_get = sub.add_parser("get")
@@ -493,16 +533,28 @@ def main():
     p_learn = sub.add_parser("learn")
     p_learn.add_argument("--content", required=True)
     p_learn.add_argument("--session-id", default="")
+    p_learn.add_argument("--role", default="", help="Session role")
+    p_learn.add_argument("--mission", default="", help="Session mission")
 
     # learnings
     p_learnings = sub.add_parser("learnings")
     p_learnings.add_argument("--search")
+    p_learnings.add_argument("--role", help="Filter by session role")
+    p_learnings.add_argument("--mission", help="Filter by session mission")
 
     # unlearn
     p_unlearn = sub.add_parser("unlearn")
     p_unlearn.add_argument("id", type=int)
 
     args = parser.parse_args()
+
+    # Auto-fill role/mission from session identity if not provided
+    if hasattr(args, "role") or hasattr(args, "mission"):
+        default_role, default_mission = _load_session_identity()
+        if hasattr(args, "role") and not args.role:
+            args.role = default_role
+        if hasattr(args, "mission") and not args.mission:
+            args.mission = default_mission
 
     # Resolve project-scoped paths
     pk = _project_key(args.project)
