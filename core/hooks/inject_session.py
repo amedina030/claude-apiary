@@ -8,27 +8,15 @@ Runs once per session using a flag file, cleaned up by the companion
 Stop hook (check_install_stop.py).
 """
 import sys
-import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.session import SessionId
-
-CLAUDE_DIR = Path.home() / ".claude"
-SESSION_FLAG_DIR = CLAUDE_DIR / "tmp"
-
-
-def hook_allow(context):
-    out = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
-    out["hookSpecificOutput"]["additionalContext"] = context
-    print(json.dumps(out))
+from core.hook_context import context_block, hook_allow, read_payload
 
 
 def main():
-    try:
-        payload = json.loads(sys.stdin.read())
-    except json.JSONDecodeError:
-        sys.exit(0)
+    payload = read_payload()
 
     raw_id = payload.get("session_id", "")
     if not raw_id:
@@ -39,13 +27,13 @@ def main():
     except ValueError:
         sys.exit(0)
 
-    SESSION_FLAG_DIR.mkdir(parents=True, exist_ok=True)
     flag_file = sid.flag_path("session_injected")
+    flag_file.parent.mkdir(parents=True, exist_ok=True)
     if flag_file.exists():
         sys.exit(0)
 
     flag_file.write_text("1", encoding="utf-8")
-    hook_allow(f"[session] session_id: {sid.full}")
+    hook_allow(context_block("session", f"session_id: {sid.full}"))
 
 
 if __name__ == "__main__":

@@ -17,22 +17,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apis root
 
 from budgeter.lib import logger, estimator
 from core import flags
+from core.hook_context import context_block, join_contexts
+from core.hook_context import hook_allow, read_payload  # noqa: F401 — hook_allow used below
 
 
-_CONT_INSTRUCTION = (
-    "[budgeter] If you need to ask the user a question mid-task "
+_CONT_INSTRUCTION = context_block(
+    "budgeter",
+    "If you need to ask the user a question mid-task "
     "(you already started executing and need input before continuing), "
     "start your response with [CONT] on its own line. "
-    "Never use [CONT] for normal responses or new tasks."
+    "Never use [CONT] for normal responses or new tasks.",
 )
-
-
-def hook_allow(context=None):
-    """Allow the tool call, optionally injecting context for Claude."""
-    out = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
-    if context:
-        out["hookSpecificOutput"]["additionalContext"] = context
-    print(json.dumps(out))
 
 
 def _strip_cont(message):
@@ -44,10 +39,7 @@ def _strip_cont(message):
 
 
 def main():
-    try:
-        payload = json.loads(sys.stdin.read())
-    except json.JSONDecodeError:
-        sys.exit(0)
+    payload = read_payload()
 
     tool_name = payload.get("tool_name", "")
     session_id = payload.get("session_id", "")
@@ -215,7 +207,10 @@ def main():
     )
 
     # Build context to inject — always include the [CONT] instruction and session_id.
-    contexts = [_CONT_INSTRUCTION, f"[budgeter] session_id: {session_id}"]
+    blocks = [
+        _CONT_INSTRUCTION,
+        context_block("budgeter", f"session_id: {session_id}"),
+    ]
 
     if warning_fired:
         triggered = ", ".join(scope_flags)
@@ -228,26 +223,28 @@ def main():
         # Check if the clarifier is enabled — if so, route through it for scope narrowing.
         clarifier_enabled = (Path.home() / ".claude" / "clarifier-enabled").exists()
         if clarifier_enabled:
-            contexts.append(
-                f"[budgeter] Warning: this response looks potentially expensive — "
-                f"triggered: {triggered}. {magnitude}.\n"
+            blocks.append(context_block(
+                "budgeter",
+                f"Warning: this response looks potentially expensive — "
+                f"triggered: {triggered}. {magnitude}.",
                 f"The clarifier is enabled. Before proceeding, use the clarifier to narrow scope. "
                 f"When spawning the clarifier, include these budgeter details as additional context "
-                f"in the detected ambiguities:\n"
-                f"  - Cost signal: {triggered}\n"
-                f"  - Estimated magnitude: {magnitude}\n"
+                f"in the detected ambiguities:",
+                f"  - Cost signal: {triggered}",
+                f"  - Estimated magnitude: {magnitude}",
                 f"The clarifier should focus its questions on reducing the scope dimensions "
                 f"that triggered this warning (e.g. narrowing which files, which components, "
-                f"or whether a full vs targeted approach is needed)."
-            )
+                f"or whether a full vs targeted approach is needed).",
+            ))
         else:
-            contexts.append(
-                f"[budgeter] Warning: this response looks potentially expensive — "
+            blocks.append(context_block(
+                "budgeter",
+                f"Warning: this response looks potentially expensive — "
                 f"triggered: {triggered}. {magnitude}. "
-                f"Ask the user if they want to proceed before running."
-            )
+                f"Ask the user if they want to proceed before running.",
+            ))
 
-    hook_allow("\n\n".join(contexts))
+    hook_allow(join_contexts(*blocks))
 
 
 if __name__ == "__main__":
