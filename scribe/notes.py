@@ -152,11 +152,21 @@ def _format_age(ts):
 
 def _auto_archive(notes, notes_path, archive_path):
     """Move done notes and old handoffs past AUTO_ARCHIVE_DAYS to archive.
+    Also archives handoffs older than 7 days when there are more than 10
+    for the same role/mission combination.
     Returns (remaining, archived) lists."""
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=AUTO_ARCHIVE_DAYS)
+    handoff_cutoff = now - timedelta(days=7)
     remaining = []
     to_archive = []
+
+    # Count handoffs per role/mission
+    handoff_counts = {}
+    for n in notes:
+        if n.get("type") == "handoff":
+            key = (n.get("role", "user"), n.get("mission", "general"))
+            handoff_counts[key] = handoff_counts.get(key, 0) + 1
 
     for n in notes:
         ts = _parse_timestamp(n.get("timestamp", ""))
@@ -164,6 +174,12 @@ def _auto_archive(notes, notes_path, archive_path):
             to_archive.append(n)
         elif n.get("type") == "handoff" and ts < cutoff:
             to_archive.append(n)
+        elif n.get("type") == "handoff" and ts < handoff_cutoff:
+            key = (n.get("role", "user"), n.get("mission", "general"))
+            if handoff_counts.get(key, 0) > 10:
+                to_archive.append(n)
+            else:
+                remaining.append(n)
         else:
             remaining.append(n)
 

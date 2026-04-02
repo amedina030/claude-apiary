@@ -155,15 +155,28 @@ def cmd_init(args):
 # summary command
 # ---------------------------------------------------------------------------
 
+def _matches_role_mission(note, role, mission):
+    """Check if a note matches the given role/mission (or has no role/mission set)."""
+    n_role = note.get("role", "user")
+    n_mission = note.get("mission", "general")
+    return n_role == role and n_mission == mission
+
+
 def cmd_summary(args):
     repo_dir = args.repo_dir or str(PROJECT_ROOT)
     project_key = _project_key_from_path(repo_dir)
+    role = args.role or "user"
+    mission = args.mission or "general"
 
     notes = _read_jsonl(_notes_path(project_key))
     learnings = _read_jsonl(_learnings_path(project_key))
 
-    # Active notes (not done)
-    active = [n for n in notes if n.get("status") != "done"]
+    # Active, unresolved notes matching role/mission
+    active = [
+        n for n in notes
+        if n.get("status") not in ("done", "resolved")
+        and _matches_role_mission(n, role, mission)
+    ]
 
     # Format active items list
     items = []
@@ -175,14 +188,16 @@ def cmd_summary(args):
         content = n.get("content", "").replace("\n", " ")[:40]
         items.append(f"#{nid} {ntype} ({content})")
 
-    # Format learnings list
+    # Format learnings list (filtered by role/mission)
     learning_items = []
     for l in learnings:
+        if not _matches_role_mission(l, role, mission):
+            continue
         lid = l.get("id", "?")
         content = l.get("content", "").replace("\n", " ")[:60]
         learning_items.append(f"#{lid} {content}")
 
-    # Find latest handoff
+    # Find latest handoff matching role/mission
     handoffs = [
         n for n in active
         if n.get("type") == "handoff"
@@ -219,6 +234,8 @@ def main():
 
     p_summary = sub.add_parser("summary")
     p_summary.add_argument("--repo-dir", default=None)
+    p_summary.add_argument("--role", default="user")
+    p_summary.add_argument("--mission", default="general")
 
     args = parser.parse_args()
 

@@ -50,9 +50,9 @@ For each unseen session from the init output:
 
 ### Step 3: Load summary
 
-Run:
+Use the `role` and `mission` from the identity returned in Step 1:
 ```bash
-python <repo_dir>/core/startup.py summary --repo-dir "<repo_dir>"
+python <repo_dir>/core/startup.py summary --repo-dir "<repo_dir>" --role "<role>" --mission "<mission>"
 ```
 
 ### Step 4: Return summary
@@ -74,3 +74,13 @@ Keep the entire output under 300 words.
 ## After launching the agent
 
 Do NOT wait for the agent to finish. Immediately respond to the user's original message. When the agent completes in the background, output its summary prefixed with "Startup complete:" so the user knows session context is loaded.
+
+## Cost logging
+
+When the startup agent completes, the task notification includes a `<usage>` block. Pipe the **raw usage block** (copy-paste the entire `<usage>...</usage>` tag) to the logging script via stdin:
+
+```bash
+echo '<usage>...</usage>' | python <repo_dir>/budgeter/log_agent_cost.py --session-id "<full_session_id>" --agent "startup" --cwd "<repo_dir>"
+```
+
+Use the full session UUID (not the 8-char prefix) so it matches other budgeter entries. Run this silently — do not mention the cost logging to the user.
