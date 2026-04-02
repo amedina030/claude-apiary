@@ -14,7 +14,6 @@ import json
 from pathlib import Path
 
 CLAUDE_DIR = Path.home() / ".claude"
-NOTES_PATH = CLAUDE_DIR / "notes.jsonl"
 TRANSCRIPT_PATH = CLAUDE_DIR / ".last-transcript.jsonl"
 SESSION_PATH = CLAUDE_DIR / ".last-session.json"
 SESSION_FLAG_DIR = CLAUDE_DIR / "tmp"
@@ -22,6 +21,8 @@ SESSION_FLAG_DIR = CLAUDE_DIR / "tmp"
 # Add scribe to path for notes.py imports
 APIS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(APIS_DIR))
+
+from scribe.notes import _project_key_from_path, _notes_path
 
 
 def hook_allow(context=None):
@@ -31,11 +32,11 @@ def hook_allow(context=None):
     print(json.dumps(out))
 
 
-def read_notes():
-    if not NOTES_PATH.exists():
+def read_notes(notes_path):
+    if not notes_path.exists():
         return []
     entries = []
-    for line in NOTES_PATH.read_text(encoding="utf-8").splitlines():
+    for line in notes_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line:
             try:
@@ -67,7 +68,12 @@ def main():
         sys.exit(0)
     flag_file.write_text("1", encoding="utf-8")
 
-    notes = read_notes()
+    # Resolve project-scoped notes path from session cwd
+    cwd = payload.get("cwd", str(Path.cwd()))
+    pk = _project_key_from_path(cwd)
+    notes_path = _notes_path(pk)
+
+    notes = read_notes(notes_path)
     if not notes:
         sys.exit(0)
 

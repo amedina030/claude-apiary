@@ -22,11 +22,34 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 CLAUDE_DIR = Path.home() / ".claude"
-NOTES_PATH = CLAUDE_DIR / "notes.jsonl"
-ARCHIVE_PATH = CLAUDE_DIR / "notes_archive.jsonl"
+PROJECTS_DIR = CLAUDE_DIR / "projects"
 
 VALID_TYPES = ["todo", "handoff", "decision", "wishlist", "reference", "blocker", "context"]
 AUTO_ARCHIVE_DAYS = 30
+
+
+def _project_key_from_path(p):
+    """Derive Claude's project key from an absolute path.
+    E.g. D:\\Professional\\claude-apis → D--Professional-claude-apis"""
+    p = Path(p).resolve()
+    drive = p.drive.rstrip(":\\")  # "D"
+    rest = str(p).replace(p.drive + "\\", "").replace("\\", "-").replace("/", "-")
+    return f"{drive}--{rest}"
+
+
+def _project_key(project_override=None):
+    """Return the project key, from --project flag or cwd."""
+    if project_override:
+        return project_override
+    return _project_key_from_path(Path.cwd())
+
+
+def _notes_path(project_key):
+    return PROJECTS_DIR / project_key / "notes.jsonl"
+
+
+def _archive_path(project_key):
+    return PROJECTS_DIR / project_key / "notes_archive.jsonl"
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +129,7 @@ def _format_age(ts):
 # Auto-archive
 # ---------------------------------------------------------------------------
 
-def _auto_archive(notes):
+def _auto_archive(notes, notes_path, archive_path):
     """Move done notes and old handoffs past AUTO_ARCHIVE_DAYS to archive.
     Returns (remaining, archived) lists."""
     now = datetime.now(timezone.utc)
@@ -124,10 +147,10 @@ def _auto_archive(notes):
             remaining.append(n)
 
     if to_archive:
-        existing_archive = _read_jsonl(ARCHIVE_PATH)
+        existing_archive = _read_jsonl(archive_path)
         existing_archive.extend(to_archive)
-        _write_jsonl(ARCHIVE_PATH, existing_archive)
-        _write_jsonl(NOTES_PATH, remaining)
+        _write_jsonl(archive_path, existing_archive)
+        _write_jsonl(notes_path, remaining)
 
     return remaining, to_archive
 
@@ -141,7 +164,7 @@ def cmd_add(args):
         print(f"Error: type must be one of {VALID_TYPES}", file=sys.stderr)
         sys.exit(1)
 
-    notes = _read_jsonl(NOTES_PATH)
+    notes = _read_jsonl(args.notes_path)
     note = {
         "id": _next_id(notes),
         "timestamp": _now_iso(),
@@ -151,18 +174,18 @@ def cmd_add(args):
         "status": "active",
         "auto_generated": args.auto,
     }
-    _append_jsonl(NOTES_PATH, note)
+    _append_jsonl(args.notes_path, note)
     print(f"Added #{note['id']} ({note['type']})")
 
 
 def cmd_list(args):
     if args.archive:
-        notes = _read_jsonl(ARCHIVE_PATH)
+        notes = _read_jsonl(args.archive_path)
         source = "archive"
     else:
-        notes = _read_jsonl(NOTES_PATH)
+        notes = _read_jsonl(args.notes_path)
         # Auto-archive on every list call
-        notes, archived = _auto_archive(notes)
+        notes, archived = _auto_archive(notes, args.notes_path, args.archive_path)
         if archived:
             print(f"[auto-archived {len(archived)} notes]")
         source = "active"
@@ -204,11 +227,11 @@ def cmd_list(args):
 
 
 def cmd_get(args):
-    notes = _read_jsonl(NOTES_PATH)
+    notes = _read_jsonl(args.notes_path)
     # Also check archive
     note = next((n for n in notes if n.get("id") == args.id), None)
     if not note:
-        archive = _read_jsonl(ARCHIVE_PATH)
+        archive = _read_jsonl(args.archive_path)
         note = next((n for n in archive if n.get("id") == args.id), None)
         if note:
             print("[from archive]")
@@ -228,7 +251,7 @@ def cmd_get(args):
 
 
 def cmd_done(args):
-    notes = _read_jsonl(NOTES_PATH)
+    notes = _read_jsonl(args.notes_path)
     found = False
     for n in notes:
         if n.get("id") == args.id:
@@ -240,12 +263,12 @@ def cmd_done(args):
         print(f"Note #{args.id} not found.", file=sys.stderr)
         sys.exit(1)
 
-    _write_jsonl(NOTES_PATH, notes)
+    _write_jsonl(args.notes_path, notes)
     print(f"Marked #{args.id} as done.")
 
 
 def cmd_update(args):
-    notes = _read_jsonl(NOTES_PATH)
+    notes = _read_jsonl(args.notes_path)
     found = False
     for n in notes:
         if n.get("id") == args.id:
@@ -257,12 +280,12 @@ def cmd_update(args):
         print(f"Note #{args.id} not found.", file=sys.stderr)
         sys.exit(1)
 
-    _write_jsonl(NOTES_PATH, notes)
+    _write_jsonl(args.notes_path, notes)
     print(f"Updated #{args.id}.")
 
 
 def cmd_archive(args):
-    notes = _read_jsonl(NOTES_PATH)
+    notes = _read_jsonl(args.notes_path)
     if args.before:
         cutoff = datetime.strptime(args.before, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     else:
@@ -281,10 +304,10 @@ def cmd_archive(args):
         print("Nothing to archive.")
         return
 
-    existing_archive = _read_jsonl(ARCHIVE_PATH)
+    existing_archive = _read_jsonl(args.archive_path)
     existing_archive.extend(to_archive)
-    _write_jsonl(ARCHIVE_PATH, existing_archive)
-    _write_jsonl(NOTES_PATH, remaining)
+    _write_jsonl(args.archive_path, existing_archive)
+    _write_jsonl(args.notes_path, remaining)
     print(f"Archived {len(to_archive)} notes (before {cutoff.strftime('%Y-%m-%d')}).")
 
 
@@ -299,7 +322,7 @@ def cmd_migrate(args):
     # Split on note boundaries: lines starting with "N. ["
     pattern = re.compile(r'^(\d+)\.\s+\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+UTC)\]\s+\[session:\s*(\S+?)\]\s*(.*)', re.MULTILINE)
 
-    existing = _read_jsonl(NOTES_PATH)
+    existing = _read_jsonl(args.notes_path)
     next_id = _next_id(existing)
 
     # Find all note starts
@@ -339,11 +362,11 @@ def cmd_migrate(args):
             "status": "active",
             "auto_generated": False,
         }
-        _append_jsonl(NOTES_PATH, note)
+        _append_jsonl(args.notes_path, note)
         next_id += 1
         migrated += 1
 
-    print(f"Migrated {migrated} notes from {md_path} to {NOTES_PATH}")
+    print(f"Migrated {migrated} notes from {md_path} to {args.notes_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +375,8 @@ def cmd_migrate(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Scribe — structured note management")
+    parser.add_argument("--project", default=None,
+                        help="Project key (e.g. D--Professional-claude-apis). Defaults to cwd-derived key.")
     sub = parser.add_subparsers(dest="command")
 
     # add
@@ -392,6 +417,11 @@ def main():
     p_migrate.add_argument("path", help="Path to old notes.md file")
 
     args = parser.parse_args()
+
+    # Resolve project-scoped paths
+    pk = _project_key(args.project)
+    args.notes_path = _notes_path(pk)
+    args.archive_path = _archive_path(pk)
 
     if args.command == "add":
         cmd_add(args)
