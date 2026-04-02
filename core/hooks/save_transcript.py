@@ -1,66 +1,66 @@
 #!/usr/bin/env python3
 """
-Stop hook — saves a stripped conversation transcript for handoff generation.
+Stop hook — preserves session metadata and history for handoff generation.
 
-Extracts user + assistant text messages from the session transcript,
-writes to ~/.claude/.last-transcript.jsonl. Overwrites each time.
-Also writes session metadata to ~/.claude/.last-session.json.
+Tracks current session in .last-session.json and maintains a ring buffer
+of recent sessions in .session-history.json with identity tags (role/mission).
 """
 import sys
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from core.utils.filelock import FileLock
+
 CLAUDE_DIR = Path.home() / ".claude"
-TRANSCRIPT_PATH = CLAUDE_DIR / ".last-transcript.jsonl"
 SESSION_PATH = CLAUDE_DIR / ".last-session.json"
-PREV_SESSION_PATH = CLAUDE_DIR / ".prev-session.json"
+HISTORY_PATH = CLAUDE_DIR / ".session-history.json"
+MAX_HISTORY = 10
 
 
-def extract_conversation(session_entries):
-    """Extract user and assistant text messages, stripping tool calls/results."""
-    messages = []
-    for entry in session_entries:
-        msg = entry.get("message", {})
-        role = msg.get("role", "")
-
-        if role == "user":
-            content = msg.get("content", [])
-            if isinstance(content, str) and content.strip():
-                messages.append({"role": "user", "text": content.strip()})
-            elif isinstance(content, list):
-                texts = [b.get("text", "") for b in content
-                         if isinstance(b, dict) and b.get("type") == "text"]
-                text = " ".join(t for t in texts if t).strip()
-                if text:
-                    messages.append({"role": "user", "text": text})
-
-        elif role == "assistant":
-            content = msg.get("content", [])
-            if isinstance(content, str) and content.strip():
-                messages.append({"role": "assistant", "text": content.strip()})
-            elif isinstance(content, list):
-                texts = [b.get("text", "") for b in content
-                         if isinstance(b, dict) and b.get("type") == "text"]
-                text = " ".join(t for t in texts if t).strip()
-                if text:
-                    messages.append({"role": "assistant", "text": text})
-
-    return messages
+def _read_session_identity(session_id):
+    """Read role/mission from the session identity file written by startup."""
+    identity_path = CLAUDE_DIR / f".session-identity-{session_id[:8]}.json"
+    if identity_path.exists():
+        try:
+            data = json.loads(identity_path.read_text(encoding="utf-8"))
+            return data.get("role", "user"), data.get("mission", "general"), data.get("registered", True)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return "user", "general", True
 
 
-def read_session_jsonl(path):
-    if not path or not Path(path).exists():
-        return []
-    entries = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
-    return entries
+def _append_to_history(session_id, transcript_path):
+    """Append session to history ring buffer with identity tags."""
+    role, mission, registered = _read_session_identity(session_id)
+
+    with FileLock(HISTORY_PATH):
+        if HISTORY_PATH.exists():
+            try:
+                history = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                history = []
+        else:
+            history = []
+
+        # Dedup: remove existing entry for this session_id
+        history = [h for h in history if h.get("session_id") != session_id]
+
+        history.append({
+            "session_id": session_id,
+            "transcript_path": transcript_path,
+            "ended_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "role": role,
+            "mission": mission,
+            "registered": registered,
+        })
+
+        # Cap at MAX_HISTORY
+        history = history[-MAX_HISTORY:]
+
+        CLAUDE_DIR.mkdir(parents=True, exist_ok=True)
+        HISTORY_PATH.write_text(json.dumps(history, indent=2), encoding="utf-8")
 
 
 def main():
@@ -75,31 +75,12 @@ def main():
     if not session_id or not transcript_path:
         sys.exit(0)
 
-    # Extract conversation
-    session_entries = read_session_jsonl(transcript_path)
-    conversation = extract_conversation(session_entries)
-
-    if not conversation:
-        sys.exit(0)
-
-    # Write stripped transcript
     CLAUDE_DIR.mkdir(parents=True, exist_ok=True)
-    with open(TRANSCRIPT_PATH, "w", encoding="utf-8") as f:
-        for msg in conversation:
-            f.write(json.dumps(msg) + "\n")
 
-    # Preserve previous session metadata when session ID changes
-    if SESSION_PATH.exists():
-        try:
-            existing = json.loads(SESSION_PATH.read_text(encoding="utf-8"))
-            if existing.get("session_id") != session_id:
-                PREV_SESSION_PATH.write_text(
-                    json.dumps(existing), encoding="utf-8"
-                )
-        except (json.JSONDecodeError, OSError):
-            pass
+    # Append to session history ring buffer
+    _append_to_history(session_id, transcript_path)
 
-    # Write session metadata
+    # Write current session metadata
     SESSION_PATH.write_text(
         json.dumps({"session_id": session_id, "transcript_path": transcript_path}),
         encoding="utf-8",

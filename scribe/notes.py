@@ -20,6 +20,11 @@ import json
 import re
 import sys
 from datetime import datetime, timezone, timedelta
+from pathlib import Path as _PathImport
+
+# Add project root to path for core.utils import
+sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
+from core.utils.filelock import FileLock
 
 # Force UTF-8 output on Windows (cp1252 can't handle → and other Unicode)
 if sys.stdout.encoding != "utf-8":
@@ -176,6 +181,15 @@ def cmd_add(args):
         sys.exit(1)
 
     notes = _read_jsonl(args.notes_path)
+
+    # Duplicate handoff prevention
+    if getattr(args, "if_no_handoff_for", None):
+        target_sid = args.if_no_handoff_for.lower()
+        for n in notes:
+            if (n.get("type") == "handoff" and
+                    n.get("session_id", "").lower().startswith(target_sid)):
+                print(f"Handoff for session {target_sid} already exists (#{n['id']}). Skipping.")
+                return
     note = {
         "id": _next_id(notes),
         "timestamp": _now_iso(),
@@ -446,6 +460,8 @@ def main():
     p_add.add_argument("--content", required=True)
     p_add.add_argument("--session-id", default="")
     p_add.add_argument("--auto", action="store_true", help="Mark as auto-generated")
+    p_add.add_argument("--if-no-handoff-for", default=None,
+                        help="Only add if no handoff exists for this session ID")
 
     # list
     p_list = sub.add_parser("list")
@@ -498,26 +514,21 @@ def main():
     args.archive_path = _archive_path(pk)
     args.learnings_path = _learnings_path(pk)
 
-    if args.command == "add":
-        cmd_add(args)
-    elif args.command == "list":
-        cmd_list(args)
-    elif args.command == "get":
-        cmd_get(args)
-    elif args.command == "done":
-        cmd_done(args)
-    elif args.command == "update":
-        cmd_update(args)
-    elif args.command == "archive":
-        cmd_archive(args)
-    elif args.command == "migrate":
-        cmd_migrate(args)
-    elif args.command == "learn":
-        cmd_learn(args)
-    elif args.command == "learnings":
-        cmd_learnings(args)
-    elif args.command == "unlearn":
-        cmd_unlearn(args)
+    notes_commands = {
+        "add": cmd_add, "list": cmd_list, "get": cmd_get,
+        "done": cmd_done, "update": cmd_update, "archive": cmd_archive,
+        "migrate": cmd_migrate,
+    }
+    learnings_commands = {
+        "learn": cmd_learn, "learnings": cmd_learnings, "unlearn": cmd_unlearn,
+    }
+
+    if args.command in notes_commands:
+        with FileLock(args.notes_path):
+            notes_commands[args.command](args)
+    elif args.command in learnings_commands:
+        with FileLock(args.learnings_path):
+            learnings_commands[args.command](args)
     else:
         parser.print_help()
 

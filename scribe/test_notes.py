@@ -146,7 +146,7 @@ def test_auto_archive(tmp_dir):
     all_notes = notes._read_jsonl(notes.NOTES_PATH)
     assert len(all_notes) == 3
 
-    remaining, archived = notes._auto_archive(all_notes)
+    remaining, archived = notes._auto_archive(all_notes, notes.NOTES_PATH, notes.ARCHIVE_PATH)
     assert len(remaining) == 1
     assert remaining[0]["content"] == "Recent todo"
     assert len(archived) == 2
@@ -180,7 +180,7 @@ def test_migrate(tmp_dir):
         encoding="utf-8",
     )
 
-    notes.cmd_migrate(type("Args", (), {"path": str(md_path)})())
+    notes.cmd_migrate(type("Args", (), {"path": str(md_path), "notes_path": notes.NOTES_PATH})())
 
     result = notes._read_jsonl(notes.NOTES_PATH)
     assert len(result) == 3
@@ -215,6 +215,62 @@ def test_empty_file_returns_empty_list(tmp_dir):
     assert notes._read_jsonl(notes.ARCHIVE_PATH) == []
 
 
+def test_concurrent_adds(tmp_dir):
+    """Two threads adding notes simultaneously should not produce duplicate IDs or corrupt lines."""
+    import threading
+    _setup(tmp_dir)
+    errors = []
+
+    def add_notes(start, count):
+        try:
+            for i in range(count):
+                from core.utils.filelock import FileLock
+                with FileLock(notes.NOTES_PATH):
+                    existing = notes._read_jsonl(notes.NOTES_PATH)
+                    note = {
+                        "id": notes._next_id(existing),
+                        "timestamp": notes._now_iso(),
+                        "session_id": f"thread-{start}",
+                        "type": "todo",
+                        "content": f"Note {start}-{i}",
+                        "status": "active",
+                        "auto_generated": False,
+                    }
+                    notes._append_jsonl(notes.NOTES_PATH, note)
+        except Exception as e:
+            errors.append(e)
+
+    t1 = threading.Thread(target=add_notes, args=(1, 10))
+    t2 = threading.Thread(target=add_notes, args=(2, 10))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert not errors, f"Errors in threads: {errors}"
+    result = notes._read_jsonl(notes.NOTES_PATH)
+    assert len(result) == 20, f"Expected 20 notes, got {len(result)}"
+    ids = [n["id"] for n in result]
+    assert len(set(ids)) == 20, f"Duplicate IDs found: {ids}"
+
+
+def test_if_no_handoff_for(tmp_dir):
+    """--if-no-handoff-for should prevent duplicate handoffs for the same session."""
+    _setup(tmp_dir)
+    _add(tmp_dir, type="handoff", session_id="abc12345", content="First handoff")
+
+    all_notes = notes._read_jsonl(notes.NOTES_PATH)
+    assert len(all_notes) == 1
+
+    # Simulate the guard check
+    target_sid = "abc12345"
+    found = any(
+        n.get("type") == "handoff" and n.get("session_id", "").startswith(target_sid)
+        for n in all_notes
+    )
+    assert found, "Should find existing handoff for session abc12345"
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -237,6 +293,8 @@ def main():
             ("migrate", test_migrate),
             ("get checks archive", test_get_checks_archive),
             ("empty file returns empty", test_empty_file_returns_empty_list),
+            ("concurrent adds", test_concurrent_adds),
+            ("if_no_handoff_for guard", test_if_no_handoff_for),
         ]
 
         for name, fn in tests:

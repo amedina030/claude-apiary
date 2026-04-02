@@ -81,16 +81,10 @@ def build_install_check_hooks():
 
 
 def build_scribe_hooks():
-    """Build PreToolUse and Stop hook entries for the scribe (notes) system."""
-    load_cmd = hook_cmd(CORE_DIR / "hooks" / "load_notes.py", PYTHON)
-    load_stop_cmd = hook_cmd(CORE_DIR / "hooks" / "load_notes_stop.py", PYTHON)
+    """Build Stop hook entry for the scribe transcript saver."""
     save_cmd = hook_cmd(CORE_DIR / "hooks" / "save_transcript.py", PYTHON)
     return {
-        "PreToolUse": [
-            {"matcher": "", "hooks": [{"type": "command", "command": load_cmd}]}
-        ],
         "Stop": [
-            {"hooks": [{"type": "command", "command": load_stop_cmd}]},
             {"hooks": [{"type": "command", "command": save_cmd}]},
         ],
     }
@@ -110,7 +104,7 @@ def write_manifest(claude_dir: Path):
     ]
 
     # Add all command files
-    for cmd_dir in [BUDGETER_DIR / "commands", CLARIFIER_DIR / "commands", SCRIBE_DIR / "commands"]:
+    for cmd_dir in [BUDGETER_DIR / "commands", CLARIFIER_DIR / "commands", SCRIBE_DIR / "commands", CORE_DIR / "commands"]:
         if cmd_dir.is_dir():
             for cmd_file in cmd_dir.glob("*.md"):
                 installed_files.append({
@@ -172,6 +166,10 @@ def install_clarifier(claude_dir: Path):
 
     # Scribe commands
     for cmd_file in (SCRIBE_DIR / "commands").glob("*.md"):
+        shutil.copy2(cmd_file, commands_dir / cmd_file.name)
+
+    # Core commands
+    for cmd_file in (CORE_DIR / "commands").glob("*.md"):
         shutil.copy2(cmd_file, commands_dir / cmd_file.name)
 
     print(f"  Clarifier agent  : {agents_dir / 'clarifier.md'}")
