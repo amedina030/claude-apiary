@@ -13,6 +13,7 @@ from pathlib import Path
 CLAUDE_DIR = Path.home() / ".claude"
 TRANSCRIPT_PATH = CLAUDE_DIR / ".last-transcript.jsonl"
 SESSION_PATH = CLAUDE_DIR / ".last-session.json"
+PREV_SESSION_PATH = CLAUDE_DIR / ".prev-session.json"
 
 
 def extract_conversation(session_entries):
@@ -86,6 +87,17 @@ def main():
     with open(TRANSCRIPT_PATH, "w", encoding="utf-8") as f:
         for msg in conversation:
             f.write(json.dumps(msg) + "\n")
+
+    # Preserve previous session metadata when session ID changes
+    if SESSION_PATH.exists():
+        try:
+            existing = json.loads(SESSION_PATH.read_text(encoding="utf-8"))
+            if existing.get("session_id") != session_id:
+                PREV_SESSION_PATH.write_text(
+                    json.dumps(existing), encoding="utf-8"
+                )
+        except (json.JSONDecodeError, OSError):
+            pass
 
     # Write session metadata
     SESSION_PATH.write_text(

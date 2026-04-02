@@ -16,6 +16,7 @@ from pathlib import Path
 CLAUDE_DIR = Path.home() / ".claude"
 TRANSCRIPT_PATH = CLAUDE_DIR / ".last-transcript.jsonl"
 SESSION_PATH = CLAUDE_DIR / ".last-session.json"
+PREV_SESSION_PATH = CLAUDE_DIR / ".prev-session.json"
 SESSION_FLAG_DIR = CLAUDE_DIR / "tmp"
 
 # Add scribe to path for notes.py imports
@@ -89,6 +90,15 @@ def main():
             prev_id = prev_session.get("session_id", "unknown")[:8]
         except (json.JSONDecodeError, KeyError):
             prev_id = "unknown"
+
+        # If .last-session.json already has our ID (Stop hook raced ahead),
+        # fall back to .prev-session.json which preserves the actual previous session
+        if prev_id == session_id[:8] and PREV_SESSION_PATH.exists():
+            try:
+                prev_session = json.loads(PREV_SESSION_PATH.read_text(encoding="utf-8"))
+                prev_id = prev_session.get("session_id", "unknown")[:8]
+            except (json.JSONDecodeError, KeyError):
+                prev_id = "unknown"
 
         # Don't generate handoff for the current session's own transcript
         if prev_id != session_id[:8]:
