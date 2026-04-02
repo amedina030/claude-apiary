@@ -1,0 +1,126 @@
+---
+type: architecture
+title: System Overview
+scope: project
+description: High-level component map, data flow, and how the tools connect
+framework_version: "1.0"
+last_verified: 2026-04-02
+---
+
+# System Overview
+
+## Components
+
+```
+┌─────────────────────────────────────────────────┐
+│                  Claude Code                     │
+│                                                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │ PreTool  │  │ PostTool │  │   Stop   │      │
+│  │  hooks   │  │  hooks   │  │  hooks   │      │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘      │
+└───────┼──────────────┼─────────────┼─────────────┘
+        │              │             │
+   ┌────▼────┐    ┌────▼────┐  ┌────▼────┐
+   │Budgeter │    │Budgeter │  │Budgeter │
+   │  pre    │    │  post   │  │  stop   │
+   │         │    │(agents) │  │(final)  │
+   ├─────────┤    └─────────┘  └─────────┘
+   │  Core   │
+   │inject/  │
+   │check    │
+   └─────────┘
+
+   ┌─────────────────────────────────────┐
+   │           Slash Commands            │
+   │  /startup  /note  /notes            │
+   │  /budgeter-*  /clarifier            │
+   └─────────────────────────────────────┘
+
+   ┌─────────────────────────────────────┐
+   │          Clarifier Agent            │
+   │  (subagent, spawned on demand)      │
+   └─────────────────────────────────────┘
+```
+
+## Tool roles
+
+| Tool | What it does | How it integrates |
+|------|-------------|-------------------|
+| **Budgeter** | Tracks token consumption, warns before expensive operations | Hooks (PreToolUse, PostToolUse, Stop) |
+| **Clarifier** | Resolves ambiguous requests before Claude acts | Subagent (spawned by behavioral rules in CLAUDE.md) |
+| **Scribe** | Manages cross-session notes, learnings, handoffs | Slash commands + startup skill |
+| **Core** | Shared infrastructure: flags, config, session, hooks | Library imported by all tools |
+
+## Data flow
+
+### Per-tool-call cycle (budgeter)
+
+```
+Tool call N starts
+  → PreToolUse fires
+    → inject_session.py adds session context
+    → check_install.py validates installation (first call only)
+    → pre_tool_use.py:
+        1. Reads baseline from previous call
+        2. Computes delta (tokens_now - baseline) = cost of tool N-1
+        3. Logs cost of N-1 to usage_log.jsonl
+        4. Evaluates current assistant message for scope signals
+        5. If expensive: injects warning into context
+        6. Saves new baseline for next call
+  → Tool N executes
+  → PostToolUse fires (Agent calls only)
+    → post_tool_use.py logs exact subagent token count
+```
+
+### Session lifecycle
+
+```
+Session starts
+  → /startup runs (first message)
+    → startup.py init: registers session, detects unseen transcripts
+    → Startup agent: generates handoffs from unseen transcripts
+    → startup.py summary: loads active notes + learnings
+  → ... normal work ...
+  → Session ends
+    → stop_session.py: logs final tool cost, cleans temp files
+    → check_install_stop.py: removes "already checked" flag
+    → save_transcript.py: saves transcript for next session's handoff
+```
+
+### Cross-session continuity
+
+```
+Session N ends
+  → save_transcript.py saves transcript
+Session N+1 starts
+  → /startup detects Session N's transcript is unseen
+  → Startup agent reads transcript, generates handoff note
+  → Summary loads handoff + all active notes/learnings
+  → Claude has full context of what happened in Session N
+```
+
+## Shared core
+
+All tools import from `core/` rather than reimplementing common patterns:
+
+- **`core/flags.py`** — feature toggles via sentinel files at `~/.claude/{name}-enabled`
+- **`core/config.py`** — JSON config loading with defaults fallback
+- **`core/session.py`** — session identity (ID, role, mission) and validation
+- **`core/hook_context.py`** — formatting context blocks for hook output, reading hook payloads
+- **`core/hooks_lib.py`** — programmatic hook registration in `settings.json`
+- **`core/utils/filelock.py`** — file locking for concurrent JSONL writes
+
+## Design rationale
+
+### Why hooks, not inline prompts?
+
+Hooks run as shell commands at zero token cost. If budgeter ran as an inline prompt, every tool call would add its analysis tokens to the session — compounding cost for the entire conversation. Hooks are invisible to the token counter.
+
+### Why a subagent for the clarifier?
+
+The clarifier's multi-turn Q&A dialogue can be verbose. As a subagent, only the final approved prompt returns to the main context. If it ran inline, every clarification question and answer would persist in context for the rest of the session.
+
+### Why scribe notes over git/comments?
+
+Git tracks what changed, not what was deferred. Comments track local code decisions, not cross-file operational state. Scribe fills the gap: "what was I working on, what's blocked, what did I decide and why" — the things a new session needs to pick up where the last one left off.

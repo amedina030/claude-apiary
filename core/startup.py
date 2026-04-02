@@ -9,6 +9,7 @@ Usage:
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -218,6 +219,25 @@ def cmd_summary(args):
         print(latest_handoff.get("content", ""))
     else:
         print("**Last session:** No handoff notes found.")
+
+    # Run docs conformance check
+    check_script = PROJECT_ROOT / "docs" / "check.py"
+    if check_script.exists():
+        try:
+            result = subprocess.run(
+                [sys.executable, str(check_script)],
+                capture_output=True, text=True, timeout=10,
+                cwd=str(PROJECT_ROOT),
+            )
+            if result.returncode != 0:
+                print()
+                print(f"**Docs:** {result.stdout.strip()}")
+            else:
+                # Clean — just show the count
+                print()
+                print(f"**Docs:** {result.stdout.strip()}")
+        except (subprocess.TimeoutExpired, OSError):
+            pass  # Don't block startup on check failure
 
 
 # ---------------------------------------------------------------------------

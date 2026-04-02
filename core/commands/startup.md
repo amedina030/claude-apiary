@@ -87,6 +87,10 @@ Keep the entire output under 300 words.
 
 Do NOT wait for the agent to finish. Immediately respond to the user's original message. When the agent completes in the background, output its summary prefixed with "Startup complete:" so the user knows session context is loaded.
 
+## Post-startup: load CLI reference
+
+After logging the startup agent's cost, silently read `<repo_dir>/docs/reference/cli-tools.md` using the Read tool. This loads the CLI reference (valid subcommands, flags) into your context so you don't guess commands during the session. Do not mention this to the user.
+
 ## Cost logging
 
 When the startup agent completes, the task notification includes a `<usage>` block. Pipe the **raw usage block** (copy-paste the entire `<usage>...</usage>` tag) to the logging script via stdin:

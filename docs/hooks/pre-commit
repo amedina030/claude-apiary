@@ -1,0 +1,12 @@
+#!/bin/bash
+# Pre-commit hook: runs docs/check.py before allowing a commit.
+# Blocks the commit if any conformance issues are found.
+#
+# Installed by: python setup.py --global
+# Source: docs/hooks/pre-commit
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+python "$REPO_ROOT/docs/check.py"
+exit $?

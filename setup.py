@@ -23,6 +23,7 @@ APIS_DIR = Path(__file__).parent.resolve()
 BUDGETER_DIR = APIS_DIR / "budgeter"
 CLARIFIER_DIR = APIS_DIR / "clarifier"
 SCRIBE_DIR = APIS_DIR / "scribe"
+DOCS_DIR = APIS_DIR / "docs"
 
 sys.path.insert(0, str(APIS_DIR))
 from core.hooks_lib import to_bash_path, hook_cmd, load_settings, save_settings, register_hooks
@@ -92,6 +93,39 @@ def build_scribe_hooks():
     }
 
 
+def build_docs_hooks():
+    """Build PreToolUse hook entry for the docs standards reminder."""
+    remind_cmd = hook_cmd(DOCS_DIR / "hooks" / "remind_standards.py", PYTHON)
+    return {
+        "PreToolUse": [
+            {"matcher": "", "hooks": [{"type": "command", "command": remind_cmd}]},
+        ],
+    }
+
+
+def install_pre_commit_hook():
+    """Install git pre-commit hook that runs docs/check.py."""
+    git_hooks_dir = APIS_DIR / ".git" / "hooks"
+    if not git_hooks_dir.is_dir():
+        print(f"  Pre-commit hook  : skipped (.git/hooks/ not found)")
+        return
+
+    target = git_hooks_dir / "pre-commit"
+    source = DOCS_DIR / "hooks" / "pre-commit"
+
+    if target.exists():
+        # Check if it's ours (contains docs/check.py reference)
+        content = target.read_text(encoding="utf-8")
+        if "docs/check.py" not in content:
+            print(f"  Pre-commit hook  : WARNING — {target} already exists (not ours), skipping")
+            return
+
+    shutil.copy2(source, target)
+    # Make executable (no-op on Windows, needed on Unix)
+    target.chmod(target.stat().st_mode | 0o755)
+    print(f"  Pre-commit hook  : {target}")
+
+
 def write_manifest(claude_dir: Path):
     """Write .install-manifest.json with hashes of all installed files."""
     installed_files = [
@@ -106,7 +140,7 @@ def write_manifest(claude_dir: Path):
     ]
 
     # Add all command files
-    for cmd_dir in [BUDGETER_DIR / "commands", CLARIFIER_DIR / "commands", SCRIBE_DIR / "commands", CORE_DIR / "commands"]:
+    for cmd_dir in [BUDGETER_DIR / "commands", CLARIFIER_DIR / "commands", SCRIBE_DIR / "commands", CORE_DIR / "commands", DOCS_DIR / "commands"]:
         if cmd_dir.is_dir():
             for cmd_file in cmd_dir.glob("*.md"):
                 installed_files.append({
@@ -365,7 +399,23 @@ def run_check():
         fail("Manifest: not found (run setup.py --global to create)")
     print()
 
-    # 6. Python
+    # 6. Pre-commit hook
+    print("[Pre-commit]")
+    git_hooks_dir = APIS_DIR / ".git" / "hooks"
+    pre_commit = git_hooks_dir / "pre-commit"
+    if not git_hooks_dir.is_dir():
+        fail("Git hooks dir not found")
+    elif not pre_commit.exists():
+        fail(f"Pre-commit hook not installed: {pre_commit}")
+    else:
+        content = pre_commit.read_text(encoding="utf-8")
+        if "docs/check.py" in content:
+            ok(f"Pre-commit hook: {pre_commit}")
+        else:
+            fail(f"Pre-commit hook exists but doesn't run docs/check.py")
+    print()
+
+    # 7. Python
     print("[Runtime]")
     ok(f"Python: {PYTHON}")
     ok(f"claude-apis: {APIS_DIR}")
@@ -472,7 +522,7 @@ def main():
 
     # Merge all hooks into one dict, then register once to avoid stripping each other.
     all_hooks = {}
-    for hooks_dict in [build_budgeter_hooks(), build_core_hooks(), build_scribe_hooks()]:
+    for hooks_dict in [build_budgeter_hooks(), build_core_hooks(), build_scribe_hooks(), build_docs_hooks()]:
         for event, entries in hooks_dict.items():
             all_hooks.setdefault(event, []).extend(entries)
     register_hooks(settings_path, all_hooks, MARKER, also_strip=["claude-budgeter"])
@@ -501,6 +551,16 @@ def main():
         if args.with_test_suite:
             install_test_suite(claude_dir)
         check_claude_md(claude_dir)
+
+        # Docs commands
+        commands_dir = claude_dir / "commands"
+        for cmd_file in (DOCS_DIR / "commands").glob("*.md"):
+            shutil.copy2(cmd_file, commands_dir / cmd_file.name)
+        print(f"  Docs commands    : {commands_dir}")
+
+        # Pre-commit hook
+        install_pre_commit_hook()
+
         write_manifest(claude_dir)
 
     scope = "global" if args.global_install else f"project ({claude_dir.parent})"

@@ -116,6 +116,11 @@ If `clarifier/CLAUDE.md` has changed, re-apply the updated rules to `~/.claude/C
 - Remove the scribe/learnings sections from `~/.claude/CLAUDE.md`
 - Optionally delete `~/.claude/projects/*/notes.jsonl`, `learnings.jsonl`, and `notes_archive.jsonl`
 
+**Docs framework:**
+- Delete `~/.claude/commands/review.md`
+- Remove the docs reminder hook entries from `~/.claude/settings.json` (entries containing `remind_standards`)
+- Delete `.git/hooks/pre-commit` (if it references `docs/check.py`)
+
 **Everything:**
 - Delete the `claude-apis` repo directory
 

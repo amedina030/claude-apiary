@@ -144,77 +144,20 @@ claude-apis/
 
 ## How It All Comes Together
 
-### Shared core
+For detailed architecture documentation, see [`docs/architecture/`](docs/architecture/):
 
-All tools use `core/` instead of reinventing common patterns:
+- **[System Overview](docs/architecture/system-overview.md)** — component map, data flow, shared core, and design rationale
+- **[Hook Lifecycle](docs/architecture/hook-lifecycle.md)** — PRE-to-PRE delta pattern, agent special case, CONT task chaining, scope detection
 
-- **`core/flags.py`** — every feature toggle is a sentinel file at `~/.claude/{name}-enabled`. `flags.is_enabled("budgeter-log")` replaces raw `Path` checks scattered across hooks.
-- **`core/config.py`** — generic JSON config loader with a defaults fallback. Tools wrap this with their own path logic.
-- **`core/hooks_lib.py`** — handles reading/writing `settings.json` and building bash-compatible hook command strings. Used by `setup.py` to register hooks without duplicates.
+Additional reference documentation lives in [`docs/`](docs/_index.md):
 
-### Hook lifecycle (budgeter)
-
-Claude Code fires hooks at tool lifecycle events. Budgeter uses three:
-
-```
-User turn → Claude responds → [PRE hook fires before each tool call]
-                           → Tool runs
-                           → [POST hook fires after Agent — logs exact subagent token cost]
-                           → [PRE hook fires before next tool call — logs cost of previous]
-                           → ...
-                           → Session ends → [Stop hook fires — logs final tool cost]
-```
-
-The PRE-to-PRE delta pattern is key: tokens can't be measured during a tool call, so each PRE hook saves a baseline and the *next* PRE computes the delta. The Stop hook captures the last call's cost.
-
-**Agent calls are a special case.** Subagents run in a separate transcript, so their token usage is invisible to the PRE-to-PRE delta. Instead, the POST hook reads `tool_response.totalTokens` from the payload — the exact cost reported by Claude Code — and logs it directly. The following PRE hook skips logging to avoid double-counting.
-
-### Task chaining (`[CONT]`)
-
-When Claude asks a mid-task clarifying question and you reply, subsequent tool calls would normally be attributed to your reply turn rather than your original request — inflating the reply turn's cost and under-attributing the original. To fix this, the hook injects an instruction into Claude's context:
-
-> When asking a mid-task clarifying question, start your response with `[CONT]` on its own line.
-
-When the PRE hook detects `[CONT]`, it inherits `task_turn` from the prior baseline, chaining the continuation cost back to the originating request in both the report and the warning system.
-
-### Clarifier flow
-
-The clarifier is implemented as a Claude Code sub-agent (defined in `clarifier/agents/clarifier.md`) rather than a Python hook. When the executing agent (Claude) detects ambiguity with the clarifier ON, it:
-
-1. Pauses — does not begin the task
-2. Spawns the clarifier sub-agent with the original prompt, its interpretation, detected ambiguities, and intended plan
-3. The clarifier questions the user interactively, refines the prompt, and asks for explicit approval
-4. Returns the approved prompt to the executing agent
-5. The executing agent logs the clarifier session cost to `~/.claude/clarifier-logs/cost.log`, including the Claude session ID for attribution
-6. Proceeds using the approved prompt, not the original
-
-The clarifier is implemented as a subagent (not an inline prompt) so that the clarification dialogue stays out of the main session context. If it ran inline, every subsequent tool call in the session would carry those extra tokens forward — compounding cost for the remainder of the session. As a subagent, only the final approved prompt is returned.
-
-### Session startup
-
-On every new session, `~/.claude/CLAUDE.md` instructs Claude to run `/startup` before responding. This skill:
-
-1. Reads the previous session's transcript (`~/.claude/.last-transcript.jsonl`)
-2. Generates or consolidates a handoff note summarizing what happened
-3. Loads all active notes and learnings into context
-
-This replaces the old per-tool-call `load_notes.py` hook — notes are read once at startup instead of on every tool call.
-
-### Scribe flow
-
-Scribe manages two types of persistent project-scoped data:
-
-- **Notes** (`notes.jsonl`) — operational state that decays: TODOs, handoffs, blockers, decisions, wishlists, context. Auto-archived after 30 days.
-- **Learnings** (`learnings.jsonl`) — project-specific knowledge Claude discovers during execution: workarounds, platform quirks, better approaches. No auto-archive.
-
-Both are stored under `~/.claude/projects/<project-key>/` and loaded at session start via the `/startup` skill. Claude writes notes and learnings autonomously when it encounters situations that future sessions should know about (deferred work, bugs, workarounds), or when the user explicitly asks.
-
-### Setup
-
-`setup.py` ties everything together at install time:
-- Registers all budgeter Python hooks in `settings.json` (stripping old entries to prevent duplicates)
-- Copies clarifier agent/command files to `~/.claude/agents/` and `~/.claude/commands/`
-- Warns if the clarifier trigger rules are missing from `~/.claude/CLAUDE.md`
+- **[CLI Tools](docs/reference/cli-tools.md)** — all Python entry points with subcommands and flags
+- **[Slash Commands](docs/reference/slash-commands.md)** — all commands and when to use them
+- **[Hooks](docs/reference/hooks.md)** — registered hooks and execution order
+- **[Config Files](docs/reference/config-files.md)** — configuration and state files
+- **[File Storage](docs/reference/file-storage.md)** — where runtime data lives
+- **[Code Style](docs/standards/code-style.md)** — coding conventions for this project
+- **[New Tool Checklist](docs/standards/new-tool-checklist.md)** — what a new tool needs
 
 ---
 
