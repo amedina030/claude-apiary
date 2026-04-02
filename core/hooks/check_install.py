@@ -8,6 +8,7 @@ immediately on subsequent calls. The flag file is cleaned up by the
 companion Stop hook.
 """
 import sys
+import json
 import hashlib
 from pathlib import Path
 
