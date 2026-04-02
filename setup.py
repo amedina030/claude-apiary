@@ -15,6 +15,7 @@ Usage:
 import sys
 import json
 import shutil
+import hashlib
 import argparse
 from pathlib import Path
 
@@ -22,9 +23,10 @@ APIS_DIR = Path(__file__).parent.resolve()
 BUDGETER_DIR = APIS_DIR / "budgeter"
 CLARIFIER_DIR = APIS_DIR / "clarifier"
 NOTETAKER_DIR = APIS_DIR / "notetaker"
+SCRIBE_DIR = APIS_DIR / "scribe"
 
 sys.path.insert(0, str(APIS_DIR))
-from core.hooks import to_bash_path, hook_cmd, load_settings, save_settings, register_hooks
+from core.hooks_lib import to_bash_path, hook_cmd, load_settings, save_settings, register_hooks
 
 PYTHON = Path(sys.executable)
 MARKER = "claude-apis"
@@ -55,6 +57,83 @@ def build_budgeter_hooks():
             {"hooks": [{"type": "command", "command": stop_cmd}]}
         ],
     }
+
+
+CORE_DIR = APIS_DIR / "core"
+
+
+def file_hash(path):
+    """Return SHA-256 hex digest of a file's contents."""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def build_install_check_hooks():
+    """Build PreToolUse and Stop hook entries for the install checker."""
+    pre_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install.py", PYTHON)
+    stop_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install_stop.py", PYTHON)
+    return {
+        "PreToolUse": [
+            {"matcher": "", "hooks": [{"type": "command", "command": pre_cmd}]}
+        ],
+        "Stop": [
+            {"hooks": [{"type": "command", "command": stop_cmd}]}
+        ],
+    }
+
+
+def build_scribe_hooks():
+    """Build PreToolUse and Stop hook entries for the scribe (notes) system."""
+    load_cmd = hook_cmd(CORE_DIR / "hooks" / "load_notes.py", PYTHON)
+    load_stop_cmd = hook_cmd(CORE_DIR / "hooks" / "load_notes_stop.py", PYTHON)
+    save_cmd = hook_cmd(CORE_DIR / "hooks" / "save_transcript.py", PYTHON)
+    return {
+        "PreToolUse": [
+            {"matcher": "", "hooks": [{"type": "command", "command": load_cmd}]}
+        ],
+        "Stop": [
+            {"hooks": [{"type": "command", "command": load_stop_cmd}]},
+            {"hooks": [{"type": "command", "command": save_cmd}]},
+        ],
+    }
+
+
+def write_manifest(claude_dir: Path):
+    """Write .install-manifest.json with hashes of all installed files."""
+    installed_files = [
+        {"label": "clarifier agent", "installed_path": str(claude_dir / "agents" / "clarifier.md"),
+         "source_path": str(CLARIFIER_DIR / "agents" / "clarifier.md")},
+        {"label": "clarifier toggle", "installed_path": str(claude_dir / "commands" / "clarifier.md"),
+         "source_path": str(CLARIFIER_DIR / "commands" / "clarifier.md")},
+        {"label": "write_log.py", "installed_path": str(claude_dir / "clarifier" / "write_log.py"),
+         "source_path": str(CLARIFIER_DIR / "write_log.py")},
+        {"label": "log_cost.py", "installed_path": str(claude_dir / "clarifier" / "log_cost.py"),
+         "source_path": str(CLARIFIER_DIR / "log_cost.py")},
+    ]
+
+    # Add all command files
+    for cmd_dir in [BUDGETER_DIR / "commands", CLARIFIER_DIR / "commands", NOTETAKER_DIR / "commands"]:
+        if cmd_dir.is_dir():
+            for cmd_file in cmd_dir.glob("*.md"):
+                installed_files.append({
+                    "label": f"command: /{cmd_file.stem}",
+                    "installed_path": str(claude_dir / "commands" / cmd_file.name),
+                    "source_path": str(cmd_file),
+                })
+
+    manifest = {"files": []}
+    for entry in installed_files:
+        installed = Path(entry["installed_path"])
+        if installed.exists():
+            manifest["files"].append({
+                "label": entry["label"],
+                "installed_path": entry["installed_path"],
+                "source_path": entry["source_path"],
+                "hash": file_hash(installed),
+            })
+
+    manifest_path = claude_dir / ".install-manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    print(f"  Manifest         : {manifest_path} ({len(manifest['files'])} files tracked)")
 
 
 def check_claude_md(claude_dir: Path):
@@ -92,8 +171,8 @@ def install_clarifier(claude_dir: Path):
     for cmd_file in (BUDGETER_DIR / "commands").glob("*.md"):
         shutil.copy2(cmd_file, commands_dir / cmd_file.name)
 
-    # Notetaker commands
-    for cmd_file in (NOTETAKER_DIR / "commands").glob("*.md"):
+    # Scribe commands (replaces notetaker)
+    for cmd_file in (SCRIBE_DIR / "commands").glob("*.md"):
         shutil.copy2(cmd_file, commands_dir / cmd_file.name)
 
     print(f"  Clarifier agent  : {agents_dir / 'clarifier.md'}")
@@ -258,7 +337,36 @@ def run_check():
         fail("Commands directory not found")
     print()
 
-    # 5. Python
+    # 5. Manifest / drift detection
+    print("[Manifest]")
+    manifest_path = claude_dir / ".install-manifest.json"
+    if manifest_path.exists():
+        ok(f"Manifest: {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        stale = []
+        for entry in manifest.get("files", []):
+            installed = Path(entry.get("installed_path", ""))
+            expected = entry.get("hash", "")
+            label = entry.get("label", "")
+            if not installed.exists():
+                stale.append(f"{label} (missing)")
+            elif file_hash(installed) != expected:
+                # Check if source changed (repo update) or installed was edited
+                source = Path(entry.get("source_path", ""))
+                if source.exists() and file_hash(source) != expected:
+                    stale.append(f"{label} (repo updated, re-run setup)")
+                else:
+                    stale.append(f"{label} (locally modified)")
+        if stale:
+            for s in stale:
+                fail(f"Drift: {s}")
+        else:
+            ok(f"All {len(manifest.get('files', []))} tracked files match manifest")
+    else:
+        fail("Manifest: not found (run setup.py --global to create)")
+    print()
+
+    # 6. Python
     print("[Runtime]")
     ok(f"Python: {PYTHON}")
     ok(f"claude-apis: {APIS_DIR}")
@@ -314,6 +422,14 @@ def main():
     new_hooks = build_budgeter_hooks()
     register_hooks(settings_path, new_hooks, MARKER, also_strip=["claude-budgeter"])
 
+    # Register install check hooks
+    check_hooks = build_install_check_hooks()
+    register_hooks(settings_path, check_hooks, MARKER)
+
+    # Register scribe hooks
+    scribe_hooks = build_scribe_hooks()
+    register_hooks(settings_path, scribe_hooks, MARKER)
+
     # Ensure budgeter data/tmp dirs exist
     if args.global_install:
         (BUDGETER_DIR / "data").mkdir(exist_ok=True)
@@ -338,6 +454,7 @@ def main():
         if args.with_test_suite:
             install_test_suite(claude_dir)
         check_claude_md(claude_dir)
+        write_manifest(claude_dir)
 
     scope = "global" if args.global_install else f"project ({claude_dir.parent})"
     print(f"\n  Scope            : {scope}")

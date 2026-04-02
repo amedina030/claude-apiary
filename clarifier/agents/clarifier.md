@@ -38,8 +38,8 @@ Note: You may be invoked by the budgeter warning system for an expensive task, n
 If your analysis finds **no genuine ambiguity** — the task has clear scope, a single valid interpretation, and no consequential assumptions — do not ask questions. Instead:
 
 1. Write the init log (Step 2b) with `first_questions` set to `"No ambiguity detected."`
-2. Skip directly to Step 7 (Final Approval) with the original prompt unchanged.
-3. In your message to the user, note: "I reviewed this task and found no ambiguity to resolve. The scope is clear."
+2. Immediately finalize (Step 8) with `final_prompt` set to the original prompt unchanged, `outcome` set to `"No ambiguity detected"`, and `unresolved_ambiguities` set to `"None"`.
+3. Return `CLARIFIER_DONE` with the original prompt. Do **not** prompt the user for approval — this exit must be silent.
 
 This avoids wasting tokens on unnecessary clarification rounds.
 

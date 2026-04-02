@@ -22,11 +22,11 @@ TF-IDF replaced entirely. Rule-based trigger with `min_flagged_tasks=10` (not 50
 
 ## Clarifier
 
-### C1 — Ambiguity detection is LLM judgment
-The clarifier only fires when Claude decides a request is ambiguous. That detection is inconsistent across model mood, prompt phrasing, and CLAUDE.md load state. No way to audit calibration. Consequential tasks may silently skip clarification; trivial ones may get it.
+### ~~C1 — Ambiguity detection is LLM judgment~~ ✓ FIXED
+Non-trivial tasks now always spawn the clarifier — LLM ambiguity judgment is no longer a gate. The clarifier itself decides whether there's ambiguity: if none, it fast-exits silently (no user prompt) and returns the original prompt unchanged. Trivial tasks still use LLM judgment, which is acceptable given their low stakes.
 
-### C2 — No risk-weighting
-"Delete these test files" and "refactor the auth system" go through the same flow. The overhead of spawning a subagent + interactive rounds may exceed the cost of a wrong assumption on low-stakes tasks. No signal for task consequence.
+### ~~C2 — No risk-weighting~~ ✓ FIXED
+Addressed by the combination of: (1) S1 — budgeter routes expensive tasks to the clarifier with cost context, (2) C1 fix — all non-trivial tasks go through clarifier, but clear tasks fast-exit silently with no user interaction, (3) trivial tasks skip clarifier entirely. The overhead for clear non-trivial tasks is one silent subagent round-trip (~2-3k tokens).
 
 ### ~~C3 — Iteration limit fires too late~~ ✓ FIXED
 Iteration limit changed from every 5 rounds to every 3 rounds.
@@ -37,18 +37,18 @@ The PRE hook now always injects `[budgeter] session_id: <id>` into Claude's cont
 ### ~~C5 — `[CONT]` chaining breaks if budgeter is disabled~~ ✓ FIXED
 Root cause was the same as C4 — session_id was `"unknown"` when budgeter-log was off, breaking report attribution. Fixed by the same session_id injection. Note: `[CONT]` chaining in the budgeter log only matters when budgeter-log is on, which is the only time there are entries to chain.
 
-### C6 — CLAUDE.md drift on update
-`setup.py` copies clarifier rules to `~/.claude/CLAUDE.md` at install time. Updates to the rules in the repo don't propagate to existing installs without a manual re-run. No version tracking.
+### ~~C6 — CLAUDE.md drift on update~~ ✓ FIXED
+`setup.py --global` now writes `.install-manifest.json` with SHA-256 hashes of all installed files. `setup.py --check` compares installed files against the manifest and reports drift. A `core/hooks/check_install.py` PreToolUse hook runs once per session and warns if any files are stale. Drift still requires a manual `setup.py --global` to fix, but it's now detected automatically.
 
 ---
 
 ## Notetaker
 
-### N1 — Thin as a standalone "tool"
-Two slash commands that read/write a markdown file. The value is real but marginal. Its standing as a peer to budgeter and clarifier overstates its weight.
+### ~~N1 — Thin as a standalone "tool"~~ ✓ FIXED
+Notetaker replaced by Scribe — a full Python-backed note management system. JSONL storage, 7 note types (todo, handoff, decision, wishlist, reference, blocker, context), structured CLI with add/list/get/done/update/archive/migrate. Auto-load hook injects notes at session start. Stop hook saves stripped transcript for handoff generation. CLAUDE.md rules define when to auto-write notes.
 
-### N2 — `/notes` doesn't scale
-No filtering by session, date, or keyword. With 20+ notes it becomes a wall of text.
+### ~~N2 — `/notes` doesn't scale~~ ✓ FIXED
+`notes.py list` returns compact one-liners with Python-computed age. Filtering by type, session, keyword, and recency. Auto-archives done notes and old handoffs after 30 days. Archive searchable via `--archive` flag.
 
 ---
 

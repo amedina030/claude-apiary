@@ -1,0 +1,415 @@
+#!/usr/bin/env python3
+"""
+Scribe — structured note management for LLM session continuity.
+
+Storage: JSONL files (.claude/notes.jsonl active, .claude/notes_archive.jsonl archived).
+Notes are operational state — deferred work, handoffs, decisions — not permanent facts.
+
+Usage:
+    notes.py add --type todo --content "..." --session-id X [--auto]
+    notes.py list [--type X] [--session X] [--search X] [--last N] [--all] [--archive]
+    notes.py get <id>
+    notes.py done <id>
+    notes.py update <id> --content "..."
+    notes.py archive [--before YYYY-MM-DD]
+    notes.py migrate <notes.md path>
+"""
+import argparse
+import json
+import re
+import sys
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+
+CLAUDE_DIR = Path.home() / ".claude"
+NOTES_PATH = CLAUDE_DIR / "notes.jsonl"
+ARCHIVE_PATH = CLAUDE_DIR / "notes_archive.jsonl"
+
+VALID_TYPES = ["todo", "handoff", "decision", "wishlist", "reference", "blocker", "context"]
+AUTO_ARCHIVE_DAYS = 30
+
+
+# ---------------------------------------------------------------------------
+# Storage helpers
+# ---------------------------------------------------------------------------
+
+def _read_jsonl(path):
+    if not path.exists():
+        return []
+    entries = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+    return entries
+
+
+def _write_jsonl(path, entries):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(json.dumps(e) for e in entries) + "\n" if entries else "",
+        encoding="utf-8",
+    )
+
+
+def _append_jsonl(path, entry):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def _next_id(entries):
+    if not entries:
+        return 1
+    return max(e.get("id", 0) for e in entries) + 1
+
+
+def _now_iso():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_timestamp(ts):
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return datetime.now(timezone.utc)
+
+
+def _format_age(ts):
+    """Return human-readable relative age string from an ISO timestamp."""
+    dt = _parse_timestamp(ts)
+    now = datetime.now(timezone.utc)
+    delta = now - dt
+
+    minutes = int(delta.total_seconds() / 60)
+    if minutes < 1:
+        return "just now"
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    days = hours // 24
+    if days < 7:
+        return f"{days}d ago"
+    weeks = days // 7
+    if weeks < 5:
+        return f"{weeks}w ago"
+    months = days // 30
+    return f"{months}mo ago"
+
+
+# ---------------------------------------------------------------------------
+# Auto-archive
+# ---------------------------------------------------------------------------
+
+def _auto_archive(notes):
+    """Move done notes and old handoffs past AUTO_ARCHIVE_DAYS to archive.
+    Returns (remaining, archived) lists."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=AUTO_ARCHIVE_DAYS)
+    remaining = []
+    to_archive = []
+
+    for n in notes:
+        ts = _parse_timestamp(n.get("timestamp", ""))
+        if n.get("status") == "done" and ts < cutoff:
+            to_archive.append(n)
+        elif n.get("type") == "handoff" and ts < cutoff:
+            to_archive.append(n)
+        else:
+            remaining.append(n)
+
+    if to_archive:
+        existing_archive = _read_jsonl(ARCHIVE_PATH)
+        existing_archive.extend(to_archive)
+        _write_jsonl(ARCHIVE_PATH, existing_archive)
+        _write_jsonl(NOTES_PATH, remaining)
+
+    return remaining, to_archive
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+def cmd_add(args):
+    if args.type not in VALID_TYPES:
+        print(f"Error: type must be one of {VALID_TYPES}", file=sys.stderr)
+        sys.exit(1)
+
+    notes = _read_jsonl(NOTES_PATH)
+    note = {
+        "id": _next_id(notes),
+        "timestamp": _now_iso(),
+        "session_id": args.session_id or "",
+        "type": args.type,
+        "content": args.content,
+        "status": "active",
+        "auto_generated": args.auto,
+    }
+    _append_jsonl(NOTES_PATH, note)
+    print(f"Added #{note['id']} ({note['type']})")
+
+
+def cmd_list(args):
+    if args.archive:
+        notes = _read_jsonl(ARCHIVE_PATH)
+        source = "archive"
+    else:
+        notes = _read_jsonl(NOTES_PATH)
+        # Auto-archive on every list call
+        notes, archived = _auto_archive(notes)
+        if archived:
+            print(f"[auto-archived {len(archived)} notes]")
+        source = "active"
+
+    # Filter by status (default: hide done unless --all)
+    if not args.all and not args.archive:
+        notes = [n for n in notes if n.get("status") != "done"]
+
+    # Filter by type
+    if args.type:
+        notes = [n for n in notes if n.get("type") == args.type]
+
+    # Filter by session
+    if args.session:
+        prefix = args.session.lower()
+        notes = [n for n in notes if n.get("session_id", "").lower().startswith(prefix)]
+
+    # Filter by search
+    if args.search:
+        term = args.search.lower()
+        notes = [n for n in notes if term in n.get("content", "").lower()]
+
+    # Limit
+    if args.last:
+        notes = notes[-args.last:]
+
+    if not notes:
+        print(f"No {source} notes found.")
+        return
+
+    for n in notes:
+        nid = n.get("id", "?")
+        ntype = n.get("type", "?")[:8]
+        age = _format_age(n.get("timestamp", ""))
+        status = " [DONE]" if n.get("status") == "done" else ""
+        content = n.get("content", "").replace("\n", " ")[:80]
+        line = f"#{nid:<4} {ntype:<10} ({age:<9}) {content}{status}"
+        print(line.encode("ascii", errors="replace").decode("ascii"))
+
+
+def cmd_get(args):
+    notes = _read_jsonl(NOTES_PATH)
+    # Also check archive
+    note = next((n for n in notes if n.get("id") == args.id), None)
+    if not note:
+        archive = _read_jsonl(ARCHIVE_PATH)
+        note = next((n for n in archive if n.get("id") == args.id), None)
+        if note:
+            print("[from archive]")
+
+    if not note:
+        print(f"Note #{args.id} not found.", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"ID: {note['id']}")
+    print(f"Type: {note.get('type', '?')}")
+    print(f"Status: {note.get('status', '?')}")
+    print(f"Session: {note.get('session_id', '?')}")
+    print(f"Time: {note.get('timestamp', '?')} ({_format_age(note.get('timestamp', ''))})")
+    print(f"Auto: {note.get('auto_generated', False)}")
+    print(f"---")
+    print(note.get("content", ""))
+
+
+def cmd_done(args):
+    notes = _read_jsonl(NOTES_PATH)
+    found = False
+    for n in notes:
+        if n.get("id") == args.id:
+            n["status"] = "done"
+            found = True
+            break
+
+    if not found:
+        print(f"Note #{args.id} not found.", file=sys.stderr)
+        sys.exit(1)
+
+    _write_jsonl(NOTES_PATH, notes)
+    print(f"Marked #{args.id} as done.")
+
+
+def cmd_update(args):
+    notes = _read_jsonl(NOTES_PATH)
+    found = False
+    for n in notes:
+        if n.get("id") == args.id:
+            n["content"] = args.content
+            found = True
+            break
+
+    if not found:
+        print(f"Note #{args.id} not found.", file=sys.stderr)
+        sys.exit(1)
+
+    _write_jsonl(NOTES_PATH, notes)
+    print(f"Updated #{args.id}.")
+
+
+def cmd_archive(args):
+    notes = _read_jsonl(NOTES_PATH)
+    if args.before:
+        cutoff = datetime.strptime(args.before, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    else:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=AUTO_ARCHIVE_DAYS)
+
+    remaining = []
+    to_archive = []
+    for n in notes:
+        ts = _parse_timestamp(n.get("timestamp", ""))
+        if ts < cutoff:
+            to_archive.append(n)
+        else:
+            remaining.append(n)
+
+    if not to_archive:
+        print("Nothing to archive.")
+        return
+
+    existing_archive = _read_jsonl(ARCHIVE_PATH)
+    existing_archive.extend(to_archive)
+    _write_jsonl(ARCHIVE_PATH, existing_archive)
+    _write_jsonl(NOTES_PATH, remaining)
+    print(f"Archived {len(to_archive)} notes (before {cutoff.strftime('%Y-%m-%d')}).")
+
+
+def cmd_migrate(args):
+    """Migrate from old notes.md format to JSONL."""
+    md_path = Path(args.path)
+    if not md_path.exists():
+        print(f"File not found: {md_path}", file=sys.stderr)
+        sys.exit(1)
+
+    content = md_path.read_text(encoding="utf-8")
+    # Split on note boundaries: lines starting with "N. ["
+    pattern = re.compile(r'^(\d+)\.\s+\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+UTC)\]\s+\[session:\s*(\S+?)\]\s*(.*)', re.MULTILINE)
+
+    existing = _read_jsonl(NOTES_PATH)
+    next_id = _next_id(existing)
+
+    # Find all note starts
+    matches = list(pattern.finditer(content))
+    migrated = 0
+
+    for i, m in enumerate(matches):
+        ts_str = m.group(2)
+        session_id = m.group(3)
+        # Content is from after the header to the next note start (or end of file)
+        start = m.start(4)
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+        note_content = content[start:end].strip()
+
+        # Detect type from content prefix
+        note_type = "context"
+        lower = note_content.lower()
+        for t in VALID_TYPES:
+            if lower.startswith(t + ":") or lower.startswith(t + " "):
+                note_type = t
+                break
+        if lower.startswith("handoff"):
+            note_type = "handoff"
+
+        try:
+            ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M UTC").replace(tzinfo=timezone.utc)
+            ts_iso = ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            ts_iso = _now_iso()
+
+        note = {
+            "id": next_id,
+            "timestamp": ts_iso,
+            "session_id": session_id,
+            "type": note_type,
+            "content": note_content,
+            "status": "active",
+            "auto_generated": False,
+        }
+        _append_jsonl(NOTES_PATH, note)
+        next_id += 1
+        migrated += 1
+
+    print(f"Migrated {migrated} notes from {md_path} to {NOTES_PATH}")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(description="Scribe — structured note management")
+    sub = parser.add_subparsers(dest="command")
+
+    # add
+    p_add = sub.add_parser("add")
+    p_add.add_argument("--type", required=True, choices=VALID_TYPES)
+    p_add.add_argument("--content", required=True)
+    p_add.add_argument("--session-id", default="")
+    p_add.add_argument("--auto", action="store_true", help="Mark as auto-generated")
+
+    # list
+    p_list = sub.add_parser("list")
+    p_list.add_argument("--type", choices=VALID_TYPES)
+    p_list.add_argument("--session")
+    p_list.add_argument("--search")
+    p_list.add_argument("--last", type=int)
+    p_list.add_argument("--all", action="store_true", help="Include done notes")
+    p_list.add_argument("--archive", action="store_true", help="Search archive instead")
+
+    # get
+    p_get = sub.add_parser("get")
+    p_get.add_argument("id", type=int)
+
+    # done
+    p_done = sub.add_parser("done")
+    p_done.add_argument("id", type=int)
+
+    # update
+    p_update = sub.add_parser("update")
+    p_update.add_argument("id", type=int)
+    p_update.add_argument("--content", required=True)
+
+    # archive
+    p_archive = sub.add_parser("archive")
+    p_archive.add_argument("--before", help="Archive notes before this date (YYYY-MM-DD)")
+
+    # migrate
+    p_migrate = sub.add_parser("migrate")
+    p_migrate.add_argument("path", help="Path to old notes.md file")
+
+    args = parser.parse_args()
+
+    if args.command == "add":
+        cmd_add(args)
+    elif args.command == "list":
+        cmd_list(args)
+    elif args.command == "get":
+        cmd_get(args)
+    elif args.command == "done":
+        cmd_done(args)
+    elif args.command == "update":
+        cmd_update(args)
+    elif args.command == "archive":
+        cmd_archive(args)
+    elif args.command == "migrate":
+        cmd_migrate(args)
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

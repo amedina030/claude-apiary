@@ -5,19 +5,20 @@ At the start of every session, check whether `~/.claude/clarifier-enabled` exist
 - If it does not exist: the clarifier is **OFF**.
 
 ### When the clarifier is ON
-Before acting on any non-trivial user request, assess whether the request contains ambiguity — multiple valid interpretations, unclear scope, implicit assumptions, or missing context that would meaningfully change your approach.
+For every non-trivial user request, spawn the clarifier sub-agent before beginning work. Do not assess ambiguity yourself — let the clarifier make that determination.
 
-If ambiguity is detected:
 - Do not begin the task.
-- Surface to the clarifier sub-agent: (1) the original prompt, (2) your interpretation of the task, (3) a list of detected ambiguities and why they matter, (4) your intended plan.
-- Spawn the clarifier sub-agent. It will ask the user questions, write a partial log, and return with `agentId: [uuid] | log: [filename]`. Note the uuid and log filename. Then call:
-  `python ~/.claude/clarifier/log_cost.py tally --id [uuid] --tokens [total_tokens] --tools [tool_uses] --duration [duration_ms]`
-- The clarifier is multi-turn. After it returns with questions, wait for the user's response, then **resume** the clarifier (using its agentId) passing the user's answers. After each resume, call `log_cost.py tally` again with that call's metadata.
+- Surface to the clarifier sub-agent: (1) the original prompt, (2) your interpretation of the task, (3) any potential ambiguities you notice (this is context for the clarifier, not a gate), (4) your intended plan.
+- Spawn the clarifier sub-agent. It will either:
+  - **Find no ambiguity** → return silently with `CLARIFIER_DONE` and the original prompt unchanged. No user interaction needed.
+  - **Find ambiguity** → ask the user questions, write a partial log, and return with `agentId: [uuid] | log: [filename]`. Note the uuid and log filename. Then call:
+    `python ~/.claude/clarifier/log_cost.py tally --id [uuid] --tokens [total_tokens] --tools [tool_uses] --duration [duration_ms]`
+- If the clarifier found ambiguity (multi-turn): after it returns with questions, wait for the user's response, then **resume** the clarifier (using its agentId) passing the user's answers. After each resume, call `log_cost.py tally` again with that call's metadata.
 - Continue resuming until the clarifier returns `CLARIFIER_DONE`. At that point extract the final approved prompt from the clarifier's return message.
 - Call: `python ~/.claude/clarifier/log_cost.py finalize --id [uuid] --log [log filename] --prompt "[original prompt]" --session-id [session_id from budgeter context]`
 - Execute the task using the final approved prompt, not the original.
 
-If no ambiguity is detected: proceed normally.
+For trivial tasks (see below), use your judgment: if you notice potential ambiguity, you may spawn the clarifier. If not, proceed normally.
 
 ### When the clarifier is OFF
 If you detect potential ambiguity in a user request, do not run the clarifier automatically. Instead, flag it to the user:
@@ -45,3 +46,37 @@ If the request fails **any one** of these four conditions, it is non-trivial and
 
 ## Toggle Command
 Use `/clarifier` to toggle the clarifier on or off at any time.
+
+## Scribe — Structured Notes
+
+The scribe tool (`scribe/notes.py`) manages operational notes for cross-session continuity.
+
+### When to write notes
+
+| Signal | Type | Action |
+|--------|------|--------|
+| User defers work ("later", "hold", "next time", "put that on hold") | todo | Write a TODO with enough context to resume |
+| Design choice resolved, alternatives rejected | decision | Record what was decided and what was rejected |
+| Something blocks progress | blocker | Record what's blocked and why |
+| User says "note this", "write that down", "remember this" | as specified | Write the note with the type the user indicates, or `context` |
+| Wishlist idea ("would be nice", "eventually", "someday") | wishlist | Record the idea |
+| Work that matches an active TODO is completed | — | Run `notes.py done <id>` |
+
+Do **not** write notes for:
+- Routine tool calls or file reads
+- Information that belongs in memory (permanent facts about user/project)
+- Ephemeral conversation details that won't matter next session
+
+### Memory vs Notes
+
+- **Memory** (`~/.claude/projects/.../memory/`): permanent facts — user preferences, project structure, team info. Still true in 3 months.
+- **Notes** (`~/.claude/notes.jsonl` via `scribe/notes.py`): operational state — deferred work, session context, decisions in flux. Relevant to current work, decays over time.
+
+If it's still true in 3 months → memory. If it's about current work → note.
+
+### Archive fallback
+
+If a note the user references isn't found in active notes, search the archive:
+```
+python scribe/notes.py list --archive --search "<keyword>"
+```
