@@ -47,6 +47,17 @@ For each unseen session from the init output:
    ```bash
    python <repo_dir>/scribe/notes.py add --type handoff --session-id <prev-id> --auto --if-no-handoff-for <prev-id> --content "<handoff>"
    ```
+6. **Extract missed learnings and TODOs.** While reading the transcript, look for:
+   - Non-obvious workarounds or fixes that were discovered but not saved as learnings
+   - Work that was deferred or left incomplete that wasn't captured as a TODO
+   - Bugs observed but not tracked
+   
+   For each one found, save it:
+   ```bash
+   python <repo_dir>/scribe/notes.py learn --content "<what was learned>" --session-id <prev-id>
+   python <repo_dir>/scribe/notes.py add --type todo --content "<what was deferred>" --session-id <prev-id> --auto
+   ```
+   Only add items that are genuinely missing — check existing notes/learnings first to avoid duplicates.
 
 ### Step 3: Load summary
 
@@ -63,6 +74,7 @@ Compose and return a message with EXACTLY this structure (no extras):
 **Identity:** role=<role>, mission=<mission>, registered=<registered>, wants=<wants_role>/<wants_mission>
 
 **Handoffs generated:** <count> — <list of session IDs, or "None">
+**Extracted from transcripts:** <count> learnings, <count> TODOs — or "None"
 
 <paste the full output from the summary command here>
 ```
