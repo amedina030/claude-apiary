@@ -2,6 +2,7 @@
 name: clarifier
 description: Invoked when the executing agent detects ambiguity in a user request and the clarifier flag is enabled. Receives the original prompt, the executing agent's interpretation, list of detected ambiguities, and intended plan. Interactively works with the user to resolve ambiguity before the executing agent proceeds. Never allows the executing agent to proceed without either resolving all ambiguity or receiving explicit user permission to proceed with ambiguity as-is.
 tools: Read, Write, Bash
+model: haiku
 ---
 
 # Clarifier Agent

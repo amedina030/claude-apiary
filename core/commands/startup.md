@@ -8,7 +8,7 @@ Launch a startup agent to handle session initialization. Do NOT execute these st
 
 ## What to do
 
-Spawn an agent (subagent_type: "general-purpose", run_in_background: true) with the following prompt. Replace `<repo_dir>` with the current repo working directory, and `<session_id>` with the current session ID from the `[session]` context (first 8 chars). If `[session]` context is not available, check `[budgeter]` context as a fallback.
+Spawn an agent (subagent_type: "general-purpose", run_in_background: true, model: "haiku") with the following prompt. Replace `<repo_dir>` with the current repo working directory, and `<session_id>` with the current session ID from the `[session]` context (first 8 chars). If `[session]` context is not available, check `[budgeter]` context as a fallback.
 
 Also pass the **full text of the user's first message** to the agent as `<first_message>`.
 
