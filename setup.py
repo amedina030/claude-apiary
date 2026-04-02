@@ -22,7 +22,6 @@ from pathlib import Path
 APIS_DIR = Path(__file__).parent.resolve()
 BUDGETER_DIR = APIS_DIR / "budgeter"
 CLARIFIER_DIR = APIS_DIR / "clarifier"
-NOTETAKER_DIR = APIS_DIR / "notetaker"
 SCRIBE_DIR = APIS_DIR / "scribe"
 
 sys.path.insert(0, str(APIS_DIR))
@@ -111,7 +110,7 @@ def write_manifest(claude_dir: Path):
     ]
 
     # Add all command files
-    for cmd_dir in [BUDGETER_DIR / "commands", CLARIFIER_DIR / "commands", NOTETAKER_DIR / "commands"]:
+    for cmd_dir in [BUDGETER_DIR / "commands", CLARIFIER_DIR / "commands", SCRIBE_DIR / "commands"]:
         if cmd_dir.is_dir():
             for cmd_file in cmd_dir.glob("*.md"):
                 installed_files.append({
@@ -171,7 +170,7 @@ def install_clarifier(claude_dir: Path):
     for cmd_file in (BUDGETER_DIR / "commands").glob("*.md"):
         shutil.copy2(cmd_file, commands_dir / cmd_file.name)
 
-    # Scribe commands (replaces notetaker)
+    # Scribe commands
     for cmd_file in (SCRIBE_DIR / "commands").glob("*.md"):
         shutil.copy2(cmd_file, commands_dir / cmd_file.name)
 

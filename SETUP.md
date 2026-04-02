@@ -14,7 +14,7 @@ No external Python dependencies.
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/amedina030/claude-apis.git /path/to/claude-apis
+git clone https://github.com/amedina030/claude-apiary.git /path/to/claude-apis
 cd /path/to/claude-apis
 ```
 
@@ -25,10 +25,10 @@ python setup.py --global
 ```
 
 This will:
-- Register all budgeter hooks in `~/.claude/settings.json`
+- Register all hooks (budgeter, transcript saver, install checker) in `~/.claude/settings.json`
 - Copy the clarifier agent to `~/.claude/agents/clarifier.md`
-- Copy slash commands to `~/.claude/commands/`
-- Check whether the clarifier rules are present in `~/.claude/CLAUDE.md`
+- Copy slash commands to `~/.claude/commands/` (budgeter, clarifier, scribe, startup)
+- Check whether the clarifier and scribe rules are present in `~/.claude/CLAUDE.md`
 
 ### 3. Add clarifier rules to CLAUDE.md (if warned)
 
@@ -53,6 +53,8 @@ In any Claude Code session:
 /budgeter-warn    # enable expensive-call warnings
 /clarifier        # enable ambiguity detection
 ```
+
+Scribe (notes, learnings, handoffs) and the `/startup` skill are always active — no toggle needed.
 
 Each toggle persists across sessions (stored as a flag file in `~/.claude/`).
 
@@ -108,6 +110,11 @@ If `clarifier/CLAUDE.md` has changed, re-apply the updated rules to `~/.claude/C
 - Delete `~/.claude/commands/clarifier.md` and `~/.claude/commands/run-clarifier-tests.md`
 - Remove the clarifier section from `~/.claude/CLAUDE.md`
 - Optionally delete `~/.claude/clarifier-enabled` and `~/.claude/clarifier-logs/`
+
+**Scribe:**
+- Delete `~/.claude/commands/note.md`, `~/.claude/commands/notes.md`, `~/.claude/commands/startup.md`
+- Remove the scribe/learnings sections from `~/.claude/CLAUDE.md`
+- Optionally delete `~/.claude/projects/*/notes.jsonl`, `learnings.jsonl`, and `notes_archive.jsonl`
 
 **Everything:**
 - Delete the `claude-apis` repo directory

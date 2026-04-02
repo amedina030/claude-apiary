@@ -4,3 +4,5 @@ __pycache__/
 budgeter/tmp/
 budgeter/data/
 .claude/notes.md
+.claude/clarifier-logs/
+.claude/issues.md
