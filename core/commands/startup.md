@@ -52,7 +52,8 @@ You are a session startup agent. Your job is to declare session identity, genera
 
 5. For each unseen matching session (oldest first):
    a. Get its `transcript_path`. Run `python <repo_dir>/core/hooks/extract_transcript.py <transcript_path>` to extract clean messages (each line: JSON with `role` and `text`). If output is empty, skip this session.
-   b. Analyze the transcript and produce a handoff with these sections:
+   b. **Important:** Read the ENTIRE transcript before classifying a session. Early messages are often startup boilerplate — the real work typically starts midway through. Do NOT classify a session as "startup-only" unless the transcript truly contains nothing beyond startup initialization and brief status checks. Look for: file edits, bug fixes, design discussions, config changes, commits, or any substantive technical work.
+   d. Analyze the transcript and produce a handoff with these sections:
       ```
       ## Session <prev-id> Handoff
       **Role:** <role> | **Mission:** <mission>
@@ -62,7 +63,7 @@ You are a session startup agent. Your job is to declare session identity, genera
       ### Where it stopped
       ```
       Be concise but specific — file names, function names, concrete details. Focus on what a future session needs.
-   c. Save the handoff:
+   e. Save the handoff:
       ```bash
       python <repo_dir>/scribe/notes.py add --type handoff --session-id <prev-id> --auto --if-no-handoff-for <prev-id> --content "<handoff>"
       ```

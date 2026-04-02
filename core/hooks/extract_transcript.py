@@ -25,6 +25,20 @@ def read_session_jsonl(path):
     return entries
 
 
+STARTUP_NOISE_MARKERS = [
+    "Launch a startup agent to handle session initialization",
+    "You are a session startup agent",
+]
+
+
+def _is_startup_noise(text):
+    """Detect startup skill expansion and boilerplate messages."""
+    for marker in STARTUP_NOISE_MARKERS:
+        if marker in text:
+            return True
+    return False
+
+
 def extract_conversation(session_entries):
     """Extract user and assistant text messages, stripping tool calls/results."""
     messages = []
@@ -37,12 +51,14 @@ def extract_conversation(session_entries):
 
         content = msg.get("content", [])
         if isinstance(content, str) and content.strip():
-            messages.append({"role": role, "text": content.strip()})
+            text = content.strip()
+            if not _is_startup_noise(text):
+                messages.append({"role": role, "text": text})
         elif isinstance(content, list):
             texts = [b.get("text", "") for b in content
                      if isinstance(b, dict) and b.get("type") == "text"]
             text = " ".join(t for t in texts if t).strip()
-            if text:
+            if text and not _is_startup_noise(text):
                 messages.append({"role": role, "text": text})
 
     return messages
