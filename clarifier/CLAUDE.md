@@ -53,18 +53,33 @@ The scribe tool (`scribe/notes.py`) manages operational notes for cross-session 
 
 ### When to write notes
 
+Notes are primarily for Claude's own use — to maintain continuity across sessions.
+
+**User-triggered:**
+
 | Signal | Type | Action |
 |--------|------|--------|
-| User defers work ("later", "hold", "next time", "put that on hold") | todo | Write a TODO with enough context to resume |
+| User defers work ("later", "hold", "next time") | todo | Write a TODO with enough context to resume |
 | Design choice resolved, alternatives rejected | decision | Record what was decided and what was rejected |
 | Something blocks progress | blocker | Record what's blocked and why |
-| User says "note this", "write that down", "remember this" | as specified | Write the note with the type the user indicates, or `context` |
-| Wishlist idea ("would be nice", "eventually", "someday") | wishlist | Record the idea |
+| User says "note this", "write that down" | as specified | Write the note with the type the user indicates, or `context` |
+| Wishlist idea ("would be nice", "eventually") | wishlist | Record the idea |
 | Work that matches an active TODO is completed | — | Run `notes.py done <id>` |
 
-Do **not** write notes for:
+**Self-triggered (Claude writes without user prompting):**
+
+| Signal | Type | Action |
+|--------|------|--------|
+| You defer a side-fix to stay on task | todo | Record what you noticed and why you deferred it |
+| You observe a bug unrelated to current work | todo or blocker | Record the bug, severity, and where you saw it |
+| You left something incomplete (edge cases, error handling) | todo | Record what's missing and where |
+| Context is getting large, key state at risk of compaction | context | Save critical decisions, open questions, and current approach |
+| Something needs verification in a future session | todo | Record what changed and what should be checked |
+
+**Do not** write notes for:
 - Routine tool calls or file reads
 - Information that belongs in memory (permanent facts about user/project)
+- Things already captured by git (file changes, commit history)
 - Ephemeral conversation details that won't matter next session
 
 ### Memory vs Notes
