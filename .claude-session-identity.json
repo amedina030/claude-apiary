@@ -1,0 +1,10 @@
+{
+  "session_id": "ed2d3b4d-6abb-453f-a1b6-740682aaf8f4",
+  "role": "user",
+  "mission": "general",
+  "registered": true,
+  "wants": {
+    "role": "user",
+    "mission": "general"
+  }
+}

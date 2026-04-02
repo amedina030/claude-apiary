@@ -312,11 +312,17 @@ def cmd_done(args):
 
 
 def cmd_update(args):
+    if args.content is None and args.session_id is None:
+        print("Error: provide --content and/or --session-id", file=sys.stderr)
+        sys.exit(1)
     notes = _read_jsonl(args.notes_path)
     found = False
     for n in notes:
         if n.get("id") == args.id:
-            n["content"] = args.content
+            if args.content is not None:
+                n["content"] = args.content
+            if args.session_id is not None:
+                n["session_id"] = args.session_id
             found = True
             break
 
@@ -528,7 +534,8 @@ def main():
     # update
     p_update = sub.add_parser("update")
     p_update.add_argument("id", type=int)
-    p_update.add_argument("--content", required=True)
+    p_update.add_argument("--content", default=None)
+    p_update.add_argument("--session-id", default=None)
 
     # archive
     p_archive = sub.add_parser("archive")
