@@ -73,46 +73,48 @@ def main():
 
     contexts = []
 
-    # Find the last handoff
-    handoffs = [n for n in notes if n.get("type") == "handoff"]
-    last_handoff = handoffs[-1] if handoffs else None
-    last_handoff_id = last_handoff["id"] if last_handoff else 0
+    # Always read the previous session transcript to generate/refresh handoff
+    last_note = notes[-1] if notes else None
+    last_is_handoff = last_note and last_note.get("type") == "handoff"
 
-    # Check if any notes from a DIFFERENT session exist after the last handoff.
-    # Notes from the current session don't count — we're still in it.
-    notes_after_handoff = [
-        n for n in notes
-        if n.get("id", 0) > last_handoff_id
-        and n.get("session_id", "")[:8] != session_id[:8]
-    ]
-    has_gap = len(notes_after_handoff) > 0
-
-    # Check for missing handoff from previous session
-    if has_gap and TRANSCRIPT_PATH.exists() and SESSION_PATH.exists():
+    if TRANSCRIPT_PATH.exists() and SESSION_PATH.exists():
         try:
             prev_session = json.loads(SESSION_PATH.read_text(encoding="utf-8"))
             prev_id = prev_session.get("session_id", "unknown")[:8]
         except (json.JSONDecodeError, KeyError):
             prev_id = "unknown"
 
-        # Don't request handoff for the current session
-        if prev_id == session_id[:8]:
-            has_gap = False
-
-    if has_gap and TRANSCRIPT_PATH.exists():
-        contexts.append(
-            f"[scribe] Previous session ({prev_id}) has no handoff note. "
-            f"Before proceeding with the user's request, spawn a subagent to:\n"
-            f"  1. Read {TRANSCRIPT_PATH} (stripped conversation transcript)\n"
-            f"  2. Summarize the session: what was done, what's pending, where it stopped\n"
-            f"  3. Write the handoff: python {APIS_DIR}/scribe/notes.py add "
-            f"--type handoff --session-id {prev_id} --auto "
-            f'--content "<summary>"\n'
-            f"After the subagent finishes, read the notes to get context."
-        )
+        # Don't generate handoff for the current session's own transcript
+        if prev_id != session_id[:8]:
+            if last_is_handoff:
+                # Consolidate: read transcript + existing handoff, update in place
+                handoff_id = last_note["id"]
+                handoff_content = last_note.get("content", "")
+                contexts.append(
+                    f"[scribe] Before proceeding with the user's request, spawn a subagent to:\n"
+                    f"  1. Read {TRANSCRIPT_PATH} (stripped conversation transcript from session {prev_id})\n"
+                    f"  2. Read the existing handoff note #{handoff_id}: {handoff_content}\n"
+                    f"  3. Consolidate both into a single summary: what was done, what's pending, where it stopped\n"
+                    f"  4. Update the handoff: python {APIS_DIR}/scribe/notes.py update {handoff_id} "
+                    f'--content "<consolidated summary>"\n'
+                    f"After the subagent finishes, read the notes to get context."
+                )
+            else:
+                # No existing handoff at tail — create a new one
+                contexts.append(
+                    f"[scribe] Before proceeding with the user's request, spawn a subagent to:\n"
+                    f"  1. Read {TRANSCRIPT_PATH} (stripped conversation transcript from session {prev_id})\n"
+                    f"  2. Summarize the session: what was done, what's pending, where it stopped\n"
+                    f"  3. Write the handoff: python {APIS_DIR}/scribe/notes.py add "
+                    f"--type handoff --session-id {prev_id} --auto "
+                    f'--content "<summary>"\n'
+                    f"After the subagent finishes, read the notes to get context."
+                )
 
     # Inject last handoff if it exists
-    if last_handoff:
+    handoffs = [n for n in notes if n.get("type") == "handoff"]
+    if handoffs:
+        last_handoff = handoffs[-1]
         age = format_age(last_handoff.get("timestamp", ""))
         content = last_handoff.get("content", "").replace("\n", " ")[:200]
         contexts.append(f"[scribe] Last handoff ({age}): {content}")
