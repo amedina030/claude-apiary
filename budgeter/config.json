@@ -1,7 +1,7 @@
 {
   "monitored_tools": ["Agent", "Bash", "Read", "Write"],
   "scope_keywords": ["refactor", "rewrite", "migrate", "overhaul", "restructure", "redesign"],
-  "breadth_keywords": ["entire", "throughout", "across", "codebase", "everywhere"],
+  "breadth_keywords": [],
   "file_count_threshold": 3,
   "step_count_threshold": 4,
   "investigative_keywords": ["why", "explain", "understand", "investigate", "debug", "diagnose", "analyze"],
@@ -12,7 +12,7 @@
     "step_count": 1.0,
     "investigative_keywords": 1.0
   },
-  "warn_score_threshold": 2.0,
+  "warn_score_threshold": 1.0,
   "min_flagged_tasks": 10,
   "expensive_percentile_feedback": 75
 }
