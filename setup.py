@@ -418,17 +418,12 @@ def main():
 
     settings_path = claude_dir / "settings.json"
 
-    # Register budgeter hooks
-    new_hooks = build_budgeter_hooks()
-    register_hooks(settings_path, new_hooks, MARKER, also_strip=["claude-budgeter"])
-
-    # Register install check hooks
-    check_hooks = build_install_check_hooks()
-    register_hooks(settings_path, check_hooks, MARKER)
-
-    # Register scribe hooks
-    scribe_hooks = build_scribe_hooks()
-    register_hooks(settings_path, scribe_hooks, MARKER)
+    # Merge all hooks into one dict, then register once to avoid stripping each other.
+    all_hooks = {}
+    for hooks_dict in [build_budgeter_hooks(), build_install_check_hooks(), build_scribe_hooks()]:
+        for event, entries in hooks_dict.items():
+            all_hooks.setdefault(event, []).extend(entries)
+    register_hooks(settings_path, all_hooks, MARKER, also_strip=["claude-budgeter"])
 
     # Ensure budgeter data/tmp dirs exist
     if args.global_install:
