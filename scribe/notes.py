@@ -15,10 +15,17 @@ Usage:
     notes.py migrate <notes.md path>
 """
 import argparse
+import io
 import json
 import re
 import sys
 from datetime import datetime, timezone, timedelta
+
+# Force UTF-8 output on Windows (cp1252 can't handle → and other Unicode)
+if sys.stdout.encoding != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+if sys.stderr.encoding != "utf-8":
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 from pathlib import Path
 
 CLAUDE_DIR = Path.home() / ".claude"
@@ -50,6 +57,10 @@ def _notes_path(project_key):
 
 def _archive_path(project_key):
     return PROJECTS_DIR / project_key / "notes_archive.jsonl"
+
+
+def _learnings_path(project_key):
+    return PROJECTS_DIR / project_key / "learnings.jsonl"
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +381,56 @@ def cmd_migrate(args):
 
 
 # ---------------------------------------------------------------------------
+# Learnings commands
+# ---------------------------------------------------------------------------
+
+def cmd_learn(args):
+    """Add a new learning."""
+    learnings = _read_jsonl(args.learnings_path)
+    entry = {
+        "id": _next_id(learnings),
+        "timestamp": _now_iso(),
+        "session_id": args.session_id or "",
+        "content": args.content,
+    }
+    _append_jsonl(args.learnings_path, entry)
+    print(f"Learned #{entry['id']}")
+
+
+def cmd_learnings(args):
+    """List all learnings."""
+    learnings = _read_jsonl(args.learnings_path)
+
+    if args.search:
+        term = args.search.lower()
+        learnings = [l for l in learnings if term in l.get("content", "").lower()]
+
+    if not learnings:
+        print("No learnings found.")
+        return
+
+    for l in learnings:
+        lid = l.get("id", "?")
+        age = _format_age(l.get("timestamp", ""))
+        content = l.get("content", "").replace("\n", " ")[:80]
+        line = f"#{lid:<4} ({age:<9}) {content}"
+        print(line)
+
+
+def cmd_unlearn(args):
+    """Remove a learning by ID."""
+    learnings = _read_jsonl(args.learnings_path)
+    remaining = [l for l in learnings if l.get("id") != args.id]
+
+    if len(remaining) == len(learnings):
+        print(f"Learning #{args.id} not found.", file=sys.stderr)
+        sys.exit(1)
+
+    _write_jsonl(args.learnings_path, remaining)
+    print(f"Removed learning #{args.id}.")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -416,12 +477,26 @@ def main():
     p_migrate = sub.add_parser("migrate")
     p_migrate.add_argument("path", help="Path to old notes.md file")
 
+    # learn
+    p_learn = sub.add_parser("learn")
+    p_learn.add_argument("--content", required=True)
+    p_learn.add_argument("--session-id", default="")
+
+    # learnings
+    p_learnings = sub.add_parser("learnings")
+    p_learnings.add_argument("--search")
+
+    # unlearn
+    p_unlearn = sub.add_parser("unlearn")
+    p_unlearn.add_argument("id", type=int)
+
     args = parser.parse_args()
 
     # Resolve project-scoped paths
     pk = _project_key(args.project)
     args.notes_path = _notes_path(pk)
     args.archive_path = _archive_path(pk)
+    args.learnings_path = _learnings_path(pk)
 
     if args.command == "add":
         cmd_add(args)
@@ -437,6 +512,12 @@ def main():
         cmd_archive(args)
     elif args.command == "migrate":
         cmd_migrate(args)
+    elif args.command == "learn":
+        cmd_learn(args)
+    elif args.command == "learnings":
+        cmd_learnings(args)
+    elif args.command == "unlearn":
+        cmd_unlearn(args)
     else:
         parser.print_help()
 
