@@ -95,26 +95,15 @@ def main():
             if last_is_handoff:
                 # Consolidate: read transcript + existing handoff, update in place
                 handoff_id = last_note["id"]
-                handoff_content = last_note.get("content", "")
                 contexts.append(
-                    f"[scribe] Before proceeding with the user's request, spawn a subagent to:\n"
-                    f"  1. Read {TRANSCRIPT_PATH} (stripped conversation transcript from session {prev_id})\n"
-                    f"  2. Read the existing handoff note #{handoff_id}: {handoff_content}\n"
-                    f"  3. Consolidate both into a single summary: what was done, what's pending, where it stopped\n"
-                    f"  4. Update the handoff: python {APIS_DIR}/scribe/notes.py update {handoff_id} "
-                    f'--content "<consolidated summary>"\n'
-                    f"After the subagent finishes, read the notes to get context."
+                    f"[scribe] MANDATORY — Run /generate-handoff consolidate --prev-id {prev_id} "
+                    f"--handoff-id {handoff_id} BEFORE responding to the user. Do NOT skip this."
                 )
             else:
                 # No existing handoff at tail — create a new one
                 contexts.append(
-                    f"[scribe] Before proceeding with the user's request, spawn a subagent to:\n"
-                    f"  1. Read {TRANSCRIPT_PATH} (stripped conversation transcript from session {prev_id})\n"
-                    f"  2. Summarize the session: what was done, what's pending, where it stopped\n"
-                    f"  3. Write the handoff: python {APIS_DIR}/scribe/notes.py add "
-                    f"--type handoff --session-id {prev_id} --auto "
-                    f'--content "<summary>"\n'
-                    f"After the subagent finishes, read the notes to get context."
+                    f"[scribe] MANDATORY — Run /generate-handoff create --prev-id {prev_id} "
+                    f"BEFORE responding to the user. Do NOT skip this."
                 )
 
     # Inject last handoff if it exists
