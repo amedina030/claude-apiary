@@ -11,6 +11,9 @@ import sys
 import json
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from core.session import SessionId
+
 CLAUDE_DIR = Path.home() / ".claude"
 SESSION_FLAG_DIR = CLAUDE_DIR / "tmp"
 
@@ -27,17 +30,22 @@ def main():
     except json.JSONDecodeError:
         sys.exit(0)
 
-    session_id = payload.get("session_id", "")
-    if not session_id:
+    raw_id = payload.get("session_id", "")
+    if not raw_id:
+        sys.exit(0)
+
+    try:
+        sid = SessionId(raw_id)
+    except ValueError:
         sys.exit(0)
 
     SESSION_FLAG_DIR.mkdir(parents=True, exist_ok=True)
-    flag_file = SESSION_FLAG_DIR / f"{session_id}_session_injected"
+    flag_file = sid.flag_path("session_injected")
     if flag_file.exists():
         sys.exit(0)
 
     flag_file.write_text("1", encoding="utf-8")
-    hook_allow(f"[session] session_id: {session_id}")
+    hook_allow(f"[session] session_id: {sid.full}")
 
 
 if __name__ == "__main__":

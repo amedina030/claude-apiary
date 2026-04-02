@@ -81,7 +81,11 @@ def entry_date(e):
 
 
 def short_session(session_id):
-    return session_id[:8] if session_id else "unknown"
+    try:
+        from core.session import SessionId
+        return SessionId(session_id).short
+    except (ValueError, ImportError):
+        return session_id[:8] if session_id else "unknown"
 
 
 def median(values):

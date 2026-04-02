@@ -15,7 +15,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.session import CLAUDE_DIR, load_identity
+from core.session import CLAUDE_DIR, SessionId, load_identity
 from scribe.notes import (
     _read_jsonl, _notes_path, _learnings_path,
     _project_key_from_path, _format_age,
@@ -87,12 +87,12 @@ def get_unseen_sessions(session_id, wants_role, wants_mission, project_key):
     if not isinstance(history, list):
         return []
 
-    sid_prefix = session_id[:8]
+    sid = SessionId(session_id)
 
     # Filter: not current session, matches wants
     matching = [
         s for s in history
-        if not s.get("session_id", "").startswith(sid_prefix)
+        if not sid.matches(s.get("session_id", ""))
         and s.get("role", "user") == wants_role
         and s.get("mission", "general") == wants_mission
     ]
@@ -108,8 +108,8 @@ def get_unseen_sessions(session_id, wants_role, wants_mission, project_key):
     # Filter to unseen
     unseen = []
     for s in matching:
-        s_prefix = s.get("session_id", "")[:8]
-        if s_prefix and s_prefix not in handoff_sids:
+        s_short = s.get("session_id", "")[:8].lower()
+        if s_short and s_short not in handoff_sids:
             unseen.append({
                 "session_id": s.get("session_id", ""),
                 "transcript_path": s.get("transcript_path", ""),
@@ -125,7 +125,8 @@ def cmd_init(args):
     registered = validate_registry(identity["role"], identity["mission"])
 
     # Write identity file
-    identity_file = CLAUDE_DIR / f".session-identity-{args.session_id[:8]}.json"
+    sid = SessionId(args.session_id)
+    identity_file = sid.identity_path()
     identity_data = {
         "role": identity["role"],
         "mission": identity["mission"],

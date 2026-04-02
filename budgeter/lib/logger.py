@@ -1,5 +1,9 @@
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from core.session import SessionId
 
 BUDGETER_DIR = Path(__file__).parent.parent
 LOG_PATH = BUDGETER_DIR / "data" / "usage_log.jsonl"
@@ -192,13 +196,18 @@ def get_last_call_tokens(session_entries):
 
 def save_snapshot(session_id, snapshot):
     TMP_DIR.mkdir(parents=True, exist_ok=True)
-    path = TMP_DIR / f"{session_id}_pending.json"
+    path = _sid(session_id).tmp_path("pending.json", TMP_DIR)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(snapshot, f)
 
 
+def _sid(session_id):
+    """Coerce raw string to SessionId if needed."""
+    return session_id if isinstance(session_id, SessionId) else SessionId(session_id)
+
+
 def load_snapshot(session_id):
-    path = TMP_DIR / f"{session_id}_pending.json"
+    path = _sid(session_id).tmp_path("pending.json", TMP_DIR)
     if not path.exists():
         return None
     with open(path, encoding="utf-8") as f:
@@ -206,13 +215,13 @@ def load_snapshot(session_id):
 
 
 def delete_snapshot(session_id):
-    path = TMP_DIR / f"{session_id}_pending.json"
+    path = _sid(session_id).tmp_path("pending.json", TMP_DIR)
     if path.exists():
         path.unlink()
 
 
 def load_baseline(session_id):
-    path = TMP_DIR / f"{session_id}_baseline.json"
+    path = _sid(session_id).tmp_path("baseline.json", TMP_DIR)
     if not path.exists():
         return None
     with open(path, encoding="utf-8") as f:
@@ -221,7 +230,7 @@ def load_baseline(session_id):
 
 def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message="", scope_flags=None, predicted_cost=0, warning_fired=False, baseline_input=0, baseline_cache=0, baseline_output=0):
     TMP_DIR.mkdir(parents=True, exist_ok=True)
-    path = TMP_DIR / f"{session_id}_baseline.json"
+    path = _sid(session_id).tmp_path("baseline.json", TMP_DIR)
     with open(path, "w", encoding="utf-8") as f:
         json.dump({
             "tokens": tokens,
@@ -241,7 +250,8 @@ def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_
 
 
 def cleanup_session(session_id):
-    for name in [f"{session_id}_pending.json", f"{session_id}_baseline.json"]:
-        p = TMP_DIR / name
+    sid = _sid(session_id)
+    for suffix in ["pending.json", "baseline.json"]:
+        p = sid.tmp_path(suffix, TMP_DIR)
         if p.exists():
             p.unlink()

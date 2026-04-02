@@ -7,9 +7,10 @@ import sys
 import json
 from pathlib import Path
 
-SESSION_FLAG_DIR = Path.home() / ".claude" / "tmp"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from core.session import SessionId
 
-FLAG_SUFFIXES = ["_install_checked", "_session_injected"]
+FLAG_SUFFIXES = ["install_checked", "session_injected"]
 
 
 def main():
@@ -18,10 +19,14 @@ def main():
     except json.JSONDecodeError:
         sys.exit(0)
 
-    session_id = payload.get("session_id", "")
-    if session_id:
+    raw_id = payload.get("session_id", "")
+    if raw_id:
+        try:
+            sid = SessionId(raw_id)
+        except ValueError:
+            sys.exit(0)
         for suffix in FLAG_SUFFIXES:
-            flag_file = SESSION_FLAG_DIR / f"{session_id}{suffix}"
+            flag_file = sid.flag_path(suffix)
             if flag_file.exists():
                 flag_file.unlink()
 
