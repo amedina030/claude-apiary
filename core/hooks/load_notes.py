@@ -78,8 +78,13 @@ def main():
     last_handoff = handoffs[-1] if handoffs else None
     last_handoff_id = last_handoff["id"] if last_handoff else 0
 
-    # Check if any notes exist after the last handoff (different session = gap)
-    notes_after_handoff = [n for n in notes if n.get("id", 0) > last_handoff_id]
+    # Check if any notes from a DIFFERENT session exist after the last handoff.
+    # Notes from the current session don't count — we're still in it.
+    notes_after_handoff = [
+        n for n in notes
+        if n.get("id", 0) > last_handoff_id
+        and n.get("session_id", "")[:8] != session_id[:8]
+    ]
     has_gap = len(notes_after_handoff) > 0
 
     # Check for missing handoff from previous session
@@ -90,6 +95,11 @@ def main():
         except (json.JSONDecodeError, KeyError):
             prev_id = "unknown"
 
+        # Don't request handoff for the current session
+        if prev_id == session_id[:8]:
+            has_gap = False
+
+    if has_gap and TRANSCRIPT_PATH.exists():
         contexts.append(
             f"[scribe] Previous session ({prev_id}) has no handoff note. "
             f"Before proceeding with the user's request, spawn a subagent to:\n"

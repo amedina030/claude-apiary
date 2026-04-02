@@ -20,9 +20,10 @@ from core import flags
 
 
 _CONT_INSTRUCTION = (
-    "[budgeter] When asking a mid-task clarifying question "
-    "(you started executing a task and need user input before continuing), "
-    "start your response with [CONT] on its own line."
+    "[budgeter] The [CONT] marker is ONLY for mid-task clarifying questions — "
+    "when you have already started executing a task and need user input before "
+    "continuing. Start your response with [CONT] on its own line in that case ONLY. "
+    "Do NOT use [CONT] for normal responses, status updates, or new tasks."
 )
 
 
