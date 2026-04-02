@@ -62,7 +62,7 @@ def main():
 
     session_entries = logger.read_session_jsonl(transcript_path)
     tokens_now = logger.get_cumulative_tokens(session_entries)
-    last_input, last_output = logger.get_last_call_tokens(session_entries)
+    last_input, last_cache, last_output = logger.get_last_call_tokens(session_entries)
     assistant_message = logger.get_last_assistant_message(session_entries)
     turn_number = logger.get_user_turn_number(session_entries)
 
@@ -149,13 +149,17 @@ def main():
 
         if baseline is not None and baseline.get("prev_tool_name") != "Agent" and not compacted:
             tokens_delta = max(0, tokens_now - baseline["tokens"])
-            # Marginal cost: input growth (new context added) + new output generated.
+            # Marginal cost: input growth (new context added) + cache growth + new output.
             # Falls back to old context_tokens heuristic for baselines without split fields.
             prev_input = baseline.get("baseline_input", 0)
-            if prev_input > 0:
+            prev_cache = baseline.get("baseline_cache", 0)
+            if prev_input > 0 or prev_cache > 0:
                 input_growth = max(0, last_input - prev_input)
-                net_tokens_delta = input_growth + last_output
+                cache_growth = max(0, last_cache - prev_cache)
+                net_tokens_delta = input_growth + cache_growth + last_output
             else:
+                input_growth = 0
+                cache_growth = 0
                 context_tokens = baseline.get("context_tokens", 0)
                 net_tokens_delta = max(0, tokens_delta - context_tokens)
 
@@ -166,8 +170,11 @@ def main():
                 "assistant_message": baseline.get("prev_assistant_message", ""),
                 "user_message": baseline.get("user_message", ""),
                 "tokens_delta": tokens_delta,
-                "context_tokens": baseline.get("baseline_input", 0) + baseline.get("baseline_output", 0),
+                "context_tokens": baseline.get("baseline_input", 0) + baseline.get("baseline_cache", 0) + baseline.get("baseline_output", 0),
                 "net_tokens_delta": net_tokens_delta,
+                "input_tokens_delta": input_growth,
+                "cache_tokens_delta": cache_growth,
+                "output_tokens_delta": last_output,
                 "turn_number": baseline.get("turn_number", 0),
                 "task_turn": baseline.get("task_turn", baseline.get("turn_number", 0)),
                 "scope_flags": baseline.get("scope_flags", []),
@@ -193,7 +200,7 @@ def main():
     # Save baseline for the next PRE (or Stop hook).
     logger.save_baseline(
         session_id, tokens_now,
-        context_tokens=last_input + last_output,
+        context_tokens=last_input + last_cache + last_output,
         prev_tool_name=tool_name,
         prev_assistant_message=clean_message,
         turn_number=turn_number,
@@ -203,6 +210,7 @@ def main():
         predicted_cost=predicted_cost,
         warning_fired=warning_fired,
         baseline_input=last_input,
+        baseline_cache=last_cache,
         baseline_output=last_output,
     )
 

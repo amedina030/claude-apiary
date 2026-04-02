@@ -96,32 +96,54 @@ def net_delta(e):
     return e.get("net_tokens_delta", e["tokens_delta"])
 
 
-def print_summary(entries, sessions=None):
-    total = sum(net_delta(e) for e in entries)
+# Pricing weights relative to regular input tokens (Opus rates as baseline).
+# input: $15/MTok, cache_read: $1.50/MTok (10%), output: $75/MTok (5x)
+PRICE_WEIGHT_INPUT = 1.0
+PRICE_WEIGHT_CACHE = 0.1
+PRICE_WEIGHT_OUTPUT = 5.0
+
+
+def weighted_delta(e):
+    """Return weighted token count, scaling cache (0.1x) and output (5x) relative to input."""
+    inp = e.get("input_tokens_delta", 0)
+    cache = e.get("cache_tokens_delta", 0)
+    out = e.get("output_tokens_delta", 0)
+    if inp or cache or out:
+        return int(inp * PRICE_WEIGHT_INPUT + cache * PRICE_WEIGHT_CACHE + out * PRICE_WEIGHT_OUTPUT)
+    # Fallback for old entries without split fields
+    return net_delta(e)
+
+
+def print_summary(entries, sessions=None, weighted=False):
+    val = weighted_delta if weighted else net_delta
+    label_suffix = " (weighted)" if weighted else ""
+    total = sum(val(e) for e in entries)
     count = len(entries)
-    deltas = [net_delta(e) for e in entries]
+    deltas = [val(e) for e in entries]
     med_per_call = median(deltas) if deltas else 0
 
     by_tool = {}
     for e in entries:
         t = e.get("tool_name", "unknown")
-        by_tool.setdefault(t, []).append(net_delta(e))
+        by_tool.setdefault(t, []).append(e)
 
-    print(f"{'TOTAL TOKENS':>24} {total:>12,}")
-    print(f"{'TOTAL ENTRIES':>24} {count:>12,}")
-    print(f"{'MEDIAN TOKENS/CALL':>24} {med_per_call:>12,}")
+    print(f"{'TOTAL TOKENS' + label_suffix:>30} {total:>12,}")
+    print(f"{'TOTAL ENTRIES':>30} {count:>12,}")
+    print(f"{'MEDIAN TOKENS/CALL':>30} {med_per_call:>12,}")
     if sessions is not None:
-        sess_totals = [sum(net_delta(e) for e in s) for s in sessions.values()]
+        sess_totals = [sum(val(e) for e in s) for s in sessions.values()]
         med_per_session = median(sess_totals) if sess_totals else 0
-        print(f"{'SESSIONS':>24} {len(sessions):>12,}")
-        print(f"{'MEDIAN TOKENS/SESSION':>24} {med_per_session:>12,}")
-    for tool, tool_deltas in sorted(by_tool.items()):
+        print(f"{'SESSIONS':>30} {len(sessions):>12,}")
+        print(f"{'MEDIAN TOKENS/SESSION':>30} {med_per_session:>12,}")
+    for tool, tool_entries in sorted(by_tool.items()):
+        tool_deltas = [val(e) for e in tool_entries]
         med = median(tool_deltas)
         label = f"MEDIAN TOKENS/{tool.upper()}"
-        print(f"  {label:<22} {med:>12,}")
+        print(f"  {label:<28} {med:>12,}")
 
 
-def print_flat(entries):
+def print_flat(entries, weighted=False):
+    val = weighted_delta if weighted else net_delta
     print(f"{'DATE':<12} {'TIME':<8} {'TOOL':<7} {'DELTA':>10}  MESSAGE")
     print("-" * 82)
     for e in entries:
@@ -129,14 +151,15 @@ def print_flat(entries):
         d = ts[:10]
         t = ts[11:19]
         tool = e.get("tool_name", "")[:6]
-        delta = net_delta(e)
+        delta = val(e)
         msg = e["assistant_message"][:52].replace("\n", " ")
         print(f"{d:<12} {t:<8} {tool:<7} {delta:>10,}  {msg}")
     print("-" * 82)
-    print_summary(entries)
+    print_summary(entries, weighted=weighted)
 
 
-def print_by_turn(entries):
+def print_by_turn(entries, weighted=False):
+    val = weighted_delta if weighted else net_delta
     # Group by session_id, then by task_turn (falls back to turn_number for old entries)
     sessions = {}
     for e in entries:
@@ -147,7 +170,7 @@ def print_by_turn(entries):
 
     all_task_totals = []
     for sid, sess_entries in sessions.items():
-        sess_total = sum(net_delta(e) for e in sess_entries)
+        sess_total = sum(val(e) for e in sess_entries)
         first_ts = sess_entries[0]["timestamp"]
         d = first_ts[:10]
         t = first_ts[11:19]
@@ -164,7 +187,7 @@ def print_by_turn(entries):
 
         for task_num in sorted(tasks):
             task_entries = tasks[task_num]
-            task_total = sum(net_delta(e) for e in task_entries)
+            task_total = sum(val(e) for e in task_entries)
             all_task_totals.append(task_total)
             t = task_entries[0]["timestamp"][11:19]
             user_turns = sorted(set(e.get("turn_number", task_num) for e in task_entries))
@@ -177,15 +200,15 @@ def print_by_turn(entries):
             for e in task_entries:
                 turn = e.get("turn_number", task_num)
                 tool = e.get("tool_name", "")[:6]
-                delta = net_delta(e)
+                delta = val(e)
                 msg = e["assistant_message"][:44].replace("\n", " ")
                 print(f"    {turn:<5} {tool:<7} {delta:>10,}  {msg}")
         print()
 
     print("-" * 82)
-    total = sum(net_delta(e) for e in entries)
+    total = sum(val(e) for e in entries)
     med_per_task = median(all_task_totals) if all_task_totals else 0
-    sess_totals = [sum(net_delta(e) for e in s) for s in sessions.values()]
+    sess_totals = [sum(val(e) for e in s) for s in sessions.values()]
     med_per_session = median(sess_totals) if sess_totals else 0
     print(f"{'TOTAL TOKENS':>24} {total:>12,}")
     print(f"{'TOTAL TASKS':>24} {len(all_task_totals):>12,}")
@@ -194,7 +217,8 @@ def print_by_turn(entries):
     print(f"{'MEDIAN TOKENS/SESSION':>24} {med_per_session:>12,}")
 
 
-def print_grouped(entries):
+def print_grouped(entries, weighted=False):
+    val = weighted_delta if weighted else net_delta
     # Group by session_id
     sessions = {}
     for e in entries:
@@ -202,7 +226,7 @@ def print_grouped(entries):
         sessions.setdefault(sid, []).append(e)
 
     for sid, sess_entries in sessions.items():
-        sess_total = sum(net_delta(e) for e in sess_entries)
+        sess_total = sum(val(e) for e in sess_entries)
         first_ts = sess_entries[0]["timestamp"]
         d = first_ts[:10]
         t = first_ts[11:19]
@@ -212,7 +236,7 @@ def print_grouped(entries):
         for e in sess_entries:
             t = e["timestamp"][11:19]
             tool = e.get("tool_name", "")[:6]
-            delta = net_delta(e)
+            delta = val(e)
             msg = e["assistant_message"][:52].replace("\n", " ")
             print(f"  {t:<8} {tool:<7} {delta:>10,}  {msg}")
         print()
@@ -226,11 +250,11 @@ def print_grouped(entries):
             task = e.get("task_turn", e.get("turn_number", 0))
             tasks.setdefault(task, []).append(e)
         for task_entries in tasks.values():
-            all_task_totals.append(sum(net_delta(e) for e in task_entries))
+            all_task_totals.append(sum(val(e) for e in task_entries))
 
-    total = sum(net_delta(e) for e in entries)
+    total = sum(val(e) for e in entries)
     med_per_task = median(all_task_totals) if all_task_totals else 0
-    sess_totals = [sum(net_delta(e) for e in s) for s in sessions.values()]
+    sess_totals = [sum(val(e) for e in s) for s in sessions.values()]
     med_per_session = median(sess_totals) if sess_totals else 0
     print(f"{'TOTAL TOKENS':>24} {total:>12,}")
     print(f"{'TOTAL TASKS':>24} {len(all_task_totals):>12,}")
@@ -331,6 +355,7 @@ def main():
     parser.add_argument("--grouped", action="store_true", help="Group by session only (no task breakdown)")
     parser.add_argument("--by-turn", action="store_true", help="Alias for default (session > task grouping)")
     parser.add_argument("--all", action="store_true", help="Include zero-delta entries")
+    parser.add_argument("--weighted", action="store_true", help="Weight tokens by type: cache 0.1x, output 5x (relative to input)")
     parser.add_argument("--feedback", action="store_true", help="Show warning precision and rule breakdown")
     args = parser.parse_args()
 
@@ -361,11 +386,11 @@ def main():
         return
 
     if args.flat:
-        print_flat(entries)
+        print_flat(entries, weighted=args.weighted)
     elif args.grouped:
-        print_grouped(entries)
+        print_grouped(entries, weighted=args.weighted)
     else:
-        print_by_turn(entries)
+        print_by_turn(entries, weighted=args.weighted)
 
 
 if __name__ == "__main__":

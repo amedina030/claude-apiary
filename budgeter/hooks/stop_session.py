@@ -36,14 +36,18 @@ def main():
         if baseline is not None and baseline.get("prev_tool_name") and baseline.get("prev_tool_name") != "Agent":
             session_entries = logger.read_session_jsonl(transcript_path)
             tokens_now = logger.get_cumulative_tokens(session_entries)
-            last_input, last_output = logger.get_last_call_tokens(session_entries)
+            last_input, last_cache, last_output = logger.get_last_call_tokens(session_entries)
             tokens_delta = max(0, tokens_now - baseline["tokens"])
 
             prev_input = baseline.get("baseline_input", 0)
-            if prev_input > 0:
+            prev_cache = baseline.get("baseline_cache", 0)
+            if prev_input > 0 or prev_cache > 0:
                 input_growth = max(0, last_input - prev_input)
-                net_tokens_delta = input_growth + last_output
+                cache_growth = max(0, last_cache - prev_cache)
+                net_tokens_delta = input_growth + cache_growth + last_output
             else:
+                input_growth = 0
+                cache_growth = 0
                 context_tokens = baseline.get("context_tokens", 0)
                 net_tokens_delta = max(0, tokens_delta - context_tokens)
 
@@ -54,8 +58,11 @@ def main():
                 "assistant_message": baseline.get("prev_assistant_message", ""),
                 "user_message": baseline.get("user_message", ""),
                 "tokens_delta": tokens_delta,
-                "context_tokens": baseline.get("baseline_input", 0) + baseline.get("baseline_output", 0),
+                "context_tokens": baseline.get("baseline_input", 0) + baseline.get("baseline_cache", 0) + baseline.get("baseline_output", 0),
                 "net_tokens_delta": net_tokens_delta,
+                "input_tokens_delta": input_growth,
+                "cache_tokens_delta": cache_growth,
+                "output_tokens_delta": last_output,
                 "turn_number": baseline.get("turn_number", 0),
                 "task_turn": baseline.get("task_turn", baseline.get("turn_number", 0)),
                 "scope_flags": baseline.get("scope_flags", []),

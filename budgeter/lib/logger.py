@@ -176,16 +176,18 @@ def get_cumulative_tokens(session_entries):
 
 
 def get_last_call_tokens(session_entries):
-    """Return (input_tokens, output_tokens) of the most recent assistant message."""
+    """Return (input_tokens, cache_read_tokens, output_tokens) of the most recent assistant message."""
     last_input = 0
+    last_cache = 0
     last_output = 0
     for entry in session_entries:
         msg = entry.get("message", {})
         if msg.get("role") == "assistant":
             usage = msg.get("usage", {})
-            last_input = usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
+            last_input = usage.get("input_tokens", 0)
+            last_cache = usage.get("cache_read_input_tokens", 0)
             last_output = usage.get("output_tokens", 0)
-    return last_input, last_output
+    return last_input, last_cache, last_output
 
 
 def save_snapshot(session_id, snapshot):
@@ -217,7 +219,7 @@ def load_baseline(session_id):
         return json.load(f)
 
 
-def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message="", scope_flags=None, predicted_cost=0, warning_fired=False, baseline_input=0, baseline_output=0):
+def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message="", scope_flags=None, predicted_cost=0, warning_fired=False, baseline_input=0, baseline_cache=0, baseline_output=0):
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     path = TMP_DIR / f"{session_id}_baseline.json"
     with open(path, "w", encoding="utf-8") as f:
@@ -225,6 +227,7 @@ def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_
             "tokens": tokens,
             "context_tokens": context_tokens,
             "baseline_input": baseline_input,
+            "baseline_cache": baseline_cache,
             "baseline_output": baseline_output,
             "prev_tool_name": prev_tool_name,
             "prev_assistant_message": prev_assistant_message,
