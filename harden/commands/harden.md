@@ -11,6 +11,7 @@ Run an automated attack-defend loop where an Attacker agent finds weaknesses and
 ## Arguments
 
 - `/harden file1.py [file2.py ...]` — harden one or more code files (max 5 by default)
+- `/harden path/to/dir/` — harden all code files in a directory (recursive)
 - `/harden --plan <note-id>` — harden a scribe plan/spec note
 - `/harden cancel` — cancel the current harden loop and exit
 
@@ -39,7 +40,17 @@ If the argument is `cancel`:
 Determine the mode from the arguments:
 
 - If `--plan <note-id>` is present → **plan mode**. The note ID is the argument.
-- Otherwise → **code mode**. All non-flag arguments are file paths.
+- Otherwise → **code mode**. All non-flag arguments are file paths or directory paths.
+
+### Expand directories
+
+After extracting the non-flag arguments, check each one: if it's a directory (use Bash `test -d` or equivalent), expand it into individual files using the Glob tool with the pattern `**/*.{py,js,ts,tsx,jsx,go,rs,java,rb,sh}` rooted at that directory. Replace the directory argument with the expanded file list.
+
+**Exclusions:** Skip files matching these patterns:
+- `__pycache__/`, `node_modules/`, `.git/`
+- `test_*.py`, `*_test.py`, `*_test.go`, `*.test.ts`, `*.test.js`, `*.spec.ts`, `*.spec.js`
+
+After expansion, deduplicate the full file list (in case a file was listed both explicitly and via directory).
 
 Extract optional flags with their defaults:
 - `--focus`: default `general`
@@ -52,8 +63,8 @@ Extract optional flags with their defaults:
 ### Validate inputs
 
 **Code mode:**
-1. Check that at least one file path was provided. If not, tell the user and stop.
-2. Check that the number of files does not exceed `--max-files`. If it does, abort with: "Too many files (N > max). Narrow scope or use `--max-files N`."
+1. Check that at least one file path was provided (after directory expansion). If not, tell the user and stop. If a directory was provided but expansion found 0 matching files, tell the user: "No code files found in `<dir>`. Check the path or add files explicitly."
+2. Check that the number of files does not exceed `--max-files`. If it does, abort with: "Too many files (N > max). Narrow scope, use `--max-files N`, or pass specific files instead of a directory."
 3. For each file, verify it exists using the Read tool. If any file is missing, list the missing files and stop.
 
 **Plan mode:**

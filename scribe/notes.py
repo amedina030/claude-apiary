@@ -20,8 +20,10 @@ Usage:
 """
 import argparse
 import json
+import os
 import re
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from pathlib import Path as _PathImport
 
@@ -37,27 +39,64 @@ PROJECTS_DIR = CLAUDE_DIR / "projects"
 
 VALID_TYPES = ["todo", "handoff", "decision", "wishlist", "reference", "blocker", "context"]
 AUTO_ARCHIVE_DAYS = 30
+MAX_CONTENT_LENGTH = 100_000  # bytes; prevents runaway JSONL file growth
+MAX_LAST = 10_000  # upper bound for --last to prevent misleading output
 
 
 def _load_session_identity():
-    """Load role/mission/session_id from the most recent session identity file."""
-    from core.session import load_identity
-    identity = load_identity()
-    return identity["role"], identity["mission"], identity["session_id"]
+    """Load role/mission/session_id from the most recent session identity file.
+
+    Returns empty strings for all fields if the identity file is unavailable
+    or malformed — this keeps the CLI usable in environments without a valid
+    session identity.
+    """
+    try:
+        from core.session import load_identity
+        identity = load_identity()
+        return identity.get("role", ""), identity.get("mission", ""), identity.get("session_id", "")
+    except Exception:
+        return "", "", ""
 
 
 def project_key_from_path(p):
     """Derive Claude's project key from an absolute path.
-    E.g. D:\\Professional\\claude-apis → D--Professional-claude-apis"""
+
+    Windows: D:\\Professional\\claude-apis → D--Professional-claude-apis
+    Unix:    /home/user/project           → home-user-project
+    """
     p = Path(p).resolve()
-    drive = p.drive.rstrip(":\\")  # "D"
-    rest = str(p).replace(p.drive + "\\", "").replace("\\", "-").replace("/", "-")
-    return f"{drive}--{rest}"
+    if p.drive:
+        # Windows: strip drive letter and backslashes
+        drive = p.drive.rstrip(":\\")  # "D"
+        rest = str(p).replace(p.drive + "\\", "").replace("\\", "-").replace("/", "-")
+        return f"{drive}--{rest}"
+    else:
+        # Unix: convert leading slash-separated components to dashes
+        parts = [part for part in p.parts if part != "/"]
+        return "-".join(parts)
+
+
+_PROJECT_KEY_RE = re.compile(r'^[A-Za-z0-9_.\-]{1,200}$')
 
 
 def _project_key(project_override=None):
     """Return the project key, from --project flag or cwd."""
     if project_override:
+        # Reject values that could escape PROJECTS_DIR via traversal components.
+        if not _PROJECT_KEY_RE.match(project_override):
+            print(
+                f"Error: --project value contains invalid characters: {project_override!r}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        # Double-check the resolved path stays inside PROJECTS_DIR.
+        resolved = (PROJECTS_DIR / project_override).resolve()
+        if not str(resolved).startswith(str(PROJECTS_DIR.resolve())):
+            print(
+                f"Error: --project value escapes projects directory: {project_override!r}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         return project_override
     return project_key_from_path(Path.cwd())
 
@@ -75,6 +114,19 @@ def learnings_path(project_key):
 
 
 # ---------------------------------------------------------------------------
+# Locking helpers
+# ---------------------------------------------------------------------------
+
+@contextmanager
+def _notes_and_archive_lock(notes_path, archive_path):
+    """Acquire locks on both notes and archive files in a consistent order
+    (notes first, then archive) to prevent deadlocks and TOCTOU races."""
+    with FileLock(notes_path):
+        with FileLock(archive_path):
+            yield
+
+
+# ---------------------------------------------------------------------------
 # Storage helpers
 # ---------------------------------------------------------------------------
 
@@ -82,22 +134,27 @@ def read_jsonl(path):
     if not path.exists():
         return []
     entries = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                pass
+    with open(path, encoding="utf-8") as f:
+        for lineno, line in enumerate(f, 1):
+            line = line.strip()
+            if line:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    print(f"[scribe] WARNING: skipped malformed JSON on line {lineno} of {path}", file=sys.stderr)
     return entries
 
 
 def _write_jsonl(path, entries):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "\n".join(json.dumps(e) for e in entries) + "\n" if entries else "",
-        encoding="utf-8",
-    )
+    content = "\n".join(json.dumps(e) for e in entries) + "\n" if entries else ""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    # fsync the tmp file so data is durable before the rename
+    with open(tmp, "r+b") as fh:
+        fh.flush()
+        os.fsync(fh.fileno())
+    tmp.replace(path)
 
 
 def _append_jsonl(path, entry):
@@ -107,6 +164,11 @@ def _append_jsonl(path, entry):
 
 
 def _next_id(entries):
+    """Return the next available ID from an in-memory entry list.
+
+    Callers MUST hold FileLock on the target file before calling this and
+    must pass a freshly read list to avoid ID collisions across processes.
+    """
     if not entries:
         return 1
     return max(e.get("id", 0) for e in entries) + 1
@@ -120,16 +182,21 @@ def _parse_timestamp(ts):
     try:
         return datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
-        return datetime.now(timezone.utc)
+        return None
 
 
 def format_age(ts):
     """Return human-readable relative age string from an ISO timestamp."""
     dt = _parse_timestamp(ts)
+    if dt is None:
+        return "unknown"
     now = datetime.now(timezone.utc)
     delta = now - dt
 
-    minutes = int(delta.total_seconds() / 60)
+    total_seconds = delta.total_seconds()
+    if total_seconds < 0:
+        return "in the future"
+    minutes = int(total_seconds / 60)
     if minutes < 1:
         return "just now"
     if minutes < 60:
@@ -155,6 +222,7 @@ def _auto_archive(notes, notes_path, archive_path):
     """Move done notes and old handoffs past AUTO_ARCHIVE_DAYS to archive.
     Also archives handoffs older than 7 days when there are more than 10
     for the same role/mission combination.
+    Caller must hold a FileLock on archive_path before calling this function.
     Returns (remaining, archived) lists."""
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=AUTO_ARCHIVE_DAYS)
@@ -162,15 +230,23 @@ def _auto_archive(notes, notes_path, archive_path):
     remaining = []
     to_archive = []
 
-    # Count handoffs per role/mission
+    # Count only handoffs that will NOT be archived by the age cutoff,
+    # so the > 10 threshold check reflects the post-cutoff survivor count.
     handoff_counts = {}
     for n in notes:
         if n.get("type") == "handoff":
-            key = (n.get("role", "user"), n.get("mission", "general"))
-            handoff_counts[key] = handoff_counts.get(key, 0) + 1
+            ts = _parse_timestamp(n.get("timestamp", ""))
+            # Treat None timestamps as recent (they survive the cutoff)
+            if ts is None or ts >= cutoff:
+                key = (n.get("role", "user"), n.get("mission", "general"))
+                handoff_counts[key] = handoff_counts.get(key, 0) + 1
 
     for n in notes:
         ts = _parse_timestamp(n.get("timestamp", ""))
+        # Treat unparseable timestamps as recent (don't archive them silently)
+        if ts is None:
+            remaining.append(n)
+            continue
         if n.get("status") == "done" and ts < cutoff:
             to_archive.append(n)
         elif n.get("type") == "handoff" and ts < cutoff:
@@ -179,15 +255,23 @@ def _auto_archive(notes, notes_path, archive_path):
             key = (n.get("role", "user"), n.get("mission", "general"))
             if handoff_counts.get(key, 0) > 10:
                 to_archive.append(n)
+                handoff_counts[key] -= 1
             else:
                 remaining.append(n)
         else:
             remaining.append(n)
 
     if to_archive:
+        # Read archive and deduplicate by id before writing, so that a crash
+        # between the two writes below (archive written, notes not yet trimmed)
+        # doesn't produce permanent duplicates on the next run.
         existing_archive = read_jsonl(archive_path)
-        existing_archive.extend(to_archive)
-        _write_jsonl(archive_path, existing_archive)
+        archive_ids = {e.get("id") for e in existing_archive}
+        new_entries = [n for n in to_archive if n.get("id") not in archive_ids]
+        if new_entries:
+            existing_archive.extend(new_entries)
+            _write_jsonl(archive_path, existing_archive)
+        # Only trim notes file after archive is safely on disk
         _write_jsonl(notes_path, remaining)
 
     return remaining, to_archive
@@ -202,10 +286,12 @@ def make_note(notes, *, type: str, content: str, session_id: str = "",
     """Build a validated note record.
 
     *notes* is the current list (used for ID generation).
-    Raises ValueError for invalid type.
+    Raises ValueError for invalid type or oversized content.
     """
     if type not in VALID_TYPES:
         raise ValueError(f"Invalid note type {type!r}, must be one of {VALID_TYPES}")
+    if len(content.encode("utf-8")) > MAX_CONTENT_LENGTH:
+        raise ValueError(f"Content exceeds maximum length of {MAX_CONTENT_LENGTH} bytes")
     return {
         "id": _next_id(notes),
         "timestamp": _now_iso(),
@@ -224,7 +310,10 @@ def make_learning(learnings, *, content: str, session_id: str = "",
     """Build a validated learning record.
 
     *learnings* is the current list (used for ID generation).
+    Raises ValueError for oversized content.
     """
+    if len(content.encode("utf-8")) > MAX_CONTENT_LENGTH:
+        raise ValueError(f"Content exceeds maximum length of {MAX_CONTENT_LENGTH} bytes")
     return {
         "id": _next_id(learnings),
         "timestamp": _now_iso(),
@@ -279,10 +368,13 @@ def cmd_list(args):
         source = "archive"
     else:
         notes = read_jsonl(args.notes_path)
-        # Auto-archive on every list call
-        notes, archived = _auto_archive(notes, args.notes_path, args.archive_path)
-        if archived:
-            print(f"[auto-archived {len(archived)} notes]")
+        # Auto-archive only when listing active notes (not archive/search-only queries)
+        if not args.search and not args.type and not args.session and not args.role and not args.mission:
+            with _notes_and_archive_lock(args.notes_path, args.archive_path):
+                notes = read_jsonl(args.notes_path)
+                notes, archived = _auto_archive(notes, args.notes_path, args.archive_path)
+            if archived:
+                print(f"[auto-archived {len(archived)} notes]", file=sys.stderr)
         source = "active"
 
     # Filter by status (default: hide done unless --all)
@@ -315,9 +407,13 @@ def cmd_list(args):
         term = args.search.lower()
         notes = [n for n in notes if term in n.get("content", "").lower()]
 
-    # Limit
-    if args.last:
-        notes = notes[-args.last:]
+    # Limit (cap at MAX_LAST to prevent misleading output)
+    if args.last is not None:
+        if args.last <= 0:
+            print("Error: --last must be a positive integer", file=sys.stderr)
+            sys.exit(1)
+        last = min(args.last, MAX_LAST)
+        notes = notes[-last:]
 
     if not notes:
         print(f"No {source} notes found.")
@@ -337,11 +433,20 @@ def cmd_get(args):
     notes = read_jsonl(args.notes_path)
     # Also check archive
     note = next((n for n in notes if n.get("id") == args.id), None)
+    source_label = None
     if not note:
         archive = read_jsonl(args.archive_path)
         note = next((n for n in archive if n.get("id") == args.id), None)
         if note:
-            print("[from archive]")
+            source_label = "[from archive]"
+    else:
+        # Check if a duplicate also exists in archive and warn
+        archive = read_jsonl(args.archive_path)
+        if any(n.get("id") == args.id for n in archive):
+            print(f"[WARNING: duplicate ID #{args.id} exists in archive; showing active note]", file=sys.stderr)
+
+    if source_label:
+        print(source_label)
 
     if not note:
         print(f"Note #{args.id} not found.", file=sys.stderr)
@@ -364,15 +469,23 @@ def cmd_get(args):
 def cmd_done(args):
     notes = read_jsonl(args.notes_path)
     found = False
+    already_done = False
     for n in notes:
         if n.get("id") == args.id:
-            n["status"] = "done"
+            if n.get("status") == "done":
+                already_done = True
+            else:
+                n["status"] = "done"
             found = True
             break
 
     if not found:
         print(f"Note #{args.id} not found.", file=sys.stderr)
         sys.exit(1)
+
+    if already_done:
+        print(f"Note #{args.id} is already marked done.")
+        return
 
     _write_jsonl(args.notes_path, notes)
     print(f"Marked #{args.id} as done.")
@@ -382,10 +495,16 @@ def cmd_update(args):
     if args.content is None and args.session_id is None:
         print("Error: provide --content and/or --session-id", file=sys.stderr)
         sys.exit(1)
+    if args.content is not None and len(args.content.encode("utf-8")) > MAX_CONTENT_LENGTH:
+        print(f"Error: content exceeds {MAX_CONTENT_LENGTH} bytes", file=sys.stderr)
+        sys.exit(1)
     notes = read_jsonl(args.notes_path)
     found = False
     for n in notes:
         if n.get("id") == args.id:
+            if n.get("status") == "done":
+                print(f"Error: note #{args.id} is already done and cannot be updated.", file=sys.stderr)
+                sys.exit(1)
             if args.content is not None:
                 n["content"] = args.content
             if args.session_id is not None:
@@ -402,29 +521,40 @@ def cmd_update(args):
 
 
 def cmd_archive(args):
-    notes = read_jsonl(args.notes_path)
     if args.before:
-        cutoff = datetime.strptime(args.before, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        try:
+            cutoff = datetime.strptime(args.before, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            print(f"Error: --before must be in YYYY-MM-DD format, got {args.before!r}", file=sys.stderr)
+            sys.exit(1)
     else:
         cutoff = datetime.now(timezone.utc) - timedelta(days=AUTO_ARCHIVE_DAYS)
 
-    remaining = []
-    to_archive = []
-    for n in notes:
-        ts = _parse_timestamp(n.get("timestamp", ""))
-        if ts < cutoff:
-            to_archive.append(n)
-        else:
-            remaining.append(n)
+    # Hold both locks for the entire read-classify-write sequence
+    with _notes_and_archive_lock(args.notes_path, args.archive_path):
+        notes = read_jsonl(args.notes_path)
+        remaining = []
+        to_archive = []
+        for n in notes:
+            ts = _parse_timestamp(n.get("timestamp", ""))
+            # Only archive done notes or handoffs past the cutoff — never silently
+            # drop active todos, blockers, decisions, or other live note types.
+            # Treat unparseable timestamps as recent (keep them).
+            archivable = (n.get("status") == "done") or (n.get("type") == "handoff")
+            if ts is not None and ts < cutoff and archivable:
+                to_archive.append(n)
+            else:
+                remaining.append(n)
 
-    if not to_archive:
-        print("Nothing to archive.")
-        return
+        if not to_archive:
+            print("Nothing to archive.")
+            return
 
-    existing_archive = read_jsonl(args.archive_path)
-    existing_archive.extend(to_archive)
-    _write_jsonl(args.archive_path, existing_archive)
-    _write_jsonl(args.notes_path, remaining)
+        existing_archive = read_jsonl(args.archive_path)
+        existing_archive.extend(to_archive)
+        _write_jsonl(args.archive_path, existing_archive)
+        _write_jsonl(args.notes_path, remaining)
+
     print(f"Archived {len(to_archive)} notes (before {cutoff.strftime('%Y-%m-%d')}).")
 
 
@@ -448,11 +578,22 @@ def cmd_migrate(args):
 
     for i, m in enumerate(matches):
         ts_str = m.group(2)
-        session_id = m.group(3)
+        raw_session_id = m.group(3)
+        # Validate: max 128 chars, alphanumeric/hyphen/underscore only
+        if len(raw_session_id) > 128 or not re.match(r'^[A-Za-z0-9_\-]+$', raw_session_id):
+            raw_session_id = ""
+        session_id = raw_session_id
+
         # Content is from after the header to the next note start (or end of file)
         start = m.start(4)
         end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
         note_content = content[start:end].strip()
+
+        # Byte-safe truncation: encode, slice at byte boundary, decode back
+        encoded = note_content.encode("utf-8")
+        if len(encoded) > MAX_CONTENT_LENGTH:
+            encoded = encoded[:MAX_CONTENT_LENGTH]
+            note_content = encoded.decode("utf-8", errors="ignore")
 
         # Detect type from content prefix
         note_type = "context"
@@ -633,7 +774,13 @@ def main():
 
     args = parser.parse_args()
 
-    # Auto-fill role/mission/session_id from session identity if not provided
+    if not args.command:
+        parser.print_help()
+        return
+
+    # Auto-fill role/mission/session_id from session identity if not provided.
+    # Only called after confirming a command is present so --help works without
+    # a valid session identity file.
     default_role, default_mission, default_sid = _load_session_identity()
     if hasattr(args, "role") and not getattr(args, "role", ""):
         args.role = default_role
@@ -650,16 +797,24 @@ def main():
     args.archive_path = archive_path(pk)
     args.learnings_path = learnings_path(pk)
 
+    # Commands that manage their own dual-lock (notes + archive) internally
+    dual_lock_commands = {
+        "list": cmd_list,
+        "archive": cmd_archive,
+    }
+    # Commands that only need the notes lock
     notes_commands = {
-        "add": cmd_add, "list": cmd_list, "get": cmd_get,
-        "done": cmd_done, "update": cmd_update, "archive": cmd_archive,
+        "add": cmd_add, "get": cmd_get,
+        "done": cmd_done, "update": cmd_update,
         "migrate": cmd_migrate, "handoff-sessions": cmd_handoff_sessions,
     }
     learnings_commands = {
         "learn": cmd_learn, "learnings": cmd_learnings, "unlearn": cmd_unlearn,
     }
 
-    if args.command in notes_commands:
+    if args.command in dual_lock_commands:
+        dual_lock_commands[args.command](args)
+    elif args.command in notes_commands:
         with FileLock(args.notes_path):
             notes_commands[args.command](args)
     elif args.command in learnings_commands:
