@@ -48,7 +48,7 @@ last_verified: 2026-04-02
 | Tool | What it does | How it integrates |
 |------|-------------|-------------------|
 | **Budgeter** | Tracks token consumption, warns before expensive operations | Hooks (PreToolUse, PostToolUse, Stop) |
-| **Clarifier** | Resolves ambiguous requests before Claude acts | Subagent (spawned by behavioral rules in CLAUDE.md) |
+| **Clarifier** | Detects assumptions in specs, prompts, and plans before execution | Subagent (spawned by behavioral rules in CLAUDE.md) |
 | **Scribe** | Manages cross-session notes, learnings, handoffs | Slash commands + startup skill |
 | **Core** | Shared infrastructure: flags, config, session, hooks | Library imported by all tools |
 
@@ -119,7 +119,7 @@ Hooks run as shell commands at zero token cost. If budgeter ran as an inline pro
 
 ### Why a subagent for the clarifier?
 
-The clarifier's multi-turn Q&A dialogue can be verbose. As a subagent, only the final approved prompt returns to the main context. If it ran inline, every clarification question and answer would persist in context for the rest of the session.
+The clarifier's assumption detection runs as a subagent so its analysis tokens stay out of the main context. Only the JSON result (list of assumptions) returns to the caller. See [Clarifier v2 architecture](clarifier.md) for the full design.
 
 ### Why scribe notes over git/comments?
 
