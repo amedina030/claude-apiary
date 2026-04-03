@@ -28,6 +28,7 @@ from pathlib import Path as _PathImport
 # Add project root to path for core.utils import
 sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
 from core.utils.filelock import FileLock
+from core.session import SessionId
 
 from pathlib import Path
 
@@ -243,11 +244,15 @@ def cmd_add(args):
 
     # Duplicate handoff prevention
     if getattr(args, "if_no_handoff_for", None):
-        target_sid = args.if_no_handoff_for.lower()
+        try:
+            target_sid = SessionId(args.if_no_handoff_for)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return
         for n in notes:
             if (n.get("type") == "handoff" and
-                    n.get("session_id", "").lower().startswith(target_sid)):
-                print(f"Handoff for session {target_sid} already exists (#{n['id']}). Skipping.")
+                    target_sid.matches(n.get("session_id", ""))):
+                print(f"Handoff for session {target_sid.short} already exists (#{n['id']}). Skipping.")
                 return
 
     try:
@@ -290,8 +295,12 @@ def cmd_list(args):
 
     # Filter by session
     if args.session:
-        prefix = args.session.lower()
-        notes = [n for n in notes if n.get("session_id", "").lower().startswith(prefix)]
+        try:
+            sid = SessionId(args.session)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return
+        notes = [n for n in notes if sid.matches(n.get("session_id", ""))]
 
     # Filter by role
     if args.role:
