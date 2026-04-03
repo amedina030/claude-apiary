@@ -199,12 +199,31 @@ def cmd_summary(args):
         content = l.get("content", "").replace("\n", " ")[:60]
         learning_items.append(f"#{lid} {content}")
 
-    # Find latest handoff matching role/mission
+    # Find latest handoff matching role/mission, sorted by session end time
     handoffs = [
         n for n in active
         if n.get("type") == "handoff"
     ]
-    latest_handoff = max(handoffs, key=lambda n: n.get("id", 0)) if handoffs else None
+    latest_handoff = None
+    if handoffs:
+        # Build session_id -> ended_at lookup from history
+        session_times = {}
+        if HISTORY_PATH.exists():
+            try:
+                history = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+                for s in history:
+                    sid_short = s.get("session_id", "")[:8].lower()
+                    if sid_short and s.get("ended_at"):
+                        session_times[sid_short] = s["ended_at"]
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        def handoff_sort_key(n):
+            sid = n.get("session_id", "")[:8].lower()
+            # Prefer session ended_at, fall back to note timestamp
+            return session_times.get(sid, n.get("timestamp", ""))
+
+        latest_handoff = max(handoffs, key=handoff_sort_key)
 
     # Print summary
     print(f"**Active items:** {len(items)} notes — {', '.join(items) if items else 'None'}")
