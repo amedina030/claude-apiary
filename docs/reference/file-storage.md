@@ -4,7 +4,7 @@ title: File Storage
 scope: project
 description: Runtime data locations — where JSONL logs, flags, transcripts, and session state live
 framework_version: "1.0"
-last_verified: 2026-04-02
+last_verified: 2026-04-03
 ---
 
 # File Storage
@@ -48,6 +48,12 @@ The `<project-key>` is derived from the absolute path of the working directory (
 |------|------|-------------|
 | Session logs | `~/.claude/clarifier-logs/clarifier-*.md` | One log per clarifier session |
 | Cost log | `~/.claude/clarifier-logs/cost.log` | Token usage per clarifier invocation |
+
+## Refiner data
+
+| File | Path | Description |
+|------|------|-------------|
+| Round counter | `refiner/tmp/round_<session-id>.json` | Per-session refinement round count (repo-local, git-ignored) |
 
 ## Transcripts
 

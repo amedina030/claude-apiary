@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: 2026-04-02
+last_verified: 2026-04-03
 ---
 
 # CLI Tools
@@ -137,6 +137,27 @@ python clarifier/write_log.py [file]           # init new session
 python clarifier/write_log.py --append [file]   # append round
 python clarifier/write_log.py --complete [file]  # finalize session
 ```
+
+## refiner/round_counter.py
+
+Track refinement round counts per session. Used by the `/refine` skill to enforce the 15-round soft limit.
+
+### Subcommands
+
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `start` | `round_counter.py start --session-id ID` | Initialize counter at 0 for this session |
+| `tick` | `round_counter.py tick --session-id ID` | Increment by 1, print new count |
+| `reset` | `round_counter.py reset --session-id ID` | Reset to 0 |
+| `status` | `round_counter.py status --session-id ID` | Print current count without incrementing |
+
+### Flags
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--session-id ID` | yes | Session ID used to scope the counter file |
+
+State is stored at `refiner/tmp/round_<session-id>.json`. Directory is auto-created on first write.
 
 ## setup.py
 

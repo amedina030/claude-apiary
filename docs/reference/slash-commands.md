@@ -4,7 +4,7 @@ title: Slash Commands
 scope: project
 description: All slash commands, what they do, and when to use them
 framework_version: "1.0"
-last_verified: 2026-04-02
+last_verified: 2026-04-03
 ---
 
 # Slash Commands
@@ -23,7 +23,7 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 | `/run-clarifier-tests` | `clarifier/commands/run-clarifier-tests.md` | Run clarifier test suite (24 automated cases) |
 | `/note` | `scribe/commands/note.md` | Add a typed note (type auto-detected from prefix) |
 | `/notes` | `scribe/commands/notes.md` | List and query notes |
-| `/refine` | `refiner/commands/refine.md` | Sharpen a fuzzy idea into an airtight requirements spec through adversarial refinement |
+| `/refine` | `refiner/commands/refine.md` | Refine a fuzzy idea into a structured handoff spec through value-first adversarial questioning |
 | `/review` | `docs/commands/review.md` | Review changes against standards, then fix issues |
 
 ## Toggles
