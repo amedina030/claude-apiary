@@ -78,6 +78,16 @@ Extract optional flags with their defaults:
 python <repo_dir>/harden/round_counter.py start --session-id <session_id>
 ```
 
+### Create worktree (code mode only)
+
+For code mode, create a single worktree that persists across all rounds. All Defenders will edit files here cumulatively, and Attackers in rounds 2+ will read from here to see the accumulated fixes.
+
+```bash
+git worktree add .claude/worktrees/harden-<session_id> -b harden-<session_id> HEAD
+```
+
+Save the worktree path (`.claude/worktrees/harden-<session_id>`) and branch name (`harden-<session_id>`) for use throughout the loop.
+
 ---
 
 ## Step 1: Pre-run confirmation
@@ -121,7 +131,10 @@ Take `attacker_template` and replace the placeholders:
 - `{{FOCUS}}` → the focus type
 - `{{DEEP}}` → `true` or `false`
 - `{{PREV_DEFENDER}}` → `prev_defender_output`
-- `{{TARGET_CONTENT}}` → For code mode: instruct the agent to read the files by path. For plan mode: paste the note content directly.
+- `{{TARGET_CONTENT}}` → For code mode: instruct the agent to read the files by path. **For rounds 2+, use the worktree paths** (e.g. `<worktree_path>/file.py`) so the Attacker sees the cumulative Defender edits. For round 1, use the original repo paths. For plan mode: paste the note content directly.
+
+**Important:** Append this instruction for code mode:
+> "In your findings, always use the ORIGINAL relative file paths (e.g. `src/app.py:45-50`), not the worktree paths. The location field must match the original project structure."
 
 #### 2b. Spawn Attacker agent
 
@@ -173,18 +186,19 @@ Round <N>: Attacker found <total> issues (<critical> critical, <high> high, <med
 Take `defender_template` and replace:
 - `{{MODE}}` → `code` or `plan`
 - `{{FINDINGS_JSON}}` → the validated findings JSON (with ATK-NNN IDs)
-- `{{TARGET_CONTENT}}` → For code mode: list the file paths for the agent to read and edit. For plan mode: paste the note content directly.
+- `{{TARGET_CONTENT}}` → For code mode: list the file paths **using the worktree paths** (e.g. `<worktree_path>/file.py`) so the Defender reads and edits the cumulative state. For plan mode: paste the note content directly.
+
+**Important:** Append this instruction for code mode:
+> "Read and edit files at the worktree paths provided. In your JSON response, use the ORIGINAL relative file paths (e.g. `src/app.py`) in the `changes.file` field, not the worktree paths."
 
 Spawn a **foreground** Agent (subagent_type: "general-purpose") with:
 - **model:** value of `--model-defender`
 - **prompt:** the prepared Defender prompt
-- **For code mode only:** add `isolation: "worktree"` so the Defender edits files in an isolated worktree
+- **Do NOT use `isolation: "worktree"`** — the Defender edits the shared worktree directly
 
 **Important for code mode:** Append this instruction to the prompt:
 
 > "WORKFLOW: First, use the Read tool to read each target file. Then use the Edit tool to make your fixes — this is required, do not skip it. After all edits are complete, return your JSON summary. The JSON documents what you already changed, it is not a plan."
-
-The agent result will include worktree info (path and branch name) if files were changed. Save the `worktree_branch` and `worktree_path` for use in Step 3.
 
 #### 2f. Process Defender output
 
@@ -253,12 +267,13 @@ If ALL findings in this round were deferred (no fixes or refactors), and this is
 
 ### Code mode
 
-If any Defender agent ran with worktree isolation and returned a `worktree_branch` and `worktree_path`:
+Show the accumulated diff from the shared worktree:
 
-1. Show the diff from the worktree:
+1. Show the diff:
    ```bash
    git -C <worktree_path> diff HEAD
    ```
+   If the diff is empty (no changes were made across all rounds), warn: "Defenders did not make any file edits. No code changes to review."
 2. Show summary:
    ```
    **Harden complete.** <N> rounds, <total_findings> findings, <total_fixed> fixed, <total_deferred> deferred.
@@ -267,9 +282,6 @@ If any Defender agent ran with worktree isolation and returned a `worktree_branc
 3. Use AskUserQuestion:
    - **Approve** → proceed to Step 4
    - **Discard** → run `git worktree remove <worktree_path>`, save summary note anyway, stop
-
-If no worktree was returned (Defender didn't edit files), warn the user:
-> "Defender did not make any file edits. No code changes to review."
 
 ### Plan mode
 
