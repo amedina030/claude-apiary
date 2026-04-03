@@ -29,7 +29,6 @@ def run_validate_response(input_json: str, expected_ids: str, check_files: bool 
 
 def make_finding(**overrides):
     base = {
-        "id": "ATK-001",
         "category": "security",
         "severity": "high",
         "description": "SQL injection in query builder",
@@ -123,10 +122,22 @@ class TestValidateFindings(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
 
     def test_check_files_with_missing_file(self):
-        finding = make_finding(location="/nonexistent/file.py:10-20")
+        finding = make_finding(location="nonexistent/file.py:10-20")
         result = run_validate_findings(json.dumps([finding]), check_files=True)
         self.assertEqual(result.returncode, 1)
         self.assertIn("file not found", result.stderr)
+
+    def test_check_files_rejects_path_traversal(self):
+        finding = make_finding(location="/etc/passwd")
+        result = run_validate_findings(json.dumps([finding]), check_files=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("escapes project directory", result.stderr)
+
+    def test_check_files_rejects_comma_separated_locations(self):
+        finding = make_finding(location="app/db.py:10-20, app/models.py:5-8")
+        result = run_validate_findings(json.dumps([finding]), check_files=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("must reference a single file", result.stderr)
 
     def test_check_files_with_existing_file(self):
         # Use this test file itself as the target

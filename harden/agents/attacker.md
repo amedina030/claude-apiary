@@ -33,7 +33,7 @@ Each finding object must have these fields:
 1. **Do NOT include an "id" field.** IDs are assigned by a post-processor.
 2. All findings must have category "{{FOCUS}}" if a focus type was specified. If focus is "general", use whichever category fits best.
 3. Every field must be non-empty. Do not use placeholders.
-4. For code mode, "location" must reference real file paths and line numbers from the target.
+4. For code mode, "location" must reference a single file path with optional line range (e.g. `src/app.py:45-50`). **One file per finding.** If the same issue spans multiple files, create a separate finding for each file.
 5. For plan mode, "location" must reference a section heading from the spec.
 6. If deep mode is true, every finding MUST include a "scenario" field in Given/When/Then format.
 7. If deep mode is false, omit the "scenario" field entirely.
