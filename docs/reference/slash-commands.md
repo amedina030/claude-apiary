@@ -23,6 +23,7 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 | `/run-clarifier-tests` | `clarifier/commands/run-clarifier-tests.md` | Run clarifier test suite (24 automated cases) |
 | `/note` | `scribe/commands/note.md` | Add a typed note (type auto-detected from prefix) |
 | `/notes` | `scribe/commands/notes.md` | List and query notes |
+| `/refine` | `refiner/commands/refine.md` | Sharpen a fuzzy idea into an airtight requirements spec through adversarial refinement |
 | `/review` | `docs/commands/review.md` | Review changes against standards, then fix issues |
 
 ## Toggles
