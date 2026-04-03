@@ -24,6 +24,7 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 | `/note` | `scribe/commands/note.md` | Add a typed note (type auto-detected from prefix) |
 | `/notes` | `scribe/commands/notes.md` | List and query notes |
 | `/refine` | `refiner/commands/refine.md` | Refine a fuzzy idea into a structured handoff spec through value-first adversarial questioning |
+| `/harden` | `harden/commands/harden.md` | Adversarial attack-defend loop that stress-tests code or plans |
 | `/review` | `docs/commands/review.md` | Review changes against standards, then fix issues |
 
 ## Toggles

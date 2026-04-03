@@ -81,6 +81,39 @@ Claude Code sessions are isolated — each one starts fresh with no memory of wh
 
 ---
 
+### Refiner
+
+Adversarial spec-writing tool that turns fuzzy ideas into structured handoff documents.
+
+**Command:**
+```
+/refine <idea>    # start refining an idea into a handoff spec
+```
+
+---
+
+### Harden
+
+Adversarial code hardening loop that stress-tests code or plans.
+
+An automated attack-defend loop where an Attacker agent finds weaknesses (edge cases, vulnerabilities, design flaws) and a Defender agent fixes them. Iterates until the code or plan is hardened, producing a paper trail of what was found, fixed, and deferred.
+
+**What it does:**
+- **Attacker** reads code/plan and produces structured findings with severity ratings
+- **Defender** addresses each finding: fixes, refactors, or defers with justification
+- **Validators** ensure structured output — required fields, valid enums, file existence
+- **IDs assigned by Python** (ATK-001, DEF-001) — deterministic, not LLM-generated
+- Works on code files (with worktree isolation) or scribe plan notes
+
+**Commands:**
+```
+/harden file1.py file2.py           # harden code files
+/harden --plan 79                   # harden a scribe plan/spec note
+/harden --focus security --deep     # focused deep analysis
+```
+
+---
+
 ## Repository Structure
 
 ```
@@ -134,6 +167,23 @@ claude-apis/
 │   │   └── notes.md             # /notes command — query and list notes
 │   ├── notes.py                 # Core CLI: notes, learnings, handoffs, archive
 │   └── test_notes.py            # Tests for notes.py
+│
+├── refiner/                     # Idea-to-spec refinement tool
+│   ├── commands/
+│   │   └── refine.md            # /refine slash command definition
+│   └── round_counter.py         # Round tracking for refinement loops
+│
+├── harden/                      # Adversarial code hardening tool
+│   ├── agents/
+│   │   ├── attacker.md          # Attacker agent prompt template
+│   │   └── defender.md          # Defender agent prompt template
+│   ├── commands/
+│   │   └── harden.md            # /harden slash command definition
+│   ├── assign_ids.py            # Post-processor: assigns ATK-NNN / DEF-NNN IDs
+│   ├── validate_findings.py     # Validates Attacker output structure
+│   ├── validate_response.py     # Validates Defender output structure
+│   ├── round_counter.py         # Round tracking for harden loops
+│   └── tmp/                     # Runtime — round state files (git-ignored)
 │
 ├── setup.py                     # Unified installer for all tools
 ├── SETUP.md                     # Setup instructions

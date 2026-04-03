@@ -159,6 +159,64 @@ Track refinement round counts per session. Used by the `/refine` skill to enforc
 
 State is stored at `refiner/tmp/round_<session-id>.json`. Directory is auto-created on first write.
 
+## harden/assign_ids.py
+
+Assign deterministic sequential IDs to harden agent output. Reads JSON array from stdin.
+
+```bash
+echo '<json_array>' | python harden/assign_ids.py --prefix ATK
+echo '<json_array>' | python harden/assign_ids.py --prefix DEF
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--prefix PREFIX` | yes | ID prefix: `ATK` (findings) or `DEF` (responses) |
+
+## harden/validate_findings.py
+
+Validate Attacker output structure. Reads JSON from stdin.
+
+```bash
+echo '<json>' | python harden/validate_findings.py [--check-files] [--deep]
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--check-files` | no | Verify referenced files exist (code mode) |
+| `--deep` | no | Require Given/When/Then scenarios |
+
+Exit 0 + validated JSON on success. Exit 1 + error details on failure.
+
+## harden/validate_response.py
+
+Validate Defender output structure. Reads JSON from stdin.
+
+```bash
+echo '<json>' | python harden/validate_response.py --expected-ids ATK-001,ATK-002 [--check-files]
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--expected-ids IDS` | yes | Comma-separated ATK-IDs that must be addressed |
+| `--check-files` | no | Verify referenced files exist (code mode) |
+
+Exit 0 + validated JSON on success. Exit 1 + error details on failure.
+
+## harden/round_counter.py
+
+Track harden round counts per session. Same interface as `refiner/round_counter.py`.
+
+### Subcommands
+
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `start` | `round_counter.py start --session-id ID` | Initialize counter at 0 |
+| `tick` | `round_counter.py tick --session-id ID` | Increment by 1, print new count |
+| `reset` | `round_counter.py reset --session-id ID` | Reset to 0 |
+| `status` | `round_counter.py status --session-id ID` | Print current count without incrementing |
+
+State is stored at `harden/tmp/round_<session-id>.json`.
+
 ## setup.py
 
 Unified installer for all tools.
@@ -185,4 +243,6 @@ python budgeter/test_hooks.py
 python scribe/test_notes.py
 python clarifier/test_write_log.py
 python clarifier/test_log_cost.py
+python harden/test_validators.py
+python harden/test_assign_ids.py
 ```

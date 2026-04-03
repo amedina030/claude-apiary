@@ -9,6 +9,9 @@ budgeter/data/
 # Refiner runtime data
 refiner/tmp/
 
+# Harden runtime data
+harden/tmp/
+
 # Session runtime artifacts
 .claude-session-identity.json
 

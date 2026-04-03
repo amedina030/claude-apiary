@@ -25,6 +25,7 @@ CLARIFIER_DIR = APIS_DIR / "clarifier"
 SCRIBE_DIR = APIS_DIR / "scribe"
 DOCS_DIR = APIS_DIR / "docs"
 REFINER_DIR = APIS_DIR / "refiner"
+HARDEN_DIR = APIS_DIR / "harden"
 
 sys.path.insert(0, str(APIS_DIR))
 from core.hooks_lib import to_bash_path, hook_cmd, load_settings, save_settings, register_hooks
@@ -135,7 +136,7 @@ def write_manifest(claude_dir: Path):
     ]
 
     # Add all command files
-    for cmd_dir in [BUDGETER_DIR / "commands", CLARIFIER_DIR / "commands", SCRIBE_DIR / "commands", CORE_DIR / "commands", DOCS_DIR / "commands", REFINER_DIR / "commands"]:
+    for cmd_dir in [BUDGETER_DIR / "commands", CLARIFIER_DIR / "commands", SCRIBE_DIR / "commands", CORE_DIR / "commands", DOCS_DIR / "commands", REFINER_DIR / "commands", HARDEN_DIR / "commands"]:
         if cmd_dir.is_dir():
             for cmd_file in cmd_dir.glob("*.md"):
                 installed_files.append({
@@ -529,6 +530,11 @@ def main():
         for cmd_file in (REFINER_DIR / "commands").glob("*.md"):
             shutil.copy2(cmd_file, commands_dir / cmd_file.name)
         print(f"  Refiner commands : {commands_dir}")
+
+        # Harden commands
+        for cmd_file in (HARDEN_DIR / "commands").glob("*.md"):
+            shutil.copy2(cmd_file, commands_dir / cmd_file.name)
+        print(f"  Harden commands  : {commands_dir}")
 
         # Pre-commit hook
         install_pre_commit_hook()
