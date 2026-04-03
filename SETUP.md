@@ -14,8 +14,8 @@ No external Python dependencies.
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/amedina030/claude-apiary.git /path/to/claude-apis
-cd /path/to/claude-apis
+git clone https://github.com/amedina030/claude-apiary.git /path/to/claude-apiary
+cd /path/to/claude-apiary
 ```
 
 ### 2. Run the installer
@@ -35,7 +35,7 @@ This will:
 If setup prints a warning about `CLAUDE.md`, append the clarifier rules manually:
 
 ```bash
-cat /path/to/claude-apis/clarifier/CLAUDE.md >> ~/.claude/CLAUDE.md
+cat /path/to/claude-apiary/clarifier/CLAUDE.md >> ~/.claude/CLAUDE.md
 ```
 
 This only needs to be done once. The clarifier rules define when and how ambiguity detection fires — they live in `CLAUDE.md` because they govern Claude's core behavior, not a specific hook.
@@ -84,7 +84,7 @@ python setup.py --global --with-test-suite
 
 ## Re-running Setup
 
-Safe to re-run at any time — old `claude-apis` hook entries are stripped before writing new ones, so no duplicates accumulate. Run it again after pulling updates to keep installed files in sync.
+Safe to re-run at any time — old `claude-apiary` hook entries are stripped before writing new ones, so no duplicates accumulate. Run it again after pulling updates to keep installed files in sync.
 
 ---
 
@@ -102,7 +102,7 @@ If `clarifier/CLAUDE.md` has changed, re-apply the updated rules to `~/.claude/C
 ## Uninstalling
 
 **Budgeter:**
-- Remove the budgeter hook entries from `~/.claude/settings.json` (any entry containing `claude-apis`)
+- Remove the budgeter hook entries from `~/.claude/settings.json` (any entry containing `claude-apiary`)
 - Optionally delete `~/.claude/budgeter-log-enabled` and `~/.claude/budgeter-warn-enabled`
 
 **Clarifier:**
@@ -120,7 +120,7 @@ If `clarifier/CLAUDE.md` has changed, re-apply the updated rules to `~/.claude/C
 - Delete `.git/hooks/pre-commit` (if it references `docs/check.py`)
 
 **Everything:**
-- Delete the `claude-apis` repo directory
+- Delete the `claude-apiary` repo directory
 
 ---
 

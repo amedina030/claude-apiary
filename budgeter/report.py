@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Summary of claude-apis budgeter usage log.
+Summary of claude-apiary budgeter usage log.
 
 Usage:
     python report.py                    # default: grouped by session > task

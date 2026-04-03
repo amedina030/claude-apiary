@@ -30,5 +30,5 @@ Query notes using the scribe tool.
    ```bash
    python <scribe_dir>/notes.py <subcommand> [args]
    ```
-   Where `<scribe_dir>` is the `scribe/` directory in the claude-apis repo.
+   Where `<scribe_dir>` is the `scribe/` directory in the claude-apiary repo.
 3. Display the output to the user.

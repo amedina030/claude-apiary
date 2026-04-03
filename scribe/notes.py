@@ -61,7 +61,7 @@ def _load_session_identity():
 def project_key_from_path(p):
     """Derive Claude's project key from an absolute path.
 
-    Windows: D:\\Professional\\claude-apis → D--Professional-claude-apis
+    Windows: D:\\Professional\\claude-apiary → D--Professional-claude-apiary
     Unix:    /home/user/project           → home-user-project
     """
     p = Path(p).resolve()
@@ -705,7 +705,7 @@ def cmd_unlearn(args):
 def main():
     parser = argparse.ArgumentParser(description="Scribe — structured note management")
     parser.add_argument("--project", default=None,
-                        help="Project key (e.g. D--Professional-claude-apis). Defaults to cwd-derived key.")
+                        help="Project key (e.g. D--Professional-claude-apiary). Defaults to cwd-derived key.")
     sub = parser.add_subparsers(dest="command")
 
     # add

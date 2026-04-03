@@ -40,7 +40,7 @@ All scribe data is project-scoped under `~/.claude/projects/<project-key>/`:
 | `learnings.jsonl` | Project-specific learnings (no auto-archive) |
 | `notes_archive.jsonl` | Archived notes (older than 30 days) |
 
-The `<project-key>` is derived from the absolute path of the working directory (e.g. `D--Professional-claude-apis`).
+The `<project-key>` is derived from the absolute path of the working directory (e.g. `D--Professional-claude-apiary`).
 
 ## Clarifier data
 

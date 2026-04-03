@@ -1,5 +1,5 @@
 """
-Config loading utilities for claude-apis tools.
+Config loading utilities for claude-apiary tools.
 """
 import json
 from pathlib import Path

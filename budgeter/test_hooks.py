@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests for claude-apis budgeter hooks and logger.
+Tests for claude-apiary budgeter hooks and logger.
 
 Covers:
   - Unit tests for logger (append_entry zero-delta filter, baseline, snapshot)

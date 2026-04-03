@@ -10,7 +10,7 @@ import sys
 import json
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apis root
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apiary root
 
 from core.hook_context import context_block, hook_allow, read_payload
 from core.session import SessionId

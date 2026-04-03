@@ -1,4 +1,4 @@
-# claude-apis
+# claude-apiary
 
 A unified ecosystem of tools that extend and optimize the [Claude Code](https://claude.ai/claude-code) experience. Each tool is a specialized worker — together they form a hive.
 
@@ -117,7 +117,7 @@ An automated attack-defend loop where an Attacker agent finds weaknesses (edge c
 ## Repository Structure
 
 ```
-claude-apis/
+claude-apiary/
 ├── core/                        # Shared infrastructure used by all tools
 │   ├── flags.py                 # Flag file management (~/.claude/{name}-enabled)
 │   ├── config.py                # JSON config loader with defaults fallback

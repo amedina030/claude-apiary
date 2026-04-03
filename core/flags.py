@@ -1,5 +1,5 @@
 """
-Flag file management for claude-apis tools.
+Flag file management for claude-apiary tools.
 
 Each tool feature is toggled via a sentinel file at ~/.claude/{flag_name}-enabled.
 """

@@ -1,5 +1,5 @@
 """
-Hook registration utilities for claude-apis tools.
+Hook registration utilities for claude-apiary tools.
 
 Used by setup.py to install/update hooks in Claude Code settings.json files.
 """
@@ -46,7 +46,7 @@ def register_hooks(settings_path: Path, new_hooks: Dict[str, List], marker: str,
     marker (or any string in also_strip) in their JSON representation.
 
     new_hooks: {event_name: [hook_entry, ...]}
-    marker: string identifying this tool's hooks (e.g. "claude-apis")
+    marker: string identifying this tool's hooks (e.g. "claude-apiary")
     also_strip: additional marker strings to remove (e.g. old repo paths)
     """
     strip = [marker] + (also_strip or [])

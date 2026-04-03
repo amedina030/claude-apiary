@@ -1,15 +1,35 @@
 {
-  "monitored_tools": ["Agent", "Bash", "Read", "Write"],
-  "scope_keywords": ["refactor", "rewrite", "migrate", "overhaul", "restructure", "redesign"],
+  "monitored_tools": [
+    "Agent",
+    "Bash",
+    "Read",
+    "Write"
+  ],
+  "scope_keywords": [
+    "refactor",
+    "rewrite",
+    "migrate",
+    "overhaul",
+    "restructure",
+    "redesign"
+  ],
   "breadth_keywords": [],
   "file_count_threshold": 3,
   "step_count_threshold": 4,
-  "investigative_keywords": ["why", "explain", "understand", "investigate", "debug", "diagnose", "analyze"],
+  "investigative_keywords": [
+    "why",
+    "explain",
+    "understand",
+    "investigate",
+    "debug",
+    "diagnose",
+    "analyze"
+  ],
   "rule_weights": {
-    "scope_keywords": 1.0,
+    "scope_keywords": 0.8,
     "breadth_keywords": 0.5,
-    "file_count": 1.0,
-    "step_count": 1.0,
+    "file_count": 1.6,
+    "step_count": 0.5,
     "investigative_keywords": 1.0
   },
   "warn_score_threshold": 1.0,

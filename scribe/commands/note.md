@@ -30,6 +30,6 @@ Add a structured note using the scribe tool.
    ```bash
    python <scribe_dir>/notes.py add --type <type> --session-id <first 8 chars of session_id> --content "<content>"
    ```
-   Where `<scribe_dir>` is the `scribe/` directory in the claude-apis repo.
+   Where `<scribe_dir>` is the `scribe/` directory in the claude-apiary repo.
 
 3. Confirm to the user: "Noted: #<id> (<type>)"

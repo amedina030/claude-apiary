@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Setup script for claude-apis.
+Setup script for claude-apiary.
 
 Installs all tools (budgeter hooks, clarifier agent/commands) into the Claude Code
-environment. Safe to re-run — existing claude-apis entries are replaced, not duplicated.
+environment. Safe to re-run — existing claude-apiary entries are replaced, not duplicated.
 
 Usage:
     # Global install (hooks fire in every Claude Code session):
@@ -31,7 +31,7 @@ sys.path.insert(0, str(APIS_DIR))
 from core.hooks_lib import to_bash_path, hook_cmd, load_settings, save_settings, register_hooks
 
 PYTHON = Path(sys.executable)
-MARKER = "claude-apis"
+MARKER = "claude-apiary"
 
 
 def build_budgeter_hooks():
@@ -386,7 +386,7 @@ def run_check():
     # 7. Python
     print("[Runtime]")
     ok(f"Python: {PYTHON}")
-    ok(f"claude-apis: {APIS_DIR}")
+    ok(f"claude-apiary: {APIS_DIR}")
     import os
     if os.environ.get("PYTHONUTF8") == "1":
         ok("PYTHONUTF8=1 (UTF-8 mode enabled)")
@@ -453,7 +453,7 @@ def run_check():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Set up claude-apis tools.")
+    parser = argparse.ArgumentParser(description="Set up claude-apiary tools.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--global",
@@ -493,7 +493,7 @@ def main():
     for hooks_dict in [build_budgeter_hooks(), build_core_hooks(), build_scribe_hooks(), build_docs_hooks()]:
         for event, entries in hooks_dict.items():
             all_hooks.setdefault(event, []).extend(entries)
-    register_hooks(settings_path, all_hooks, MARKER, also_strip=["claude-budgeter"])
+    register_hooks(settings_path, all_hooks, MARKER, also_strip=["claude-budgeter", "claude-apis"])
 
     # Ensure budgeter data/tmp dirs exist
     if args.global_install:
@@ -545,7 +545,7 @@ def main():
     print(f"\n  Scope            : {scope}")
     print(f"  Hooks written to : {settings_path}")
     print(f"  Python executable: {PYTHON}")
-    print(f"  claude-apis      : {APIS_DIR}")
+    print(f"  claude-apiary      : {APIS_DIR}")
     if not args.global_install:
         print(f"  Project config   : {claude_dir / 'budgeter.json'}")
         print(f"  Project log      : {claude_dir / 'budgeter-log.jsonl'}")

@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apis root
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apiary root
 
 from budgeter.lib import logger, estimator
 from core import flags

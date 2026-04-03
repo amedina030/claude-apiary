@@ -4,7 +4,7 @@ version: "1.0"
 
 # Documentation Framework
 
-This file defines how documentation works in the claude-apis project. Every doc under `docs/` follows these rules. When this file changes, all existing docs must be updated to match — see [Framework Edit Workflow](#framework-edit-workflow).
+This file defines how documentation works in the claude-apiary project. Every doc under `docs/` follows these rules. When this file changes, all existing docs must be updated to match — see [Framework Edit Workflow](#framework-edit-workflow).
 
 ## Core Principle: Errors Signal Doc Gaps
 
