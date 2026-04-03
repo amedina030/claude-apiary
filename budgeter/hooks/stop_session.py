@@ -18,9 +18,12 @@ from budgeter.lib import logger, estimator
 from core import flags
 
 
+_MAX_STDIN_BYTES = 64 * 1024  # 64 KB — matches log_agent_cost.py cap
+
+
 def main():
     try:
-        payload = json.loads(sys.stdin.read())
+        payload = json.loads(sys.stdin.buffer.read(_MAX_STDIN_BYTES))
     except json.JSONDecodeError:
         sys.exit(0)
 
@@ -70,18 +73,24 @@ def main():
             }
             logger.append_entry(entry)
 
-        # Write feedback for the last task in the session.
+        # Write feedback for the last task in the session, but only if
+        # pre_tool_use hasn't already written a record for the same task
+        # (pre_tool_use writes at task boundaries; stop_session covers the
+        # final task which has no subsequent PRE hook).
+        # Use the atomic read-check-write helper to avoid the TOCTOU race
+        # where two concurrent processes both pass the "already written" check.
         if baseline is not None:
+            task_turn_val = baseline.get("task_turn", baseline.get("turn_number", 0))
             feedback_entry = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "session_id": session_id,
-                "task_turn": baseline.get("task_turn", baseline.get("turn_number", 0)),
+                "task_turn": task_turn_val,
                 "scope_flags": baseline.get("scope_flags", []),
                 "score": estimator.score_flags(baseline.get("scope_flags", []), config),
                 "predicted_cost": baseline.get("predicted_cost", 0),
                 "warning_fired": baseline.get("warning_fired", False),
             }
-            logger.append_feedback(feedback_entry)
+            logger.append_feedback_if_not_present(feedback_entry, session_id, task_turn_val)
 
     if session_id:
         logger.cleanup_session(session_id)

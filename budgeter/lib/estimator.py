@@ -41,11 +41,18 @@ def is_approval_message(text):
 _FILE_EXTENSIONS = (
     "py|js|ts|json|md|txt|yaml|yml|css|html|jsx|tsx|go|rs|java|rb|sh|vue|php|c|cpp|h"
 )
+# Match filenames/relative paths but NOT URLs (no scheme://) and not bare
+# path components inside a URL.  We disallow forward-slash in the stem so
+# that "https://example.com/foo.js" does not match as a file reference — only
+# the final path component "foo.js" would qualify if it appears as a word boundary.
 _FILE_PATTERN = re.compile(
-    r'\b[\w\-/\.]*[\w\-]\.(?:' + _FILE_EXTENSIONS + r')\b'
+    r'(?<![:/])(?<!\w/)\b[\w\-\.]*[\w\-]\.(?:' + _FILE_EXTENSIONS + r')\b'
 )
 _STEP_PATTERNS = [
-    r'\bthen\b', r'\bnext\b', r'\balso\b', r'\bfirst\b', r'\bfinally\b', r'\d+\.',
+    r'\bthen\b', r'\bnext\b', r'\balso\b', r'\bfirst\b', r'\bfinally\b',
+    # Match numbered list items only: digit(s) followed by a period and whitespace
+    # (or end of string), not bare decimals like "3.14" or version strings.
+    r'(?m)^\s*\d+\.\s',
 ]
 
 
@@ -125,17 +132,31 @@ def _group_tasks(log_entries, config):
     for e in log_entries:
         if "turn_number" not in e:
             continue
+        # Skip Agent-sourced entries logged with task_turn=0 — these are
+        # background agent costs not attributed to any user task and would
+        # artificially inflate the cost of task 0, skewing predictions.
+        if e.get("tool_name") == "Agent" and e.get("task_turn", 0) == 0:
+            continue
         task_turn = e.get("task_turn", e["turn_number"])
         key = (e.get("session_id", ""), task_turn)
         if key not in groups:
-            groups[key] = {"message": e.get("assistant_message", ""), "total": 0}
+            # Store the representative message AND any scope_flags from the first entry
+            groups[key] = {
+                "message": e.get("assistant_message", ""),
+                "total": 0,
+                "scope_flags": e.get("scope_flags"),  # may be None or []
+            }
+        else:
+            # Prefer the first non-empty scope_flags we encounter for this group
+            if not groups[key]["scope_flags"] and e.get("scope_flags"):
+                groups[key]["scope_flags"] = e["scope_flags"]
         groups[key]["total"] += e.get("net_tokens_delta", 0)
 
     tasks = []
     for g in groups.values():
-        # Prefer stored scope_flags if present; otherwise backfill from message.
+        # Prefer stored scope_flags if present and non-empty; otherwise backfill from message.
         stored_flags = g.get("scope_flags")
-        task_flags = stored_flags if stored_flags is not None else detect_scope_flags(g["message"], config)
+        task_flags = stored_flags if stored_flags else detect_scope_flags(g["message"], config)
         tasks.append((task_flags, g["total"]))
     return tasks
 

@@ -15,6 +15,8 @@ Usage:
 import json
 import sys
 import argparse
+import tempfile
+import os
 from pathlib import Path
 
 BUDGETER_DIR = Path(__file__).parent
@@ -26,17 +28,28 @@ WEIGHT_MIN = 0.3
 WEIGHT_MAX = 2.5
 
 
+_MAX_LOG_BYTES = 100 * 1024 * 1024  # 100 MB — prevents OOM on runaway log files
+
+
 def load_jsonl(path):
     if not path.exists():
         return []
+    try:
+        if path.stat().st_size > _MAX_LOG_BYTES:
+            print(f"Warning: {path.name} exceeds {_MAX_LOG_BYTES // (1024*1024)} MB — skipping to avoid OOM.",
+                  file=sys.stderr)
+            return []
+    except OSError:
+        return []
     entries = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                pass
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
     return entries
 
 
@@ -132,8 +145,16 @@ def propose_weights(current_weights, rule_stats):
     proposed = {}
     for rule, s in eligible.items():
         current = current_weights.get(rule, 1.0)
-        new_weight = current * (s["precision"] / mean_precision)
-        new_weight = max(WEIGHT_MIN, min(WEIGHT_MAX, round(new_weight, 1)))
+        if s["precision"] == 0.0:
+            # Rule never predicted correctly — set to WEIGHT_MIN so it
+            # cannot trigger a warning on its own but still participates
+            # in multi-rule score sums at the stated minimum weight.
+            # Using WEIGHT_MIN (not WEIGHT_MIN/10) keeps this branch
+            # consistent with the clamp applied in the normal branch.
+            new_weight = WEIGHT_MIN
+        else:
+            new_weight = current * (s["precision"] / mean_precision)
+            new_weight = max(WEIGHT_MIN, min(WEIGHT_MAX, round(new_weight, 1)))
         proposed[rule] = new_weight
 
     return proposed, mean_precision
@@ -261,7 +282,24 @@ def main():
     # Merge proposed weights into config (preserve unchanged rules)
     new_weights = {**current_weights, **proposed_weights}
     config["rule_weights"] = new_weights
-    CONFIG_PATH.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    # Write atomically: write to a temp file in the same directory, then rename
+    # so a crash mid-write never truncates the live config.
+    config_dir = CONFIG_PATH.parent
+    try:
+        fd, tmp_path = tempfile.mkstemp(dir=config_dir, suffix=".tmp", prefix="config-")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as tf:
+                tf.write(json.dumps(config, indent=2) + "\n")
+            os.replace(tmp_path, CONFIG_PATH)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+    except OSError as exc:
+        print(f"Error writing config: {exc}", file=sys.stderr)
+        sys.exit(1)
     print(f"Updated config.json with new rule weights.")
 
 

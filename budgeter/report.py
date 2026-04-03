@@ -19,32 +19,40 @@ BUDGETER_DIR = Path(__file__).parent
 LOG_PATH = BUDGETER_DIR / "data" / "usage_log.jsonl"
 FEEDBACK_PATH = BUDGETER_DIR / "data" / "feedback.jsonl"
 
-def load_feedback():
-    if not FEEDBACK_PATH.exists():
+# 100 MB — generous cap for local log files; prevents OOM on runaway logs
+_MAX_LOG_BYTES = 100 * 1024 * 1024
+
+
+def _read_jsonl(path):
+    """Read a JSONL file into a list of dicts, skipping invalid lines.
+    Returns an empty list when the file does not exist or exceeds _MAX_LOG_BYTES."""
+    if not path.exists():
+        return []
+    try:
+        if path.stat().st_size > _MAX_LOG_BYTES:
+            print(f"Warning: {path.name} exceeds {_MAX_LOG_BYTES // (1024*1024)} MB — skipping to avoid OOM.",
+                  file=__import__("sys").stderr)
+            return []
+    except OSError:
         return []
     entries = []
-    for line in FEEDBACK_PATH.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                pass
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
     return entries
+
+
+def load_feedback():
+    return _read_jsonl(FEEDBACK_PATH)
 
 
 def load_entries():
-    if not LOG_PATH.exists():
-        return []
-    entries = []
-    for line in LOG_PATH.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                pass
-    return entries
+    return _read_jsonl(LOG_PATH)
 
 
 def parse_date(s):
@@ -52,7 +60,10 @@ def parse_date(s):
 
 
 def entry_date(e):
-    return datetime.fromisoformat(e["timestamp"]).date()
+    try:
+        return datetime.fromisoformat(e["timestamp"]).date()
+    except (ValueError, KeyError):
+        return None
 
 
 def short_session(session_id):
@@ -77,18 +88,47 @@ def net_delta(e):
 
 # Pricing weights relative to regular input tokens (Opus rates as baseline).
 # input: $15/MTok, cache_read: $1.50/MTok (10%), output: $75/MTok (5x)
-PRICE_WEIGHT_INPUT = 1.0
-PRICE_WEIGHT_CACHE = 0.1
-PRICE_WEIGHT_OUTPUT = 5.0
+# These defaults can be overridden via config.json keys:
+#   price_weight_input, price_weight_cache, price_weight_output
+_DEFAULT_PRICE_WEIGHT_INPUT = 1.0
+_DEFAULT_PRICE_WEIGHT_CACHE = 0.1
+_DEFAULT_PRICE_WEIGHT_OUTPUT = 5.0
+
+
+def _load_price_weights():
+    """Load pricing weights from config.json, falling back to module defaults."""
+    try:
+        config = json.loads((BUDGETER_DIR / "config.json").read_text(encoding="utf-8"))
+        return (
+            config.get("price_weight_input", _DEFAULT_PRICE_WEIGHT_INPUT),
+            config.get("price_weight_cache", _DEFAULT_PRICE_WEIGHT_CACHE),
+            config.get("price_weight_output", _DEFAULT_PRICE_WEIGHT_OUTPUT),
+        )
+    except Exception:
+        return _DEFAULT_PRICE_WEIGHT_INPUT, _DEFAULT_PRICE_WEIGHT_CACHE, _DEFAULT_PRICE_WEIGHT_OUTPUT
+
+
+_price_weights_cache = None
+
+
+def _get_price_weights():
+    """Return cached pricing weights, loading from config.json only once per process."""
+    global _price_weights_cache
+    if _price_weights_cache is None:
+        _price_weights_cache = _load_price_weights()
+    return _price_weights_cache
 
 
 def weighted_delta(e):
-    """Return weighted token count, scaling cache (0.1x) and output (5x) relative to input."""
+    """Return weighted token count, scaling cache and output relative to input.
+    Weights are loaded from config.json once per process (cached) so pricing
+    changes take effect on the next invocation without repeated file I/O."""
+    w_input, w_cache, w_output = _get_price_weights()
     inp = e.get("input_tokens_delta", 0)
     cache = e.get("cache_tokens_delta", 0)
     out = e.get("output_tokens_delta", 0)
     if inp or cache or out:
-        return int(inp * PRICE_WEIGHT_INPUT + cache * PRICE_WEIGHT_CACHE + out * PRICE_WEIGHT_OUTPUT)
+        return int(inp * w_input + cache * w_cache + out * w_output)
     # Fallback for old entries without split fields
     return net_delta(e)
 
@@ -352,7 +392,9 @@ def main():
         entries = [e for e in entries if entry_date(e) == target]
     elif args.since:
         since = parse_date(args.since)
-        entries = [e for e in entries if entry_date(e) >= since]
+        # Entries without a parseable timestamp are excluded rather than
+        # incorrectly treated as matching (entry_date returns None for them).
+        entries = [e for e in entries if entry_date(e) is not None and entry_date(e) >= since]
 
     if not entries:
         print("No entries found.")

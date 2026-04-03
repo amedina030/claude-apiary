@@ -70,12 +70,20 @@ def main():
     is_continuation = assistant_message.lstrip().startswith("[CONT]")
     clean_message = _strip_cont(assistant_message)
 
-    if is_new_turn and is_continuation and baseline is not None:
+    if is_new_turn and not is_continuation:
+        # A genuinely new task: assign this turn as the task anchor.
+        task_turn = turn_number
+    elif is_new_turn and is_continuation and baseline is not None:
+        # Mid-task clarifying question: inherit the task_turn from baseline.
         task_turn = baseline.get("task_turn", baseline.get("turn_number", turn_number))
+    elif baseline is not None:
+        # Same turn as before: always use the baseline's task_turn directly.
+        # Use "task_turn" key; fall back to "turn_number" only when the baseline
+        # predates the task_turn field (old records).  Never fall back to the
+        # current turn_number, which would misattribute costs to a different task.
+        task_turn = baseline["task_turn"] if "task_turn" in baseline else baseline.get("turn_number", turn_number)
     else:
-        task_turn = baseline.get("task_turn", turn_number) if baseline is not None else turn_number
-        if is_new_turn and not is_continuation:
-            task_turn = turn_number
+        task_turn = turn_number
 
     # Capture user prompt on the first tool call of a new task; inherit it otherwise.
     if is_new_turn and not is_continuation:
@@ -88,11 +96,19 @@ def main():
     if is_new_turn and not is_continuation:
         scope_flags = estimator.detect_scope_flags(clean_message, config, user_text=user_message)
         # Approval inheritance: if this turn has no flags but the user message is
-        # a short approval ("yes", "proceed", etc.) and the previous task had flags,
-        # inherit them — the approval continues the previous task's risk profile.
+        # a short approval ("yes", "proceed", etc.) AND the previous task was the
+        # immediately preceding turn (no gap), inherit its flags — the approval
+        # continues that task's risk profile.
+        # Guard: only inherit when the baseline turn is adjacent (prev_turn + 1 ==
+        # turn_number) so a "yes" on a wholly new topic doesn't pick up stale flags.
         if not scope_flags and baseline is not None:
             prev_flags = baseline.get("scope_flags", [])
-            if prev_flags and estimator.is_approval_message(user_message):
+            # Use turn_number (last recorded turn) for adjacency, not task_turn
+            # (the task anchor). Multi-turn tasks have prev_turn == turn_number - 1
+            # even when task_turn is many turns back, so using task_turn would
+            # incorrectly fail the adjacency check for those tasks.
+            adjacent = (prev_turn == turn_number - 1)
+            if prev_flags and adjacent and estimator.is_approval_message(user_message):
                 scope_flags = prev_flags
     else:
         scope_flags = baseline.get("scope_flags", []) if baseline is not None else []
@@ -130,13 +146,14 @@ def main():
                 "tool_name": "[compaction]",
                 "assistant_message": f"Context compacted: {baseline['tokens']:,} -> {tokens_now:,} tokens",
                 "user_message": "",
-                "tokens_delta": 1,  # non-zero so it gets written
+                "tokens_delta": 0,
                 "context_tokens": 0,
                 "net_tokens_delta": 0,
                 "turn_number": turn_number,
                 "task_turn": task_turn,
                 "scope_flags": scope_flags,
                 "project": "",
+                "_marker": True,  # force-write despite zero deltas
             })
 
         if baseline is not None and baseline.get("prev_tool_name") != "Agent" and not compacted:

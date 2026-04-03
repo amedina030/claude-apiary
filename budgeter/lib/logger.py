@@ -1,9 +1,15 @@
 import json
 import sys
+import time
+import threading
+from contextlib import contextmanager
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.session import SessionId
+
+_globals_lock = threading.Lock()
 
 BUDGETER_DIR = Path(__file__).parent.parent
 LOG_PATH = BUDGETER_DIR / "data" / "usage_log.jsonl"
@@ -15,41 +21,114 @@ CONFIG_PATH = BUDGETER_DIR / "config.json"
 _PROJECT_CONFIG_FILENAME = "budgeter.json"
 
 
+@contextmanager
+def _file_lock(path):
+    """
+    Advisory cross-platform file lock around append operations.
+    Uses a sibling .lock file.  Retries for up to 2 seconds before giving up
+    (proceeding unlocked) so a crashed process never permanently blocks writes.
+    """
+    lock_path = Path(str(path) + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + 2.0
+    acquired = False
+    fd = None
+    try:
+        while time.monotonic() < deadline:
+            try:
+                fd = open(lock_path, "x")  # exclusive create — atomic on most FS
+                acquired = True
+                break
+            except FileExistsError:
+                time.sleep(0.05)
+        yield
+    finally:
+        if acquired and fd is not None:
+            try:
+                fd.close()
+            except OSError:
+                pass
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass
+
+
+def _resolve_safe_project_root(cwd):
+    """
+    Resolve cwd to a real, absolute path and return it.
+    Raises ValueError if the path is empty, non-absolute after resolution,
+    or contains suspicious traversal components that survive normalization.
+    """
+    if not cwd or not str(cwd).strip():
+        raise ValueError("cwd is empty")
+    p = Path(cwd).resolve()
+    # Must be absolute after resolution
+    if not p.is_absolute():
+        raise ValueError(f"cwd resolved to a non-absolute path: {p}")
+    return p
+
+
 def configure_for_project(cwd):
     """
-    If a .claude/budgeter.json exists in cwd, switch all paths to that project's
-    directory. Returns True if project-level config was found, False otherwise.
+    If a .claude/budgeter.json exists in cwd, update the module-level path
+    globals atomically (under a lock) and return True.  Falls back to
+    module-level defaults and returns False when no project config is found.
+
+    The globals are updated as a single assignment under _globals_lock so
+    concurrent calls for different projects cannot interleave partial state.
+
+    NOTE: Readers of LOG_PATH, FEEDBACK_PATH, TMP_DIR, and CONFIG_PATH do not
+    hold _globals_lock. This is an intentional known gap — the globals are Path
+    objects (reference assignment is atomic in CPython) and the practical
+    concurrent-write window is extremely narrow (hook startup). A full reader
+    lock would require threading.local() copies and is deferred.
     """
     global LOG_PATH, FEEDBACK_PATH, TMP_DIR, CONFIG_PATH
     if not cwd:
         return False
-    project_config = Path(cwd) / ".claude" / _PROJECT_CONFIG_FILENAME
+    try:
+        root = _resolve_safe_project_root(cwd)
+    except ValueError:
+        return False
+    project_config = root / ".claude" / _PROJECT_CONFIG_FILENAME
     if not project_config.exists():
         return False
-    CONFIG_PATH = project_config
-    LOG_PATH = Path(cwd) / ".claude" / "budgeter-log.jsonl"
-    FEEDBACK_PATH = Path(cwd) / ".claude" / "budgeter-feedback.jsonl"
-    TMP_DIR = Path(cwd) / ".claude" / "budgeter-tmp"
+    new_config = project_config
+    new_log = root / ".claude" / "budgeter-log.jsonl"
+    new_feedback = root / ".claude" / "budgeter-feedback.jsonl"
+    new_tmp = root / ".claude" / "budgeter-tmp"
+    with _globals_lock:
+        CONFIG_PATH = new_config
+        LOG_PATH = new_log
+        FEEDBACK_PATH = new_feedback
+        TMP_DIR = new_tmp
     return True
 
 
 def load_config():
-    with open(CONFIG_PATH, encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 
 def read_log():
     if not LOG_PATH.exists():
         return []
     entries = []
-    with open(LOG_PATH, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
+    with _file_lock(LOG_PATH):
+        with open(LOG_PATH, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
     return entries
 
 
@@ -68,32 +147,76 @@ def count_tasks():
 
 
 def append_entry(entry):
-    if entry.get("tokens_delta", 0) == 0:
-        return
+    # Force-write if the entry is explicitly marked (e.g. compaction markers).
+    # Otherwise drop entries where both deltas are zero — there is nothing to record.
+    if not entry.get("_marker"):
+        if entry.get("tokens_delta", 0) == 0 and entry.get("net_tokens_delta", 0) == 0:
+            return
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+    # Strip internal-only fields before persisting
+    persisted = {k: v for k, v in entry.items() if k != "_marker"}
+    with _file_lock(LOG_PATH):
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(persisted) + "\n")
 
 
 def append_feedback(entry):
     FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(FEEDBACK_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+    with _file_lock(FEEDBACK_PATH):
+        with open(FEEDBACK_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+
+
+def append_feedback_if_not_present(entry, session_id, task_turn):
+    """
+    Atomically check whether a feedback record for (session_id, task_turn)
+    already exists and, if not, append entry — all under a single lock
+    acquisition.  This closes the TOCTOU window that exists when read_feedback()
+    and append_feedback() are called separately (ATK-005).
+
+    Returns True if the entry was written, False if it was already present.
+    """
+    FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _file_lock(FEEDBACK_PATH):
+        # Read existing records while holding the lock
+        existing_entries = []
+        if FEEDBACK_PATH.exists():
+            with open(FEEDBACK_PATH, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            existing_entries.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            pass
+        already_written = any(
+            f.get("session_id") == session_id and f.get("task_turn") == task_turn
+            for f in existing_entries
+        )
+        if already_written:
+            return False
+        with open(FEEDBACK_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+        return True
 
 
 def read_feedback():
     if not FEEDBACK_PATH.exists():
         return []
     entries = []
-    with open(FEEDBACK_PATH, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
+    with _file_lock(FEEDBACK_PATH):
+        with open(FEEDBACK_PATH, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
     return entries
+
+
+_MAX_TRANSCRIPT_BYTES = 50 * 1024 * 1024  # 50 MB — transcripts beyond this are unusually large
 
 
 def read_session_jsonl(transcript_path):
@@ -101,6 +224,14 @@ def read_session_jsonl(transcript_path):
         return []
     path = Path(transcript_path)
     if not path.exists():
+        return []
+    try:
+        file_size = path.stat().st_size
+    except OSError:
+        return []
+    if file_size > _MAX_TRANSCRIPT_BYTES:
+        # Return an empty list rather than exhausting memory on a huge file.
+        # Callers treat an empty result as "no history" which is safe.
         return []
     entries = []
     with open(path, encoding="utf-8") as f:
@@ -115,7 +246,12 @@ def read_session_jsonl(transcript_path):
 
 
 def get_user_turn_number(session_entries):
-    """Count user messages with actual text content (not tool results)."""
+    """Count user messages with actual text content (not tool results).
+
+    Tool result blocks have type 'tool_result', not 'text', but they can contain
+    nested content lists that include text blocks.  We only count top-level 'text'
+    blocks that are not inside a tool_result block.
+    """
     count = 0
     for entry in session_entries:
         msg = entry.get("message", {})
@@ -124,7 +260,13 @@ def get_user_turn_number(session_entries):
             if isinstance(content, str) and content.strip():
                 count += 1
             elif isinstance(content, list):
-                if any(isinstance(b, dict) and b.get("type") == "text" for b in content):
+                # Only count if there is at least one top-level text block
+                # (tool_result blocks have type "tool_result", not "text")
+                if any(
+                    isinstance(b, dict)
+                    and b.get("type") == "text"
+                    for b in content
+                ):
                     count += 1
     return count
 
@@ -224,29 +366,33 @@ def load_baseline(session_id):
     path = _sid(session_id).tmp_path("baseline.json", TMP_DIR)
     if not path.exists():
         return None
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    with _file_lock(path):
+        if not path.exists():
+            return None
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
 
 
 def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message="", scope_flags=None, predicted_cost=0, warning_fired=False, baseline_input=0, baseline_cache=0, baseline_output=0):
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     path = _sid(session_id).tmp_path("baseline.json", TMP_DIR)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump({
-            "tokens": tokens,
-            "context_tokens": context_tokens,
-            "baseline_input": baseline_input,
-            "baseline_cache": baseline_cache,
-            "baseline_output": baseline_output,
-            "prev_tool_name": prev_tool_name,
-            "prev_assistant_message": prev_assistant_message,
-            "turn_number": turn_number,
-            "task_turn": task_turn if task_turn is not None else turn_number,
-            "user_message": user_message,
-            "scope_flags": scope_flags if scope_flags is not None else [],
-            "predicted_cost": predicted_cost,
-            "warning_fired": warning_fired,
-        }, f)
+    with _file_lock(path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({
+                "tokens": tokens,
+                "context_tokens": context_tokens,
+                "baseline_input": baseline_input,
+                "baseline_cache": baseline_cache,
+                "baseline_output": baseline_output,
+                "prev_tool_name": prev_tool_name,
+                "prev_assistant_message": prev_assistant_message,
+                "turn_number": turn_number,
+                "task_turn": task_turn if task_turn is not None else turn_number,
+                "user_message": user_message,
+                "scope_flags": scope_flags if scope_flags is not None else [],
+                "predicted_cost": predicted_cost,
+                "warning_fired": warning_fired,
+            }, f)
 
 
 def cleanup_session(session_id):
@@ -254,4 +400,7 @@ def cleanup_session(session_id):
     for suffix in ["pending.json", "baseline.json"]:
         p = sid.tmp_path(suffix, TMP_DIR)
         if p.exists():
-            p.unlink()
+            try:
+                p.unlink()
+            except PermissionError:
+                pass  # file locked by another process (common on Windows); leave it
