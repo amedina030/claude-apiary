@@ -220,29 +220,12 @@ def main():
         else:
             magnitude = "not enough history for a cost estimate yet"
 
-        # Check if the clarifier is enabled — if so, route through it for scope narrowing.
-        clarifier_enabled = (Path.home() / ".claude" / "clarifier-enabled").exists()
-        if clarifier_enabled:
-            blocks.append(context_block(
-                "budgeter",
-                f"Warning: this response looks potentially expensive — "
-                f"triggered: {triggered}. {magnitude}.",
-                f"The clarifier is enabled. Before proceeding, use the clarifier to narrow scope. "
-                f"When spawning the clarifier, include these budgeter details as additional context "
-                f"in the detected ambiguities:",
-                f"  - Cost signal: {triggered}",
-                f"  - Estimated magnitude: {magnitude}",
-                f"The clarifier should focus its questions on reducing the scope dimensions "
-                f"that triggered this warning (e.g. narrowing which files, which components, "
-                f"or whether a full vs targeted approach is needed).",
-            ))
-        else:
-            blocks.append(context_block(
-                "budgeter",
-                f"Warning: this response looks potentially expensive — "
-                f"triggered: {triggered}. {magnitude}. "
-                f"Ask the user if they want to proceed before running.",
-            ))
+        blocks.append(context_block(
+            "budgeter",
+            f"Warning: this response looks potentially expensive — "
+            f"triggered: {triggered}. {magnitude}. "
+            f"Ask the user if they want to proceed before running.",
+        ))
 
     hook_allow(join_contexts(*blocks))
 

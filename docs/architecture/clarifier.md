@@ -11,9 +11,11 @@ last_verified: 2026-04-02
 
 ## Overview
 
-The clarifier is a stateless agent that detects assumptions in any text an LLM is about to act on. It does not resolve assumptions — it reports them. The caller decides what to do: ask the user, refine the spec, read the codebase, or proceed anyway.
+The clarifier (`clarifier/agents/clarifier.md`) is a stateless agent that detects assumptions in any text an LLM is about to act on. It does not resolve assumptions — it reports them. The caller decides what to do: ask the user, refine the spec, read the codebase, or proceed anyway.
 
 This replaces the v1 interactive clarifier, which combined detection and resolution into a multi-turn conversational agent with session logging, iteration limits, and approval flows. That complexity belonged to the caller, not the detector.
+
+See [System Overview](system-overview.md) for how the clarifier fits into the broader tool architecture.
 
 ## How it works
 
@@ -58,6 +60,34 @@ Callers should use severity to decide whether to proceed:
 - **Any medium or high** — escalate to the appropriate resolver
 
 This is a recommendation, not enforced by the clarifier. The caller owns the decision.
+
+### Example
+
+Input content: `"Add caching to the API endpoints."`
+
+Output:
+```json
+{
+  "assumptions": [
+    {
+      "assumption": "Which API endpoints to cache — all of them, or specific ones",
+      "where": "the API endpoints",
+      "severity": "high"
+    },
+    {
+      "assumption": "Cache backend — in-memory, Redis, filesystem, or other",
+      "where": "Add caching",
+      "severity": "high"
+    },
+    {
+      "assumption": "Cache invalidation strategy — TTL, manual purge, or event-driven",
+      "where": "Add caching",
+      "severity": "medium"
+    }
+  ],
+  "clean": false
+}
+```
 
 ## What counts as an assumption
 
@@ -108,25 +138,11 @@ The clarifier never resolves. It escalates to its caller. What happens next depe
 
 The clarifier doesn't need to know who it's escalating to. It returns assumptions; the caller routes them.
 
-## Pipeline integration
+## Usage
 
-The clarifier's primary use case is the refiner pipeline:
+The clarifier is an internal tool — pipelines and agents spawn it as a subagent when they need assumption detection before acting. It is not invoked during normal user interaction.
 
-```
-User idea
-  → Refine (Opus) — idea to spec
-  → Explore (cheap) — ground spec in repo
-  → Clarify (caller's choice) — detect remaining assumptions
-      → if assumptions found:
-          → Opus resolves design questions
-          → Explorer resolves repo questions
-          → re-run clarifier until clean
-      → if clean: proceed
-  → Execute (Sonnet) — implement
-  → Harden (later) — stress-test
-```
-
-But the clarifier is also usable standalone — any agent can call it on any text before acting.
+Any agent can call it on any text before acting. The test suite at `clarifier/test-suite/clarifier-test-suite.md` contains 24 test cases covering scope ambiguity, referent ambiguity, conflicting constraints, implicit assumptions, and clearly-scoped requests that should return clean.
 
 ## Design rationale
 
@@ -164,6 +180,5 @@ Different callers have different accuracy/cost tradeoffs. A quick pre-flight che
 
 ### What stays
 
-- The `/clarifier` toggle and `clarifier-enabled` flag file — controls whether agents run assumption checks
+- The clarifier agent definition — pipelines spawn it as a subagent when they need assumption detection
 - The concept of spawning a subagent for detection — keeps detection tokens out of main context
-- The CLAUDE.md behavioral rules about when to invoke the clarifier — updated to match v2 interface

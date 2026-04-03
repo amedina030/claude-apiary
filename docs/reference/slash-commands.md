@@ -33,7 +33,6 @@ These commands create or remove flag files at `~/.claude/<name>-enabled`:
 |---------|-----------|---------|
 | `/budgeter-log` | `~/.claude/budgeter-log-enabled` | off |
 | `/budgeter-warn` | `~/.claude/budgeter-warn-enabled` | off |
-| `/clarifier` | `~/.claude/clarifier-enabled` | off |
 
 Toggles persist across sessions.
 

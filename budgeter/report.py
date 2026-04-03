@@ -18,31 +18,6 @@ from datetime import datetime
 BUDGETER_DIR = Path(__file__).parent
 LOG_PATH = BUDGETER_DIR / "data" / "usage_log.jsonl"
 FEEDBACK_PATH = BUDGETER_DIR / "data" / "feedback.jsonl"
-CLARIFIER_COST_LOG = Path.home() / ".claude" / "clarifier-logs" / "cost.log"
-
-
-def _parse_cost_field(line, key):
-    for part in line.split(" | "):
-        if part.startswith(f"{key}: "):
-            return part[len(f"{key}: "):]
-    return None
-
-
-def load_clarifier_costs():
-    """Return dict of session_id -> total clarifier tokens from cost.log."""
-    if not CLARIFIER_COST_LOG.exists():
-        return {}
-    costs = {}
-    for line in CLARIFIER_COST_LOG.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        sid = _parse_cost_field(line, "session_id")
-        tokens_str = _parse_cost_field(line, "total_tokens")
-        if sid and sid != "unknown" and tokens_str:
-            costs[sid] = costs.get(sid, 0) + int(tokens_str)
-    return costs
-
 
 def load_feedback():
     if not FEEDBACK_PATH.exists():
@@ -170,8 +145,6 @@ def print_by_turn(entries, weighted=False):
         sid = e.get("session_id", "unknown")
         sessions.setdefault(sid, []).append(e)
 
-    clarifier_costs = load_clarifier_costs()
-
     all_task_totals = []
     for sid, sess_entries in sessions.items():
         sess_total = sum(val(e) for e in sess_entries)
@@ -179,10 +152,6 @@ def print_by_turn(entries, weighted=False):
         d = first_ts[:10]
         t = first_ts[11:19]
         print(f"Session {short_session(sid)}  {d} {t}  ({sess_total:,} tokens)")
-        clarifier_tokens = clarifier_costs.get(sid, 0)
-        if clarifier_tokens > 0:
-            main_tokens = sess_total - clarifier_tokens
-            print(f"  [clarifier: {clarifier_tokens:,} tokens | main: {main_tokens:,} tokens]")
 
         tasks = {}
         for e in sess_entries:

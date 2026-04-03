@@ -131,12 +131,6 @@ def write_manifest(claude_dir: Path):
     installed_files = [
         {"label": "clarifier agent", "installed_path": str(claude_dir / "agents" / "clarifier.md"),
          "source_path": str(CLARIFIER_DIR / "agents" / "clarifier.md")},
-        {"label": "clarifier toggle", "installed_path": str(claude_dir / "commands" / "clarifier.md"),
-         "source_path": str(CLARIFIER_DIR / "commands" / "clarifier.md")},
-        {"label": "write_log.py", "installed_path": str(claude_dir / "clarifier" / "write_log.py"),
-         "source_path": str(CLARIFIER_DIR / "write_log.py")},
-        {"label": "log_cost.py", "installed_path": str(claude_dir / "clarifier" / "log_cost.py"),
-         "source_path": str(CLARIFIER_DIR / "log_cost.py")},
     ]
 
     # Add all command files
@@ -166,35 +160,24 @@ def write_manifest(claude_dir: Path):
 
 
 def check_claude_md(claude_dir: Path):
-    """Append clarifier rules to ~/.claude/CLAUDE.md if not already present."""
+    """Check that ~/.claude/CLAUDE.md exists."""
     claude_md = claude_dir / "CLAUDE.md"
-    rules_src = CLARIFIER_DIR / "CLAUDE.md"
-    marker = "clarifier-enabled"  # distinctive string present in the clarifier rules
 
-    if claude_md.exists() and marker in claude_md.read_text(encoding="utf-8"):
-        print(f"  CLAUDE.md        : clarifier rules detected OK")
-        return
-
-    rules = rules_src.read_text(encoding="utf-8")
-    with open(claude_md, "a", encoding="utf-8") as f:
-        f.write("\n" + rules)
-    print(f"  CLAUDE.md        : clarifier rules appended to {claude_md}")
+    if claude_md.exists():
+        print(f"  CLAUDE.md        : {claude_md} OK")
+    else:
+        print(f"  CLAUDE.md        : {claude_md} not found (create manually)")
 
 
 def install_clarifier(claude_dir: Path):
-    """Copy clarifier agent, command files, and write_log.py into the Claude Code directories."""
+    """Copy clarifier agent and command files into the Claude Code directories."""
     agents_dir = claude_dir / "agents"
     commands_dir = claude_dir / "commands"
-    clarifier_bin_dir = claude_dir / "clarifier"
     agents_dir.mkdir(parents=True, exist_ok=True)
     commands_dir.mkdir(parents=True, exist_ok=True)
-    clarifier_bin_dir.mkdir(parents=True, exist_ok=True)
 
     shutil.copy2(CLARIFIER_DIR / "agents" / "clarifier.md", agents_dir / "clarifier.md")
-    shutil.copy2(CLARIFIER_DIR / "commands" / "clarifier.md", commands_dir / "clarifier.md")
     shutil.copy2(CLARIFIER_DIR / "commands" / "run-clarifier-tests.md", commands_dir / "run-clarifier-tests.md")
-    shutil.copy2(CLARIFIER_DIR / "write_log.py", clarifier_bin_dir / "write_log.py")
-    shutil.copy2(CLARIFIER_DIR / "log_cost.py", clarifier_bin_dir / "log_cost.py")
 
     # Budgeter commands
     for cmd_file in (BUDGETER_DIR / "commands").glob("*.md"):
@@ -209,7 +192,6 @@ def install_clarifier(claude_dir: Path):
         shutil.copy2(cmd_file, commands_dir / cmd_file.name)
 
     print(f"  Clarifier agent  : {agents_dir / 'clarifier.md'}")
-    print(f"  Clarifier scripts: {clarifier_bin_dir}")
     print(f"  Commands         : {commands_dir}")
 
 
@@ -340,22 +322,6 @@ def run_check():
     # 3. Clarifier
     print("[Clarifier]")
     check_file(claude_dir / "agents" / "clarifier.md", "Agent definition")
-    check_file(claude_dir / "clarifier" / "write_log.py", "write_log.py")
-    check_file(claude_dir / "clarifier" / "log_cost.py", "log_cost.py")
-    check_file(claude_dir / "commands" / "clarifier.md", "Toggle command")
-
-    claude_md = claude_dir / "CLAUDE.md"
-    if claude_md.exists():
-        content = claude_md.read_text(encoding="utf-8")
-        if "clarifier-enabled" in content:
-            ok("CLAUDE.md: clarifier rules present")
-        else:
-            fail("CLAUDE.md: clarifier rules missing")
-    else:
-        fail(f"CLAUDE.md: {claude_md} not found")
-
-    clarifier_flag = claude_dir / "clarifier-enabled"
-    print(f"  {'ON  ' if clarifier_flag.exists() else 'OFF '} clarifier: {clarifier_flag}")
     print()
 
     # 4. Commands

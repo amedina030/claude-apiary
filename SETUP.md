@@ -107,9 +107,7 @@ If `clarifier/CLAUDE.md` has changed, re-apply the updated rules to `~/.claude/C
 
 **Clarifier:**
 - Delete `~/.claude/agents/clarifier.md`
-- Delete `~/.claude/commands/clarifier.md` and `~/.claude/commands/run-clarifier-tests.md`
-- Remove the clarifier section from `~/.claude/CLAUDE.md`
-- Optionally delete `~/.claude/clarifier-enabled` and `~/.claude/clarifier-logs/`
+- Delete `~/.claude/commands/run-clarifier-tests.md`
 
 **Scribe:**
 - Delete `~/.claude/commands/note.md`, `~/.claude/commands/notes.md`, `~/.claude/commands/startup.md`
@@ -133,9 +131,6 @@ Start a new Claude Code session — hooks are loaded at session start, not mid-s
 
 **`budgeter-log` toggle has no effect**
 Check that `~/.claude/budgeter-log-enabled` exists (ON) or is absent (OFF). The slash command creates/removes this file.
-
-**Clarifier not intercepting requests**
-Verify `~/.claude/clarifier-enabled` exists and that the clarifier rules are present in `~/.claude/CLAUDE.md` (look for the `## Clarifier` section).
 
 **Warnings never firing**
 Warnings require at least `min_tasks` unique tasks in the log (default: 50). Run `/budgeter-log` to start building history, then check again after enough sessions.

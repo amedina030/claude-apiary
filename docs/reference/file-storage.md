@@ -19,7 +19,6 @@ Toggle state stored as sentinel files. Presence = enabled, absence = disabled.
 |------|------|--------|
 | Budgeter logging | `~/.claude/budgeter-log-enabled` | `/budgeter-log` |
 | Budgeter warnings | `~/.claude/budgeter-warn-enabled` | `/budgeter-warn` |
-| Clarifier | `~/.claude/clarifier-enabled` | `/clarifier` |
 
 Managed via `core/flags.py`: `flags.is_enabled("budgeter-log")`, `flags.enable(name)`, `flags.disable(name)`.
 
