@@ -666,9 +666,12 @@ def cmd_learnings(args):
     for l in learnings:
         lid = l.get("id", "?")
         age = format_age(l.get("timestamp", ""))
-        content = l.get("content", "").replace("\n", " ")[:80]
-        line = f"#{lid:<4} ({age:<9}) {content}"
-        print(line)
+        content = l.get("content", "")
+        if args.full:
+            print(f"#{lid}: {content}")
+        else:
+            short = content.replace("\n", " ")[:80]
+            print(f"#{lid:<4} ({age:<9}) {short}")
 
 
 def cmd_handoff_sessions(args):
@@ -762,6 +765,7 @@ def main():
     # learnings
     p_learnings = sub.add_parser("learnings")
     p_learnings.add_argument("--search")
+    p_learnings.add_argument("--full", action="store_true", help="Print full content (not truncated)")
     p_learnings.add_argument("--role", help="Filter by session role")
     p_learnings.add_argument("--mission", help="Filter by session mission")
 

@@ -41,7 +41,8 @@ Core note and learning management.
 | `--session-id ID` | add, update, learn | Associate with a session |
 | `--auto` | add | Mark as auto-generated |
 | `--if-no-handoff-for ID` | add | Only add if no handoff exists for this session |
-| `--search TEXT` | list | Full-text search |
+| `--full` | learnings | Print full content (not truncated) |
+| `--search TEXT` | list, learnings | Full-text search |
 | `--last N` | list | Show last N notes |
 | `--all` | list | Include done notes |
 | `--archive` | list | Search archive instead of active |

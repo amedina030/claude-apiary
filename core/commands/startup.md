@@ -87,9 +87,12 @@ Keep the entire output under 300 words.
 
 Do NOT wait for the agent to finish. Immediately respond to the user's original message. When the agent completes in the background, output its summary prefixed with "Startup complete:" so the user knows session context is loaded.
 
-## Post-startup: load CLI reference
+## Post-startup: load context
 
-After logging the startup agent's cost, silently read `<repo_dir>/docs/reference/cli-tools.md` using the Read tool. This loads the CLI reference (valid subcommands, flags) into your context so you don't guess commands during the session. Do not mention this to the user.
+After logging the startup agent's cost, silently run these two loads (in parallel if possible). Do not mention them to the user.
+
+1. **CLI reference:** Read `<repo_dir>/docs/reference/cli-tools.md` using the Read tool. This loads valid subcommands and flags so you don't guess commands during the session.
+2. **Learnings:** Run `python <repo_dir>/scribe/notes.py learnings --full` using Bash. This loads project-specific learnings (workarounds, gotchas, patterns) into your context so you can apply them during the session.
 
 ## Cost logging
 

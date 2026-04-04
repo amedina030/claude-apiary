@@ -190,14 +190,8 @@ def cmd_summary(args):
         content = n.get("content", "").replace("\n", " ")[:40]
         items.append(f"#{nid} {ntype} ({content})")
 
-    # Format learnings list (filtered by role/mission)
-    learning_items = []
-    for l in learnings:
-        if not _matches_role_mission(l, role, mission):
-            continue
-        lid = l.get("id", "?")
-        content = l.get("content", "").replace("\n", " ")[:60]
-        learning_items.append(f"#{lid} {content}")
+    # Count learnings (filtered by role/mission) — full content loaded separately
+    learning_count = sum(1 for l in learnings if _matches_role_mission(l, role, mission))
 
     # Find latest handoff matching role/mission, sorted by session end time
     handoffs = [
@@ -228,7 +222,7 @@ def cmd_summary(args):
     # Print summary
     print(f"**Active items:** {len(items)} notes — {', '.join(items) if items else 'None'}")
     print()
-    print(f"**Learnings:** {len(learning_items)} — {', '.join(learning_items) if learning_items else 'None'}")
+    print(f"**Learnings:** {learning_count} (loaded separately via --full)")
     print()
 
     if latest_handoff:
