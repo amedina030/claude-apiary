@@ -17,9 +17,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.session import CLAUDE_DIR, SessionId, load_identity
+from core.utils.project import project_key_from_path
 from scribe.notes import (
     read_jsonl, notes_path, learnings_path,
-    project_key_from_path, format_age, run_auto_archive,
+    format_age, run_auto_archive,
 )
 
 HISTORY_PATH = CLAUDE_DIR / ".session-history.json"
@@ -121,12 +122,13 @@ def get_unseen_sessions(session_id, wants_role, wants_mission, project_key):
     return unseen
 
 
-def cmd_init(args):
-    identity = parse_identity(args.first_message)
+def run_init(session_id: str, first_message: str, repo_dir: str) -> dict:
+    """Run init logic and return result dict (identity + unseen_sessions)."""
+    identity = parse_identity(first_message)
     registered = validate_registry(identity["role"], identity["mission"])
 
     # Write identity file
-    sid = SessionId(args.session_id)
+    sid = SessionId(session_id)
     identity_file = sid.identity_path()
     identity_data = {
         "role": identity["role"],
@@ -138,18 +140,22 @@ def cmd_init(args):
     identity_file.write_text(json.dumps(identity_data), encoding="utf-8")
 
     # Find unseen sessions
-    project_key = project_key_from_path(args.repo_dir)
+    project_key = project_key_from_path(repo_dir)
     unseen = get_unseen_sessions(
-        args.session_id,
+        session_id,
         identity["wants_role"],
         identity["wants_mission"],
         project_key,
     )
 
-    result = {
+    return {
         "identity": {**identity_data, "registered": registered},
         "unseen_sessions": unseen,
     }
+
+
+def cmd_init(args):
+    result = run_init(args.session_id, args.first_message, args.repo_dir)
     print(json.dumps(result, indent=2))
 
 
@@ -164,16 +170,17 @@ def _matches_role_mission(note, role, mission):
     return n_role == role and n_mission == mission
 
 
-def cmd_summary(args):
-    repo_dir = args.repo_dir or str(PROJECT_ROOT)
+def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> str:
+    """Run summary logic and return the text output."""
+    repo_dir = repo_dir or str(PROJECT_ROOT)
     project_key = project_key_from_path(repo_dir)
-    role = args.role or "user"
-    mission = args.mission or "general"
 
     # Prune stale notes before loading
     archived_count = run_auto_archive(project_key)
+
+    lines = []
     if archived_count:
-        print(f"[auto-archived {archived_count} notes]", file=sys.stderr)
+        lines.append(f"[auto-archived {archived_count} notes]")
 
     notes = read_jsonl(notes_path(project_key))
     learnings = read_jsonl(learnings_path(project_key))
@@ -189,13 +196,13 @@ def cmd_summary(args):
     items = []
     for n in active:
         if n.get("type") == "handoff":
-            continue  # Don't list handoffs in active items
+            continue
         nid = n.get("id", "?")
         ntype = n.get("type", "?")
         content = n.get("content", "").replace("\n", " ")[:40]
         items.append(f"#{nid} {ntype} ({content})")
 
-    # Count learnings (filtered by role/mission) — full content loaded separately
+    # Count learnings (filtered by role/mission)
     learning_count = sum(1 for l in learnings if _matches_role_mission(l, role, mission))
 
     # Find latest handoff matching role/mission, sorted by session end time
@@ -205,7 +212,6 @@ def cmd_summary(args):
     ]
     latest_handoff = None
     if handoffs:
-        # Build session_id -> ended_at lookup from history
         session_times = {}
         if HISTORY_PATH.exists():
             try:
@@ -219,24 +225,22 @@ def cmd_summary(args):
 
         def handoff_sort_key(n):
             sid = n.get("session_id", "")[:8].lower()
-            # Prefer session ended_at, fall back to note timestamp
             return session_times.get(sid, n.get("timestamp", ""))
 
         latest_handoff = max(handoffs, key=handoff_sort_key)
 
-    # Print summary
-    print(f"**Active items:** {len(items)} notes — {', '.join(items) if items else 'None'}")
-    print()
-    print(f"**Learnings:** {learning_count} (loaded separately via --full)")
-    print()
+    lines.append(f"**Active items:** {len(items)} notes — {', '.join(items) if items else 'None'}")
+    lines.append("")
+    lines.append(f"**Learnings:** {learning_count} (loaded separately via --full)")
+    lines.append("")
 
     if latest_handoff:
         hid = latest_handoff.get("id", "?")
         hsid = latest_handoff.get("session_id", "?")
-        print(f"**Last session (#{hid}, {hsid}):**")
-        print(latest_handoff.get("content", ""))
+        lines.append(f"**Last session (#{hid}, {hsid}):**")
+        lines.append(latest_handoff.get("content", ""))
     else:
-        print("**Last session:** No handoff notes found.")
+        lines.append("**Last session:** No handoff notes found.")
 
     # Run docs conformance check
     check_script = PROJECT_ROOT / "docs" / "check.py"
@@ -247,15 +251,17 @@ def cmd_summary(args):
                 capture_output=True, text=True, timeout=10,
                 cwd=str(PROJECT_ROOT),
             )
-            if result.returncode != 0:
-                print()
-                print(f"**Docs:** {result.stdout.strip()}")
-            else:
-                # Clean — just show the count
-                print()
-                print(f"**Docs:** {result.stdout.strip()}")
+            lines.append("")
+            lines.append(f"**Docs:** {result.stdout.strip()}")
         except (subprocess.TimeoutExpired, OSError):
-            pass  # Don't block startup on check failure
+            pass
+
+    return "\n".join(lines)
+
+
+def cmd_summary(args):
+    output = run_summary(args.repo_dir, args.role or "user", args.mission or "general")
+    print(output)
 
 
 # ---------------------------------------------------------------------------

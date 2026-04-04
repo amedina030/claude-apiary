@@ -1,35 +1,24 @@
 ---
 name: startup
-description: Session startup — declares identity, generates handoffs, loads notes
+description: Process unseen session transcripts (identity and context already loaded via hook)
 user-invocable: true
 ---
 
-Launch a startup agent to handle session initialization. Do NOT execute these steps yourself — delegate them entirely to the agent.
+Process unseen session transcripts listed in the `[startup]` context block. Only run this if the `[startup]` context contains `unseen_sessions` that are NOT "none".
 
 ## What to do
 
 Spawn an agent (subagent_type: "general-purpose", run_in_background: true, model: "haiku") with the following prompt. Replace `<repo_dir>` with the current repo working directory, and `<session_id>` with the current session ID from the `[session]` context (first 8 chars). If `[session]` context is not available, check `[budgeter]` context as a fallback.
 
-Also pass the **full text of the user's first message** to the agent as `<first_message>`.
-
 ---
 
 **Agent prompt:**
 
-You are a session startup agent. Your job is to initialize the session, process any unseen transcripts, and return a summary. Most of the work is done by `core/startup.py` — you only need LLM reasoning for transcript analysis.
+You are a transcript processing agent. Your job is to generate handoffs and extract missed learnings/TODOs from unseen session transcripts.
 
-### Step 1: Initialize session and detect unseen sessions
+### Step 1: Process unseen sessions
 
-Run:
-```bash
-python <repo_dir>/core/startup.py init --session-id "<session_id>" --first-message "<first_message>" --repo-dir "<repo_dir>"
-```
-
-This returns JSON with `identity` and `unseen_sessions`. Parse the output.
-
-### Step 2: Process unseen sessions (only if unseen_sessions is non-empty)
-
-For each unseen session from the init output:
+For each unseen session from the `[startup]` context:
 1. Run `python <repo_dir>/core/hooks/extract_transcript.py <transcript_path>` to extract clean messages.
 2. If output is empty, skip this session.
 3. **Important:** Read the ENTIRE transcript before classifying. Early messages are often startup boilerplate — the real work typically starts midway through. Do NOT classify a session as "startup-only" unless it truly contains nothing beyond startup initialization and brief status checks.
@@ -59,44 +48,26 @@ For each unseen session from the init output:
    ```
    Only add items that are genuinely missing — check existing notes/learnings first to avoid duplicates.
 
-### Step 3: Load summary
-
-Use the `role` and `mission` from the identity returned in Step 1:
-```bash
-python <repo_dir>/core/startup.py summary --repo-dir "<repo_dir>" --role "<role>" --mission "<mission>"
-```
-
-### Step 4: Return summary
+### Step 2: Return summary
 
 Compose and return a message with EXACTLY this structure (no extras):
 
 ```
-**Identity:** role=<role>, mission=<mission>, registered=<registered>, wants=<wants_role>/<wants_mission>
-
 **Handoffs generated:** <count> — <list of session IDs, or "None">
 **Extracted from transcripts:** <count> learnings, <count> TODOs — or "None"
-
-<paste the full output from the summary command here>
 ```
 
-Keep the entire output under 300 words.
+Keep the entire output under 200 words.
 
 ---
 
 ## After launching the agent
 
-Do NOT wait for the agent to finish. Immediately respond to the user's original message. When the agent completes in the background, output its summary prefixed with "Startup complete:" so the user knows session context is loaded.
-
-## Post-startup: load context
-
-After logging the startup agent's cost, silently run these two loads (in parallel if possible). Do not mention them to the user.
-
-1. **CLI reference:** Read `<repo_dir>/docs/reference/cli-tools.md` using the Read tool. This loads valid subcommands and flags so you don't guess commands during the session.
-2. **Learnings:** Run `python <repo_dir>/scribe/notes.py learnings --full` using Bash. This loads project-specific learnings (workarounds, gotchas, patterns) into your context so you can apply them during the session.
+Do NOT wait for the agent to finish. Immediately continue with the user's request. When the agent completes in the background, output its summary prefixed with "Transcripts processed:" so the user knows handoffs are ready.
 
 ## Cost logging
 
-When the startup agent completes, the task notification includes a `<usage>` block. Pipe the **raw usage block** (copy-paste the entire `<usage>...</usage>` tag) to the logging script via stdin:
+When the transcript agent completes, the task notification includes a `<usage>` block. Pipe the **raw usage block** (copy-paste the entire `<usage>...</usage>` tag) to the logging script via stdin:
 
 ```bash
 echo '<usage>...</usage>' | python <repo_dir>/budgeter/log_agent_cost.py --session-id "<full_session_id>" --agent "startup" --cwd "<repo_dir>"

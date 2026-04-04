@@ -70,14 +70,16 @@ def file_hash(path):
 
 
 def build_core_hooks():
-    """Build PreToolUse and Stop hook entries for core hooks (install check, session injection)."""
+    """Build PreToolUse and Stop hook entries for core hooks (install check, session injection, startup)."""
     install_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install.py", PYTHON)
     session_cmd = hook_cmd(CORE_DIR / "hooks" / "inject_session.py", PYTHON)
+    startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_hook.py", PYTHON)
     stop_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install_stop.py", PYTHON)
     return {
         "PreToolUse": [
             {"matcher": "", "hooks": [{"type": "command", "command": install_cmd}]},
             {"matcher": "", "hooks": [{"type": "command", "command": session_cmd}]},
+            {"matcher": "", "hooks": [{"type": "command", "command": startup_cmd}]},
         ],
         "Stop": [
             {"hooks": [{"type": "command", "command": stop_cmd}]}
@@ -417,6 +419,7 @@ def run_check():
     hook_scripts = [
         APIS_DIR / "core" / "hooks" / "inject_session.py",
         APIS_DIR / "core" / "hooks" / "check_install.py",
+        APIS_DIR / "core" / "hooks" / "startup_hook.py",
         APIS_DIR / "budgeter" / "hooks" / "pre_tool_use.py",
         APIS_DIR / "budgeter" / "hooks" / "post_tool_use.py",
     ]
