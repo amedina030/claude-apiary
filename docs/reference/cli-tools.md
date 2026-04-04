@@ -214,8 +214,10 @@ Track harden round counts per session. Same interface as `refiner/round_counter.
 | `tick` | `round_counter.py tick --session-id ID` | Increment by 1, print new count |
 | `reset` | `round_counter.py reset --session-id ID` | Reset to 0 |
 | `status` | `round_counter.py status --session-id ID` | Print current count without incrementing |
+| `defender` | `round_counter.py defender --session-id ID --set AGENT_ID` | Store defender agent ID |
+| `defender` | `round_counter.py defender --session-id ID --get` | Retrieve defender agent ID (exit 1 if not set) |
 
-State is stored at `harden/tmp/round_<session-id>.json`.
+State is stored at `harden/tmp/round_<session-id>.json`. Format: `{"session_id": "...", "count": N, "defender_agent_id": "..."}`.
 
 ## setup.py
 

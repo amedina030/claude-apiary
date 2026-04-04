@@ -181,7 +181,11 @@ echo '<validated_json>' | python <repo_dir>/harden/assign_ids.py --prefix ATK
 Round <N>: Attacker found <total> issues (<critical> critical, <high> high, <medium> medium, <low> low)
 ```
 
-#### 2e. Spawn Defender agent
+#### 2e. Invoke Defender agent
+
+The Defender persists across rounds. It is spawned once in round 1 and continued via SendMessage in subsequent rounds. Its agent ID is stored externally in the round state file — never hold it in LLM context.
+
+##### Round 1: Spawn the Defender
 
 Take `defender_template` and replace:
 - `{{MODE}}` → `code` or `plan`
@@ -199,6 +203,45 @@ Spawn a **foreground** Agent (subagent_type: "general-purpose") with:
 **Important for code mode:** Append this instruction to the prompt:
 
 > "WORKFLOW: First, use the Read tool to read each target file. Then use the Edit tool to make your fixes — this is required, do not skip it. After all edits are complete, return your JSON summary. The JSON documents what you already changed, it is not a plan."
+
+After the Defender responds, store its agent ID in the round state file:
+
+```bash
+python <repo_dir>/harden/round_counter.py defender --session-id <session_id> --set <agent_id>
+```
+
+Where `<agent_id>` is the internal agent ID returned by the Agent tool (shown in the tool result).
+
+##### Round 2+: Continue the existing Defender
+
+Read the Defender agent ID from the state file:
+
+```bash
+python <repo_dir>/harden/round_counter.py defender --session-id <session_id> --get
+```
+
+If this fails (exit code 1), abort the harden run: "Defender state corrupted — no agent ID found. Aborting."
+
+Send the continuation message to the existing Defender via **SendMessage** using the retrieved agent ID. The continuation message is:
+
+```
+## Round <N> Findings
+
+The Attacker re-examined your fixes and found <count> new issues.
+
+### New findings
+<validated findings JSON with ATK-NNN IDs>
+
+### Previous round summary
+- Fixed: <fixed_count> (<comma-separated fixed ATK-IDs>)
+- Deferred: <deferred_count> (<comma-separated deferred ATK-IDs>)
+
+Apply the same process: fix what you can in the worktree, defer what you can't, then return your JSON summary.
+```
+
+The "previous round summary" uses the mechanical counts and IDs from the previous round's validated Defender output — not LLM recall.
+
+**If the Defender agent errors during continuation**, abort the harden run: "Defender agent failed on round N. Aborting." Do not attempt to respawn a fresh Defender.
 
 #### 2f. Process Defender output
 

@@ -61,6 +61,7 @@ After completing all edits, return ONLY a JSON object summarizing your changes. 
 8. The "todos" array is optional — omit it or leave it empty if nothing was noticed.
 9. Do not introduce new bugs. Preserve existing behavior except where the fix requires a change.
 10. Do not add unnecessary abstractions, error handling for impossible cases, or speculative improvements.
+11. You may receive additional rounds of findings after your initial response. Apply the same process each time: read files, edit via Edit tool, return JSON summary.
 
 ## Findings
 
