@@ -219,45 +219,57 @@ def format_age(ts):
 # ---------------------------------------------------------------------------
 
 def _auto_archive(notes, notes_path, archive_path):
-    """Move done notes and old handoffs past AUTO_ARCHIVE_DAYS to archive.
-    Also archives handoffs older than 7 days when there are more than 10
-    for the same role/mission combination.
+    """Apply retention policy and move expired notes to archive.
+
+    Retention rules by type:
+      handoff  — keep only the latest per role/mission, archive the rest
+      context  — archive after 3 days
+      done     — archive after 1 day (any type marked done)
+      todo     — keep until done
+      decision — keep indefinitely
+      wishlist — keep indefinitely
+      blocker  — keep until resolved
+
     Caller must hold a FileLock on archive_path before calling this function.
     Returns (remaining, archived) lists."""
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=AUTO_ARCHIVE_DAYS)
-    handoff_cutoff = now - timedelta(days=7)
+    context_cutoff = now - timedelta(days=3)
+    done_cutoff = now - timedelta(days=1)
     remaining = []
     to_archive = []
 
-    # Count only handoffs that will NOT be archived by the age cutoff,
-    # so the > 10 threshold check reflects the post-cutoff survivor count.
-    handoff_counts = {}
+    # Find the latest handoff per role/mission
+    latest_handoff = {}  # (role, mission) -> newest timestamp
     for n in notes:
         if n.get("type") == "handoff":
+            key = (n.get("role", "user"), n.get("mission", "general"))
             ts = _parse_timestamp(n.get("timestamp", ""))
-            # Treat None timestamps as recent (they survive the cutoff)
-            if ts is None or ts >= cutoff:
-                key = (n.get("role", "user"), n.get("mission", "general"))
-                handoff_counts[key] = handoff_counts.get(key, 0) + 1
+            if ts is not None:
+                if key not in latest_handoff or ts > latest_handoff[key]:
+                    latest_handoff[key] = ts
 
     for n in notes:
         ts = _parse_timestamp(n.get("timestamp", ""))
+        ntype = n.get("type", "")
+
         # Treat unparseable timestamps as recent (don't archive them silently)
         if ts is None:
             remaining.append(n)
             continue
-        if n.get("status") == "done" and ts < cutoff:
+
+        # Done notes: archive after 1 day
+        if n.get("status") == "done" and ts < done_cutoff:
             to_archive.append(n)
-        elif n.get("type") == "handoff" and ts < cutoff:
-            to_archive.append(n)
-        elif n.get("type") == "handoff" and ts < handoff_cutoff:
+        # Handoffs: keep only the latest per role/mission
+        elif ntype == "handoff":
             key = (n.get("role", "user"), n.get("mission", "general"))
-            if handoff_counts.get(key, 0) > 10:
+            if ts < latest_handoff.get(key, ts):
                 to_archive.append(n)
-                handoff_counts[key] -= 1
             else:
                 remaining.append(n)
+        # Context: archive after 3 days
+        elif ntype == "context" and ts < context_cutoff:
+            to_archive.append(n)
         else:
             remaining.append(n)
 
@@ -275,6 +287,16 @@ def _auto_archive(notes, notes_path, archive_path):
         _write_jsonl(notes_path, remaining)
 
     return remaining, to_archive
+
+
+def run_auto_archive(project_key: str) -> int:
+    """Run auto-archive for a project. Returns count of archived notes."""
+    np = notes_path(project_key)
+    ap = archive_path(project_key)
+    with _notes_and_archive_lock(np, ap):
+        notes = read_jsonl(np)
+        _remaining, archived = _auto_archive(notes, np, ap)
+    return len(archived)
 
 
 # ---------------------------------------------------------------------------

@@ -141,14 +141,17 @@ def test_auto_archive(tmp_dir):
 
     _add(tmp_dir, type="todo", content="Old done", status="done", timestamp=old_ts)
     _add(tmp_dir, type="handoff", content="Old handoff", timestamp=old_ts)
+    _add(tmp_dir, type="handoff", content="New handoff", timestamp=recent_ts)
     _add(tmp_dir, type="todo", content="Recent todo", timestamp=recent_ts)
 
     all_notes = notes.read_jsonl(notes.NOTES_PATH)
-    assert len(all_notes) == 3
+    assert len(all_notes) == 4
 
     remaining, archived = notes._auto_archive(all_notes, notes.NOTES_PATH, notes.ARCHIVE_PATH)
-    assert len(remaining) == 1
-    assert remaining[0]["content"] == "Recent todo"
+    # Old done todo archived (>1 day), old handoff archived (newer one exists),
+    # new handoff kept (latest), recent todo kept (active)
+    assert len(remaining) == 2
+    assert {n["content"] for n in remaining} == {"New handoff", "Recent todo"}
     assert len(archived) == 2
 
     # Verify archive file

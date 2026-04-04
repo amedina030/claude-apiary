@@ -19,7 +19,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from core.session import CLAUDE_DIR, SessionId, load_identity
 from scribe.notes import (
     read_jsonl, notes_path, learnings_path,
-    project_key_from_path, format_age,
+    project_key_from_path, format_age, run_auto_archive,
 )
 
 HISTORY_PATH = CLAUDE_DIR / ".session-history.json"
@@ -169,6 +169,11 @@ def cmd_summary(args):
     project_key = project_key_from_path(repo_dir)
     role = args.role or "user"
     mission = args.mission or "general"
+
+    # Prune stale notes before loading
+    archived_count = run_auto_archive(project_key)
+    if archived_count:
+        print(f"[auto-archived {archived_count} notes]", file=sys.stderr)
 
     notes = read_jsonl(notes_path(project_key))
     learnings = read_jsonl(learnings_path(project_key))
