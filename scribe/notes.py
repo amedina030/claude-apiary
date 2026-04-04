@@ -157,10 +157,17 @@ def _write_jsonl(path, entries):
     tmp.replace(path)
 
 
-def _append_jsonl(path, entry):
+def _append_jsonl(path, entry, _locked=False):
+    """Append a single JSON entry to a JSONL file.
+    If _locked is True, assumes caller already holds FileLock on path."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+    if _locked:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    else:
+        with FileLock(path):
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
 
 
 def _next_id(entries):
@@ -380,7 +387,7 @@ def cmd_add(args):
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    _append_jsonl(args.notes_path, note)
+    _append_jsonl(args.notes_path, note, _locked=True)
     print(f"Added #{note['id']} ({note['type']})")
 
 
@@ -673,7 +680,7 @@ def cmd_migrate(args):
             "status": "active",
             "auto_generated": False,
         }
-        _append_jsonl(args.notes_path, note)
+        _append_jsonl(args.notes_path, note, _locked=True)
         next_id += 1
         migrated += 1
 
@@ -694,7 +701,7 @@ def cmd_learn(args):
         role=getattr(args, "role", "") or "",
         mission=getattr(args, "mission", "") or "",
     )
-    _append_jsonl(args.learnings_path, entry)
+    _append_jsonl(args.learnings_path, entry, _locked=True)
     print(f"Learned #L{entry['id']}")
 
 

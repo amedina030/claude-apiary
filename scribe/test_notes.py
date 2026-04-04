@@ -239,7 +239,7 @@ def test_concurrent_adds(tmp_dir):
                         "status": "active",
                         "auto_generated": False,
                     }
-                    notes._append_jsonl(notes.NOTES_PATH, note)
+                    notes._append_jsonl(notes.NOTES_PATH, note, _locked=True)
         except Exception as e:
             errors.append(e)
 
