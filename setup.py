@@ -493,7 +493,7 @@ def main():
     for hooks_dict in [build_budgeter_hooks(), build_core_hooks(), build_scribe_hooks(), build_docs_hooks()]:
         for event, entries in hooks_dict.items():
             all_hooks.setdefault(event, []).extend(entries)
-    register_hooks(settings_path, all_hooks, MARKER, also_strip=["claude-budgeter", "claude-apis"])
+    register_hooks(settings_path, all_hooks, MARKER, also_strip=["claude-budgeter"])
 
     # Ensure budgeter data/tmp dirs exist
     if args.global_install:
