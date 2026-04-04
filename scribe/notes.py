@@ -451,21 +451,48 @@ def cmd_list(args):
         print(line.encode("ascii", errors="replace").decode("ascii"))
 
 
+def _parse_id_arg(raw: str) -> tuple:
+    """Parse an ID argument. Returns (int_id, is_learning).
+    'L3' or 'l3' -> (3, True). '42' -> (42, False)."""
+    raw = raw.strip()
+    if raw.upper().startswith("L"):
+        try:
+            return int(raw[1:]), True
+        except ValueError:
+            print(f"Error: invalid learning ID: {raw!r}", file=sys.stderr)
+            sys.exit(1)
+    try:
+        return int(raw), False
+    except ValueError:
+        print(f"Error: invalid ID: {raw!r}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_get(args):
-    notes = read_jsonl(args.notes_path)
-    # Also check archive
-    note = next((n for n in notes if n.get("id") == args.id), None)
+    raw_id, force_learning = _parse_id_arg(args.id)
     source_label = None
-    if not note:
-        archive = read_jsonl(args.archive_path)
-        note = next((n for n in archive if n.get("id") == args.id), None)
-        if note:
-            source_label = "[from archive]"
+    is_learning = False
+
+    if force_learning:
+        # L-prefix: go straight to learnings
+        learnings = read_jsonl(args.learnings_path)
+        note = next((l for l in learnings if l.get("id") == raw_id), None)
+        is_learning = True
     else:
-        # Check if a duplicate also exists in archive and warn
-        archive = read_jsonl(args.archive_path)
-        if any(n.get("id") == args.id for n in archive):
-            print(f"[WARNING: duplicate ID #{args.id} exists in archive; showing active note]", file=sys.stderr)
+        # Search notes first
+        notes = read_jsonl(args.notes_path)
+        note = next((n for n in notes if n.get("id") == raw_id), None)
+        if not note:
+            # Check archive
+            archive = read_jsonl(args.archive_path)
+            note = next((n for n in archive if n.get("id") == raw_id), None)
+            if note:
+                source_label = "[from archive]"
+        else:
+            # Check if a duplicate also exists in archive and warn
+            archive = read_jsonl(args.archive_path)
+            if any(n.get("id") == raw_id for n in archive):
+                print(f"[WARNING: duplicate ID #{raw_id} exists in archive; showing active note]", file=sys.stderr)
 
     if source_label:
         print(source_label)
@@ -475,15 +502,19 @@ def cmd_get(args):
         sys.exit(1)
 
     print(f"ID: {note['id']}")
-    print(f"Type: {note.get('type', '?')}")
-    print(f"Status: {note.get('status', '?')}")
+    if is_learning:
+        print(f"Type: learning")
+    else:
+        print(f"Type: {note.get('type', '?')}")
+        print(f"Status: {note.get('status', '?')}")
     print(f"Session: {note.get('session_id', '?')}")
     print(f"Time: {note.get('timestamp', '?')} ({format_age(note.get('timestamp', ''))})")
     if note.get("role"):
         print(f"Role: {note['role']}")
     if note.get("mission"):
         print(f"Mission: {note['mission']}")
-    print(f"Auto: {note.get('auto_generated', False)}")
+    if not is_learning:
+        print(f"Auto: {note.get('auto_generated', False)}")
     print(f"---")
     print(note.get("content", ""))
 
@@ -664,7 +695,7 @@ def cmd_learn(args):
         mission=getattr(args, "mission", "") or "",
     )
     _append_jsonl(args.learnings_path, entry)
-    print(f"Learned #{entry['id']}")
+    print(f"Learned #L{entry['id']}")
 
 
 def cmd_learnings(args):
@@ -690,10 +721,10 @@ def cmd_learnings(args):
         age = format_age(l.get("timestamp", ""))
         content = l.get("content", "")
         if args.full:
-            print(f"#{lid}: {content}")
+            print(f"#L{lid}: {content}")
         else:
             short = content.replace("\n", " ")[:80]
-            print(f"#{lid:<4} ({age:<9}) {short}")
+            print(f"#L{lid:<3} ({age:<9}) {short}")
 
 
 def cmd_handoff_sessions(args):
@@ -712,15 +743,16 @@ def cmd_handoff_sessions(args):
 
 def cmd_unlearn(args):
     """Remove a learning by ID."""
+    raw_id, _ = _parse_id_arg(args.id)  # Accept both '3' and 'L3'
     learnings = read_jsonl(args.learnings_path)
-    remaining = [l for l in learnings if l.get("id") != args.id]
+    remaining = [l for l in learnings if l.get("id") != raw_id]
 
     if len(remaining) == len(learnings):
-        print(f"Learning #{args.id} not found.", file=sys.stderr)
+        print(f"Learning #L{raw_id} not found.", file=sys.stderr)
         sys.exit(1)
 
     _write_jsonl(args.learnings_path, remaining)
-    print(f"Removed learning #{args.id}.")
+    print(f"Removed learning #L{raw_id}.")
 
 
 # ---------------------------------------------------------------------------
@@ -757,7 +789,7 @@ def main():
 
     # get
     p_get = sub.add_parser("get")
-    p_get.add_argument("id", type=int)
+    p_get.add_argument("id", type=str, help="Note ID (integer) or learning ID (L-prefix, e.g. L3)")
 
     # done
     p_done = sub.add_parser("done")
@@ -796,7 +828,7 @@ def main():
 
     # unlearn
     p_unlearn = sub.add_parser("unlearn")
-    p_unlearn.add_argument("id", type=int)
+    p_unlearn.add_argument("id", type=str, help="Learning ID (integer or L-prefix, e.g. L3 or 3)")
 
     args = parser.parse_args()
 
