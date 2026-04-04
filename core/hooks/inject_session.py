@@ -20,17 +20,20 @@ def main():
 
     raw_id = payload.get("session_id", "")
     if not raw_id:
-        sys.exit(0)
+        hook_allow()
+        return
 
     try:
         sid = SessionId(raw_id)
     except ValueError:
-        sys.exit(0)
+        hook_allow()
+        return
 
     flag_file = sid.flag_path("session_injected")
     flag_file.parent.mkdir(parents=True, exist_ok=True)
     if flag_file.exists():
-        sys.exit(0)
+        hook_allow()
+        return
 
     flag_file.write_text("1", encoding="utf-8")
     hook_allow(context_block("session", f"session_id: {sid.full}"))

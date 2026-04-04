@@ -50,7 +50,8 @@ def main():
     config = logger.load_config()
 
     if tool_name not in config.get("monitored_tools", ["Agent", "Bash"]):
-        sys.exit(0)
+        hook_allow()
+        return
 
     session_entries = logger.read_session_jsonl(transcript_path)
     tokens_now = logger.get_cumulative_tokens(session_entries)
@@ -206,6 +207,14 @@ def main():
             }
             logger.append_feedback(feedback_entry)
 
+    # Extract agent description when the current tool is Agent, so post_tool_use
+    # can tag the log entry with agent_type.
+    agent_description = ""
+    if tool_name == "Agent":
+        tool_input = payload.get("tool_input", {})
+        if isinstance(tool_input, dict):
+            agent_description = tool_input.get("description", "")
+
     # Save baseline for the next PRE (or Stop hook).
     logger.save_baseline(
         session_id, tokens_now,
@@ -221,6 +230,7 @@ def main():
         baseline_input=last_input,
         baseline_cache=last_cache,
         baseline_output=last_output,
+        agent_description=agent_description,
     )
 
     # Build context to inject — always include the [CONT] instruction and session_id.

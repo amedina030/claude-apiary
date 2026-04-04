@@ -373,7 +373,7 @@ def load_baseline(session_id):
             return json.load(f)
 
 
-def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message="", scope_flags=None, predicted_cost=0, warning_fired=False, baseline_input=0, baseline_cache=0, baseline_output=0):
+def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message="", scope_flags=None, predicted_cost=0, warning_fired=False, baseline_input=0, baseline_cache=0, baseline_output=0, agent_description=""):
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     path = _sid(session_id).tmp_path("baseline.json", TMP_DIR)
     with _file_lock(path):
@@ -392,6 +392,7 @@ def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_
                 "scope_flags": scope_flags if scope_flags is not None else [],
                 "predicted_cost": predicted_cost,
                 "warning_fired": warning_fired,
+                "agent_description": agent_description,
             }, f)
 
 

@@ -78,6 +78,7 @@ def main():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "session_id": session_id,
         "tool_name": "Agent",
+        "agent_type": args.agent,
         "assistant_message": f"[background] {args.agent}",
         "user_message": "",
         "tokens_delta": tokens,

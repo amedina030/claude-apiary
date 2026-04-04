@@ -47,10 +47,12 @@ def main():
     baseline = logger.load_baseline(session_id)
 
     safe_tokens = max(0, total_tokens)
+    agent_desc = baseline.get("agent_description", "") if baseline else ""
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "session_id": session_id,
         "tool_name": "Agent",
+        "agent_type": agent_desc,
         "assistant_message": baseline.get("prev_assistant_message", "") if baseline else "",
         "user_message": baseline.get("user_message", "") if baseline else "",
         "tokens_delta": safe_tokens,

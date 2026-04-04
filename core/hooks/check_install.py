@@ -61,18 +61,21 @@ def main():
 
     raw_id = payload.get("session_id", "")
     if not raw_id:
-        sys.exit(0)
+        hook_allow()
+        return
 
     try:
         sid = SessionId(raw_id)
     except ValueError:
-        sys.exit(0)
+        hook_allow()
+        return
 
     # Once-per-session: check if we already ran for this session.
     flag_file = sid.flag_path("install_checked")
     flag_file.parent.mkdir(parents=True, exist_ok=True)
     if flag_file.exists():
-        sys.exit(0)
+        hook_allow()
+        return
 
     # Mark as checked for this session.
     flag_file.write_text("1", encoding="utf-8")
@@ -87,7 +90,7 @@ def main():
             f"Run `python setup.py --global` to update."
         ))
     else:
-        sys.exit(0)
+        hook_allow()
 
 
 if __name__ == "__main__":

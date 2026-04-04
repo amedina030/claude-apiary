@@ -9,6 +9,7 @@ Usage:
     python report.py --since 2026-03-01 # from date onwards
     python report.py --flat             # flat list, no grouping
     python report.py --grouped          # group by session only (no task breakdown)
+    python report.py --by-agent         # per-agent-type token breakdown
 """
 import json
 import argparse
@@ -276,6 +277,53 @@ def print_grouped(entries, weighted=False):
     print(f"{'MEDIAN TOKENS/SESSION':>24} {med_per_session:>12,}")
 
 
+def _agent_type(e):
+    """Extract agent type from a log entry. Uses agent_type field if present,
+    falls back to parsing [background] prefix from assistant_message."""
+    at = e.get("agent_type", "")
+    if at:
+        return at
+    msg = e.get("assistant_message", "")
+    if msg.startswith("[background] "):
+        return msg[len("[background] "):]
+    return "unknown"
+
+
+def print_by_agent(entries, weighted=False):
+    val = weighted_delta if weighted else net_delta
+    agent_entries = [e for e in entries if e.get("tool_name") == "Agent"]
+    if not agent_entries:
+        print("No Agent entries found.")
+        return
+
+    by_type = {}
+    for e in agent_entries:
+        atype = _agent_type(e)
+        by_type.setdefault(atype, []).append(e)
+
+    print(f"{'AGENT TYPE':<30} {'CALLS':>6} {'TOTAL':>12} {'MEDIAN':>12} {'MAX':>12}")
+    print("-" * 76)
+    for atype in sorted(by_type, key=lambda t: -sum(val(e) for e in by_type[t])):
+        items = by_type[atype]
+        deltas = [val(e) for e in items]
+        total = sum(deltas)
+        med = median(deltas)
+        mx = max(deltas)
+        print(f"  {atype:<28} {len(items):>6} {total:>12,} {med:>12,} {mx:>12,}")
+
+    print("-" * 76)
+    all_deltas = [val(e) for e in agent_entries]
+    print(f"  {'TOTAL':<28} {len(agent_entries):>6} {sum(all_deltas):>12,} {median(all_deltas):>12,} {max(all_deltas):>12,}")
+    print()
+
+    # Non-agent entries summary
+    non_agent = [e for e in entries if e.get("tool_name") != "Agent"]
+    if non_agent:
+        non_total = sum(val(e) for e in non_agent)
+        print(f"  Non-agent tool calls: {len(non_agent)} ({non_total:,} tokens)")
+        print(f"  Grand total: {sum(val(e) for e in entries):,} tokens")
+
+
 def _percentile(values, p):
     if not values:
         return 0
@@ -367,6 +415,7 @@ def main():
     parser.add_argument("--flat", action="store_true", help="Flat list instead of session grouping")
     parser.add_argument("--grouped", action="store_true", help="Group by session only (no task breakdown)")
     parser.add_argument("--by-turn", action="store_true", help="Alias for default (session > task grouping)")
+    parser.add_argument("--by-agent", action="store_true", help="Show per-agent-type token breakdown")
     parser.add_argument("--all", action="store_true", help="Include zero-delta entries")
     parser.add_argument("--weighted", action="store_true", help="Weight tokens by type: cache 0.1x, output 5x (relative to input)")
     parser.add_argument("--feedback", action="store_true", help="Show warning precision and rule breakdown")
@@ -400,7 +449,9 @@ def main():
         print("No entries found.")
         return
 
-    if args.flat:
+    if args.by_agent:
+        print_by_agent(entries, weighted=args.weighted)
+    elif args.flat:
         print_flat(entries, weighted=args.weighted)
     elif args.grouped:
         print_grouped(entries, weighted=args.weighted)

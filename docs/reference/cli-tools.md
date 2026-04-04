@@ -86,6 +86,7 @@ python budgeter/report.py [options]
 | `--grouped` | Group by session only (no task breakdown) |
 | `--by-turn` | Group by session > task (default) |
 | `--all` | Include zero-delta entries |
+| `--by-agent` | Show per-agent-type token breakdown |
 | `--weighted` | Weight tokens by type: cache 0.1x, output 5x |
 | `--feedback` | Show warning precision and rule breakdown |
 

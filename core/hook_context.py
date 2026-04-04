@@ -53,8 +53,9 @@ def hook_block(message: str, event: str = "PreToolUse"):
 
 
 def read_payload():
-    """Read and parse JSON payload from stdin. Returns dict or exits."""
+    """Read and parse JSON payload from stdin. Returns dict or exits with allow."""
     try:
         return json.loads(sys.stdin.read())
     except json.JSONDecodeError:
+        hook_allow()
         sys.exit(0)
