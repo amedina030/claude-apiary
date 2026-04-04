@@ -2,25 +2,27 @@
 """
 Validate Defender output from the harden skill.
 
-Reads a JSON object from stdin with "responses" and optional "todos" arrays.
-Validates that every expected ATK-ID is addressed, actions are valid enums,
-no fields are empty, and referenced files exist (optionally).
+Reads a JSON object from stdin (or --file) with "responses" and optional
+"todos" arrays. Validates that every expected ATK-ID is addressed, actions
+are valid enums, no fields are empty, and referenced files exist (optionally).
 
 Exit 0 + prints validated JSON on success.
 Exit 1 + prints error details on failure.
 
 Usage:
     echo '<json>' | validate_response.py --expected-ids ATK-001,ATK-002 [--check-files]
+    validate_response.py --file response.json --expected-ids ATK-001,ATK-002 [--check-files]
 """
 import argparse
 import json
 import sys
 from pathlib import Path
 
+from validate_common import check_path_escape, read_json_input, report_errors
+
 REQUIRED_FIELDS = ["finding_ref", "action", "description"]
 VALID_ACTIONS = {"fixed", "refactored", "deferred"}
 
-MAX_STDIN_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_RESPONSES = 1000  # ATK-008: cap responses count to prevent O(n) DoS
 MAX_EXPECTED_IDS = 500  # ATK-003: cap --expected-ids to bound error output size
 
@@ -106,15 +108,11 @@ def validate(data: dict, expected_ids: set, check_files: bool = False) -> list[s
                     continue  # already reported above
                 filepath = change.get("file", "")
                 if filepath:
-                    # ATK-002: use relative_to() to prevent prefix collision attacks
-                    resolved = Path(filepath).resolve()
-                    cwd = Path.cwd().resolve()
-                    try:
-                        resolved.relative_to(cwd)
-                    except ValueError:
-                        errors.append(f"{label}: file escapes project directory: {filepath}")
+                    escape_err = check_path_escape(filepath)
+                    if escape_err:
+                        errors.append(f"{label}: {escape_err}")
                         continue
-                    if not resolved.exists():
+                    if not Path(filepath).resolve().exists():
                         errors.append(f"{label}: file not found: {filepath}")
 
     # Report missing IDs and show which refs were actually found
@@ -152,6 +150,8 @@ def main():
                         help="Comma-separated list of ATK-IDs that must be addressed")
     parser.add_argument("--check-files", action="store_true",
                         help="Verify that referenced files exist")
+    parser.add_argument("--file", dest="file_path",
+                        help="Read JSON from file instead of stdin")
     args = parser.parse_args()
 
     # ATK-003: require at least one valid ID
@@ -163,29 +163,9 @@ def main():
         print(f"ERROR: --expected-ids exceeds maximum allowed count ({MAX_EXPECTED_IDS})", file=sys.stderr)
         sys.exit(1)
 
-    # ATK-009: check size BEFORE stripping
-    raw_unstripped = sys.stdin.read(MAX_STDIN_BYTES + 1)
-    if len(raw_unstripped) > MAX_STDIN_BYTES:
-        print(f"ERROR: Input exceeds maximum allowed size ({MAX_STDIN_BYTES} bytes)", file=sys.stderr)
-        sys.exit(1)
-    raw = raw_unstripped.strip()
-    if not raw:
-        print("ERROR: Empty input", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"ERROR: Invalid JSON: {e}", file=sys.stderr)
-        sys.exit(1)
-
+    raw, data = read_json_input(file_path=args.file_path)
     errors = validate(data, expected_ids=expected, check_files=args.check_files)
-
-    if errors:
-        print(f"VALIDATION FAILED ({len(errors)} errors):", file=sys.stderr)
-        for err in errors:
-            print(f"  - {err}", file=sys.stderr)
-        sys.exit(1)
+    report_errors(errors)
 
     # Echo back the original input verbatim to preserve byte-identity
     print(raw)

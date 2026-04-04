@@ -2,16 +2,18 @@
 """
 Assign deterministic sequential IDs to harden agent output.
 
-Reads a JSON array from stdin, adds an "id" field to each object,
+Reads a JSON array from stdin (or --file), adds an "id" field to each object,
 and writes the result to stdout.
 
 Usage:
     echo '[{"category": "security", ...}]' | assign_ids.py --prefix ATK
-    echo '[{"finding_ref": "ATK-001", ...}]' | assign_ids.py --prefix DEF
+    assign_ids.py --prefix ATK --file findings.json
 """
 import argparse
 import json
 import sys
+
+from validate_common import read_json_input
 
 
 def assign_ids(items: list, prefix: str) -> list:
@@ -25,18 +27,15 @@ def main():
     parser = argparse.ArgumentParser(description="Assign sequential IDs to harden output")
     parser.add_argument("--prefix", required=True, choices=["ATK", "DEF"],
                         help="ID prefix (ATK for findings, DEF for responses)")
+    parser.add_argument("--file", dest="file_path",
+                        help="Read JSON from file instead of stdin")
     args = parser.parse_args()
 
-    raw = sys.stdin.read().strip()
-    if not raw:
+    _raw, items = read_json_input(file_path=args.file_path, empty_ok=True)
+
+    if items is None:
         print("[]")
         return
-
-    try:
-        items = json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"ERROR: Invalid JSON input: {e}", file=sys.stderr)
-        sys.exit(1)
 
     if not isinstance(items, list):
         print("ERROR: Expected a JSON array", file=sys.stderr)

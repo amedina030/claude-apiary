@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: 2026-04-03
+last_verified: "2026-04-03"
 ---
 
 # CLI Tools
@@ -159,46 +159,81 @@ Track refinement round counts per session. Used by the `/refine` skill to enforc
 
 State is stored at `refiner/tmp/round_<session-id>.json`. Directory is auto-created on first write.
 
+## harden/pipeline.py
+
+Combined validate + assign-IDs pipeline. Preferred over calling validators and assign_ids separately.
+
+```bash
+echo '<json>' | python harden/pipeline.py findings [--check-files] [--deep] [--sanitize]
+python harden/pipeline.py findings --file findings.json [--check-files] [--deep] [--sanitize]
+python harden/pipeline.py response --file response.json --expected-ids ATK-001,ATK-002 [--check-files]
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `findings` | Validate and assign ATK-IDs to Attacker findings |
+| `response` | Validate and assign DEF-IDs to Defender response |
+
+### Flags
+
+| Flag | Applies to | Required | Description |
+|------|-----------|----------|-------------|
+| `--file PATH` | both | no | Read JSON from file instead of stdin |
+| `--check-files` | both | no | Verify referenced files exist (code mode) |
+| `--deep` | findings | no | Require Given/When/Then scenarios |
+| `--sanitize` | findings | no | Auto-fix common issues (strip unknown fields, map invalid categories) |
+| `--expected-ids IDS` | response | yes | Comma-separated ATK-IDs that must be addressed |
+
+Exit 0 + validated JSON with IDs on success. Exit 1 + error details on failure.
+
 ## harden/assign_ids.py
 
-Assign deterministic sequential IDs to harden agent output. Reads JSON array from stdin.
+Assign deterministic sequential IDs to harden agent output. Reads JSON array from stdin or file.
 
 ```bash
 echo '<json_array>' | python harden/assign_ids.py --prefix ATK
-echo '<json_array>' | python harden/assign_ids.py --prefix DEF
+python harden/assign_ids.py --prefix ATK --file findings.json
 ```
 
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--prefix PREFIX` | yes | ID prefix: `ATK` (findings) or `DEF` (responses) |
+| `--file PATH` | no | Read JSON from file instead of stdin |
 
 ## harden/validate_findings.py
 
-Validate Attacker output structure. Reads JSON from stdin.
+Validate Attacker output structure. Reads JSON from stdin or file.
 
 ```bash
-echo '<json>' | python harden/validate_findings.py [--check-files] [--deep]
+echo '<json>' | python harden/validate_findings.py [--check-files] [--deep] [--sanitize]
+python harden/validate_findings.py --file findings.json [--check-files] [--deep] [--sanitize]
 ```
 
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--check-files` | no | Verify referenced files exist (code mode) |
 | `--deep` | no | Require Given/When/Then scenarios |
+| `--file PATH` | no | Read JSON from file instead of stdin |
+| `--sanitize` | no | Auto-fix common issues before validation |
 
 Exit 0 + validated JSON on success. Exit 1 + error details on failure.
 
 ## harden/validate_response.py
 
-Validate Defender output structure. Reads JSON from stdin.
+Validate Defender output structure. Reads JSON from stdin or file.
 
 ```bash
 echo '<json>' | python harden/validate_response.py --expected-ids ATK-001,ATK-002 [--check-files]
+python harden/validate_response.py --file response.json --expected-ids ATK-001,ATK-002 [--check-files]
 ```
 
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--expected-ids IDS` | yes | Comma-separated ATK-IDs that must be addressed |
 | `--check-files` | no | Verify referenced files exist (code mode) |
+| `--file PATH` | no | Read JSON from file instead of stdin |
 
 Exit 0 + validated JSON on success. Exit 1 + error details on failure.
 

@@ -149,24 +149,18 @@ The agent must return ONLY a JSON array. Instruct it clearly:
 
 Extract the JSON array from the agent's response. If the response contains markdown fences, strip them.
 
-**Validate first, then assign IDs** (the validator rejects the `id` field, so it must run on raw Attacker output):
+Write the extracted JSON to a temp file, then run the pipeline to sanitize, validate, and assign IDs in one step:
 
 ```bash
-echo '<attacker_json>' | python <repo_dir>/harden/validate_findings.py [--check-files] [--deep]
+python <repo_dir>/harden/pipeline.py findings --file <temp_file> --sanitize [--check-files] [--deep]
 ```
 
-Use `--check-files` in code mode. Use `--deep` if the deep flag is set.
-
-Then assign IDs to the validated output:
-
-```bash
-echo '<validated_json>' | python <repo_dir>/harden/assign_ids.py --prefix ATK
-```
+Use `--check-files` in code mode. Use `--deep` if the deep flag is set. The `--sanitize` flag auto-strips unknown fields (e.g. `title`, `fix`) and maps invalid categories (e.g. `correctness` → `logic`) before validation.
 
 **On validation failure:**
 1. Show the error to the user briefly: "Attacker output validation failed: <errors>. Retrying..."
 2. Re-spawn the Attacker with the validation errors appended to the prompt as feedback.
-3. Run assign_ids + validation again on the retry output.
+3. Run the pipeline again on the retry output.
 4. If retry also fails: show the errors and use AskUserQuestion — "Continue to next round or stop?"
    - Continue → skip this round, proceed to next
    - Stop → jump to Step 3 with partial results
@@ -253,25 +247,13 @@ Collect the expected ATK-IDs from the findings:
 expected_ids = comma-separated list of all ATK-NNN IDs from the findings
 ```
 
-Pipe through ID assigner and validator:
+Write the extracted JSON to a temp file, then run the pipeline to validate and assign IDs in one step:
 
 ```bash
-echo '<defender_json>' | python <repo_dir>/harden/assign_ids.py --prefix DEF
+python <repo_dir>/harden/pipeline.py response --file <temp_file> --expected-ids <expected_ids> [--check-files]
 ```
 
-Wait — the assign_ids script works on arrays, but the Defender output is an object with a `responses` array. So instead, extract the `responses` array, pipe it through assign_ids, then reassemble the object. Or better: pipe just the responses array:
-
-```bash
-echo '<responses_array>' | python <repo_dir>/harden/assign_ids.py --prefix DEF
-```
-
-Then reconstruct the full object with the ID-assigned responses, and validate:
-
-```bash
-echo '<full_defender_json>' | python <repo_dir>/harden/validate_response.py --expected-ids <expected_ids> [--check-files]
-```
-
-Use `--check-files` in code mode.
+Use `--check-files` in code mode. The pipeline handles extracting the `responses` array, assigning DEF-IDs, and validating the full object.
 
 **On validation failure:** same retry pattern as Attacker (one retry, then ask user).
 
@@ -291,7 +273,19 @@ python <repo_dir>/scribe/notes.py add --type todo \
   --session-id "<session_id>" --auto
 ```
 
-#### 2i. Update state
+#### 2i. Save deferred findings as TODOs
+
+For each response in the Defender's output where `action` is `deferred`, create a TODO note so the deferred item is individually trackable:
+
+```bash
+python <repo_dir>/scribe/notes.py add --type todo \
+  --content "Deferred <finding_ref>: <finding description> — Reason: <deferral reason from Defender> (from /harden round <N>)" \
+  --session-id "<session_id>" --auto
+```
+
+The `<finding description>` comes from the original Attacker finding (matched by `finding_ref`). The `<deferral reason>` comes from the Defender's response `description` field.
+
+#### 2j. Update state
 
 - Set `prev_defender_output` to the validated Defender JSON (so the next round's Attacker sees what was fixed).
 - Tick the round counter:
@@ -300,7 +294,7 @@ python <repo_dir>/scribe/notes.py add --type todo \
 python <repo_dir>/harden/round_counter.py tick --session-id <session_id>
 ```
 
-#### 2j. Early exit check
+#### 2k. Early exit check
 
 If ALL findings in this round were deferred (no fixes or refactors), and this is not the first round, consider exiting early. Show: "All findings deferred — no further fixes possible. Exiting loop."
 

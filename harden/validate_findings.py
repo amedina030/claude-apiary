@@ -2,8 +2,8 @@
 """
 Validate Attacker output from the harden skill.
 
-Reads a JSON array of findings from stdin and validates required fields,
-valid enums, non-empty values, optional file existence, and optional
+Reads a JSON array of findings from stdin (or --file) and validates required
+fields, valid enums, non-empty values, optional file existence, and optional
 Given/When/Then scenarios.
 
 Exit 0 + prints validated JSON on success.
@@ -11,6 +11,7 @@ Exit 1 + prints error details on failure.
 
 Usage:
     echo '<json>' | validate_findings.py [--check-files] [--deep]
+    validate_findings.py --file findings.json [--check-files] [--deep]
 """
 import argparse
 import json
@@ -18,12 +19,47 @@ import re
 import sys
 from pathlib import Path
 
+from validate_common import check_path_escape, read_json_input, report_errors
+
 REQUIRED_FIELDS = ["category", "description", "severity", "location"]
 VALID_SEVERITIES = {"critical", "high", "medium", "low"}
 VALID_CATEGORIES = {"general", "security", "input", "logic", "complexity", "resilience"}
 
-MAX_STDIN_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_FINDINGS = 1000  # ATK-010: cap findings count to prevent O(n) DoS
+
+# Map common invalid categories to valid ones
+CATEGORY_MAP = {
+    "correctness": "logic",
+    "robustness": "resilience",
+    "performance": "complexity",
+    "error-handling": "resilience",
+    "error_handling": "resilience",
+    "validation": "input",
+    "data-validation": "input",
+    "maintainability": "complexity",
+}
+
+# Fields the Attacker is allowed to produce (plus "scenario" in deep mode)
+ALLOWED_FIELDS = {"category", "description", "severity", "location", "scenario"}
+
+
+def sanitize(findings: list, deep: bool = False) -> list:
+    """Auto-fix common Attacker output issues: strip unknown fields, map invalid categories."""
+    if not isinstance(findings, list):
+        return findings
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        # Strip unknown fields
+        allowed = ALLOWED_FIELDS if deep else ALLOWED_FIELDS - {"scenario"}
+        for key in list(finding.keys()):
+            if key not in allowed:
+                del finding[key]
+        # Map invalid categories
+        cat = finding.get("category", "")
+        if isinstance(cat, str) and cat.lower() in CATEGORY_MAP:
+            finding["category"] = CATEGORY_MAP[cat.lower()]
+    return findings
 
 
 def _resolve_filepath(location: str) -> str:
@@ -112,15 +148,11 @@ def validate(findings: list, check_files: bool = False, deep: bool = False) -> l
                     errors.append(f"{label}: 'location' must reference a single file, got multi-file: {location}")
                 else:
                     filepath = _resolve_filepath(location)
-                    # ATK-001: use relative_to() to prevent prefix collision attacks
-                    resolved = Path(filepath).resolve()
-                    cwd = Path.cwd().resolve()
-                    try:
-                        resolved.relative_to(cwd)
-                    except ValueError:
-                        errors.append(f"{label}: location escapes project directory: {filepath}")
+                    escape_err = check_path_escape(filepath)
+                    if escape_err:
+                        errors.append(f"{label}: location {escape_err}")
                         continue
-                    if not resolved.exists():
+                    if not Path(filepath).resolve().exists():
                         errors.append(f"{label}: file not found: {filepath}")
 
         # Deep mode: require Given/When/Then scenario
@@ -150,35 +182,23 @@ def main():
                         help="Verify that referenced files exist")
     parser.add_argument("--deep", action="store_true",
                         help="Require Given/When/Then scenarios in each finding")
+    parser.add_argument("--file", dest="file_path",
+                        help="Read JSON from file instead of stdin")
+    parser.add_argument("--sanitize", action="store_true",
+                        help="Auto-fix common issues (strip unknown fields, map invalid categories)")
     args = parser.parse_args()
 
-    # ATK-008: check size BEFORE stripping so whitespace-padded inputs cannot
-    # bypass the limit by relying on strip() reducing the byte count
-    raw_unstripped = sys.stdin.read(MAX_STDIN_BYTES + 1)
-    if len(raw_unstripped) > MAX_STDIN_BYTES:
-        print(f"ERROR: Input exceeds maximum allowed size ({MAX_STDIN_BYTES} bytes)", file=sys.stderr)
-        sys.exit(1)
-    raw = raw_unstripped.strip()
-    if not raw:
-        print("ERROR: Empty input", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        findings = json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"ERROR: Invalid JSON: {e}", file=sys.stderr)
-        sys.exit(1)
-
+    raw, findings = read_json_input(file_path=args.file_path)
+    if args.sanitize:
+        findings = sanitize(findings, deep=args.deep)
     errors = validate(findings, check_files=args.check_files, deep=args.deep)
+    report_errors(errors)
 
-    if errors:
-        print(f"VALIDATION FAILED ({len(errors)} errors):", file=sys.stderr)
-        for err in errors:
-            print(f"  - {err}", file=sys.stderr)
-        sys.exit(1)
-
-    # ATK-014: echo back the original input verbatim to preserve byte-identity
-    print(raw)
+    # When sanitized, output the cleaned version; otherwise echo original
+    if args.sanitize:
+        print(json.dumps(findings, indent=2))
+    else:
+        print(raw)
 
 
 if __name__ == "__main__":
