@@ -1,0 +1,178 @@
+{
+  "uuid": "9173fa8a-438d-4f5d-b3eb-9c24b5f565a4",
+  "executor_model": "sonnet",
+  "spec": {
+    "goal": {
+      "problem": "The pipeline orchestrator (pipeline/run.py) has no automated tests, so stage sequencing, artifact routing, error handling, and edge cases are verified only by manual end-to-end runs that take minutes and require LLM calls.",
+      "solution": "Add a focused unit/integration test suite for the orchestrator that validates stage ordering, artifact path derivation, failure propagation, and CLI behavior using mocked stage subprocesses.",
+      "value": "Developers can refactor or extend the orchestrator with confidence that sequencing invariants are protected by fast, deterministic tests."
+    },
+    "shape": {
+      "components": [
+        {
+          "name": "test_orchestrator.py",
+          "description": "Pytest test module in pipeline/ that tests run_stage() and main() by mocking subprocess.run to simulate stage success, failure, timeout, and OSError scenarios without invoking real LLM-backed stages."
+        }
+      ],
+      "integration_point": "pipeline/run.py \u2014 tests import run_stage and exercise main() via subprocess or monkeypatched sys.argv",
+      "pattern": "Follows the existing pytest test pattern used in harden/test_validators.py and harden/test_assign_ids.py \u2014 same project, same runner, same assertion style",
+      "data_flow": "Fixture intake JSON file \u2192 orchestrator main() with mocked subprocess.run \u2192 assert stdout/stderr output, exit codes, and stage call order",
+      "dependencies": "pytest, unittest.mock (stdlib), pipeline/run.py, a temporary intake JSON fixture with valid id/title/problem/description/scope/created_at fields"
+    },
+    "behavior": {
+      "input": "A valid intake JSON file (fixture) containing id (UUID string), title, problem (\u226520 chars), description (\u226520 chars), scope, and created_at (ISO format). Subprocess.run is mocked so no real stage scripts execute.",
+      "processing": "1. Create a tmp intake JSON fixture in a temp directory matching pipeline/intake/{uuid}.json layout. 2. For happy-path tests, mock subprocess.run to return returncode=0 with appropriate stdout for each of the 6 stage calls. 3. Verify run_stage() is called exactly 6 times, in STAGES order, with correct script paths and artifact input paths. 4. For failure tests, mock a specific stage to return returncode=1 and verify subsequent stages are never called. 5. For timeout tests, mock subprocess.run to raise TimeoutExpired and verify the error message. 6. For invalid-input tests, invoke main() with bad argv and verify sys.exit(1).",
+      "output": "Pytest pass/fail results. Each test asserts specific exit codes, stdout/stderr content, call counts, and call argument ordering.",
+      "error_cases": [
+        {
+          "trigger": "No CLI argument provided (sys.argv has only script name)",
+          "behavior": "main() prints usage to stderr and calls sys.exit(1)"
+        },
+        {
+          "trigger": "Intake file path does not exist on disk",
+          "behavior": "main() prints 'Intake file not found: <path>' to stderr and calls sys.exit(1)"
+        },
+        {
+          "trigger": "Intake file contains invalid JSON",
+          "behavior": "main() prints 'Invalid intake JSON: <detail>' to stderr and calls sys.exit(1)"
+        },
+        {
+          "trigger": "Intake JSON has no 'id' field or id is empty/whitespace",
+          "behavior": "main() prints 'Intake file missing id field' to stderr and calls sys.exit(1)"
+        },
+        {
+          "trigger": "Intake id contains path separators (e.g. '../foo' or 'a\\b')",
+          "behavior": "main() prints 'Intake id field contains invalid characters' to stderr and calls sys.exit(1)"
+        },
+        {
+          "trigger": "Stage script file does not exist on disk",
+          "behavior": "run_stage() returns (False, 'Stage script not found: <path>', 0.0)"
+        },
+        {
+          "trigger": "Stage input artifact file does not exist on disk",
+          "behavior": "run_stage() returns (False, 'Stage input file not found: <path>', 0.0)"
+        },
+        {
+          "trigger": "Stage subprocess returns non-zero exit code",
+          "behavior": "run_stage() returns (False, stderr_content, elapsed) and orchestrator prints FAILED, shows up to 5 stderr lines, exits 1"
+        },
+        {
+          "trigger": "Stage subprocess exceeds 3600s timeout",
+          "behavior": "run_stage() returns (False, 'Stage timed out (10 min limit)', elapsed)"
+        },
+        {
+          "trigger": "Stage subprocess raises OSError (e.g. Python not found)",
+          "behavior": "run_stage() returns (False, 'Stage failed to launch: <error>', elapsed)"
+        }
+      ],
+      "edge_cases": [
+        {
+          "condition": "Intake id is a non-string type (integer, list, None)",
+          "behavior": "main() prints 'Intake file missing id field' to stderr and calls sys.exit(1)"
+        },
+        {
+          "condition": "Intake path does not match the derived artifact path (file is outside pipeline/intake/)",
+          "behavior": "Orchestrator overrides artifacts['intake'] with the resolved provided path and continues normally"
+        },
+        {
+          "condition": "Stage 3 (auto_plan) fails \u2014 stages 4-6 must not run",
+          "behavior": "Orchestrator stops after stage 3 failure, prints 'FAILED at stage 3: auto_plan', stages_completed shows 2/6, exits 1"
+        },
+        {
+          "condition": "KeyboardInterrupt during stage execution",
+          "behavior": "Orchestrator prints 'Interrupted during stage N: <name>', shows stages_completed count, exits 1"
+        },
+        {
+          "condition": "Stage stdout is empty on success",
+          "behavior": "Orchestrator prints PASSED with timing but no '-> ...' line"
+        }
+      ]
+    },
+    "boundaries": {
+      "in_scope": [
+        "Unit tests for run_stage() return values given mocked subprocess outcomes",
+        "Integration tests for main() verifying stage ordering and artifact path wiring",
+        "Tests for all CLI input validation paths (missing args, bad file, bad JSON, bad id)",
+        "Tests for failure propagation (mid-pipeline failure stops subsequent stages)",
+        "Tests for timeout and OSError handling in run_stage()",
+        "Tests for KeyboardInterrupt handling",
+        "Tests for path-traversal rejection in intake id"
+      ],
+      "out_of_scope": [
+        {
+          "item": "Testing individual stage scripts (validate_intake.py, auto_refine.py, etc.)",
+          "reason": "Each stage has its own validation logic and should have its own test file; orchestrator tests only verify sequencing and routing"
+        },
+        {
+          "item": "Testing with real LLM calls or real Claude Code subprocesses",
+          "reason": "Would make tests slow, non-deterministic, and expensive; subprocess.run is mocked"
+        },
+        {
+          "item": "Testing artifact file content or schema validation",
+          "reason": "Artifact validation is the responsibility of each stage's validator, not the orchestrator"
+        },
+        {
+          "item": "Git branch creation or merge behavior",
+          "reason": "Git operations happen inside executor.py and approval.py, not in run.py"
+        }
+      ],
+      "must_not_break": [
+        "STAGES list order and structure in run.py must not be modified",
+        "run_stage() function signature and return type must remain stable",
+        "Existing pipeline execution behavior must be unchanged \u2014 tests are additive only",
+        "No test should write to the real pipeline/intake/, specs/, plans/, etc. directories"
+      ]
+    },
+    "acceptance_criteria": [
+      "Given a valid intake fixture and all 6 stages mocked to succeed, when main() runs, then subprocess.run is called exactly 6 times with script paths matching STAGES order (validate_intake.py, auto_refine.py, auto_plan.py, executor.py, auto_harden.py, approval.py)",
+      "Given a valid intake fixture and all 6 stages mocked to succeed, when main() runs, then each stage receives the correct input artifact path: stage 1-2 get intake path, stage 3 gets specs/{uuid}.json, stage 4 gets plans/{uuid}.json, stage 5 gets executions/{uuid}.json, stage 6 gets hardens/{uuid}.json",
+      "Given all stages succeed, when main() completes, then stdout contains 'COMPLETE' and 'Stages completed: 6/6' and the process exits with code 0",
+      "Given no CLI arguments, when main() is invoked, then it prints 'Usage:' to stderr and exits with code 1",
+      "Given a non-existent intake file path, when main() is invoked, then it prints 'Intake file not found' to stderr and exits with code 1",
+      "Given an intake file with malformed JSON, when main() is invoked, then it prints 'Invalid intake JSON' to stderr and exits with code 1",
+      "Given an intake JSON where 'id' is missing, empty, or whitespace-only, when main() is invoked, then it prints 'Intake file missing id field' to stderr and exits with code 1",
+      "Given an intake JSON where 'id' is a non-string type (integer 42), when main() is invoked, then it prints 'Intake file missing id field' to stderr and exits with code 1",
+      "Given an intake JSON where 'id' contains '../traversal', when main() is invoked, then it prints 'invalid characters' to stderr and exits with code 1",
+      "Given an intake JSON where 'id' contains a backslash 'a\\b', when main() is invoked, then it prints 'invalid characters' to stderr and exits with code 1",
+      "Given a stage script path that does not exist, when run_stage() is called, then it returns (False, 'Stage script not found: <path>', 0.0)",
+      "Given a stage input file path that does not exist, when run_stage() is called, then it returns (False, 'Stage input file not found: <path>', 0.0)",
+      "Given subprocess.run returns returncode=1 with stderr 'some error', when run_stage() is called, then it returns (False, 'some error', elapsed) where elapsed > 0",
+      "Given subprocess.run raises TimeoutExpired, when run_stage() is called, then it returns (False, 'Stage timed out (10 min limit)', elapsed)",
+      "Given subprocess.run raises OSError('spawn failed'), when run_stage() is called, then it returns (False, 'Stage failed to launch: spawn failed', elapsed)",
+      "Given stage 3 (auto_plan) is mocked to fail, when main() runs, then stages 1-2 execute, stages 4-6 do not execute, stdout contains 'FAILED at stage 3: auto_plan' and 'Stages completed: 2/6', and process exits with code 1",
+      "Given a KeyboardInterrupt is raised during stage 4 execution, when main() is running, then stdout contains 'Interrupted during stage 4: executor' and process exits with code 1",
+      "Given a successful stage returns empty stdout, when main() processes it, then no '-> ...' line is printed but 'PASSED' with timing is still shown",
+      "Given the intake file resides outside the derived pipeline/intake/ directory, when main() runs, then artifacts['intake'] is overridden to the provided path and stage 1 receives that path"
+    ],
+    "id": "9173fa8a-438d-4f5d-b3eb-9c24b5f565a4",
+    "intake_id": "9173fa8a-438d-4f5d-b3eb-9c24b5f565a4",
+    "valid": true
+  },
+  "steps": [
+    {
+      "step_number": 1,
+      "type": "create",
+      "description": "Create pytest test file for the pipeline orchestrator with all test cases covering run_stage(), main() happy path, CLI validation, failure propagation, timeout/OSError handling, KeyboardInterrupt, and edge cases",
+      "action": "create",
+      "files": [
+        "pipeline/test_orchestrator.py"
+      ],
+      "depends_on": [],
+      "code_spec": "Create pipeline/test_orchestrator.py with the following structure:\n\n```\n#!/usr/bin/env python3\n\"\"\"Tests for pipeline/run.py orchestrator.\"\"\"\nimport json\nimport subprocess\nimport sys\nimport uuid\nfrom pathlib import Path\nfrom unittest.mock import patch, MagicMock, call\n\nimport pytest\n\n# Import the module under test\nfrom pipeline import run as orchestrator\n# Also: from pipeline.run import run_stage, main, STAGES, SCRIPT_DIR\n```\n\n## Fixtures\n\n```python\n@pytest.fixture\ndef intake_data():\n    \"\"\"Return a valid intake dict with all required fields.\"\"\"\n    return {\n        \"id\": str(uuid.uuid4()),\n        \"title\": \"Test Feature Implementation\",\n        \"problem\": \"This is a test problem description that is at least twenty characters long\",\n        \"description\": \"This is a test description that is at least twenty characters long\",\n        \"scope\": [\"pipeline/run.py\"],\n        \"created_at\": \"2026-04-05T12:00:00Z\",\n    }\n\n@pytest.fixture\ndef intake_file(tmp_path, intake_data):\n    \"\"\"Write intake_data to a temp JSON file and return its Path.\"\"\"\n    f = tmp_path / \"intake\" / f\"{intake_data['id']}.json\"\n    f.parent.mkdir(parents=True, exist_ok=True)\n    f.write_text(json.dumps(intake_data), encoding=\"utf-8\")\n    return f\n\n@pytest.fixture\ndef mock_subprocess_success():\n    \"\"\"Return a MagicMock configured as a successful subprocess.CompletedProcess.\"\"\"\n    result = MagicMock(spec=subprocess.CompletedProcess)\n    result.returncode = 0\n    result.stdout = \"stage output line\"\n    result.stderr = \"\"\n    return result\n```\n\n## Helper\n\n```python\ndef make_completed_process(returncode=0, stdout=\"ok\", stderr=\"\"):\n    proc = MagicMock(spec=subprocess.CompletedProcess)\n    proc.returncode = returncode\n    proc.stdout = stdout\n    proc.stderr = stderr\n    return proc\n```\n\n## run_stage() unit tests\n\n```python\nclass TestRunStage:\n\n    def test_script_not_found(self, tmp_path):\n        \"\"\"run_stage returns failure when script_path doesn't exist.\"\"\"\n        script = tmp_path / \"nonexistent.py\"\n        input_f = tmp_path / \"input.json\"\n        input_f.write_text(\"{}\", encoding=\"utf-8\")\n        ok, msg, elapsed = orchestrator.run_stage(\"test\", script, input_f)\n        assert ok is False\n        assert f\"Stage script not found: {script}\" in msg\n        assert elapsed == 0.0\n\n    def test_input_file_not_found(self, tmp_path):\n        \"\"\"run_stage returns failure when input_path doesn't exist.\"\"\"\n        script = tmp_path / \"script.py\"\n        script.write_text(\"pass\", encoding=\"utf-8\")\n        input_f = tmp_path / \"nonexistent.json\"\n        ok, msg, elapsed = orchestrator.run_stage(\"test\", script, input_f)\n        assert ok is False\n        assert f\"Stage input file not found: {input_f}\" in msg\n        assert elapsed == 0.0\n\n    @patch(\"pipeline.run.subprocess.run\")\n    def test_success(self, mock_run, tmp_path):\n        \"\"\"run_stage returns (True, stdout, elapsed) on returncode=0.\"\"\"\n        script = tmp_path / \"script.py\"\n        script.write_text(\"pass\", encoding=\"utf-8\")\n        input_f = tmp_path / \"input.json\"\n        input_f.write_text(\"{}\", encoding=\"utf-8\")\n        mock_run.return_value = make_completed_process(returncode=0, stdout=\"output here\")\n        ok, output, elapsed = orchestrator.run_stage(\"test\", script, input_f)\n        assert ok is True\n        assert output == \"output here\"\n        assert elapsed > 0 or elapsed == pytest.approx(0, abs=1)  # time-based\n        mock_run.assert_called_once()\n        # Verify call args include sys.executable, script path, input path\n        args = mock_run.call_args[0][0]\n        assert args[0] == sys.executable\n        assert str(script) in args[1]\n        assert str(input_f) in args[2]\n\n    @patch(\"pipeline.run.subprocess.run\")\n    def test_failure_returncode(self, mock_run, tmp_path):\n        \"\"\"run_stage returns (False, stderr, elapsed) on non-zero returncode.\"\"\"\n        script = tmp_path / \"script.py\"\n        script.write_text(\"pass\", encoding=\"utf-8\")\n        input_f = tmp_path / \"input.json\"\n        input_f.write_text(\"{}\", encoding=\"utf-8\")\n        mock_run.return_value = make_completed_process(returncode=1, stderr=\"some error\")\n        ok, output, elapsed = orchestrator.run_stage(\"test\", script, input_f)\n        assert ok is False\n        assert output == \"some error\"\n        assert elapsed > 0 or elapsed == pytest.approx(0, abs=1)\n\n    @patch(\"pipeline.run.subprocess.run\")\n    def test_timeout(self, mock_run, tmp_path):\n        \"\"\"run_stage returns failure with timeout message on TimeoutExpired.\"\"\"\n        script = tmp_path / \"script.py\"\n        script.write_text(\"pass\", encoding=\"utf-8\")\n        input_f = tmp_path / \"input.json\"\n        input_f.write_text(\"{}\", encoding=\"utf-8\")\n        mock_run.side_effect = subprocess.TimeoutExpired(cmd=\"test\", timeout=3600)\n        ok, output, elapsed = orchestrator.run_stage(\"test\", script, input_f)\n        assert ok is False\n        assert \"Stage timed out (10 min limit)\" in output\n\n    @patch(\"pipeline.run.subprocess.run\")\n    def test_oserror(self, mock_run, tmp_path):\n        \"\"\"run_stage returns failure with launch error on OSError.\"\"\"\n        script = tmp_path / \"script.py\"\n        script.write_text(\"pass\", encoding=\"utf-8\")\n        input_f = tmp_path / \"input.json\"\n        input_f.write_text(\"{}\", encoding=\"utf-8\")\n        mock_run.side_effect = OSError(\"spawn failed\")\n        ok, output, elapsed = orchestrator.run_stage(\"test\", script, input_f)\n        assert ok is False\n        assert \"Stage failed to launch: spawn failed\" in output\n```\n\n## main() CLI validation tests\n\nAll main() tests use monkeypatch on sys.argv and capture sys.exit via pytest.raises(SystemExit).\n\n```python\nclass TestMainCLIValidation:\n\n    def test_no_args(self, monkeypatch, capsys):\n        \"\"\"main() exits 1 with usage message when no args provided.\"\"\"\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\"])\n        with pytest.raises(SystemExit) as exc:\n            orchestrator.main()\n        assert exc.value.code == 1\n        assert \"Usage:\" in capsys.readouterr().err\n\n    def test_nonexistent_file(self, monkeypatch, capsys, tmp_path):\n        \"\"\"main() exits 1 when intake file doesn't exist.\"\"\"\n        fake = tmp_path / \"nope.json\"\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(fake)])\n        with pytest.raises(SystemExit) as exc:\n            orchestrator.main()\n        assert exc.value.code == 1\n        assert \"Intake file not found\" in capsys.readouterr().err\n\n    def test_invalid_json(self, monkeypatch, capsys, tmp_path):\n        \"\"\"main() exits 1 when intake file contains bad JSON.\"\"\"\n        bad = tmp_path / \"bad.json\"\n        bad.write_text(\"not json!\", encoding=\"utf-8\")\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(bad)])\n        with pytest.raises(SystemExit) as exc:\n            orchestrator.main()\n        assert exc.value.code == 1\n        assert \"Invalid intake JSON\" in capsys.readouterr().err\n\n    def test_missing_id_field(self, monkeypatch, capsys, tmp_path):\n        \"\"\"main() exits 1 when JSON has no 'id' field.\"\"\"\n        f = tmp_path / \"no_id.json\"\n        f.write_text(json.dumps({\"title\": \"x\"}), encoding=\"utf-8\")\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(f)])\n        with pytest.raises(SystemExit) as exc:\n            orchestrator.main()\n        assert exc.value.code == 1\n        assert \"Intake file missing id field\" in capsys.readouterr().err\n\n    def test_empty_id(self, monkeypatch, capsys, tmp_path):\n        \"\"\"main() exits 1 when 'id' is empty string.\"\"\"\n        f = tmp_path / \"empty_id.json\"\n        f.write_text(json.dumps({\"id\": \"\"}), encoding=\"utf-8\")\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(f)])\n        with pytest.raises(SystemExit) as exc:\n            orchestrator.main()\n        assert exc.value.code == 1\n        assert \"Intake file missing id field\" in capsys.readouterr().err\n\n    def test_whitespace_only_id(self, monkeypatch, capsys, tmp_path):\n        \"\"\"main() exits 1 when 'id' is whitespace-only.\"\"\"\n        f = tmp_path / \"ws_id.json\"\n        f.write_text(json.dumps({\"id\": \"   \"}), encoding=\"utf-8\")\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(f)])\n        with pytest.raises(SystemExit) as exc:\n            orchestrator.main()\n        assert exc.value.code == 1\n        assert \"Intake file missing id field\" in capsys.readouterr().err\n\n    def test_integer_id(self, monkeypatch, capsys, tmp_path):\n        \"\"\"main() exits 1 when 'id' is an integer (non-string type).\"\"\"\n        f = tmp_path / \"int_id.json\"\n        f.write_text(json.dumps({\"id\": 42}), encoding=\"utf-8\")\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(f)])\n        with pytest.raises(SystemExit) as exc:\n            orchestrator.main()\n        assert exc.value.code == 1\n        assert \"Intake file missing id field\" in capsys.readouterr().err\n\n    def test_path_traversal_forward_slash(self, monkeypatch, capsys, tmp_path):\n        \"\"\"main() exits 1 when 'id' contains '../traversal'.\"\"\"\n        f = tmp_path / \"trav.json\"\n        f.write_text(json.dumps({\"id\": \"../traversal\"}), encoding=\"utf-8\")\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(f)])\n        with pytest.raises(SystemExit) as exc:\n            orchestrator.main()\n        assert exc.value.code == 1\n        assert \"invalid characters\" in capsys.readouterr().err\n\n    def test_path_traversal_backslash(self, monkeypatch, capsys, tmp_path):\n        \"\"\"main() exits 1 when 'id' contains backslash.\"\"\"\n        f = tmp_path / \"bs.json\"\n        f.write_text(json.dumps({\"id\": \"a\\\\b\"}), encoding=\"utf-8\")\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(f)])\n        with pytest.raises(SystemExit) as exc:\n            orchestrator.main()\n        assert exc.value.code == 1\n        assert \"invalid characters\" in capsys.readouterr().err\n```\n\n## main() happy path and stage ordering tests\n\n```python\nclass TestMainHappyPath:\n\n    @patch(\"pipeline.run.run_stage\")\n    def test_all_stages_succeed(self, mock_run_stage, monkeypatch, capsys, intake_file, intake_data):\n        \"\"\"All 6 stages succeed: exits 0, prints COMPLETE, Stages completed: 6/6.\"\"\"\n        mock_run_stage.return_value = (True, \"stage output\", 1.0)\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(intake_file)])\n        # main() does not call sys.exit on success, it just returns\n        orchestrator.main()\n        out = capsys.readouterr().out\n        assert \"COMPLETE\" in out\n        assert \"Stages completed: 6/6\" in out\n        assert mock_run_stage.call_count == 6\n\n    @patch(\"pipeline.run.run_stage\")\n    def test_stage_call_order(self, mock_run_stage, monkeypatch, capsys, intake_file, intake_data):\n        \"\"\"Stages are called in STAGES order with correct script names.\"\"\"\n        mock_run_stage.return_value = (True, \"ok\", 0.5)\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(intake_file)])\n        orchestrator.main()\n        expected_scripts = [\"validate_intake.py\", \"auto_refine.py\", \"auto_plan.py\", \"executor.py\", \"auto_harden.py\", \"approval.py\"]\n        for i, c in enumerate(mock_run_stage.call_args_list):\n            # call args: (name, script_path, input_path)\n            name_arg = c[0][0]  # positional arg 0\n            script_arg = c[0][1]  # positional arg 1 (Path)\n            assert script_arg.name == expected_scripts[i]\n            assert name_arg == orchestrator.STAGES[i][0]\n\n    @patch(\"pipeline.run.run_stage\")\n    def test_artifact_path_wiring(self, mock_run_stage, monkeypatch, capsys, intake_file, intake_data):\n        \"\"\"Each stage receives the correct input artifact path.\"\"\"\n        uid = intake_data[\"id\"]\n        mock_run_stage.return_value = (True, \"ok\", 0.5)\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(intake_file)])\n        orchestrator.main()\n        calls = mock_run_stage.call_args_list\n        # Stage 1 (validate_intake) and 2 (auto_refine): intake path\n        # Since intake_file is in tmp_path (not SCRIPT_DIR/intake/), the override applies\n        assert calls[0][0][2] == intake_file.resolve()  # stage 1 input = intake\n        assert calls[1][0][2] == intake_file.resolve()  # stage 2 input = intake\n        # Stage 3: specs/{uuid}.json\n        assert calls[2][0][2] == orchestrator.SCRIPT_DIR / \"specs\" / f\"{uid}.json\"\n        # Stage 4: plans/{uuid}.json\n        assert calls[3][0][2] == orchestrator.SCRIPT_DIR / \"plans\" / f\"{uid}.json\"\n        # Stage 5: executions/{uuid}.json\n        assert calls[4][0][2] == orchestrator.SCRIPT_DIR / \"executions\" / f\"{uid}.json\"\n        # Stage 6: hardens/{uuid}.json\n        assert calls[5][0][2] == orchestrator.SCRIPT_DIR / \"hardens\" / f\"{uid}.json\"\n\n    @patch(\"pipeline.run.run_stage\")\n    def test_empty_stdout_no_arrow_line(self, mock_run_stage, monkeypatch, capsys, intake_file):\n        \"\"\"When a successful stage returns empty stdout, no '-> ...' line is printed.\"\"\"\n        mock_run_stage.return_value = (True, \"\", 0.5)\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(intake_file)])\n        orchestrator.main()\n        out = capsys.readouterr().out\n        assert \"PASSED\" in out\n        assert \"->\" not in out\n```\n\n## main() failure propagation tests\n\n```python\nclass TestMainFailurePropagation:\n\n    @patch(\"pipeline.run.run_stage\")\n    def test_stage3_failure_stops_pipeline(self, mock_run_stage, monkeypatch, capsys, intake_file):\n        \"\"\"When stage 3 fails, stages 4-6 don't run. Output shows FAILED at stage 3.\"\"\"\n        def side_effect(name, script, input_path):\n            if name == \"auto_plan\":\n                return (False, \"plan error\", 2.0)\n            return (True, \"ok\", 0.5)\n        mock_run_stage.side_effect = side_effect\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(intake_file)])\n        with pytest.raises(SystemExit) as exc:\n            orchestrator.main()\n        assert exc.value.code == 1\n        out = capsys.readouterr().out\n        assert \"FAILED at stage 3: auto_plan\" in out\n        assert \"Stages completed: 2/6\" in out\n        # Only 3 calls: stages 1, 2, and 3 (which failed)\n        assert mock_run_stage.call_count == 3\n\n    @patch(\"pipeline.run.run_stage\")\n    def test_stage1_failure_stops_all(self, mock_run_stage, monkeypatch, capsys, intake_file):\n        \"\"\"When stage 1 fails, no subsequent stages run.\"\"\"\n        mock_run_stage.return_value = (False, \"validate error\", 0.1)\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(intake_file)])\n        with pytest.raises(SystemExit) as exc:\n            orchestrator.main()\n        assert exc.value.code == 1\n        assert mock_run_stage.call_count == 1\n        out = capsys.readouterr().out\n        assert \"FAILED at stage 1: validate_intake\" in out\n        assert \"Stages completed: 0/6\" in out\n\n    @patch(\"pipeline.run.run_stage\")\n    def test_failure_shows_stderr_lines(self, mock_run_stage, monkeypatch, capsys, intake_file):\n        \"\"\"Failed stage stderr lines (up to 5) are prefixed with '! '.\"\"\"\n        mock_run_stage.return_value = (False, \"line1\\nline2\\nline3\", 1.0)\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(intake_file)])\n        with pytest.raises(SystemExit):\n            orchestrator.main()\n        out = capsys.readouterr().out\n        assert \"! line1\" in out\n        assert \"! line2\" in out\n        assert \"! line3\" in out\n```\n\n## KeyboardInterrupt test\n\n```python\nclass TestMainKeyboardInterrupt:\n\n    @patch(\"pipeline.run.run_stage\")\n    def test_interrupt_during_stage4(self, mock_run_stage, monkeypatch, capsys, intake_file):\n        \"\"\"KeyboardInterrupt during stage 4 prints interrupted message and exits 1.\"\"\"\n        call_count = 0\n        def side_effect(name, script, input_path):\n            nonlocal call_count\n            call_count += 1\n            if call_count == 4:  # stage 4 = executor\n                raise KeyboardInterrupt()\n            return (True, \"ok\", 0.5)\n        mock_run_stage.side_effect = side_effect\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(intake_file)])\n        with pytest.raises(SystemExit) as exc:\n            orchestrator.main()\n        assert exc.value.code == 1\n        out = capsys.readouterr().out\n        assert \"Interrupted during stage 4: executor\" in out\n```\n\n## Intake path override edge case\n\n```python\nclass TestIntakePathOverride:\n\n    @patch(\"pipeline.run.run_stage\")\n    def test_intake_outside_pipeline_dir(self, mock_run_stage, monkeypatch, capsys, tmp_path, intake_data):\n        \"\"\"When intake file is outside pipeline/intake/, artifacts['intake'] is overridden to the provided path.\"\"\"\n        # Write intake to a location that does NOT match SCRIPT_DIR/intake/{uuid}.json\n        f = tmp_path / \"elsewhere\" / \"myfile.json\"\n        f.parent.mkdir(parents=True, exist_ok=True)\n        f.write_text(json.dumps(intake_data), encoding=\"utf-8\")\n        mock_run_stage.return_value = (True, \"ok\", 0.5)\n        monkeypatch.setattr(sys, \"argv\", [\"run.py\", str(f)])\n        orchestrator.main()\n        # Stage 1 and 2 should receive the resolved provided path\n        calls = mock_run_stage.call_args_list\n        assert calls[0][0][2] == f.resolve()\n        assert calls[1][0][2] == f.resolve()\n```\n\nEnsure the file ends with:\n```python\nif __name__ == \"__main__\":\n    pytest.main([__file__, \"-v\"])\n```"
+    },
+    {
+      "step_number": 2,
+      "type": "verify",
+      "description": "Run pytest on the new test file and verify all tests pass",
+      "action": "verify",
+      "files": [
+        "pipeline/test_orchestrator.py"
+      ],
+      "depends_on": [
+        1
+      ],
+      "code_spec": "Run: `python -m pytest pipeline/test_orchestrator.py -v`\n\nExpected: All tests pass (0 failures). Verify:\n1. All test classes are discovered: TestRunStage, TestMainCLIValidation, TestMainHappyPath, TestMainFailurePropagation, TestMainKeyboardInterrupt, TestIntakePathOverride\n2. Total test count matches expected (~22-24 tests)\n3. No import errors or collection errors\n4. No warnings about deprecated features\n\nIf any tests fail, diagnose whether the issue is in the test or in an incorrect assumption about run.py behavior, and fix accordingly.\n\nAlso verify no tests write to the real pipeline/ directories by checking that tmp_path is used for all file I/O."
+    }
+  ],
+  "valid": true
+}

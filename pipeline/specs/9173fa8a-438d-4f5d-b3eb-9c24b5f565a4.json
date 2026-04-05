@@ -1,0 +1,147 @@
+{
+  "goal": {
+    "problem": "The pipeline orchestrator (pipeline/run.py) has no automated tests, so stage sequencing, artifact routing, error handling, and edge cases are verified only by manual end-to-end runs that take minutes and require LLM calls.",
+    "solution": "Add a focused unit/integration test suite for the orchestrator that validates stage ordering, artifact path derivation, failure propagation, and CLI behavior using mocked stage subprocesses.",
+    "value": "Developers can refactor or extend the orchestrator with confidence that sequencing invariants are protected by fast, deterministic tests."
+  },
+  "shape": {
+    "components": [
+      {
+        "name": "test_orchestrator.py",
+        "description": "Pytest test module in pipeline/ that tests run_stage() and main() by mocking subprocess.run to simulate stage success, failure, timeout, and OSError scenarios without invoking real LLM-backed stages."
+      }
+    ],
+    "integration_point": "pipeline/run.py \u2014 tests import run_stage and exercise main() via subprocess or monkeypatched sys.argv",
+    "pattern": "Follows the existing pytest test pattern used in harden/test_validators.py and harden/test_assign_ids.py \u2014 same project, same runner, same assertion style",
+    "data_flow": "Fixture intake JSON file \u2192 orchestrator main() with mocked subprocess.run \u2192 assert stdout/stderr output, exit codes, and stage call order",
+    "dependencies": "pytest, unittest.mock (stdlib), pipeline/run.py, a temporary intake JSON fixture with valid id/title/problem/description/scope/created_at fields"
+  },
+  "behavior": {
+    "input": "A valid intake JSON file (fixture) containing id (UUID string), title, problem (\u226520 chars), description (\u226520 chars), scope, and created_at (ISO format). Subprocess.run is mocked so no real stage scripts execute.",
+    "processing": "1. Create a tmp intake JSON fixture in a temp directory matching pipeline/intake/{uuid}.json layout. 2. For happy-path tests, mock subprocess.run to return returncode=0 with appropriate stdout for each of the 6 stage calls. 3. Verify run_stage() is called exactly 6 times, in STAGES order, with correct script paths and artifact input paths. 4. For failure tests, mock a specific stage to return returncode=1 and verify subsequent stages are never called. 5. For timeout tests, mock subprocess.run to raise TimeoutExpired and verify the error message. 6. For invalid-input tests, invoke main() with bad argv and verify sys.exit(1).",
+    "output": "Pytest pass/fail results. Each test asserts specific exit codes, stdout/stderr content, call counts, and call argument ordering.",
+    "error_cases": [
+      {
+        "trigger": "No CLI argument provided (sys.argv has only script name)",
+        "behavior": "main() prints usage to stderr and calls sys.exit(1)"
+      },
+      {
+        "trigger": "Intake file path does not exist on disk",
+        "behavior": "main() prints 'Intake file not found: <path>' to stderr and calls sys.exit(1)"
+      },
+      {
+        "trigger": "Intake file contains invalid JSON",
+        "behavior": "main() prints 'Invalid intake JSON: <detail>' to stderr and calls sys.exit(1)"
+      },
+      {
+        "trigger": "Intake JSON has no 'id' field or id is empty/whitespace",
+        "behavior": "main() prints 'Intake file missing id field' to stderr and calls sys.exit(1)"
+      },
+      {
+        "trigger": "Intake id contains path separators (e.g. '../foo' or 'a\\b')",
+        "behavior": "main() prints 'Intake id field contains invalid characters' to stderr and calls sys.exit(1)"
+      },
+      {
+        "trigger": "Stage script file does not exist on disk",
+        "behavior": "run_stage() returns (False, 'Stage script not found: <path>', 0.0)"
+      },
+      {
+        "trigger": "Stage input artifact file does not exist on disk",
+        "behavior": "run_stage() returns (False, 'Stage input file not found: <path>', 0.0)"
+      },
+      {
+        "trigger": "Stage subprocess returns non-zero exit code",
+        "behavior": "run_stage() returns (False, stderr_content, elapsed) and orchestrator prints FAILED, shows up to 5 stderr lines, exits 1"
+      },
+      {
+        "trigger": "Stage subprocess exceeds 3600s timeout",
+        "behavior": "run_stage() returns (False, 'Stage timed out (10 min limit)', elapsed)"
+      },
+      {
+        "trigger": "Stage subprocess raises OSError (e.g. Python not found)",
+        "behavior": "run_stage() returns (False, 'Stage failed to launch: <error>', elapsed)"
+      }
+    ],
+    "edge_cases": [
+      {
+        "condition": "Intake id is a non-string type (integer, list, None)",
+        "behavior": "main() prints 'Intake file missing id field' to stderr and calls sys.exit(1)"
+      },
+      {
+        "condition": "Intake path does not match the derived artifact path (file is outside pipeline/intake/)",
+        "behavior": "Orchestrator overrides artifacts['intake'] with the resolved provided path and continues normally"
+      },
+      {
+        "condition": "Stage 3 (auto_plan) fails \u2014 stages 4-6 must not run",
+        "behavior": "Orchestrator stops after stage 3 failure, prints 'FAILED at stage 3: auto_plan', stages_completed shows 2/6, exits 1"
+      },
+      {
+        "condition": "KeyboardInterrupt during stage execution",
+        "behavior": "Orchestrator prints 'Interrupted during stage N: <name>', shows stages_completed count, exits 1"
+      },
+      {
+        "condition": "Stage stdout is empty on success",
+        "behavior": "Orchestrator prints PASSED with timing but no '-> ...' line"
+      }
+    ]
+  },
+  "boundaries": {
+    "in_scope": [
+      "Unit tests for run_stage() return values given mocked subprocess outcomes",
+      "Integration tests for main() verifying stage ordering and artifact path wiring",
+      "Tests for all CLI input validation paths (missing args, bad file, bad JSON, bad id)",
+      "Tests for failure propagation (mid-pipeline failure stops subsequent stages)",
+      "Tests for timeout and OSError handling in run_stage()",
+      "Tests for KeyboardInterrupt handling",
+      "Tests for path-traversal rejection in intake id"
+    ],
+    "out_of_scope": [
+      {
+        "item": "Testing individual stage scripts (validate_intake.py, auto_refine.py, etc.)",
+        "reason": "Each stage has its own validation logic and should have its own test file; orchestrator tests only verify sequencing and routing"
+      },
+      {
+        "item": "Testing with real LLM calls or real Claude Code subprocesses",
+        "reason": "Would make tests slow, non-deterministic, and expensive; subprocess.run is mocked"
+      },
+      {
+        "item": "Testing artifact file content or schema validation",
+        "reason": "Artifact validation is the responsibility of each stage's validator, not the orchestrator"
+      },
+      {
+        "item": "Git branch creation or merge behavior",
+        "reason": "Git operations happen inside executor.py and approval.py, not in run.py"
+      }
+    ],
+    "must_not_break": [
+      "STAGES list order and structure in run.py must not be modified",
+      "run_stage() function signature and return type must remain stable",
+      "Existing pipeline execution behavior must be unchanged \u2014 tests are additive only",
+      "No test should write to the real pipeline/intake/, specs/, plans/, etc. directories"
+    ]
+  },
+  "acceptance_criteria": [
+    "Given a valid intake fixture and all 6 stages mocked to succeed, when main() runs, then subprocess.run is called exactly 6 times with script paths matching STAGES order (validate_intake.py, auto_refine.py, auto_plan.py, executor.py, auto_harden.py, approval.py)",
+    "Given a valid intake fixture and all 6 stages mocked to succeed, when main() runs, then each stage receives the correct input artifact path: stage 1-2 get intake path, stage 3 gets specs/{uuid}.json, stage 4 gets plans/{uuid}.json, stage 5 gets executions/{uuid}.json, stage 6 gets hardens/{uuid}.json",
+    "Given all stages succeed, when main() completes, then stdout contains 'COMPLETE' and 'Stages completed: 6/6' and the process exits with code 0",
+    "Given no CLI arguments, when main() is invoked, then it prints 'Usage:' to stderr and exits with code 1",
+    "Given a non-existent intake file path, when main() is invoked, then it prints 'Intake file not found' to stderr and exits with code 1",
+    "Given an intake file with malformed JSON, when main() is invoked, then it prints 'Invalid intake JSON' to stderr and exits with code 1",
+    "Given an intake JSON where 'id' is missing, empty, or whitespace-only, when main() is invoked, then it prints 'Intake file missing id field' to stderr and exits with code 1",
+    "Given an intake JSON where 'id' is a non-string type (integer 42), when main() is invoked, then it prints 'Intake file missing id field' to stderr and exits with code 1",
+    "Given an intake JSON where 'id' contains '../traversal', when main() is invoked, then it prints 'invalid characters' to stderr and exits with code 1",
+    "Given an intake JSON where 'id' contains a backslash 'a\\b', when main() is invoked, then it prints 'invalid characters' to stderr and exits with code 1",
+    "Given a stage script path that does not exist, when run_stage() is called, then it returns (False, 'Stage script not found: <path>', 0.0)",
+    "Given a stage input file path that does not exist, when run_stage() is called, then it returns (False, 'Stage input file not found: <path>', 0.0)",
+    "Given subprocess.run returns returncode=1 with stderr 'some error', when run_stage() is called, then it returns (False, 'some error', elapsed) where elapsed > 0",
+    "Given subprocess.run raises TimeoutExpired, when run_stage() is called, then it returns (False, 'Stage timed out (10 min limit)', elapsed)",
+    "Given subprocess.run raises OSError('spawn failed'), when run_stage() is called, then it returns (False, 'Stage failed to launch: spawn failed', elapsed)",
+    "Given stage 3 (auto_plan) is mocked to fail, when main() runs, then stages 1-2 execute, stages 4-6 do not execute, stdout contains 'FAILED at stage 3: auto_plan' and 'Stages completed: 2/6', and process exits with code 1",
+    "Given a KeyboardInterrupt is raised during stage 4 execution, when main() is running, then stdout contains 'Interrupted during stage 4: executor' and process exits with code 1",
+    "Given a successful stage returns empty stdout, when main() processes it, then no '-> ...' line is printed but 'PASSED' with timing is still shown",
+    "Given the intake file resides outside the derived pipeline/intake/ directory, when main() runs, then artifacts['intake'] is overridden to the provided path and stage 1 receives that path"
+  ],
+  "id": "9173fa8a-438d-4f5d-b3eb-9c24b5f565a4",
+  "intake_id": "9173fa8a-438d-4f5d-b3eb-9c24b5f565a4",
+  "valid": true
+}

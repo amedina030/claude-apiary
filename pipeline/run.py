@@ -48,7 +48,7 @@ def run_stage(name: str, script_path: Path, input_path: Path) -> tuple[bool, str
         return True, result.stdout.strip(), elapsed
     except subprocess.TimeoutExpired:
         elapsed = time.time() - start
-        return False, "Stage timed out (10 min limit)", elapsed
+        return False, "Stage timed out (60 min limit)", elapsed
     except OSError as e:
         elapsed = time.time() - start
         return False, f"Stage failed to launch: {e}", elapsed
@@ -82,10 +82,18 @@ def main():
         print("Intake file missing id field", file=sys.stderr)
         sys.exit(1)
 
-    # Reject ids with path separators to prevent path traversal in artifact paths.
-    # Check backslash explicitly: on POSIX, Path("foo\\bar").name == "foo\\bar" so
-    # the Path comparison alone would not catch it.
-    if "\\" in uuid or Path(uuid) != Path(Path(uuid).name) or not Path(uuid).name:
+    # Reject ids with path separators, null bytes, or dot-only names to prevent
+    # path traversal in artifact paths.
+    # - backslash: on POSIX, Path("foo\\bar").name == "foo\\bar" so Path comparison alone misses it
+    # - null bytes: truncate filenames on some filesystems
+    # - "." / "..": Path(".").name == "." on POSIX so Path comparison alone misses them
+    if (
+        "\\" in uuid
+        or "\x00" in uuid
+        or uuid in (".", "..")
+        or Path(uuid) != Path(Path(uuid).name)
+        or not Path(uuid).name
+    ):
         print("Intake id field contains invalid characters (path separators not allowed)", file=sys.stderr)
         sys.exit(1)
 
