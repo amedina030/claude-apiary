@@ -40,7 +40,7 @@ def run_stage(name: str, script_path: Path, input_path: Path) -> tuple[bool, str
     try:
         result = subprocess.run(
             [sys.executable, str(script_path), str(input_path)],
-            capture_output=True, text=True, timeout=600,
+            capture_output=True, text=True, timeout=3600,
         )
         elapsed = time.time() - start
         if result.returncode != 0:
