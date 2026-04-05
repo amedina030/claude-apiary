@@ -18,11 +18,13 @@ import sys
 import textwrap
 from pathlib import Path
 
+from config_loader import get as cfg
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 PLANS_DIR = SCRIPT_DIR / "plans"
 VALIDATE_SCRIPT = SCRIPT_DIR / "validate_plan.py"
 
-MAX_RETRIES = 3
+MAX_RETRIES = cfg("plan", "max_retries", 3)
 
 PLAN_SCHEMA = textwrap.dedent("""\
 {
@@ -102,7 +104,7 @@ def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
     result = subprocess.run(
         ["claude", "-p", "-", "--output-format", "json"],
-        input=prompt, capture_output=True, text=True, timeout=300,
+        input=prompt, capture_output=True, text=True, timeout=cfg("plan", "timeout", 300),
     )
     return result.returncode, result.stdout, result.stderr
 
@@ -206,7 +208,7 @@ def main():
         # Assemble full plan with metadata
         plan = {
             "uuid": spec_id,
-            "executor_model": "sonnet",
+            "executor_model": cfg("executor", "model", "sonnet"),
             "spec": spec,
             "steps": plan_data.get("steps", []),
         }

@@ -14,6 +14,8 @@ import sys
 import time
 from pathlib import Path
 
+from config_loader import get as cfg
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 # Stage definitions: (name, script, input_artifact_key)
@@ -40,7 +42,7 @@ def run_stage(name: str, script_path: Path, input_path: Path) -> tuple[bool, str
     try:
         result = subprocess.run(
             [sys.executable, str(script_path), str(input_path)],
-            capture_output=True, text=True, timeout=3600,
+            capture_output=True, text=True, timeout=cfg("orchestrator", "stage_timeout", 3600),
         )
         elapsed = time.time() - start
         if result.returncode != 0:

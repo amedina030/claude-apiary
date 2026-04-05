@@ -18,11 +18,13 @@ import sys
 import textwrap
 from pathlib import Path
 
+from config_loader import get as cfg
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 SPECS_DIR = SCRIPT_DIR / "specs"
 VALIDATE_SCRIPT = SCRIPT_DIR / "validate_spec.py"
 
-MAX_RETRIES = 3
+MAX_RETRIES = cfg("refine", "max_retries", 3)
 
 SPEC_SCHEMA = textwrap.dedent("""\
 {
@@ -121,7 +123,7 @@ def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
     result = subprocess.run(
         ["claude", "-p", "-", "--output-format", "json"],
-        input=prompt, capture_output=True, text=True, timeout=300,
+        input=prompt, capture_output=True, text=True, timeout=cfg("refine", "timeout", 300),
     )
     return result.returncode, result.stdout, result.stderr
 

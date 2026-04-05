@@ -21,6 +21,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from config_loader import get as cfg
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_DIR = SCRIPT_DIR.parent
 HARDENS_DIR = SCRIPT_DIR / "hardens"
@@ -30,7 +32,7 @@ VALIDATE_FINDINGS = HARDEN_DIR / "validate_findings.py"
 VALIDATE_RESPONSE = HARDEN_DIR / "validate_response.py"
 ASSIGN_IDS = HARDEN_DIR / "assign_ids.py"
 
-MAX_ROUNDS = 3
+MAX_ROUNDS = cfg("harden", "max_rounds", 3)
 
 
 # -- Git helpers --
@@ -71,7 +73,8 @@ def run_claude(prompt: str, model: str | None = None) -> tuple[int, str, str]:
     cmd = ["claude", "-p", "-", "--output-format", "json"]
     if model:
         cmd.extend(["--model", model])
-    result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=300)
+    timeout = cfg("harden", "timeout", 300)
+    result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout)
     return result.returncode, result.stdout, result.stderr
 
 
@@ -225,7 +228,7 @@ def run_attacker(files: list[str], spec: dict) -> list[dict] | None:
 
     for attempt in range(2):
         try:
-            rc, stdout, stderr = run_claude(prompt, model="opus")
+            rc, stdout, stderr = run_claude(prompt, model=cfg("harden", "attacker_model", "opus"))
         except subprocess.TimeoutExpired:
             print(f"  Attacker timed out (attempt {attempt + 1})", file=sys.stderr)
             continue
@@ -261,7 +264,7 @@ def run_defender(findings: list[dict], files: list[str]) -> list[dict] | None:
 
     for attempt in range(2):
         try:
-            rc, stdout, stderr = run_claude(prompt, model="sonnet")
+            rc, stdout, stderr = run_claude(prompt, model=cfg("harden", "defender_model", "sonnet"))
         except subprocess.TimeoutExpired:
             print(f"  Defender timed out (attempt {attempt + 1})", file=sys.stderr)
             continue

@@ -1,0 +1,26 @@
+{
+  "refine": {
+    "max_retries": 3,
+    "model": "opus",
+    "timeout": 300
+  },
+  "plan": {
+    "max_retries": 3,
+    "model": "opus",
+    "timeout": 300
+  },
+  "executor": {
+    "model": "sonnet",
+    "max_retries_per_step": 2,
+    "timeout": 300
+  },
+  "harden": {
+    "max_rounds": 1,
+    "attacker_model": "opus",
+    "defender_model": "sonnet",
+    "timeout": 300
+  },
+  "orchestrator": {
+    "stage_timeout": 3600
+  }
+}

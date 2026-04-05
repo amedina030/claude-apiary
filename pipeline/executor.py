@@ -19,10 +19,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from config_loader import get as cfg
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 EXECUTIONS_DIR = SCRIPT_DIR / "executions"
 
-MAX_STEP_RETRIES = 2
+MAX_STEP_RETRIES = cfg("executor", "max_retries_per_step", 2)
 
 
 # -- Git helpers --
@@ -145,7 +147,7 @@ def run_claude(prompt: str, model: str) -> tuple[int, str, str]:
     cmd = ["claude", "-p", "-", "--output-format", "json"]
     if model:
         cmd.extend(["--model", model])
-    result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=300)
+    result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=cfg("executor", "timeout", 300))
     return result.returncode, result.stdout, result.stderr
 
 
