@@ -94,12 +94,12 @@ def _run():
     except Exception:
         pass
 
-    # --- 4. CLI reference ---
+    # --- 4. CLI index (compact; use cli_lookup.py for full details) ---
     try:
-        cli_ref = (PROJECT_ROOT / "docs" / "reference" / "cli-tools.md").read_text(encoding="utf-8")
+        cli_index = (PROJECT_ROOT / "docs" / "reference" / "cli-index.md").read_text(encoding="utf-8")
         parts.append("")
-        parts.append("--- cli-tools reference ---")
-        parts.append(cli_ref.strip())
+        parts.append("--- cli-tools index (run `python docs/reference/cli_lookup.py <tool>` for full flags) ---")
+        parts.append(cli_index.strip())
     except Exception:
         pass
 
