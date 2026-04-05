@@ -15,7 +15,7 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 
 | Command | Source | Description |
 |---------|--------|-------------|
-| `/startup` | `core/commands/startup.md` | Session initialization — generates handoffs, loads notes and learnings |
+| `/backfill-handoffs` | `core/commands/backfill-handoffs.md` | Process unseen session transcripts into handoff notes |
 | `/budgeter-log` | `budgeter/commands/budgeter-log.md` | Toggle token logging on/off |
 | `/budgeter-warn` | `budgeter/commands/budgeter-warn.md` | Toggle cost estimation warnings on/off |
 | `/budgeter-setup` | `budgeter/commands/budgeter-setup.md` | Set up budgeter for a specific project |
@@ -43,6 +43,6 @@ Toggles persist across sessions.
 These features have no toggle — they're always on:
 
 - **Scribe** (notes, learnings, handoffs) — `/note`, `/notes`
-- **Session startup** — `/startup` runs automatically on first message per session
+- **Session startup** — context injected automatically via `UserPromptSubmit` hook (toggled by `auto-startup` flag); `/backfill-handoffs` processes unseen transcripts
 - **Install checker** — verifies installed files match repo on first tool call
 - **Transcript saver** — saves session transcript on session end

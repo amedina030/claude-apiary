@@ -1,6 +1,6 @@
 ---
-name: startup
-description: Process unseen session transcripts (identity and context already loaded via hook)
+name: backfill-handoffs
+description: Process unseen session transcripts into handoff notes
 user-invocable: true
 ---
 
@@ -70,7 +70,7 @@ Do NOT wait for the agent to finish. Immediately continue with the user's reques
 When the transcript agent completes, the task notification includes a `<usage>` block. Pipe the **raw usage block** (copy-paste the entire `<usage>...</usage>` tag) to the logging script via stdin:
 
 ```bash
-echo '<usage>...</usage>' | python <repo_dir>/budgeter/log_agent_cost.py --session-id "<full_session_id>" --agent "startup" --cwd "<repo_dir>"
+echo '<usage>...</usage>' | python <repo_dir>/budgeter/log_agent_cost.py --session-id "<full_session_id>" --agent "backfill-handoffs" --cwd "<repo_dir>"
 ```
 
 Use the full session UUID (not the 8-char prefix) so it matches other budgeter entries. Run this silently — do not mention the cost logging to the user.
