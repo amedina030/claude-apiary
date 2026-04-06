@@ -12,7 +12,7 @@
   "executor": {
     "model": "sonnet",
     "max_retries_per_step": 2,
-    "timeout": 300
+    "timeout": 900
   },
   "harden": {
     "max_rounds": 1,

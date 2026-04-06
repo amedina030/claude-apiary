@@ -215,6 +215,11 @@ def execute_step(step: dict, spec: dict, model: str) -> dict:
                 rc, stdout, stderr = run_claude(prompt, model)
                 if rc != 0:
                     result["error"] = f"Claude Code error (attempt {attempt}): {stderr.strip()[:500]}"
+                    # -1 = subprocess timeout, -2 = binary not found / permission denied.
+                    # Both are deterministic failures — retrying with identical settings
+                    # is guaranteed to waste tokens, so abort the retry loop now.
+                    if rc in (-1, -2):
+                        break
                     continue
 
                 # Parse verify result — handle envelope, code fences, and prose
@@ -262,6 +267,11 @@ def execute_step(step: dict, spec: dict, model: str) -> dict:
                 rc, stdout, stderr = run_claude(prompt, model)
                 if rc != 0:
                     result["error"] = f"Claude Code error (attempt {attempt}): {stderr.strip()[:500]}"
+                    # -1 = subprocess timeout, -2 = binary not found / permission denied.
+                    # Both are deterministic failures — retrying with identical settings
+                    # is guaranteed to waste tokens, so abort the retry loop now.
+                    if rc in (-1, -2):
+                        break
                     continue
 
                 # Success — Claude wrote the files

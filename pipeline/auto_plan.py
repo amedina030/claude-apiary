@@ -59,8 +59,13 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "",
         "## Instructions",
         "",
-        "1. Explore the codebase freely — read files, search for patterns, "
-        "understand existing architecture and conventions.",
+        "1. Read only the specific files mentioned in the spec (e.g. "
+        "files_to_modify, related_files, or files referenced in acceptance "
+        "criteria). If you must locate something the spec does not name, use "
+        "Grep/Glob sparingly — at most 3 search queries total, and prefer "
+        "narrow glob patterns over broad content searches. Do not do "
+        "exploratory reading of unrelated parts of the codebase: every extra "
+        "file you open is charged against this stage's token budget.",
         "2. Decompose the spec into ordered implementation steps. Each step should be "
         "granular enough that a coding model (Sonnet) can implement it without "
         "making design decisions.",
