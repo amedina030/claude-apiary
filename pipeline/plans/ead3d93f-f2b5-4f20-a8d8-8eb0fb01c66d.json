@@ -1,0 +1,205 @@
+{
+  "uuid": "ead3d93f-f2b5-4f20-a8d8-8eb0fb01c66d",
+  "executor_model": "sonnet",
+  "spec": {
+    "goal": {
+      "problem": "Pipeline stages run as claude -p subprocesses outside the main session, so budgeter hooks never fire and the token cost of a 6-stage pipeline run is invisible.",
+      "solution": "Have pipeline/run.py capture each stage subprocess's <usage> output, pipe it through budgeter/log_agent_cost.py tagged with the stage name, and print a per-stage and total cost summary at pipeline end.",
+      "value": "Operators running pipelines gain accurate cost visibility per stage and per pipeline session in budgeter/report.py output, enabling cost tuning and budget enforcement."
+    },
+    "shape": {
+      "components": [
+        {
+          "name": "Usage extractor in run.py",
+          "description": "Parses each stage subprocess's stdout/stderr for a <usage>...</usage> XML block (the same format claude -p --output-format json emits via stage scripts) and returns the raw XML string."
+        },
+        {
+          "name": "Cost logger invoker in run.py",
+          "description": "After each stage finishes (pass or fail), pipes the captured <usage> XML into budgeter/log_agent_cost.py via stdin, passing --session-id <pipeline-uuid>, --agent pipeline-<stage_name>, and --cwd <repo root>, mirroring the backfill-handoffs pattern."
+        },
+        {
+          "name": "Per-stage cost tracker",
+          "description": "Accumulates (stage_name, total_tokens, tool_uses, duration_ms) tuples across the run so the orchestrator can render a summary table."
+        },
+        {
+          "name": "Cost summary printer",
+          "description": "At pipeline completion (success, failure, or KeyboardInterrupt) prints a table of per-stage token totals and a grand total alongside the existing 'Stages completed' / 'Total time' summary."
+        }
+      ],
+      "integration_point": "pipeline/run.py \u2014 specifically the run_stage() return path and the success/failure/interrupt summary blocks in main(). No new modules; the cost logger invocation slots in immediately after each run_stage() call.",
+      "pattern": "Mirrors the existing background-agent cost logging pattern documented in budgeter/log_agent_cost.py and used by the backfill-handoffs agent: capture <usage> XML, pipe via stdin to log_agent_cost.py with --session-id and --agent flags.",
+      "data_flow": "Stage subprocess stdout/stderr \u2192 run.py extract_usage() regex match for <usage>...</usage> \u2192 subprocess.run(['python','budgeter/log_agent_cost.py','--session-id',uuid,'--agent','pipeline-<stage>','--cwd',repo], input=usage_xml) \u2192 budgeter usage log \u2192 run.py in-memory stage_costs list \u2192 end-of-pipeline summary print \u2192 budgeter/report.py grouped output",
+      "dependencies": "budgeter/log_agent_cost.py must exist and accept the documented stdin/flag interface; the budgeter-log feature flag must be enabled for entries to actually persist (log_agent_cost.py is a no-op otherwise \u2014 run.py should not depend on this); stage scripts' stdout must contain a <usage> block when claude -p was invoked (current claude -p --output-format json envelope embeds usage data; stages that do not emit it are tolerated as zero-cost)."
+    },
+    "behavior": {
+      "input": "Stage subprocess completion: result.stdout (str) and result.stderr (str) from each run_stage() call, plus the stage name (str) and pipeline UUID (str).",
+      "processing": "1. After run_stage() returns, scan combined stdout+stderr for the first <usage>...</usage> block via regex. 2. If found, spawn budgeter/log_agent_cost.py as a subprocess, write the raw XML to its stdin, and pass --session-id=<pipeline_uuid> --agent=pipeline-<stage_name> --cwd=<repo_root>. 3. Parse total_tokens, tool_uses, and duration_ms from the same XML for the in-memory tracker. 4. Append (stage_name, tokens, tool_uses) to a stage_costs list. 5. On pipeline end (success path, failure path, or KeyboardInterrupt path), iterate stage_costs and print a formatted summary: one line per stage 'pipeline-<name>: <tokens> tokens (<tool_uses> tool uses)' followed by 'TOTAL: <sum> tokens'. 6. Continue normal exit flow.",
+      "output": "Console: appended cost summary block under existing 'Stages completed' line on every termination path. Filesystem: appended JSONL entry per stage in the budgeter usage log (via log_agent_cost.py), discoverable by budgeter/report.py grouped under session_id=<pipeline_uuid> and agent_type=pipeline-<stage>.",
+      "error_cases": [
+        {
+          "trigger": "Stage stdout/stderr contains no <usage> block (e.g., stage exited before invoking claude -p, or stage is a pure-Python validator)",
+          "behavior": "Skip log_agent_cost.py invocation, record (stage_name, 0, 0) in tracker, print 'pipeline-<name>: no usage reported' in summary, continue pipeline."
+        },
+        {
+          "trigger": "log_agent_cost.py subprocess returns non-zero or raises OSError",
+          "behavior": "Print 'WARN: cost logging failed for <stage>: <err>' to stderr, still record the parsed token total in the in-memory tracker, do not fail the pipeline."
+        },
+        {
+          "trigger": "<usage> block is present but malformed (missing or non-numeric total_tokens)",
+          "behavior": "Treat as zero tokens, log a warning to stderr, continue pipeline; do not raise."
+        },
+        {
+          "trigger": "Stage subprocess fails (returncode != 0)",
+          "behavior": "Still attempt usage extraction and cost logging on whatever stdout/stderr was captured before failure, then proceed with the existing failure exit path so partial costs are recorded."
+        }
+      ],
+      "edge_cases": [
+        {
+          "condition": "Pipeline interrupted via KeyboardInterrupt mid-stage",
+          "behavior": "Print the cost summary for stages already completed before exiting via the existing interrupt handler."
+        },
+        {
+          "condition": "Stages skipped via --resume-from",
+          "behavior": "Skipped stages are omitted from the cost summary (not recorded as zero), and only stages actually executed in this run appear in the summary."
+        },
+        {
+          "condition": "Pipeline contains multiple stages that emit <usage> (e.g., refine retries)",
+          "behavior": "Only the first <usage> block in stdout is captured per stage call; documented as a known limitation in summary output."
+        },
+        {
+          "condition": "budgeter-log feature flag disabled",
+          "behavior": "log_agent_cost.py is a no-op internally, but run.py still parses usage and prints the in-memory summary so users get visibility even when persistence is off."
+        }
+      ]
+    },
+    "boundaries": {
+      "in_scope": [
+        "Modifying pipeline/run.py to extract <usage> from stage subprocess output",
+        "Invoking budgeter/log_agent_cost.py per stage with stage-tagged agent name",
+        "Tracking per-stage token counts in memory during a run",
+        "Printing a per-stage and total cost summary on success, failure, and interrupt paths",
+        "Tagging entries with the pipeline UUID as session_id so report.py can group them"
+      ],
+      "out_of_scope": [
+        {
+          "item": "Modifying individual stage scripts (auto_refine.py, auto_plan.py, executor.py, auto_harden.py, approval.py, validate_intake.py)",
+          "reason": "Task explicitly scopes changes to run.py only; stages already pass through claude -p envelope output that contains usage."
+        },
+        {
+          "item": "Modifying budgeter/log_agent_cost.py or budgeter internals",
+          "reason": "Task explicitly excludes budgeter changes; the existing stdin/flag interface is sufficient."
+        },
+        {
+          "item": "Modifying budgeter/report.py output format or grouping logic",
+          "reason": "Existing report.py already groups by session_id and agent_type; tagging entries correctly is enough to surface them."
+        },
+        {
+          "item": "Per-retry granularity inside a stage (e.g., refine retry attempts)",
+          "reason": "Stage script is the unit of accounting and stage-level totals are sufficient for the visibility goal."
+        },
+        {
+          "item": "Real-time streaming of token usage during stage execution",
+          "reason": "Stages run with capture_output=True and post-hoc accounting meets the visibility requirement."
+        },
+        {
+          "item": "Enforcing budget limits or aborting expensive pipelines",
+          "reason": "This task is about visibility, not policy enforcement."
+        }
+      ],
+      "must_not_break": [
+        "Existing run.py exit codes and stage success/failure semantics",
+        "Existing console output lines that test_orchestrator.py asserts on (Pipeline header, [i/6] stage progress, PASSED/FAILED markers, COMPLETE verdict, 'Stages completed', 'Total time', 'Report:' line)",
+        "board.md status updates on success, failure, and interrupt",
+        "--resume-from skip logic and prerequisite artifact checks",
+        "KeyboardInterrupt handling and the 'To resume:' hint",
+        "stage_timeout config behavior",
+        "Pipeline must still succeed end-to-end when budgeter-log flag is disabled"
+      ]
+    },
+    "acceptance_criteria": [
+      "Given a stage subprocess whose stdout contains '<usage><total_tokens>1234</total_tokens><tool_uses>2</tool_uses><duration_ms>500</duration_ms></usage>', when run.py finishes that stage, then a new entry appears in the budgeter usage log with session_id=<pipeline_uuid>, agent_type='pipeline-<stage_name>', and tokens_delta=1234.",
+      "Given a pipeline that runs all 6 stages successfully and each emits a <usage> block, when the pipeline completes, then run.py prints a 'Cost summary' block listing one line per stage with its token total and a final 'TOTAL: <sum>' line where <sum> equals the arithmetic sum of the per-stage totals.",
+      "Given a pipeline run with UUID X that completes and logs costs, when the user runs budgeter/report.py, then entries grouped under session_id=X show one row per stage tagged with agent_type='pipeline-<stage_name>'.",
+      "Given a stage whose stdout contains no <usage> block, when run.py finishes that stage, then no log_agent_cost.py subprocess is spawned, the summary line for that stage reads 'pipeline-<name>: no usage reported', and the pipeline continues to the next stage with exit code unchanged.",
+      "Given log_agent_cost.py exits with returncode 1, when run.py invokes it after a stage, then run.py prints 'WARN: cost logging failed for <stage>' to stderr, the parsed token total still appears in the in-memory summary at pipeline end, and the pipeline exit code is unchanged from the no-error baseline.",
+      "Given a stage emits '<usage><total_tokens>abc</total_tokens></usage>' (malformed), when run.py parses it, then the stage is recorded as 0 tokens, a warning is printed to stderr, and the pipeline continues without raising.",
+      "Given a stage subprocess returns non-zero with a valid <usage> block on stdout, when run.py handles the failure, then the usage is logged via log_agent_cost.py and recorded in the cost summary before run.py prints the failure block and exits 1.",
+      "Given the user presses Ctrl+C after stage 3 of 6 completes, when run.py handles KeyboardInterrupt, then the printed interrupt block includes a Cost summary listing stages 1\u20133 with their token totals and a TOTAL line summing those three.",
+      "Given the user invokes run.py with '--resume-from auto_harden' and stages 1\u20134 are skipped, when the pipeline finishes, then the cost summary contains entries only for auto_harden and approval (not zero rows for skipped stages).",
+      "Given a stage stdout contains two <usage> blocks (e.g., a retry), when run.py extracts usage, then only the first block is parsed and logged, and this limitation does not cause a crash or duplicate log entry.",
+      "Given the budgeter-log feature flag is disabled, when run.py runs a full pipeline, then log_agent_cost.py persists nothing but run.py still prints the in-memory Cost summary block and the pipeline exits 0.",
+      "Given test_orchestrator.py's existing assertions on 'Stages completed', 'Total time', 'COMPLETE', and 'Report:' lines, when the modified run.py runs against the test fixtures, then all pre-existing test_orchestrator.py tests still pass."
+    ],
+    "id": "ead3d93f-f2b5-4f20-a8d8-8eb0fb01c66d",
+    "intake_id": "ead3d93f-f2b5-4f20-a8d8-8eb0fb01c66d",
+    "valid": true
+  },
+  "steps": [
+    {
+      "step_number": 1,
+      "type": "modify",
+      "description": "Add usage extraction helper and update run_stage() to return both stdout and stderr so usage can be scanned regardless of stage success.",
+      "action": "modify",
+      "files": [
+        "pipeline/run.py"
+      ],
+      "depends_on": [],
+      "code_spec": "Add `import re` to the imports block at the top of pipeline/run.py.\n\nAdd a module-level constant after STAGES:\n  _USAGE_RE = re.compile(r'<usage>.*?</usage>', re.DOTALL)\n\nAdd a new helper function `extract_usage_block(text: str) -> str | None` that:\n  - Returns None if text is empty/None.\n  - Uses _USAGE_RE.search(text) and returns match.group(0) if found, else None.\n  - Only returns the FIRST match (re.search behavior) \u2014 this is the documented limitation.\n\nAdd a new helper function `parse_usage_fields(usage_xml: str) -> dict` that:\n  - For each tag in ('total_tokens', 'tool_uses', 'duration_ms'), runs re.search(rf'<{tag}>(\\d{{1,15}})</{tag}>', usage_xml).\n  - Returns dict with int values for matched tags, defaults of 0 if missing or non-numeric.\n  - Wraps int() conversion in try/except ValueError; on failure, that field is 0 and a flag is set in the dict (e.g. result['_malformed'] = True). Actually simpler: if usage_xml contains '<total_tokens>' but the regex fails to match the digit pattern (i.e., contents non-numeric like 'abc'), set result['_malformed'] = True so caller can warn.\n\nModify `run_stage()` signature and return type from `tuple[bool, str, float]` to `tuple[bool, str, str, float]`:\n  - Return (success, stdout_str, stderr_str, elapsed).\n  - On script-not-found / input-not-found early returns: return (False, '', error_msg, 0.0).\n  - On TimeoutExpired: return (False, '', 'Stage timed out (60 min limit)', elapsed).\n  - On OSError: return (False, '', f'Stage failed to launch: {e}', elapsed).\n  - On normal completion: return (result.returncode == 0, result.stdout or '', result.stderr or '', elapsed). Do NOT .strip() here \u2014 let callers strip for display.\n\nUpdate the call site in main() to unpack 4 values: `ok, stdout_text, stderr_text, elapsed = run_stage(...)`.\n  - For 'output' display purposes used by existing PASSED/FAILED logging, define `output = stdout_text.strip() if ok else stderr_text.strip()` immediately after the call so the existing print blocks remain unchanged in behavior.\n  - `final_output` continues to be set to this `output` on success."
+    },
+    {
+      "step_number": 2,
+      "type": "modify",
+      "description": "Add the cost-logging invoker that pipes captured <usage> XML to budgeter/log_agent_cost.py with the pipeline UUID and stage-tagged agent name.",
+      "action": "modify",
+      "files": [
+        "pipeline/run.py"
+      ],
+      "depends_on": [
+        1
+      ],
+      "code_spec": "Add module-level constants near the top:\n  REPO_ROOT = SCRIPT_DIR.parent\n  LOG_AGENT_COST_SCRIPT = REPO_ROOT / 'budgeter' / 'log_agent_cost.py'\n\nAdd a new helper function `log_stage_cost(stage_name: str, pipeline_uuid: str, usage_xml: str) -> None` that:\n  - Builds cmd = [sys.executable, str(LOG_AGENT_COST_SCRIPT), '--session-id', pipeline_uuid, '--agent', f'pipeline-{stage_name}', '--cwd', str(REPO_ROOT)].\n  - Runs subprocess.run(cmd, input=usage_xml, text=True, capture_output=True, timeout=30).\n  - If result.returncode != 0: print(f'WARN: cost logging failed for {stage_name}: {result.stderr.strip()}', file=sys.stderr).\n  - Wraps the entire subprocess.run in try/except (OSError, subprocess.TimeoutExpired) as e: print(f'WARN: cost logging failed for {stage_name}: {e}', file=sys.stderr).\n  - Never raises. Returns None.\n  - If LOG_AGENT_COST_SCRIPT does not exist, print warning and return early (no crash)."
+    },
+    {
+      "step_number": 3,
+      "type": "modify",
+      "description": "Add per-stage cost tracking accumulator and a helper that records each stage's parsed usage into an in-memory list, calling the cost logger and emitting warnings for missing/malformed usage.",
+      "action": "modify",
+      "files": [
+        "pipeline/run.py"
+      ],
+      "depends_on": [
+        1,
+        2
+      ],
+      "code_spec": "In main(), immediately before the `try:` that wraps the stage loop, initialize:\n  stage_costs: list[dict] = []  # each entry: {'stage': str, 'tokens': int, 'tool_uses': int, 'status': 'logged'|'no_usage'|'malformed'}\n\nAdd a new helper function (module-level) `record_stage_cost(stage_name: str, pipeline_uuid: str, stdout_text: str, stderr_text: str, stage_costs: list) -> None` that:\n  - combined = (stdout_text or '') + '\\n' + (stderr_text or '')\n  - usage_xml = extract_usage_block(combined)\n  - If usage_xml is None:\n      stage_costs.append({'stage': stage_name, 'tokens': 0, 'tool_uses': 0, 'status': 'no_usage'})\n      return\n  - fields = parse_usage_fields(usage_xml)\n  - If fields.get('_malformed'):\n      print(f'WARN: malformed <usage> block in stage {stage_name}', file=sys.stderr)\n      stage_costs.append({'stage': stage_name, 'tokens': 0, 'tool_uses': 0, 'status': 'malformed'})\n      log_stage_cost(stage_name, pipeline_uuid, usage_xml)  # still try to log; logger will skip 0 tokens\n      return\n  - tokens = fields.get('total_tokens', 0)\n  - tool_uses = fields.get('tool_uses', 0)\n  - log_stage_cost(stage_name, pipeline_uuid, usage_xml)\n  - stage_costs.append({'stage': stage_name, 'tokens': tokens, 'tool_uses': tool_uses, 'status': 'logged'})\n\nIn the stage loop in main(), call record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs) immediately after the run_stage() call (before the `if ok:` branch). This ensures usage is captured for both pass and fail paths. The call must occur for EVERY executed stage, including failed ones \u2014 but NOT for skipped stages (the call is placed after the resume-skip `continue`)."
+    },
+    {
+      "step_number": 4,
+      "type": "modify",
+      "description": "Add the Cost summary printer and invoke it on all three pipeline termination paths: success, failure, and KeyboardInterrupt.",
+      "action": "modify",
+      "files": [
+        "pipeline/run.py"
+      ],
+      "depends_on": [
+        3
+      ],
+      "code_spec": "Add a new helper function (module-level) `print_cost_summary(stage_costs: list) -> None` that:\n  - If not stage_costs: print('Cost summary: (no stages executed)') and return.\n  - print('Cost summary:')\n  - total_tokens = 0\n  - for entry in stage_costs:\n      stage = entry['stage']\n      status = entry['status']\n      if status == 'no_usage':\n          print(f'  pipeline-{stage}: no usage reported')\n      elif status == 'malformed':\n          print(f'  pipeline-{stage}: malformed usage (counted as 0)')\n      else:\n          tokens = entry['tokens']\n          tool_uses = entry['tool_uses']\n          print(f'  pipeline-{stage}: {tokens} tokens ({tool_uses} tool uses)')\n          total_tokens += tokens\n  - print(f'  TOTAL: {total_tokens} tokens')\n  - If any entry has status == 'no_usage' for more than one stage, no extra note needed; the per-stage line communicates it. Add a one-line note about the first-block-only limitation: print('  (note: only the first <usage> block per stage is counted)') ONLY if any stage has status == 'logged'.\n\nInsert `print_cost_summary(stage_costs)` calls at THREE termination points in main():\n  1. Inside the failure branch (before `sys.exit(1)`), after the existing 'Total time:' print and BEFORE the 'To resume:' print to stderr. Place it under a blank line for readability.\n  2. Inside the `except KeyboardInterrupt:` block, after 'Stages completed:' print and BEFORE the 'To resume:' print.\n  3. After the success-path 'Report:' print at the end of main().\n\nMake sure the existing assertion lines ('Stages completed', 'Total time', 'COMPLETE', 'Report:') remain unchanged in wording and order \u2014 only ADD the cost summary block adjacent to them."
+    },
+    {
+      "step_number": 5,
+      "type": "verify",
+      "description": "Verify the implementation against acceptance criteria using a stub stage and a manual run, then run the existing orchestrator tests.",
+      "action": "verify",
+      "files": [
+        "pipeline/run.py",
+        "pipeline/test_orchestrator.py"
+      ],
+      "depends_on": [
+        4
+      ],
+      "code_spec": "Manual verification steps:\n\n1. Unit-style sanity: from a Python REPL or scratch script, import extract_usage_block and parse_usage_fields from pipeline.run and assert:\n   - extract_usage_block('<usage><total_tokens>1234</total_tokens><tool_uses>2</tool_uses><duration_ms>500</duration_ms></usage>') returns the block.\n   - parse_usage_fields(...) returns {'total_tokens': 1234, 'tool_uses': 2, 'duration_ms': 500}.\n   - extract_usage_block('no usage here') returns None.\n   - parse_usage_fields('<usage><total_tokens>abc</total_tokens></usage>') marks _malformed True.\n   - extract_usage_block on input with two <usage> blocks returns the first one.\n\n2. Run existing orchestrator tests (covers must_not_break invariants):\n   python pipeline/test_orchestrator.py\n   All previously-passing assertions on 'Stages completed', 'Total time', 'COMPLETE', 'Report:', PASSED/FAILED markers, board.md updates, --resume-from skipping, KeyboardInterrupt handling, and exit codes must still pass.\n\n3. End-to-end smoke test: enable the budgeter-log flag, run a real pipeline against a known fixture intake, and confirm:\n   - Console output contains a 'Cost summary:' block on success.\n   - For each successful stage that emitted a <usage>, a corresponding line 'pipeline-<name>: <N> tokens (<M> tool uses)' appears, plus 'TOTAL: <sum>'.\n   - python budgeter/report.py shows entries with session_id == pipeline UUID and agent_type == 'pipeline-<stage>' for each logged stage.\n\n4. Failure-path test: invoke run.py against an intake that triggers a stage failure, and confirm the failure block prints the cost summary BEFORE exiting 1, with stages run prior to the failure listed (and the failed stage included if it produced any stdout/stderr containing <usage>).\n\n5. Interrupt test: start a pipeline and Ctrl+C after at least one stage completes; confirm the interrupt block contains the cost summary for completed stages and that the 'To resume:' hint still appears.\n\n6. Resume test: run.py with --resume-from auto_harden against an intake with prior artifacts; confirm the cost summary contains entries ONLY for auto_harden and approval (no zero rows for skipped stages).\n\n7. Flag-disabled test: disable the budgeter-log flag (`core.flags`) and rerun; confirm the on-disk usage log gains no new entries but the in-memory Cost summary still prints and the pipeline exits 0.\n\n8. No-usage stage test: point a stage at a script that prints no <usage> block; confirm the summary shows 'pipeline-<name>: no usage reported' and pipeline continues.\n\n9. Logger-failure test: temporarily rename budgeter/log_agent_cost.py (or make it exit 1) and rerun; confirm 'WARN: cost logging failed for <stage>' appears on stderr, the in-memory total still includes the parsed tokens, and pipeline exit code matches the no-error baseline."
+    }
+  ],
+  "valid": true
+}
