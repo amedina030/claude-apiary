@@ -19,7 +19,7 @@ import importlib.util
 from pathlib import Path
 from typing import Optional
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CLI_LOOKUP_PATH = REPO_ROOT / 'docs' / 'reference' / 'cli_lookup.py'
 CLI_TOOLS_MD = REPO_ROOT / 'docs' / 'reference' / 'cli-tools.md'
 
