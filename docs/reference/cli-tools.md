@@ -423,6 +423,53 @@ python pipeline/approval.py pipeline/hardens/<uuid>.json
 
 Output: `pipeline/reports/<uuid>.json`. Verdicts: `auto-merged`, `pending-review`, or stage failure.
 
+## pipeline/draft_ticket.py
+
+Create a backlog draft ticket. Writes a JSON to `pipeline/backlog/<slug>.json` and appends a `backlog` row to `pipeline/board.md`. Slug is derived from the title.
+
+```bash
+python pipeline/draft_ticket.py --title "..." --problem "..." --description "..." --scope "..."
+python pipeline/draft_ticket.py --from-todo 42 --title "..." --problem "..." --scope "..."
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--title TEXT` | yes | Short title (used to generate the slug filename) |
+| `--problem TEXT` | yes | Problem statement |
+| `--description TEXT` | yes* | Detailed description |
+| `--scope TEXT` | yes | Scope of work |
+| `--context TEXT` | no | Additional context (optional) |
+| `--from-todo ID` | no | Scribe note ID — only auto-fills `--description` from the note content; `--title`, `--problem`, and `--scope` are still required |
+
+\* Required unless `--from-todo` is provided (which fills it from the note).
+
+**Gotcha:** `--from-todo` is *not* a one-stop shortcut — it only seeds `--description`. You must still pass `--title`, `--problem`, and `--scope` explicitly.
+
+## pipeline/promote.py
+
+Promote a backlog draft to a pipeline intake file. Validates against the intake schema, assigns a UUID, copies to `pipeline/intake/<uuid>.json`, removes the backlog file, and updates `pipeline/board.md` status from `backlog` to `ready`.
+
+```bash
+python pipeline/promote.py <slug>
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `slug` | yes | Backlog ticket slug — the filename **without** directory or `.json` extension |
+
+**Gotcha:** Pass the slug only (e.g. `my-feature`), not a path (e.g. `pipeline/backlog/my-feature.json`). Path separators are rejected to prevent traversal. The script always looks in `pipeline/backlog/<slug>.json`.
+
+## pipeline/cost_emit.py
+
+Shared helper used by every stage's `run_claude` wrapper. Library module — not a CLI tool. Parses a `claude -p --output-format json` envelope and emits a `<usage>` XML block to stderr that the orchestrator scrapes for cost tracking.
+
+```python
+from cost_emit import emit_usage_xml
+emit_usage_xml(claude_subprocess_stdout)  # writes <usage>...</usage> to stderr
+```
+
+Silent on any failure — cost logging never breaks a stage. Sums all numeric fields under the envelope's `usage` key (input + output + cache_*) into a single `total_tokens` value.
+
 ## pipeline/config_loader.py
 
 Shared config loader. Library module — not a CLI tool. Used by pipeline stages to read `pipeline/config.json`.

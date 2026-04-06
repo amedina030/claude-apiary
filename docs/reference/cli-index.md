@@ -36,5 +36,8 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `pipeline/executor.py` | Code executor (stage 4) | `<plan>` |
 | `pipeline/auto_harden.py` | Autonomous hardener (stage 5) | `<execution_log>` |
 | `pipeline/approval.py` | Approval gate (stage 6) | `<harden_result>` |
+| `pipeline/draft_ticket.py` | Create backlog draft ticket | --title, --problem, --description, --scope, --context, --from-todo (only fills description) |
+| `pipeline/promote.py` | Promote backlog draft to intake | `<slug>` (filename without dir or .json extension) |
+| `pipeline/cost_emit.py` | Emit usage XML from Claude envelope | Library — no CLI |
 | `pipeline/config_loader.py` | Shared pipeline config loader | Library — no CLI |
 | `setup.py` | Unified installer | --global, --project-path, --check, --with-test-suite |
