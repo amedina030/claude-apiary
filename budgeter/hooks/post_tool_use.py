@@ -6,6 +6,8 @@ Agent calls are invisible to the pre_tool_use PRE-to-PRE delta because the subag
 runs in a separate transcript. This hook captures the exact token count from
 tool_response.totalTokens and logs it directly.
 """
+import os
+import re
 import sys
 import json
 from pathlib import Path
@@ -18,6 +20,24 @@ from core import flags
 
 
 _MAX_STDIN_BYTES = 64 * 1024  # 64 KB — matches log_agent_cost.py cap
+
+# /harden encodes the run's request_id in the Agent description as "[rid:<id>]"
+# because the Agent tool has no `env` parameter — there is no LLM-controlled
+# mechanism to set APIARY_REQUEST_ID on a spawn. The hook parses it here as
+# the authoritative source; the env var is a secondary fallback for callers that
+# do control the harness environment.
+_RID_PATTERN = re.compile(r'\[rid:([^\]\n\r]{1,128})\]')
+_REQUEST_ID_MAX_LEN = 128
+
+
+def _sanitize_request_id(value: str) -> str:
+    """Cap length and reject values with newlines or non-printable characters."""
+    if not value:
+        return ''
+    value = value[:_REQUEST_ID_MAX_LEN]
+    if not all(c.isprintable() and c not in '\n\r' for c in value):
+        return ''
+    return value
 
 
 def main():
@@ -47,7 +67,11 @@ def main():
     baseline = logger.load_baseline(session_id)
 
     safe_tokens = max(0, total_tokens)
-    agent_desc = baseline.get("agent_description", "") if baseline else ""
+    # Prefer tool_input.description (the description of THIS specific Agent spawn)
+    # over baseline.agent_description, which is session-level and can be stale for
+    # round 2+ in /harden — causing wrong per-round attribution in report --by-agent.
+    tool_input = payload.get("tool_input") or {}
+    agent_desc = tool_input.get("description", "") or (baseline.get("agent_description", "") if baseline else "")
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "session_id": session_id,
@@ -62,6 +86,19 @@ def main():
         "task_turn": baseline.get("task_turn", 0) if baseline else 0,
         "project": cwd,
     }
+    # Prefer the [rid:...] tag embedded in the agent description — it is set by
+    # /harden because the Agent tool has no env parameter and APIARY_REQUEST_ID
+    # cannot be injected by the LLM. Fall back to the env var for callers that
+    # do control the harness environment (e.g. log_agent_cost.py).
+    request_id = ''
+    if agent_desc:
+        m = _RID_PATTERN.search(agent_desc)
+        if m:
+            request_id = m.group(1)
+    if not request_id:
+        request_id = _sanitize_request_id(os.environ.get('APIARY_REQUEST_ID', ''))
+    if request_id:
+        entry['request_id'] = request_id
     logger.append_entry(entry)
 
 

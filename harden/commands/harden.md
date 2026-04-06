@@ -23,6 +23,8 @@ Run an automated attack-defend loop where an Attacker agent finds weaknesses and
 - `--max-files N` — max files allowed (default 5)
 - `--model-attacker <model>` — model for Attacker agent (default `sonnet`)
 - `--model-defender <model>` — model for Defender agent (default `sonnet`)
+- `--budget-tokens N` — token budget for this run (default 450000); used to gate spend tracking
+- `--max-target-kb K` — max total size of target files in KB before aborting (default 50)
 
 ---
 
@@ -59,6 +61,8 @@ Extract optional flags with their defaults:
 - `--max-files`: default `5`
 - `--model-attacker`: default `sonnet`
 - `--model-defender`: default `sonnet`
+- `--budget-tokens`: default `450000`
+- `--max-target-kb`: default `50`
 
 ### Validate inputs
 
@@ -71,6 +75,73 @@ Extract optional flags with their defaults:
 1. Run: `python <repo_dir>/scribe/notes.py get <note-id>`
 2. If the note doesn't exist, tell the user: "Note <id> not found. Use `python scribe/notes.py list` to find the correct ID." Stop.
 3. Save the note content for use in later steps.
+
+### Pre-flight target size check
+
+**Code mode only.** Before starting the round counter or creating any worktree, verify the total size of the resolved target files does not exceed `--max-target-kb`.
+
+Compute total bytes by writing the following Python script to a temp file and running it. Embed the resolved file paths as a list literal — this avoids command-line length limits (Windows 8191-char cap) and quoting issues with paths containing spaces:
+
+```python
+import sys
+from pathlib import Path
+
+paths = [
+    # embed one entry per resolved file — use the actual paths
+    r"<resolved_file_1>",
+    r"<resolved_file_2>",
+    # ...
+]
+
+try:
+    total_bytes = sum(Path(p).stat().st_size for p in paths)
+    print(total_bytes)
+except OSError as e:
+    print(f"size-check error: {e}", file=sys.stderr)
+    sys.exit(1)
+```
+
+Write this script to a temp file (e.g. `__harden_size_check.py`) and run `python __harden_size_check.py`. Delete the temp file after reading the output. If the script exits non-zero, abort: "Pre-flight size check failed: <error>." Do not start the round counter or create a worktree.
+
+Then compute:
+
+```
+total_kb = ceil(total_bytes / 1024)
+```
+
+If `total_kb > max_target_kb`, print:
+
+```
+Target size <total_kb> KB exceeds --max-target-kb <max_target_kb>. Narrow scope or raise the cap.
+```
+
+And **stop the run immediately** — do not start the round counter, do not create the worktree, do not spawn any Agent. This ensures `usage_log.jsonl` is untouched.
+
+In plan mode, skip this check entirely.
+
+### Generate request_id
+
+Compute a stable, human-readable ID for this harden run:
+
+```bash
+# session short prefix
+sid_short = <session_id>[:8]   # first 8 characters of the session UUID
+
+# unix timestamp (cross-platform — do not use $(date +%s) directly)
+unix_ts = $(python -c "import time;print(int(time.time()))")
+
+# 4-char random hex suffix — guards against same-second collisions from concurrent runs
+rand_hex = $(python -c "import secrets;print(secrets.token_hex(2))")
+
+# assemble
+request_id = harden-<sid_short>-<unix_ts>-<rand_hex>
+```
+
+Persist `request_id` as a local variable for use throughout the loop (Step 2 Attacker and Defender spawns).
+
+Also capture the session working directory (the directory Claude Code is running in when `/harden` is invoked) as `session_cwd`. This is used when querying per-request spend so that the log read targets the same project log that `post_tool_use.py` wrote to.
+
+**IMPORTANT:** The Agent tool has no `env` parameter, so `APIARY_REQUEST_ID` cannot be injected by the LLM via environment. Instead, embed the request_id in every Agent `description` field using the tag `[rid:<request_id>]` (e.g. `Harden Attacker round 1 [rid:harden-abc12345-1712345678-a1b2]`). The `post_tool_use.py` hook parses this tag from the agent description to attribute cost to this run. Do not omit the tag — without it, token spend will not be counted and budget tracking will silently return 0.
 
 ### Start round counter
 
@@ -92,6 +163,15 @@ Save the worktree path (`.claude/worktrees/harden-<session_id>`) and branch name
 
 ## Step 1: Pre-run confirmation
 
+Compute the estimated token cost for this run. Reuse `total_kb` from Step 0 (the size of all resolved target files after the pre-flight size check):
+
+```
+target_size_kb = total_kb   # already computed in Step 0
+estimated = int(rounds * 2 * (15000 + 1.5 * target_size_kb * 256))
+```
+
+The formula accounts for two agent calls per round (Attacker + Defender), a 15 000-token base per call, and ~384 tokens per KB of target content per call. (Formula source: scribe note #188.)
+
 Show the user what will happen:
 
 ```
@@ -103,11 +183,21 @@ Show the user what will happen:
 - Max rounds: <N>
 - Attacker model: <model>
 - Defender model: <model>
+- Estimated cost: ~<estimated> tokens
+- Token budget: <budget_tokens>
+```
+
+If `estimated > budget_tokens`, print this warning **before** calling AskUserQuestion:
+
+```
+WARNING: Estimated cost (<estimated>) exceeds budget (<budget_tokens>). Forcing through will hard-abort mid-run on overrun.
 ```
 
 Use AskUserQuestion to confirm:
 - **Proceed** → continue to Step 2
 - **Adjust** → user modifies settings, re-show confirmation
+
+If the user declines (does not choose Proceed), stop immediately — do not start the round counter, do not create the worktree, do not spawn any Agent.
 
 ---
 
@@ -139,7 +229,7 @@ Take `attacker_template` and replace the placeholders:
 #### 2b. Spawn Attacker agent
 
 Spawn a **foreground** Agent (subagent_type: "general-purpose") with:
-- **description:** `Harden Attacker round <N>` (substitute the current round number — this becomes the agent_type in budgeter logs, giving per-round attribution)
+- **description:** `Harden Attacker round <N> [rid:<request_id>]` (substitute round number and request_id — the `[rid:...]` tag is parsed by `post_tool_use.py` to attribute cost; the human-readable prefix becomes the agent_type in budgeter logs for per-round attribution)
 - **model:** value of `--model-attacker`
 - **prompt:** the prepared Attacker prompt
 
@@ -167,7 +257,33 @@ Use `--check-files` in code mode. Use `--deep` if the deep flag is set. The `--s
    - Stop → jump to Step 3 with partial results
 
 **On empty findings (`[]`):**
-- Show: "Round N: Attacker found 0 issues. Code/plan looks clean."
+
+Tick the round counter first (so Step 4's `rounds=<N completed>/<N max>` includes this round):
+
+```bash
+python <repo_dir>/harden/round_counter.py tick --session-id <session_id>
+```
+
+Then query the running spend for this request (same as Step 2g). Note: because the Defender was not invoked on this path, spend covers only the Attacker — this is expected and will show lower than the per-round estimate:
+
+```bash
+spent=$(python <repo_dir>/budgeter/query_request.py --request-id <request_id> --cwd <session_cwd> 2>&1)
+spent_status=$?
+```
+
+Check `spent_status` first, then validate the value is a plain integer:
+
+- If `spent_status == 0` and `spent` matches `^[0-9]+$`: compute `pct = round(100 * spent / budget_tokens)` and show:
+  ```
+  Round N: Attacker found 0 issues. Code/plan looks clean. | spent <spent> of <budget_tokens> (<pct>%)
+  ```
+- Otherwise (non-zero exit or non-integer output): show:
+  ```
+  Round N: Attacker found 0 issues. Code/plan looks clean. | spent: unknown (<error trimmed to first 80 chars>)
+  ```
+
+Do not apply the BUDGET EXCEEDED marker on this path even if spent > budget — the empty-findings exit means the run completed cleanly.
+
 - Exit the loop. Jump to Step 3.
 
 #### 2d. Show Attacker summary
@@ -191,7 +307,7 @@ Take `defender_template` and replace:
 > "Read and edit files at the worktree paths provided. In your JSON response, use the ORIGINAL relative file paths (e.g. `src/app.py`) in the `changes.file` field, not the worktree paths."
 
 Spawn a **foreground** Agent (subagent_type: "general-purpose") with:
-- **description:** `Harden Defender round 1` (becomes the agent_type in budgeter logs; round 2+ continuations go through SendMessage and will not produce additional Agent tool entries)
+- **description:** `Harden Defender round 1 [rid:<request_id>]` (the `[rid:...]` tag is parsed by `post_tool_use.py` to attribute cost; the human-readable prefix becomes the agent_type in budgeter logs; round 2+ continuations go through SendMessage and will not produce additional Agent tool entries)
 - **model:** value of `--model-defender`
 - **prompt:** the prepared Defender prompt
 - **Do NOT use `isolation: "worktree"`** — the Defender edits the shared worktree directly
@@ -239,6 +355,8 @@ The "previous round summary" uses the mechanical counts and IDs from the previou
 
 **If the Defender agent errors during continuation**, abort the harden run: "Defender agent failed on round N. Aborting." Do not attempt to respawn a fresh Defender.
 
+**Note on token attribution for round 2+ continuations:** SendMessage continuations do not produce a new Agent tool entry, so their tokens land on the parent session bucket. The run still aborts on overrun via the parent-session fallback path; this is a documented v1 precision loss.
+
 #### 2f. Process Defender output
 
 Extract the JSON object from the agent's response. Strip markdown fences if present.
@@ -261,9 +379,28 @@ Use `--check-files` in code mode. The pipeline handles extracting the `responses
 
 #### 2g. Show round summary
 
+Query the running spend for this request before printing the summary:
+
+```bash
+spent=$(python <repo_dir>/budgeter/query_request.py --request-id <request_id> --cwd <session_cwd> 2>&1)
+spent_status=$?
 ```
-Round <N> summary: <fixed> fixed, <refactored> refactored, <deferred> deferred
+
+Check `spent_status` first; only if it is 0 then verify `spent` matches `^[0-9]+$` (guards against exception messages that happen to start with digits being misclassified as valid token counts):
+
+- If `spent_status == 0` and `spent` matches `^[0-9]+$`: compute `pct = round(100 * spent / budget_tokens)` and append the spend info to the summary line:
+
 ```
+Round <N> summary: <fixed> fixed, <refactored> refactored, <deferred> deferred | spent <spent> of <budget_tokens> (<pct>%)
+```
+
+- If `spent_status != 0` (e.g. `usage_log.jsonl` missing or unreadable): append the error instead and **do not abort** — continue the loop:
+
+```
+Round <N> summary: <fixed> fixed, <refactored> refactored, <deferred> deferred | spent: unknown (<error trimmed to first 80 chars>)
+```
+
+Save `spent` (integer on success, `None` on error) to a variable for Step 2j to read.
 
 #### 2h. Save Defender TODOs
 
@@ -296,9 +433,24 @@ The `<finding description>` comes from the original Attacker finding (matched by
 python <repo_dir>/harden/round_counter.py tick --session-id <session_id>
 ```
 
-#### 2k. Early exit check
+#### 2k. Budget abort check
+
+If the `spent` value captured in Step 2g is a known integer (not `None`) and `spent > budget_tokens`:
+
+- Set a run-level flag `budget_exceeded = True` (this flag is consumed by Step 4 — preserve it across the early-exit jump).
+- Print:
+  ```
+  BUDGET EXCEEDED: spent <spent> > budget <budget_tokens>. Aborting after round <N> with partial results.
+  ```
+- Skip all remaining rounds and jump directly to Step 3. Do **not** reset the worktree — the `harden-<session_id>` branch must be preserved so the user can inspect partial work.
+
+If `spent` is `None` (helper errored), do **not** abort — continue the loop normally.
+
+#### 2l. Early exit check
 
 If ALL findings in this round were deferred (no fixes or refactors), and this is not the first round, consider exiting early. Show: "All findings deferred — no further fixes possible. Exiting loop."
+
+Note: if `budget_exceeded` fired in Step 2k, control has already jumped to Step 3 — this step is unreachable on a budget-exceeded round.
 
 ---
 
@@ -345,6 +497,19 @@ Save a brief summary note and stop.
 ### Build summary
 
 Compile a summary of all rounds:
+
+```
+## /harden Summary
+
+**BUDGET EXCEEDED**
+Spend at abort: <spent> of <budget_tokens> tokens
+
+**Target:** <files or note #id>
+**Settings:** focus=<focus>, deep=<yes/no>, rounds=<N completed>/<N max>
+**Models:** attacker=<model>, defender=<model>
+```
+
+The two lines `**BUDGET EXCEEDED**` and `Spend at abort: ...` are the very first lines of the summary body and are included only when `budget_exceeded == True`. When `budget_exceeded` is `False`, omit them entirely and start directly with `**Target:**`:
 
 ```
 ## /harden Summary
