@@ -88,6 +88,38 @@ def get_current_branch() -> str:
     return result.stdout.strip()
 
 
+def get_completed_step_numbers(uuid: str) -> set:
+    """Return the set of step numbers already committed on the current branch.
+
+    Executor's commit messages follow the pattern:
+        pipeline/<uuid> step <N>: <description>
+    Parses git log on HEAD for matching subjects. Used on resume so the
+    executor skips steps that were committed in a previous run rather than
+    re-running them (which collides with the "nothing to commit, working
+    tree clean" failure mode when Claude correctly makes no changes to an
+    already-updated file).
+
+    Only steps that produced a commit are detected — verify/test steps
+    don't commit and will re-run on resume, which is fine because they
+    are idempotent checks.
+    """
+    result = git("log", "--format=%s", "HEAD")
+    if result.returncode != 0:
+        return set()
+    prefix = f"pipeline/{uuid} step "
+    completed = set()
+    for line in result.stdout.splitlines():
+        if not line.startswith(prefix):
+            continue
+        rest = line[len(prefix):]
+        num_str = rest.split(":", 1)[0].strip()
+        try:
+            completed.add(int(num_str))
+        except ValueError:
+            continue
+    return completed
+
+
 # -- Topological sort --
 
 def topo_sort(steps: list[dict]) -> list[dict]:
@@ -352,6 +384,17 @@ def main():
     # Sort steps by dependency order
     sorted_steps = topo_sort(steps)
 
+    # Detect steps already committed on the branch (resume path). Git is
+    # authoritative because it is the actual record of what landed; the
+    # execution log is derivative and gets overwritten on each run.
+    completed_step_numbers = get_completed_step_numbers(uuid)
+    if completed_step_numbers:
+        print(
+            f"Resume: skipping {len(completed_step_numbers)} already-committed "
+            f"step(s): {sorted(completed_step_numbers)}",
+            file=sys.stderr,
+        )
+
     # Execute
     EXECUTIONS_DIR.mkdir(parents=True, exist_ok=True)
     log_path = EXECUTIONS_DIR / f"{uuid}.json"
@@ -368,6 +411,19 @@ def main():
     for step in sorted_steps:
         step_num = step["step_number"]
         deps = step.get("depends_on", [])
+
+        # Resume: carry forward already-committed steps as passed without
+        # re-running them. Their commit already exists on the branch, so
+        # re-running would produce "nothing to commit" and abort the pipeline.
+        if step_num in completed_step_numbers:
+            execution_log["steps"].append({
+                "step_number": step_num,
+                "status": "passed",
+                "files_changed": step.get("files", []),
+                "error": None,
+                "note": "carried forward from previous run (commit on branch)",
+            })
+            continue
 
         # Skip if any dependency failed/skipped
         if any(d in failed_steps for d in deps):
