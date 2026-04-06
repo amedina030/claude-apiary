@@ -139,6 +139,7 @@ Take `attacker_template` and replace the placeholders:
 #### 2b. Spawn Attacker agent
 
 Spawn a **foreground** Agent (subagent_type: "general-purpose") with:
+- **description:** `Harden Attacker round <N>` (substitute the current round number — this becomes the agent_type in budgeter logs, giving per-round attribution)
 - **model:** value of `--model-attacker`
 - **prompt:** the prepared Attacker prompt
 
@@ -190,6 +191,7 @@ Take `defender_template` and replace:
 > "Read and edit files at the worktree paths provided. In your JSON response, use the ORIGINAL relative file paths (e.g. `src/app.py`) in the `changes.file` field, not the worktree paths."
 
 Spawn a **foreground** Agent (subagent_type: "general-purpose") with:
+- **description:** `Harden Defender round 1` (becomes the agent_type in budgeter logs; round 2+ continuations go through SendMessage and will not produce additional Agent tool entries)
 - **model:** value of `--model-defender`
 - **prompt:** the prepared Defender prompt
 - **Do NOT use `isolation: "worktree"`** — the Defender edits the shared worktree directly

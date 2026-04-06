@@ -89,18 +89,52 @@ def _tokens(subcmd: str) -> list[str]:
         return subcmd.split()
 
 
+PYTHON_BINS = {
+    'python', 'python3', 'python2', 'py',
+    'python.exe', 'python3.exe', 'python2.exe', 'py.exe',
+}
+
+
+def _command_position_candidates(tokens: list[str]) -> list[str]:
+    """Return tokens that occupy a 'script being executed' position.
+
+    That means: the first token of the subcommand (direct script invocation
+    like `./scribe/notes.py ...`), and the first non-flag token after a
+    Python interpreter (`python scribe/notes.py ...`). Tokens inside content
+    args, --content "...", etc. are deliberately excluded so prose mentioning
+    a tool name does not false-positive.
+    """
+    if not tokens:
+        return []
+    candidates: list[str] = [tokens[0].strip('"\'')]
+    for i, tok in enumerate(tokens[:-1]):
+        base = tok.rsplit('/', 1)[-1].rsplit('\\', 1)[-1].lower()
+        if base not in PYTHON_BINS:
+            continue
+        j = i + 1
+        # Skip interpreter flags. `-m module` is a module invocation we
+        # cannot path-match, so bail out entirely on that.
+        while j < len(tokens) and tokens[j].startswith('-'):
+            if tokens[j] in ('-m', '-c'):
+                return candidates
+            j += 1
+        if j < len(tokens):
+            candidates.append(tokens[j].strip('"\''))
+        break
+    return candidates
+
+
 def _match_tool(tokens: list[str], known: list[str]) -> Optional[str]:
-    for token in tokens:
-        token = token.strip('"\'')
+    for cand in _command_position_candidates(tokens):
         for known_path in known:
             basename = known_path.rsplit('/', 1)[-1]
             if (
-                token == known_path
-                or token.endswith('/' + known_path)
-                or token.endswith('\\' + known_path)
-                or token == basename
-                or token.endswith('/' + basename)
-                or token.endswith('\\' + basename)
+                cand == known_path
+                or cand.endswith('/' + known_path)
+                or cand.endswith('\\' + known_path)
+                or cand == basename
+                or cand.endswith('/' + basename)
+                or cand.endswith('\\' + basename)
             ):
                 return known_path
     return None

@@ -152,6 +152,28 @@ class EnforceCliLookupTests(unittest.TestCase):
         self.assertTrue(deny)
         self.assertIn("report.py", deny.get("permissionDecisionReason", ""))
 
+    def test_allows_tool_name_in_quoted_content_arg(self):
+        """Regression for #172: a tool name appearing in prose inside a
+        quoted content arg must NOT be treated as an invocation. Only the
+        token in command position (the script being run) counts."""
+        _write_transcript(
+            self.home,
+            self.cwd,
+            self.session_id,
+            [_tool_use("python docs/reference/cli_lookup.py notes.py")],
+        )
+        cmd = (
+            'python scribe/notes.py add --type todo '
+            '--content "see budgeter/tune.py for details"'
+        )
+        result = self._run(self._payload(cmd))
+        self.assertEqual(result.returncode, 0)
+        deny = _parse_deny(result.stdout)
+        self.assertFalse(
+            deny,
+            f"prose mention of tune.py should not block; got: {result.stdout!r}",
+        )
+
     def test_allows_chained_command_when_all_tools_looked_up(self):
         _write_transcript(
             self.home,
