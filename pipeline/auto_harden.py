@@ -90,24 +90,30 @@ def extract_text(raw_output: str) -> str:
 
 
 def extract_json_from_text(text: str) -> str:
-    """Extract JSON array/object from text that may contain markdown fences or prose."""
+    """Extract JSON array/object from text that may contain markdown fences or prose.
+
+    Uses JSONDecoder.raw_decode to find the first complete JSON value, which
+    tolerates trailing content (prose, additional JSON blocks, explanation, etc.).
+    """
     text = text.strip()
 
     # Try to extract from markdown code fences first
     import re
     fence_match = re.search(r"```(?:json)?\s*\n([\s\S]*?)```", text)
     if fence_match:
-        return fence_match.group(1).strip()
+        text = fence_match.group(1).strip()
 
-    # Try to find a JSON object or array in the raw text
-    for start_char, end_char in [('{', '}'), ('[', ']')]:
-        start = text.find(start_char)
-        if start == -1:
-            continue
-        # Find matching closing bracket by scanning from the end
-        end = text.rfind(end_char)
-        if end > start:
-            return text[start:end + 1]
+    # Use raw_decode to parse the first complete JSON value, ignoring trailing data.
+    # Scan forward from each candidate '{' or '[' until raw_decode succeeds.
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch in "{[":
+            try:
+                obj, end = decoder.raw_decode(text, i)
+                # Re-serialize to canonical form (drops trailing prose/JSON)
+                return json.dumps(obj)
+            except json.JSONDecodeError:
+                continue
 
     return text
 
