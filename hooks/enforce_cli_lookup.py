@@ -77,6 +77,42 @@ def _is_cli_lookup_invocation(subcmd: str) -> bool:
     return any('cli_lookup.py' in t for t in _tokens(subcmd))
 
 
+def _bash_command_looks_up(command: str, tool: str, basename: str) -> bool:
+    """True if `command` is an actual cli_lookup.py invocation referencing tool."""
+    for sub in _split_subcommands(command):
+        if not _is_cli_lookup_invocation(sub):
+            continue
+        toks = _tokens(sub)
+        # Argument to cli_lookup.py — match tool path or basename (with or
+        # without .py) as a token suffix.
+        bare = basename[:-3] if basename.endswith('.py') else basename
+        for t in toks:
+            t = t.strip('"\'')
+            if (
+                t == tool
+                or t.endswith('/' + tool)
+                or t.endswith('\\' + tool)
+                or t == basename
+                or t == bare
+            ):
+                return True
+    return False
+
+
+def _iter_bash_commands(obj):
+    """Yield every Bash tool_use command string found anywhere in obj."""
+    if isinstance(obj, dict):
+        if obj.get('type') == 'tool_use' and obj.get('name') == 'Bash':
+            cmd = (obj.get('input') or {}).get('command')
+            if isinstance(cmd, str):
+                yield cmd
+        for v in obj.values():
+            yield from _iter_bash_commands(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _iter_bash_commands(v)
+
+
 def _transcript_has_lookup_for(transcript_path: Path, tool: str) -> bool:
     if not transcript_path.exists():
         return False
@@ -85,15 +121,17 @@ def _transcript_has_lookup_for(transcript_path: Path, tool: str) -> bool:
         with open(transcript_path, encoding='utf-8', errors='replace') as f:
             for line in f:
                 line = line.strip()
-                if not line:
+                if not line or 'cli_lookup.py' not in line:
                     continue
                 try:
                     obj = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                s = json.dumps(obj)
-                if 'cli_lookup.py' in s and (tool in s or basename in s):
-                    return True
+                for cmd in _iter_bash_commands(obj):
+                    if 'cli_lookup.py' not in cmd:
+                        continue
+                    if _bash_command_looks_up(cmd, tool, basename):
+                        return True
     except OSError:
         return False
     return False
