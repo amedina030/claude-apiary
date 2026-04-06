@@ -23,6 +23,7 @@ from pathlib import Path
 
 VALID_TYPES = {"create", "modify", "delete", "test", "verify"}
 VALID_ACTIONS = {"create", "modify", "delete", "test", "verify"}
+VALID_MODELS = {"opus", "sonnet", "haiku"}
 REQUIRED_STEP_FIELDS = ["step_number", "type", "description", "action", "files", "depends_on", "code_spec"]
 
 
@@ -153,6 +154,17 @@ def validate(data: dict) -> list[str]:
         action = step.get("action")
         if isinstance(action, str) and action not in VALID_ACTIONS:
             errors.append(f"{label}: invalid action '{action}' (expected: {', '.join(sorted(VALID_ACTIONS))})")
+
+        # Optional per-step model field
+        if "model" in step:
+            model_val = step.get("model")
+            if not isinstance(model_val, str):
+                errors.append(f"{label}: field 'model' must be a string")
+            elif model_val not in VALID_MODELS:
+                errors.append(
+                    f"{label}: invalid model '{model_val}' "
+                    f"(expected: {', '.join(sorted(VALID_MODELS))})"
+                )
 
         # File existence for modify/delete actions
         if action in ("modify", "delete"):

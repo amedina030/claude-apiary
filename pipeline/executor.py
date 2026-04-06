@@ -277,7 +277,7 @@ def main():
         print("Plan uuid field contains invalid characters (path separators not allowed)", file=sys.stderr)
         sys.exit(1)
 
-    model = plan.get("executor_model", "sonnet")
+    default_model = plan.get("executor_model", "sonnet")
     spec = plan.get("spec", {})
     steps = plan.get("steps", [])
     branch = f"pipeline/{uuid}"
@@ -332,7 +332,8 @@ def main():
             continue
 
         print(f"Executing step {step_num}: {step.get('description', '')}", file=sys.stderr)
-        step_result = execute_step(step, spec, model)
+        resolved_model = step.get("model") or default_model
+        step_result = execute_step(step, spec, resolved_model)
         execution_log["steps"].append(step_result)
 
         if step_result["status"] == "passed":
