@@ -10,3 +10,4 @@
 | overnight-cron-pipeline-with-morning-branch-review-workflow | Overnight cron pipeline with morning branch review workflow | failed | 5029f36e-35af-4923-9dd8-d9139bfde8ff | |
 | pipeline-mark-done-cli-for-hand-fixed-tickets | Pipeline mark-done CLI for hand-fixed tickets | done |  | self-hosted: closed itself after build + smoke test |
 | refine-to-plan-file-handoff-to-cut-auto-plan-token-cost | Refine-to-plan file handoff to cut auto_plan token cost | backlog | | |
+| pipeline-executor-architecture-hardening-from-t4-failures | Pipeline executor architecture hardening from T4 failures | backlog | | |
