@@ -6,3 +6,5 @@
 | pipeline-run-py-shows-full-stage-stderr-on-failure | Pipeline run.py shows full stage stderr on failure | backlog | | |
 | make-claude-apiary-fully-portable-across-machines-and-oses | Make claude-apiary fully portable across machines and OSes | backlog | | |
 | document-portability-rules-in-memory-notes-and-claude-md | Document portability rules in memory notes and CLAUDE.md | backlog | | |
+| add-request-id-grouping-to-budgeter-for-multi-task-chains | Add request_id grouping to budgeter for multi-task chains | backlog | | |
+| overnight-cron-pipeline-with-morning-branch-review-workflow | Overnight cron pipeline with morning branch review workflow | backlog | | |
