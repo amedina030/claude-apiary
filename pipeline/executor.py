@@ -43,10 +43,30 @@ def branch_exists(branch: str) -> bool:
     return result.returncode == 0
 
 
+def _format_git_error(action: str, result: subprocess.CompletedProcess, extra: str = "") -> str:
+    """Build a RuntimeError message that includes both stdout and stderr.
+
+    Git often writes failure context (e.g. 'nothing to commit') to stdout, not
+    stderr, so surfacing only stderr leaves operators with empty error messages.
+    """
+    parts = [f"Git error {action} (exit {result.returncode})"]
+    if extra:
+        parts.append(extra)
+    stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip()
+    if stdout:
+        parts.append(f"stdout: {stdout}")
+    if stderr:
+        parts.append(f"stderr: {stderr}")
+    if not stdout and not stderr:
+        parts.append("(no output captured)")
+    return "\n".join(parts)
+
+
 def create_branch(branch: str):
     result = git("checkout", "-b", branch)
     if result.returncode != 0:
-        raise RuntimeError(f"Git error creating branch: {result.stderr.strip()}")
+        raise RuntimeError(_format_git_error(f"creating branch '{branch}'", result))
 
 
 def commit_files(files: list[str], message: str):
@@ -56,7 +76,11 @@ def commit_files(files: list[str], message: str):
     git("add", *files)
     result = git("commit", "-m", message)
     if result.returncode != 0:
-        raise RuntimeError(f"Git error committing: {result.stderr.strip()}")
+        raise RuntimeError(_format_git_error(
+            "committing",
+            result,
+            extra=f"staged files: {', '.join(files)}",
+        ))
 
 
 def get_current_branch() -> str:
@@ -311,7 +335,7 @@ def main():
         print(f"Branch {branch} already exists, checking out", file=sys.stderr)
         result = git("checkout", branch)
         if result.returncode != 0:
-            print(f"Git error checking out branch: {result.stderr.strip()}", file=sys.stderr)
+            print(_format_git_error(f"checking out branch '{branch}'", result), file=sys.stderr)
             sys.exit(1)
     else:
         try:

@@ -330,8 +330,12 @@ def main():
             else:
                 print(f"  FAILED ({elapsed:.1f}s)")
                 if output:
-                    for line in output.strip().splitlines()[:5]:
+                    lines = output.strip().splitlines()
+                    cap = 500
+                    for line in lines[:cap]:
                         print(f"  ! {line}")
+                    if len(lines) > cap:
+                        print(f"  ! ... ({len(lines) - cap} more lines truncated)")
                 print(f"\n{'=' * 60}")
                 print(f"FAILED at stage {i}: {name}")
                 print(f"Stages completed: {stages_completed}/{len(STAGES)}")

@@ -459,6 +459,21 @@ python pipeline/promote.py <slug>
 
 **Gotcha:** Pass the slug only (e.g. `my-feature`), not a path (e.g. `pipeline/backlog/my-feature.json`). Path separators are rejected to prevent traversal. The script always looks in `pipeline/backlog/<slug>.json`.
 
+## pipeline/mark_done.py
+
+Mark a backlog ticket as done **without** running it through the pipeline. For tickets small enough to fix by hand. Deletes `pipeline/backlog/<slug>.json` and rewrites the matching `pipeline/board.md` row's status column to `done`.
+
+```bash
+python pipeline/mark_done.py <slug> [--note "explanation"]
+```
+
+| Argument / Flag | Required | Description |
+|-----------------|----------|-------------|
+| `slug` | yes | Backlog ticket slug — the filename **without** directory or `.json` extension |
+| `--note TEXT` | no | Optional note appended to the board row's notes column (e.g. "hand-fixed manually, not via pipeline") |
+
+**Refuses to operate** if the board row is not in `backlog` status — guards against clobbering pipeline-run state (`ready`, `running`, `failed`, `done`). Use `promote.py` first if you actually want the ticket to run through the pipeline.
+
 ## pipeline/cost_emit.py
 
 Shared helper used by every stage's `run_claude` wrapper. Library module — not a CLI tool. Parses a `claude -p --output-format json` envelope and emits a `<usage>` XML block to stderr that the orchestrator scrapes for cost tracking.

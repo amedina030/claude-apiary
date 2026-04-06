@@ -31,6 +31,7 @@ pipeline/reports/*
 
 # Session runtime artifacts
 .claude-session-identity.json
+session_*.txt
 
 # Scribe / clarifier runtime
 .claude/notes.md
