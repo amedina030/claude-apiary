@@ -8,6 +8,7 @@ artifact paths between them, stops on any stage failure.
 Usage:
     python pipeline/run.py pipeline/intake/<uuid>.json
 """
+import argparse
 import json
 import subprocess
 import sys
@@ -87,11 +88,19 @@ def run_stage(name: str, script_path: Path, input_path: Path) -> tuple[bool, str
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python pipeline/run.py <path_to_intake.json>", file=sys.stderr)
+    parser = argparse.ArgumentParser(description="Pipeline orchestrator")
+    parser.add_argument("intake", help="Path to intake JSON file")
+    parser.add_argument("--resume-from", dest="resume_from", default=None,
+                        help="Resume from a specific stage (skip earlier stages)")
+    cli_args = parser.parse_args()
+
+    # Validate --resume-from against known stage names
+    stage_names = [name for name, _, _ in STAGES]
+    if cli_args.resume_from is not None and cli_args.resume_from not in stage_names:
+        print(f"Unknown stage: {cli_args.resume_from}. Valid stages: {', '.join(stage_names)}", file=sys.stderr)
         sys.exit(1)
 
-    intake_path = Path(sys.argv[1])
+    intake_path = Path(cli_args.intake)
     if not intake_path.exists():
         print(f"Intake file not found: {intake_path}", file=sys.stderr)
         sys.exit(1)
@@ -144,15 +153,45 @@ def main():
         # but derived paths for subsequent stages
         artifacts["intake"] = intake_path.resolve()
 
+    resume_from = cli_args.resume_from
+
+    # Validate prerequisite artifact exists when resuming
+    if resume_from is not None:
+        # Find the input_key for the resume stage
+        resume_input_key = None
+        for name, _, input_key in STAGES:
+            if name == resume_from:
+                resume_input_key = input_key
+                break
+        artifact_path = artifacts[resume_input_key]
+        if not artifact_path.exists():
+            print(f"Cannot resume from {resume_from}: missing prerequisite artifact {artifact_path}", file=sys.stderr)
+            sys.exit(1)
+
     print(f"Pipeline: {intake.get('title', 'Untitled')} [{uuid}]")
     print(f"{'=' * 60}")
 
     total_start = time.time()
     stages_completed = 0
     final_output = ""
+    reached_resume = (resume_from is None)
+    # Track the currently-executing stage for KeyboardInterrupt reporting
+    current_stage_name = STAGES[0][0]
+    current_stage_idx = 1
+    intake_path_abs = intake_path.resolve()
 
     try:
         for i, (name, script_name, input_key) in enumerate(STAGES, 1):
+            # Skip stages before resume point
+            if resume_from is not None and not reached_resume:
+                if name == resume_from:
+                    reached_resume = True
+                else:
+                    print(f"\n[{i}/6] {name}... SKIPPED (resuming)")
+                    continue  # ATK-001: skipped stages do not count as completed
+
+            current_stage_name = name
+            current_stage_idx = i
             script_path = SCRIPT_DIR / script_name
             input_path = artifacts[input_key]
 
@@ -167,7 +206,7 @@ def main():
                     last_line = output.strip().splitlines()[-1]
                     print(f"  -> {last_line}")
                 stages_completed += 1
-                if stages_completed == 1:  # validate_intake just passed
+                if name == "validate_intake":  # ATK-003: check stage name, not count
                     update_board_status(uuid, 'running')
                 final_output = output
             else:
@@ -177,19 +216,17 @@ def main():
                         print(f"  ! {line}")
                 print(f"\n{'=' * 60}")
                 print(f"FAILED at stage {i}: {name}")
-                print(f"Stages completed: {stages_completed}/6")
+                print(f"Stages completed: {stages_completed}/{len(STAGES)}")
                 print(f"Total time: {time.time() - total_start:.1f}s")
                 update_board_status(uuid, 'failed')
+                print(f"To resume: python pipeline/run.py {intake_path_abs} --resume-from {name}", file=sys.stderr)  # ATK-007
                 sys.exit(1)
 
     except KeyboardInterrupt:
-        if stages_completed < len(STAGES):
-            interrupted = STAGES[stages_completed][0]
-        else:
-            interrupted = "(post-completion)"
-        print(f"\n\nInterrupted during stage {stages_completed + 1}: {interrupted}")
-        print(f"Stages completed: {stages_completed}/6")
+        print(f"\n\nInterrupted during stage {current_stage_idx}: {current_stage_name}")  # ATK-004
+        print(f"Stages completed: {stages_completed}/{len(STAGES)}")
         update_board_status(uuid, 'failed')
+        print(f"To resume: python pipeline/run.py {intake_path_abs} --resume-from {current_stage_name}", file=sys.stderr)  # ATK-007
         sys.exit(1)
 
     # All stages completed
@@ -200,7 +237,7 @@ def main():
     # Parse verdict from approval output
     verdict_line = final_output.strip().splitlines()[0] if final_output else "unknown"
     print(f"COMPLETE: {verdict_line}")
-    print(f"Stages completed: 6/6")
+    print(f"Stages completed: {stages_completed}/{len(STAGES)}")
     print(f"Total time: {total_elapsed:.1f}s")
     print(f"Report: {artifacts['report']}")
 

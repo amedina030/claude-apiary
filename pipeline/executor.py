@@ -38,7 +38,8 @@ def git(*args: str) -> subprocess.CompletedProcess:
 
 
 def branch_exists(branch: str) -> bool:
-    result = git("rev-parse", "--verify", branch)
+    # ATK-006: check refs/heads/ explicitly so remote tracking refs don't match
+    result = git("rev-parse", "--verify", f"refs/heads/{branch}")
     return result.returncode == 0
 
 
@@ -259,25 +260,44 @@ def main():
         sys.exit(1)
 
     uuid = plan.get("uuid", plan_path.stem)
+
+    # ATK-005: validate uuid from plan JSON to prevent path traversal
+    if not isinstance(uuid, str):
+        print("Plan uuid field is not a string", file=sys.stderr)
+        sys.exit(1)
+    uuid = uuid.strip()
+    if (
+        not uuid
+        or "\\" in uuid
+        or "\x00" in uuid
+        or uuid in (".", "..")
+        or Path(uuid) != Path(Path(uuid).name)
+        or not Path(uuid).name
+    ):
+        print("Plan uuid field contains invalid characters (path separators not allowed)", file=sys.stderr)
+        sys.exit(1)
+
     model = plan.get("executor_model", "sonnet")
     spec = plan.get("spec", {})
     steps = plan.get("steps", [])
     branch = f"pipeline/{uuid}"
 
-    # Check branch doesn't already exist
-    if branch_exists(branch):
-        print(f"Branch {branch} already exists -- pipeline may have already run", file=sys.stderr)
-        sys.exit(1)
-
     # Remember original branch to return to on error
     original_branch = get_current_branch()
 
-    # Create feature branch
-    try:
-        create_branch(branch)
-    except RuntimeError as e:
-        print(str(e), file=sys.stderr)
-        sys.exit(1)
+    # Check out existing branch or create new one
+    if branch_exists(branch):
+        print(f"Branch {branch} already exists, checking out", file=sys.stderr)
+        result = git("checkout", branch)
+        if result.returncode != 0:
+            print(f"Git error checking out branch: {result.stderr.strip()}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        try:
+            create_branch(branch)
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(1)
 
     # Sort steps by dependency order
     sorted_steps = topo_sort(steps)

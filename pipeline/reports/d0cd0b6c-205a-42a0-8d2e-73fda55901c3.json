@@ -1,0 +1,33 @@
+{
+  "uuid": "d0cd0b6c-205a-42a0-8d2e-73fda55901c3",
+  "title": "Pipeline ticket management: backlog, board, draft, promote",
+  "verdict": "all_resolved",
+  "path_taken": "auto-merged",
+  "timestamps": {
+    "intake_created": "2026-04-06T03:22:00.146073+00:00",
+    "approval_completed": "2026-04-06T03:52:33.884640+00:00"
+  },
+  "stats": {
+    "total_steps": 6,
+    "steps_passed": 6,
+    "total_findings": 8,
+    "findings_resolved": 7,
+    "findings_unresolved": 0,
+    "harden_rounds": 1
+  },
+  "files_changed": [
+    "pipeline/backlog/.gitkeep",
+    "pipeline/board.md",
+    "pipeline/draft_ticket.py",
+    "pipeline/promote.py",
+    "pipeline/run.py"
+  ],
+  "artifacts": {
+    "intake": "D:\\Professional\\claude-apiary\\pipeline\\intake\\d0cd0b6c-205a-42a0-8d2e-73fda55901c3.json",
+    "spec": "D:\\Professional\\claude-apiary\\pipeline\\specs\\d0cd0b6c-205a-42a0-8d2e-73fda55901c3.json",
+    "plan": "D:\\Professional\\claude-apiary\\pipeline\\plans\\d0cd0b6c-205a-42a0-8d2e-73fda55901c3.json",
+    "execution": "D:\\Professional\\claude-apiary\\pipeline\\executions\\d0cd0b6c-205a-42a0-8d2e-73fda55901c3.json",
+    "harden": "D:\\Professional\\claude-apiary\\pipeline\\hardens\\d0cd0b6c-205a-42a0-8d2e-73fda55901c3.json",
+    "report": "D:\\Professional\\claude-apiary\\pipeline\\reports\\d0cd0b6c-205a-42a0-8d2e-73fda55901c3.json"
+  }
+}
