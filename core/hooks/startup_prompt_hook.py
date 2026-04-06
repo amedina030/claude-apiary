@@ -6,7 +6,13 @@ Always injects: identity, notes summary, learnings, CLI reference.
 
 Unseen session detection (and automatic handoff backfilling) stays in
 the PreToolUse startup_hook.py — gated by the ``auto-startup`` flag.
+
+Pipeline subprocesses (auto_refine, auto_plan, auto_harden, executor,
+approval) set ``APIARY_PIPELINE_SUBPROCESS=1`` to skip injection — they
+are one-shot workers that don't use any of this context, and the
+injection is tens of KB of input tokens per spawn.
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +34,14 @@ def main():
 
 
 def _run():
+    # Pipeline subprocesses (auto_refine, auto_plan, etc.) set this env var
+    # to skip the entire startup injection. Saves tens of KB of input tokens
+    # per spawn — none of identity/notes/learnings/CLI-index is useful to a
+    # one-shot pipeline worker.
+    if os.environ.get("APIARY_PIPELINE_SUBPROCESS") == "1":
+        hook_allow(event="UserPromptSubmit")
+        return
+
     payload = read_payload()
 
     raw_id = payload.get("session_id", "")

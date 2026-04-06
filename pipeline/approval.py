@@ -93,13 +93,8 @@ def write_scribe_note(note_type: str, content: str):
 
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
-    result = subprocess.run(
-        ["claude", "-p", "-", "--output-format", "json"],
-        input=prompt, capture_output=True, text=True, timeout=120,
-    )
-    from cost_emit import emit_usage_xml
-    emit_usage_xml(result.stdout)
-    return result.returncode, result.stdout, result.stderr
+    from claude_subprocess import run_claude as _spawn
+    return _spawn(prompt, timeout=120)
 
 
 def extract_text(raw_output: str) -> str:

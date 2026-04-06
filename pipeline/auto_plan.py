@@ -102,13 +102,8 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
 
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
-    result = subprocess.run(
-        ["claude", "-p", "-", "--output-format", "json"],
-        input=prompt, capture_output=True, text=True, timeout=cfg("plan", "timeout", 300),
-    )
-    from cost_emit import emit_usage_xml
-    emit_usage_xml(result.stdout)
-    return result.returncode, result.stdout, result.stderr
+    from claude_subprocess import run_claude as _spawn
+    return _spawn(prompt, timeout=cfg("plan", "timeout", 300))
 
 
 def extract_plan(raw_output: str) -> dict:

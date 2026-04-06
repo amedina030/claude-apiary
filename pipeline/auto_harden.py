@@ -70,14 +70,8 @@ def get_current_branch() -> str:
 # -- Claude Code helpers --
 
 def run_claude(prompt: str, model: str | None = None) -> tuple[int, str, str]:
-    cmd = ["claude", "-p", "-", "--output-format", "json"]
-    if model:
-        cmd.extend(["--model", model])
-    timeout = cfg("harden", "timeout", 300)
-    result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout)
-    from cost_emit import emit_usage_xml
-    emit_usage_xml(result.stdout)
-    return result.returncode, result.stdout, result.stderr
+    from claude_subprocess import run_claude as _spawn
+    return _spawn(prompt, timeout=cfg("harden", "timeout", 300), model=model)
 
 
 def extract_text(raw_output: str) -> str:

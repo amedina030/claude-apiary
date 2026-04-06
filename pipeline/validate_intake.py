@@ -43,6 +43,17 @@ def validate(data: dict) -> list[str]:
         if isinstance(val, str) and val.strip() and len(val.strip()) < min_len:
             errors.append(f"{field} is too short (minimum {min_len} characters)")
 
+    # Optional explore_hints: list of repo-relative path strings. Refiner uses
+    # these as a starting set instead of exploring the codebase from zero.
+    hints = data.get("explore_hints")
+    if hints is not None:
+        if not isinstance(hints, list):
+            errors.append(f"explore_hints must be a list, got {type(hints).__name__}")
+        else:
+            for i, h in enumerate(hints):
+                if not isinstance(h, str) or not h.strip():
+                    errors.append(f"explore_hints[{i}] must be a non-empty string")
+
     # ISO date format check for created_at
     created_at = data.get("created_at")
     if isinstance(created_at, str) and created_at.strip():

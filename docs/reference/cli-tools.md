@@ -307,6 +307,7 @@ python pipeline/create_intake.py --from-todo 42
 | `--description TEXT` | yes* | Detailed description (min 20 chars) |
 | `--scope TEXT` | yes* | What's in scope for this pipeline run |
 | `--context TEXT` | no | Additional context (optional) |
+| `--explore-hints CSV` | no | Comma-separated repo-relative paths the refiner should start with (refiner can still branch out) |
 | `--from-todo ID` | no | Scribe TODO ID to seed from (replaces manual fields) |
 
 \* Required unless `--from-todo` is used.

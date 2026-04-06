@@ -88,12 +88,30 @@ def build_prompt(intake: dict, previous_errors: list[str] | None = None) -> str:
     if context:
         parts.append(f"**Additional context:** {context}")
 
+    explore_hints = intake.get("explore_hints") or []
+
     parts.extend([
         "",
         "## Instructions",
         "",
-        "1. Explore the codebase freely — read files, search for patterns, "
-        "understand the existing architecture.",
+    ])
+    if explore_hints:
+        parts.append(
+            "1. Start by reading these files (they are the most relevant "
+            "starting points; branch out from there as needed):"
+        )
+        for h in explore_hints:
+            parts.append(f"   - {h}")
+        parts.append(
+            "   Then explore further as the task requires — read related files, "
+            "search for patterns, understand surrounding architecture."
+        )
+    else:
+        parts.append(
+            "1. Explore the codebase freely — read files, search for patterns, "
+            "understand the existing architecture."
+        )
+    parts.extend([
         "2. Based on your exploration and the task description, produce a spec "
         "that covers all aspects needed for implementation.",
         "3. Output ONLY valid JSON matching this schema (no markdown, no explanation):",
@@ -121,13 +139,8 @@ def build_prompt(intake: dict, previous_errors: list[str] | None = None) -> str:
 
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
-    result = subprocess.run(
-        ["claude", "-p", "-", "--output-format", "json"],
-        input=prompt, capture_output=True, text=True, timeout=cfg("refine", "timeout", 300),
-    )
-    from cost_emit import emit_usage_xml
-    emit_usage_xml(result.stdout)
-    return result.returncode, result.stdout, result.stderr
+    from claude_subprocess import run_claude as _spawn
+    return _spawn(prompt, timeout=cfg("refine", "timeout", 300))
 
 
 def extract_spec(raw_output: str) -> dict:

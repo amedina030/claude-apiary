@@ -65,6 +65,13 @@ def main():
     parser.add_argument("--description", help="Detailed description (min 20 chars)")
     parser.add_argument("--scope", help="What's in scope for this pipeline run")
     parser.add_argument("--context", default="", help="Additional context (optional)")
+    parser.add_argument(
+        "--explore-hints",
+        dest="explore_hints",
+        default="",
+        help="Comma-separated repo-relative paths the refiner should start with "
+             "(optional; refiner can still branch out)",
+    )
     args = parser.parse_args()
 
     # If --from-todo, read TODO content as default description
@@ -106,6 +113,18 @@ def main():
     }
     if source is not None:
         intake["source"] = source
+
+    # Optional explore_hints: split CSV, drop empties, dedupe, preserve order.
+    if args.explore_hints.strip():
+        seen = set()
+        hints = []
+        for h in args.explore_hints.split(","):
+            h = h.strip()
+            if h and h not in seen:
+                seen.add(h)
+                hints.append(h)
+        if hints:
+            intake["explore_hints"] = hints
 
     # Write file
     INTAKE_DIR.mkdir(parents=True, exist_ok=True)
