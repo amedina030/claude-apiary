@@ -1,0 +1,16 @@
+{
+  "uuid": "baab0ad5-e37e-4447-995f-962daf3fb057",
+  "branch": "pipeline/baab0ad5-e37e-4447-995f-962daf3fb057",
+  "verdict": "all_resolved",
+  "rounds": [
+    {
+      "round": 1,
+      "findings": [],
+      "responses": [],
+      "resolutions": {}
+    }
+  ],
+  "unresolved": [],
+  "total_findings": 0,
+  "total_resolved": 0
+}

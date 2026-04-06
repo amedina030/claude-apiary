@@ -8,8 +8,11 @@ artifact paths between them, stops on any stage failure.
 Usage:
     python pipeline/run.py pipeline/intake/<uuid>.json
 """
+from __future__ import annotations
+
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -18,7 +21,9 @@ from pathlib import Path
 from config_loader import get as cfg
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
 BOARD_PATH = SCRIPT_DIR / "board.md"
+LOG_AGENT_COST_SCRIPT = REPO_ROOT / 'budgeter' / 'log_agent_cost.py'
 
 # Stage definitions: (name, script, input_artifact_key)
 # input_artifact_key maps to the artifact path dict
@@ -30,6 +35,53 @@ STAGES = [
     ("auto_harden",     "auto_harden.py",     "execution"),
     ("approval",        "approval.py",        "harden"),
 ]
+
+_USAGE_RE = re.compile(r'<usage>.*?</usage>', re.DOTALL)
+
+
+def log_stage_cost(stage_name: str, pipeline_uuid: str, usage_xml: str) -> None:
+    """Pipe a <usage> XML block to budgeter/log_agent_cost.py. Never raises."""
+    if not LOG_AGENT_COST_SCRIPT.exists():
+        print(f'WARN: cost logging skipped for {stage_name}: {LOG_AGENT_COST_SCRIPT} not found', file=sys.stderr)
+        return
+    cmd = [
+        sys.executable, str(LOG_AGENT_COST_SCRIPT),
+        '--session-id', pipeline_uuid,
+        '--agent', f'pipeline-{stage_name}',
+        '--cwd', str(REPO_ROOT),
+    ]
+    try:
+        result = subprocess.run(cmd, input=usage_xml, text=True, capture_output=True, timeout=30, cwd=str(REPO_ROOT))
+        if result.returncode != 0:
+            print(f'WARN: cost logging failed for {stage_name}: {result.stderr.strip()}', file=sys.stderr)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f'WARN: cost logging failed for {stage_name}: {e}', file=sys.stderr)
+
+
+def extract_usage_block(text: str) -> str | None:
+    """Return the first <usage>...</usage> block found in text, or None."""
+    if not text:
+        return None
+    match = _USAGE_RE.search(text)
+    return match.group(0) if match else None
+
+
+def parse_usage_fields(usage_xml: str) -> dict:
+    """Parse numeric fields from a <usage> XML block. Returns dict with int values."""
+    result = {}
+    for tag in ('total_tokens', 'tool_uses', 'duration_ms'):
+        m = re.search(rf'<{tag}>\s*(\d+)\s*</{tag}>', usage_xml)
+        if m:
+            try:
+                result[tag] = int(m.group(1))
+            except ValueError:
+                result[tag] = 0
+                result['_malformed'] = True
+        else:
+            result[tag] = 0
+            if f'<{tag}>' in usage_xml:
+                result['_malformed'] = True
+    return result
 
 
 def update_board_status(intake_uuid: str, new_status: str) -> None:
@@ -60,13 +112,58 @@ def update_board_status(intake_uuid: str, new_status: str) -> None:
             pass  # Board update must not block pipeline
 
 
-def run_stage(name: str, script_path: Path, input_path: Path) -> tuple[bool, str, float]:
-    """Run a stage subprocess. Returns (success, output, elapsed_seconds).
-    On success, output is stdout. On failure, output is stderr."""
+def record_stage_cost(stage_name: str, pipeline_uuid: str, stdout_text: str, stderr_text: str, stage_costs: list) -> None:
+    """Parse usage from stage output and log cost. Appends a status entry to stage_costs."""
+    # Scan stdout first, then stderr independently — avoids splicing a cross-stream pseudo-block
+    usage_xml = extract_usage_block(stdout_text or '') or extract_usage_block(stderr_text or '')
+    if usage_xml is None:
+        stage_costs.append({'stage': stage_name, 'tokens': 0, 'tool_uses': 0, 'duration_ms': 0, 'status': 'no_usage'})
+        return
+    fields = parse_usage_fields(usage_xml)
+    if fields.get('_malformed'):
+        print(f'WARN: malformed <usage> block in stage {stage_name}', file=sys.stderr)
+        # Spec: treat as zero tokens, warn, continue — do not forward malformed XML to cost logger
+        stage_costs.append({'stage': stage_name, 'tokens': 0, 'tool_uses': 0, 'duration_ms': 0, 'status': 'malformed'})
+        return
+    tokens = fields.get('total_tokens', 0)
+    tool_uses = fields.get('tool_uses', 0)
+    duration_ms = fields.get('duration_ms', 0)
+    log_stage_cost(stage_name, pipeline_uuid, usage_xml)
+    stage_costs.append({'stage': stage_name, 'tokens': tokens, 'tool_uses': tool_uses, 'duration_ms': duration_ms, 'status': 'logged'})
+
+
+def print_cost_summary(stage_costs: list) -> None:
+    """Print a per-stage token cost summary."""
+    if not stage_costs:
+        print('Cost summary: (no stages executed)')
+        return
+    print('Cost summary:')
+    total_tokens = 0
+    any_logged = False
+    for entry in stage_costs:
+        stage = entry['stage']
+        status = entry['status']
+        if status == 'no_usage':
+            print(f'  pipeline-{stage}: no usage reported')
+        elif status == 'malformed':
+            print(f'  pipeline-{stage}: malformed usage (counted as 0)')
+        else:
+            tokens = entry['tokens']
+            tool_uses = entry['tool_uses']
+            duration_ms = entry.get('duration_ms', 0)
+            print(f'  pipeline-{stage}: {tokens} tokens ({tool_uses} tool uses, {duration_ms}ms)')
+            total_tokens += tokens
+            any_logged = True
+    print(f'  TOTAL: {total_tokens} tokens')
+    print('  (note: only the first <usage> block per stage is counted)')
+
+
+def run_stage(name: str, script_path: Path, input_path: Path) -> tuple[bool, str, str, float]:
+    """Run a stage subprocess. Returns (success, stdout, stderr, elapsed_seconds)."""
     if not script_path.exists():
-        return False, f"Stage script not found: {script_path}", 0.0
+        return False, '', f"Stage script not found: {script_path}", 0.0
     if not input_path.exists():
-        return False, f"Stage input file not found: {input_path}", 0.0
+        return False, '', f"Stage input file not found: {input_path}", 0.0
 
     start = time.time()
     try:
@@ -75,15 +172,14 @@ def run_stage(name: str, script_path: Path, input_path: Path) -> tuple[bool, str
             capture_output=True, text=True, timeout=cfg("orchestrator", "stage_timeout", 3600),
         )
         elapsed = time.time() - start
-        if result.returncode != 0:
-            return False, result.stderr.strip(), elapsed
-        return True, result.stdout.strip(), elapsed
+        return result.returncode == 0, result.stdout or '', result.stderr or '', elapsed
     except subprocess.TimeoutExpired:
         elapsed = time.time() - start
-        return False, "Stage timed out (60 min limit)", elapsed
+        timeout_val = cfg("orchestrator", "stage_timeout", 3600)
+        return False, '', f'Stage timed out ({timeout_val}s limit)', elapsed
     except OSError as e:
         elapsed = time.time() - start
-        return False, f"Stage failed to launch: {e}", elapsed
+        return False, '', f'Stage failed to launch: {e}', elapsed
 
 
 
@@ -179,6 +275,7 @@ def main():
     current_stage_name = STAGES[0][0]
     current_stage_idx = 1
     intake_path_abs = intake_path.resolve()
+    stage_costs: list[dict] = []  # each entry: {'stage': str, 'tokens': int, 'tool_uses': int, 'status': 'logged'|'no_usage'|'malformed'}
 
     try:
         for i, (name, script_name, input_key) in enumerate(STAGES, 1):
@@ -197,7 +294,9 @@ def main():
 
             print(f"\n[{i}/6] {name}...", flush=True)
 
-            ok, output, elapsed = run_stage(name, script_path, input_path)
+            ok, stdout_text, stderr_text, elapsed = run_stage(name, script_path, input_path)
+            record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
+            output = stdout_text.strip() if ok else stderr_text.strip()
 
             if ok:
                 print(f"  PASSED ({elapsed:.1f}s)")
@@ -219,6 +318,10 @@ def main():
                 print(f"Stages completed: {stages_completed}/{len(STAGES)}")
                 print(f"Total time: {time.time() - total_start:.1f}s")
                 update_board_status(uuid, 'failed')
+                try:
+                    print_cost_summary(stage_costs)
+                except Exception:
+                    pass
                 print(f"To resume: python pipeline/run.py {intake_path_abs} --resume-from {name}", file=sys.stderr)  # ATK-007
                 sys.exit(1)
 
@@ -226,6 +329,7 @@ def main():
         print(f"\n\nInterrupted during stage {current_stage_idx}: {current_stage_name}")  # ATK-004
         print(f"Stages completed: {stages_completed}/{len(STAGES)}")
         update_board_status(uuid, 'failed')
+        print_cost_summary(stage_costs)
         print(f"To resume: python pipeline/run.py {intake_path_abs} --resume-from {current_stage_name}", file=sys.stderr)  # ATK-007
         sys.exit(1)
 
@@ -240,6 +344,7 @@ def main():
     print(f"Stages completed: {stages_completed}/{len(STAGES)}")
     print(f"Total time: {total_elapsed:.1f}s")
     print(f"Report: {artifacts['report']}")
+    print_cost_summary(stage_costs)
 
 
 if __name__ == "__main__":

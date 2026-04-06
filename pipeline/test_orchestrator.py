@@ -65,7 +65,7 @@ class TestRunStage:
         script = tmp_path / "nonexistent.py"
         input_f = tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
-        ok, msg, elapsed = orchestrator.run_stage("test", script, input_f)
+        ok, _, msg, elapsed = orchestrator.run_stage("test", script, input_f)
         assert ok is False
         assert f"Stage script not found: {script}" in msg
         assert elapsed == 0.0
@@ -75,7 +75,7 @@ class TestRunStage:
         script = tmp_path / "script.py"
         script.write_text("pass", encoding="utf-8")
         input_f = tmp_path / "nonexistent.json"
-        ok, msg, elapsed = orchestrator.run_stage("test", script, input_f)
+        ok, _, msg, elapsed = orchestrator.run_stage("test", script, input_f)
         assert ok is False
         assert f"Stage input file not found: {input_f}" in msg
         assert elapsed == 0.0
@@ -88,7 +88,7 @@ class TestRunStage:
         input_f = tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
         mock_run.return_value = make_completed_process(returncode=0, stdout="output here")
-        ok, output, elapsed = orchestrator.run_stage("test", script, input_f)
+        ok, output, _, elapsed = orchestrator.run_stage("test", script, input_f)
         assert ok is True
         assert output == "output here"
         assert elapsed > 0 or elapsed == pytest.approx(0, abs=1)  # time-based
@@ -107,7 +107,7 @@ class TestRunStage:
         input_f = tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
         mock_run.return_value = make_completed_process(returncode=1, stderr="some error")
-        ok, output, elapsed = orchestrator.run_stage("test", script, input_f)
+        ok, _, output, elapsed = orchestrator.run_stage("test", script, input_f)
         assert ok is False
         assert output == "some error"
         assert elapsed > 0 or elapsed == pytest.approx(0, abs=1)
@@ -120,9 +120,9 @@ class TestRunStage:
         input_f = tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=3600)
-        ok, output, elapsed = orchestrator.run_stage("test", script, input_f)
+        ok, _, output, elapsed = orchestrator.run_stage("test", script, input_f)
         assert ok is False
-        assert "Stage timed out (60 min limit)" in output
+        assert "Stage timed out" in output
 
     @patch("pipeline.run.subprocess.run")
     def test_oserror(self, mock_run, tmp_path):
@@ -132,7 +132,7 @@ class TestRunStage:
         input_f = tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
         mock_run.side_effect = OSError("spawn failed")
-        ok, output, elapsed = orchestrator.run_stage("test", script, input_f)
+        ok, _, output, elapsed = orchestrator.run_stage("test", script, input_f)
         assert ok is False
         assert "Stage failed to launch: spawn failed" in output
 
@@ -312,7 +312,7 @@ class TestMainHappyPath:
     @patch("pipeline.run.run_stage")
     def test_all_stages_succeed(self, mock_run_stage, monkeypatch, capsys, intake_file, intake_data):
         """All 6 stages succeed: exits 0, prints COMPLETE, Stages completed: 6/6."""
-        mock_run_stage.return_value = (True, "stage output", 1.0)
+        mock_run_stage.return_value = (True, "stage output", "", 1.0)
         monkeypatch.setattr(sys, "argv", ["run.py", str(intake_file)])
         # main() currently returns normally on success; handle both return and sys.exit(0)
         try:
@@ -327,7 +327,7 @@ class TestMainHappyPath:
     @patch("pipeline.run.run_stage")
     def test_stage_call_order(self, mock_run_stage, monkeypatch, capsys, intake_file, intake_data):
         """Stages are called in STAGES order with correct script names."""
-        mock_run_stage.return_value = (True, "ok", 0.5)
+        mock_run_stage.return_value = (True, "ok", "", 0.5)
         monkeypatch.setattr(sys, "argv", ["run.py", str(intake_file)])
         try:
             orchestrator.main()
@@ -353,7 +353,7 @@ class TestMainHappyPath:
     def test_artifact_path_wiring(self, mock_run_stage, monkeypatch, capsys, intake_file, intake_data):
         """Each stage receives the correct input artifact path."""
         uid = intake_data["id"]
-        mock_run_stage.return_value = (True, "ok", 0.5)
+        mock_run_stage.return_value = (True, "ok", "", 0.5)
         monkeypatch.setattr(sys, "argv", ["run.py", str(intake_file)])
         # Verify the override condition is exercised: intake_file must not be in SCRIPT_DIR/intake/
         default_intake = orchestrator.SCRIPT_DIR / "intake" / f"{uid}.json"
@@ -380,7 +380,7 @@ class TestMainHappyPath:
     @patch("pipeline.run.run_stage")
     def test_empty_stdout_no_arrow_line(self, mock_run_stage, monkeypatch, capsys, intake_file):
         """When a successful stage returns empty stdout, no '-> ...' line is printed."""
-        mock_run_stage.return_value = (True, "", 0.5)
+        mock_run_stage.return_value = (True, "", "", 0.5)
         monkeypatch.setattr(sys, "argv", ["run.py", str(intake_file)])
         try:
             orchestrator.main()
@@ -396,8 +396,8 @@ class TestMainHappyPath:
         Covers run.py:157 where empty final_output triggers the 'unknown' fallback."""
         def side_effect(name, script, input_path):
             if name == "approval":
-                return (True, "", 1.0)
-            return (True, "ok", 0.5)
+                return (True, "", "", 1.0)
+            return (True, "ok", "", 0.5)
         mock_run_stage.side_effect = side_effect
         monkeypatch.setattr(sys, "argv", ["run.py", str(intake_file)])
         try:
@@ -419,8 +419,8 @@ class TestMainFailurePropagation:
         """When stage 3 fails, stages 4-6 don't run. Output shows FAILED at stage 3."""
         def side_effect(name, script, input_path):
             if name == "auto_plan":
-                return (False, "plan error", 2.0)
-            return (True, "ok", 0.5)
+                return (False, "", "plan error", 2.0)
+            return (True, "ok", "", 0.5)
         mock_run_stage.side_effect = side_effect
         monkeypatch.setattr(sys, "argv", ["run.py", str(intake_file)])
         with pytest.raises(SystemExit) as exc:
@@ -435,7 +435,7 @@ class TestMainFailurePropagation:
     @patch("pipeline.run.run_stage")
     def test_stage1_failure_stops_all(self, mock_run_stage, monkeypatch, capsys, intake_file):
         """When stage 1 fails, no subsequent stages run."""
-        mock_run_stage.return_value = (False, "validate error", 0.1)
+        mock_run_stage.return_value = (False, "", "validate error", 0.1)
         monkeypatch.setattr(sys, "argv", ["run.py", str(intake_file)])
         with pytest.raises(SystemExit) as exc:
             orchestrator.main()
@@ -448,7 +448,7 @@ class TestMainFailurePropagation:
     @patch("pipeline.run.run_stage")
     def test_failure_shows_stderr_lines(self, mock_run_stage, monkeypatch, capsys, intake_file):
         """Failed stage stderr lines (up to 5) are prefixed with '! '."""
-        mock_run_stage.return_value = (False, "line1\nline2\nline3", 1.0)
+        mock_run_stage.return_value = (False, "", "line1\nline2\nline3", 1.0)
         monkeypatch.setattr(sys, "argv", ["run.py", str(intake_file)])
         with pytest.raises(SystemExit):
             orchestrator.main()
@@ -470,7 +470,7 @@ class TestMainKeyboardInterrupt:
         def side_effect(name, script, input_path):
             if name == "executor":  # stage 4
                 raise KeyboardInterrupt()
-            return (True, "ok", 0.5)
+            return (True, "ok", "", 0.5)
 
         mock_run_stage.side_effect = side_effect
         monkeypatch.setattr(sys, "argv", ["run.py", str(intake_file)])
@@ -495,7 +495,7 @@ class TestIntakePathOverride:
         f = tmp_path / "elsewhere" / "myfile.json"
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(json.dumps(intake_data), encoding="utf-8")
-        mock_run_stage.return_value = (True, "ok", 0.5)
+        mock_run_stage.return_value = (True, "ok", "", 0.5)
         monkeypatch.setattr(sys, "argv", ["run.py", str(f)])
         orchestrator.main()
         # Stage 1 and 2 should receive the resolved provided path

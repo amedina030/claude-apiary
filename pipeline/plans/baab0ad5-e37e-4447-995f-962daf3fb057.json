@@ -1,0 +1,146 @@
+{
+  "uuid": "baab0ad5-e37e-4447-995f-962daf3fb057",
+  "executor_model": "sonnet",
+  "spec": {
+    "goal": {
+      "problem": "The executor uses a single model from config for every plan step, so steps that need stronger reasoning and steps that are trivial all run on the same model with no way to differentiate.",
+      "solution": "Add an optional per-step `model` field that the executor honors when calling `claude -p`, falling back to the configured `executor.model` when absent, with `validate_plan.py` accepting and validating it as a known alias.",
+      "value": "Plan authors get cost/quality control per step \u2014 expensive models only where reasoning is required, cheaper models for trivial work."
+    },
+    "shape": {
+      "components": [
+        {
+          "name": "executor.py per-step model resolver",
+          "description": "Reads optional `model` field from each step in the plan; passes it to `run_claude` instead of the plan-level default when present."
+        },
+        {
+          "name": "validate_plan.py optional model field validator",
+          "description": "Recognizes `model` as a permitted optional step field and rejects values that are not one of the known aliases (opus, sonnet, haiku)."
+        }
+      ],
+      "integration_point": "executor.execute_step / executor.main step loop where `model` is currently passed as a single value, and validate_plan.validate per-step field checks.",
+      "pattern": "Mirrors existing fallback pattern used for `executor_model` in plan-level config (`plan.get('executor_model', 'sonnet')`) and the existing per-step optional-field handling in validate_plan.",
+      "data_flow": "plan.json step entry \u2192 executor.main reads default model \u2192 execute_step resolves step.get('model') or default \u2192 run_claude(prompt, resolved_model) \u2192 claude -p --model <resolved> subprocess call",
+      "dependencies": "Existing executor.run_claude already accepts a model argument and forwards it via `--model`; existing config_loader provides `executor.model` default; plan JSON schema already permits arbitrary step fields at parse time."
+    },
+    "behavior": {
+      "input": "Plan JSON file with a `steps` array; each step optionally contains a string `model` field whose value is one of `opus`, `sonnet`, `haiku`.",
+      "processing": "1) validate_plan reads each step. 2) If `model` is present, assert it is a string in the allowed alias set; otherwise emit a validation error. 3) executor.main loads the plan and computes the default model from `plan.executor_model` or config. 4) For each step, executor resolves the effective model as `step.get('model') or default_model`. 5) executor passes the resolved model into `execute_step`, which forwards it to `run_claude`. 6) `claude -p` is invoked with `--model <resolved>` for that step.",
+      "output": "Same execution log JSON as today; each Claude subprocess call for a step uses the per-step model when specified, otherwise the plan/config default. validate_plan exits 0 on valid plans (with or without `model`) and exits 1 with an error message naming the offending step on invalid alias.",
+      "error_cases": [
+        {
+          "trigger": "Step `model` field is present but not one of opus/sonnet/haiku",
+          "behavior": "validate_plan emits `step[i]: invalid model '<value>' (expected: haiku, opus, sonnet)` and exits 1."
+        },
+        {
+          "trigger": "Step `model` field is present but not a string (e.g. number, list, null literal)",
+          "behavior": "validate_plan emits `step[i]: field 'model' must be a string` and exits 1."
+        }
+      ],
+      "edge_cases": [
+        {
+          "condition": "Step has no `model` field at all",
+          "behavior": "validate_plan accepts the step; executor uses the plan-level/config default model for that step."
+        },
+        {
+          "condition": "Step is a `test` action (no Claude subprocess invoked)",
+          "behavior": "Resolved model is computed but unused; test step still runs via `run_test_command` and the `model` field is silently ignored without error."
+        },
+        {
+          "condition": "Plan-level `executor_model` is set and a step also overrides `model`",
+          "behavior": "Step-level `model` takes precedence for that step only; other steps continue to use the plan-level default."
+        }
+      ]
+    },
+    "boundaries": {
+      "in_scope": [
+        "Reading optional `model` field from each plan step in executor.py",
+        "Forwarding the per-step model to the existing run_claude subprocess call",
+        "Adding optional `model` field validation in validate_plan.py against the alias set {opus, sonnet, haiku}",
+        "Falling back to plan/config default when step.model is absent"
+      ],
+      "out_of_scope": [
+        {
+          "item": "Adding new model aliases beyond opus/sonnet/haiku",
+          "reason": "Task specifies these three as the known alias set."
+        },
+        {
+          "item": "New CLI flags on executor.py to override step models",
+          "reason": "Override is data-driven via plan JSON, not CLI."
+        },
+        {
+          "item": "Changes to planner.py to emit per-step models",
+          "reason": "Scope explicitly lists only executor.py and validate_plan.py."
+        },
+        {
+          "item": "Per-step model field on test/verify steps documented as a feature",
+          "reason": "Feature targets the create/modify/delete Claude subprocess path; test steps don't invoke Claude."
+        },
+        {
+          "item": "Runtime alias re-validation inside executor.py",
+          "reason": "validate_plan is the single source of truth for plan correctness; executor trusts a valid plan."
+        }
+      ],
+      "must_not_break": [
+        "Existing plans without any `model` fields continue to validate and execute identically",
+        "validate_plan.py existing required-field, cycle, and acceptance-criteria checks remain unchanged in behavior",
+        "executor.py existing branch creation, retry, commit, and execution log behavior is unchanged",
+        "run_claude signature continues to accept (prompt, model) and forward `--model` only when set",
+        "Plan-level `executor_model` continues to be honored when no step override is present"
+      ]
+    },
+    "acceptance_criteria": [
+      "Given a plan whose step 2 has `model: \"opus\"` and config default `sonnet`, when executor.py runs, then the `claude -p` subprocess for step 2 is invoked with `--model opus` and other steps are invoked with `--model sonnet`.",
+      "Given a plan with no `model` field on any step, when executor.py runs, then every Claude subprocess call uses the plan's `executor_model` (or `sonnet` fallback) exactly as today.",
+      "Given a valid plan that adds `model: \"haiku\"` to one step, when validate_plan.py runs, then it prints `Valid` and exits 0.",
+      "Given a plan where step 1 has `model: \"gpt-4\"`, when validate_plan.py runs, then it prints an error containing `step[0]` and `invalid model 'gpt-4'` to stderr and exits 1.",
+      "Given a plan where step 1 has `model: 42`, when validate_plan.py runs, then it prints an error containing `step[0]` and `field 'model' must be a string` to stderr and exits 1.",
+      "Given a plan whose step 3 has `model: \"opus\"` and step 4 has no `model` field, when executor.py runs, then step 3 invokes claude with `--model opus` and step 4 invokes claude with the plan-level default model.",
+      "Given a `test`-action step that includes a `model` field, when executor.py runs, then the step executes via `run_test_command` without invoking claude and without raising an error about the unused field.",
+      "Given an existing plan from the repo's `pipeline/plans/` directory with no `model` fields, when executor.py runs, then the execution log and branch contents are byte-identical to a run prior to this change (same model used for all steps)."
+    ],
+    "id": "baab0ad5-e37e-4447-995f-962daf3fb057",
+    "intake_id": "baab0ad5-e37e-4447-995f-962daf3fb057",
+    "valid": true
+  },
+  "steps": [
+    {
+      "step_number": 1,
+      "type": "modify",
+      "description": "Add VALID_MODELS constant and per-step model field validation in validate_plan.py",
+      "action": "modify",
+      "files": [
+        "pipeline/validate_plan.py"
+      ],
+      "depends_on": [],
+      "code_spec": "At module level near VALID_TYPES/VALID_ACTIONS, add:\n\n    VALID_MODELS = {\"opus\", \"sonnet\", \"haiku\"}\n\nIn the per-step validation loop in validate(), after the existing 'Valid type and action' block and before the 'File existence for modify/delete actions' block, add validation for the optional `model` field:\n\n    # Optional per-step model field\n    if \"model\" in step:\n        model_val = step.get(\"model\")\n        if not isinstance(model_val, str):\n            errors.append(f\"{label}: field 'model' must be a string\")\n        elif model_val not in VALID_MODELS:\n            errors.append(\n                f\"{label}: invalid model '{model_val}' \"\n                f\"(expected: {', '.join(sorted(VALID_MODELS))})\"\n            )\n\nNotes:\n- Use `\"model\" in step` (not `step.get(\"model\")`) so a present-but-None value is still flagged as a non-string instead of being silently treated as absent. The error message must literally contain `field 'model' must be a string` for the number/list case and `invalid model '<value>' (expected: haiku, opus, sonnet)` for unknown alias case (sorted alphabetically gives haiku, opus, sonnet).\n- Do not add `model` to REQUIRED_STEP_FIELDS \u2014 it remains optional.\n- Do not change any other validator behavior (required fields, cycle detection, criteria coverage)."
+    },
+    {
+      "step_number": 2,
+      "type": "modify",
+      "description": "Resolve per-step model in executor.py and pass it to execute_step",
+      "action": "modify",
+      "files": [
+        "pipeline/executor.py"
+      ],
+      "depends_on": [],
+      "code_spec": "In `main()`, the existing line:\n\n    model = plan.get(\"executor_model\", \"sonnet\")\n\nremains as the default. Rename the local variable for clarity to `default_model`:\n\n    default_model = plan.get(\"executor_model\", \"sonnet\")\n\nUpdate the existing call inside the step loop:\n\n    step_result = execute_step(step, spec, model)\n\nto resolve the per-step override:\n\n    resolved_model = step.get(\"model\") or default_model\n    step_result = execute_step(step, spec, resolved_model)\n\nDo NOT re-validate the alias inside executor.py \u2014 validate_plan is the single source of truth (per spec out_of_scope).\n\nDo not change `execute_step`'s signature \u2014 it already accepts `(step, spec, model)` and forwards `model` to `run_claude` via `build_step_prompt`/`build_verify_prompt` paths. The resolved model is computed for every step regardless of action; for `test`-action steps it is simply unused inside execute_step (run_test_command never receives it), so test steps with a `model` field are silently ignored without error.\n\nNo changes to run_claude, build_step_prompt, build_verify_prompt, topo_sort, git helpers, branch logic, commit logic, retry logic, or execution log structure. The execution log JSON shape stays identical."
+    },
+    {
+      "step_number": 3,
+      "type": "verify",
+      "description": "Confirm all spec acceptance criteria are met by inspecting the modified executor.py and validate_plan.py",
+      "action": "verify",
+      "files": [
+        "pipeline/executor.py",
+        "pipeline/validate_plan.py"
+      ],
+      "depends_on": [
+        1,
+        2
+      ],
+      "code_spec": "Read pipeline/executor.py and pipeline/validate_plan.py and confirm:\n\n1. validate_plan.py defines VALID_MODELS = {\"opus\",\"sonnet\",\"haiku\"} and validates step['model'] when present: rejects non-strings with `field 'model' must be a string` and rejects unknown aliases with `invalid model '<value>' (expected: haiku, opus, sonnet)`. Steps with no `model` field still pass.\n2. executor.py main() computes `default_model = plan.get('executor_model', 'sonnet')` and per-step `resolved_model = step.get('model') or default_model`, passing resolved_model into execute_step.\n3. execute_step still forwards the model into run_claude unchanged for create/modify/delete and verify actions; test actions ignore the model.\n4. No other behavior changed: branch creation, retries, commits, execution log shape, topo sort, run_claude signature, plan-level executor_model fallback all unchanged.\n5. Acceptance criteria mapping:\n   - AC1 (step has model:opus, default sonnet \u2192 opus used for that step, sonnet for others): satisfied by resolved_model fallback in step 2.\n   - AC2 (no model fields \u2192 all steps use plan default): satisfied because step.get('model') returns None and `or default_model` falls through.\n   - AC3 (valid plan with model:haiku \u2192 validate_plan exits 0): satisfied by VALID_MODELS membership check in step 1.\n   - AC4 (model:'gpt-4' \u2192 error contains step[0] and `invalid model 'gpt-4'`, exit 1): satisfied by alias error message in step 1.\n   - AC5 (model:42 \u2192 error contains step[0] and `field 'model' must be a string`, exit 1): satisfied by isinstance check in step 1.\n   - AC6 (mixed: step3 model:opus, step4 no model \u2192 opus and default respectively): same fallback logic as AC1.\n   - AC7 (test-action step with model field \u2192 executes via run_test_command without error): satisfied because execute_step's test branch never references model.\n   - AC8 (existing plan with no model fields \u2192 byte-identical execution): satisfied because default_model resolves identically when step.get('model') is None.\n\nOutput JSON: {\"passed\": true/false, \"explanation\": \"...\"}"
+    }
+  ],
+  "valid": true
+}

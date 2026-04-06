@@ -1,0 +1,30 @@
+{
+  "uuid": "387d389f-b31d-4c2f-93b4-f959e1d606a6",
+  "title": "Pipeline resume support and branch collision handling",
+  "verdict": "all_resolved",
+  "path_taken": "auto-merged",
+  "timestamps": {
+    "intake_created": "2026-04-06T03:22:31.665846+00:00",
+    "approval_completed": "2026-04-06T04:01:57.566690+00:00"
+  },
+  "stats": {
+    "total_steps": 6,
+    "steps_passed": 6,
+    "total_findings": 7,
+    "findings_resolved": 7,
+    "findings_unresolved": 0,
+    "harden_rounds": 1
+  },
+  "files_changed": [
+    "pipeline/run.py",
+    "pipeline/executor.py"
+  ],
+  "artifacts": {
+    "intake": "D:\\Professional\\claude-apiary\\pipeline\\intake\\387d389f-b31d-4c2f-93b4-f959e1d606a6.json",
+    "spec": "D:\\Professional\\claude-apiary\\pipeline\\specs\\387d389f-b31d-4c2f-93b4-f959e1d606a6.json",
+    "plan": "D:\\Professional\\claude-apiary\\pipeline\\plans\\387d389f-b31d-4c2f-93b4-f959e1d606a6.json",
+    "execution": "D:\\Professional\\claude-apiary\\pipeline\\executions\\387d389f-b31d-4c2f-93b4-f959e1d606a6.json",
+    "harden": "D:\\Professional\\claude-apiary\\pipeline\\hardens\\387d389f-b31d-4c2f-93b4-f959e1d606a6.json",
+    "report": "D:\\Professional\\claude-apiary\\pipeline\\reports\\387d389f-b31d-4c2f-93b4-f959e1d606a6.json"
+  }
+}

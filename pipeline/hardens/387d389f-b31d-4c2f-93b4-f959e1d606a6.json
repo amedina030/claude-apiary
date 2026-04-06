@@ -1,0 +1,110 @@
+{
+  "uuid": "387d389f-b31d-4c2f-93b4-f959e1d606a6",
+  "branch": "pipeline/387d389f-b31d-4c2f-93b4-f959e1d606a6",
+  "verdict": "all_resolved",
+  "rounds": [
+    {
+      "round": 1,
+      "findings": [
+        {
+          "category": "logic",
+          "description": "Skipped stages increment stages_completed (line 189), so the final summary always says 'Stages completed: 6/6' even when stages were skipped. This misrepresents work done \u2014 a resume from stage 5 that runs only 1 stage still reports 6/6.",
+          "severity": "low",
+          "location": "run.py:189",
+          "id": "ATK-001"
+        },
+        {
+          "category": "logic",
+          "description": "resume_from is assigned twice \u2014 line 108 and line 158. The first assignment is dead code since line 158 overwrites it. Not a bug, but a code smell indicating a sloppy merge of the resume logic into the existing flow.",
+          "severity": "low",
+          "location": "run.py:108,158",
+          "id": "ATK-002"
+        },
+        {
+          "category": "logic",
+          "description": "Board status update fires when stages_completed == 1 (line 206), with a comment saying 'validate_intake just passed'. But on resume, skipped stages also increment stages_completed, so stages_completed == 1 is reached by the first SKIPPED stage, not the first executed one. If validate_intake is skipped, board.md gets updated to 'running' when it shouldn't (per spec: 'board status is not re-updated to running since it should already be set').",
+          "severity": "medium",
+          "location": "run.py:206-207",
+          "id": "ATK-003"
+        },
+        {
+          "category": "resilience",
+          "description": "KeyboardInterrupt handler (line 224) uses stages_completed to index into STAGES to determine the interrupted stage name. Because skipped stages increment stages_completed, this index may point to a stage AFTER the one actually running. E.g., resume from executor (stage 4): 3 skipped + executor running = stages_completed is 3, so STAGES[3] is 'executor' \u2014 correct by coincidence. But if interrupted between stage dispatch and stages_completed increment, stages_completed=3 points to 'executor' while the interrupt happened during executor \u2014 so it works. The logic is fragile and depends on increment order.",
+          "severity": "low",
+          "location": "run.py:222-233",
+          "id": "ATK-004"
+        },
+        {
+          "category": "security",
+          "description": "executor.py reads uuid from plan JSON (line 261) with no path-traversal validation, unlike run.py which validates the UUID. A malicious plan with uuid='../../etc/something' would write the execution log outside the expected directory and create a git branch with a traversal path. run.py validates its own UUID but the executor trusts its input blindly.",
+          "severity": "high",
+          "location": "executor.py:261",
+          "id": "ATK-005"
+        },
+        {
+          "category": "resilience",
+          "description": "executor.py branch_exists() (line 41) checks 'git rev-parse --verify <branch>' but doesn't distinguish between a local branch and a remote tracking ref with the same name. If only 'origin/pipeline/<uuid>' exists (no local branch), rev-parse still succeeds, but 'git checkout pipeline/<uuid>' will create a tracking branch \u2014 different behavior than the intended 'resume on existing local work'.",
+          "severity": "low",
+          "location": "executor.py:41,271-276",
+          "id": "ATK-006"
+        },
+        {
+          "category": "input",
+          "description": "run.py resume command on failure (line 219) embeds intake_path as provided by the user. If the user passed a relative path and changes cwd before re-running, the printed resume command breaks. Should use the resolved absolute path for robustness.",
+          "severity": "low",
+          "location": "run.py:219,232",
+          "id": "ATK-007"
+        }
+      ],
+      "responses": [
+        {
+          "finding_ref": "ATK-001",
+          "action": "fixed",
+          "description": "Removed `stages_completed += 1` from the skip block so only actually executed stages count. Changed hardcoded `6/6` in the final summary and failure message to `{stages_completed}/{len(STAGES)}`."
+        },
+        {
+          "finding_ref": "ATK-002",
+          "action": "fixed",
+          "description": "Removed the dead first assignment of `resume_from = cli_args.resume_from` at line 108; only the assignment at line 158 (after intake path resolution) remains."
+        },
+        {
+          "finding_ref": "ATK-003",
+          "action": "fixed",
+          "description": "Changed the board status trigger from `stages_completed == 1` to `name == \"validate_intake\"`, so the board is only updated to 'running' when validate_intake actually executes and passes, not when a skipped stage is counted."
+        },
+        {
+          "finding_ref": "ATK-004",
+          "action": "fixed",
+          "description": "Introduced `current_stage_name` and `current_stage_idx` variables set immediately before each stage's `run_stage` call. The KeyboardInterrupt handler now uses these instead of indexing into STAGES via `stages_completed`, eliminating the fragile dependency on increment order."
+        },
+        {
+          "finding_ref": "ATK-005",
+          "action": "fixed",
+          "description": "Added the same UUID validation logic from run.py into executor.py after reading `plan.get('uuid')`: rejects non-string, empty, backslash, null-byte, dot-only, and path-traversal values before constructing the branch name and log path."
+        },
+        {
+          "finding_ref": "ATK-006",
+          "action": "fixed",
+          "description": "Changed `branch_exists()` to verify `refs/heads/<branch>` instead of bare `<branch>`, so remote tracking refs (e.g. `origin/pipeline/<uuid>`) are not treated as existing local branches."
+        },
+        {
+          "finding_ref": "ATK-007",
+          "action": "fixed",
+          "description": "Computed `intake_path_abs = intake_path.resolve()` before the stage loop and used it in both the failure resume command and the KeyboardInterrupt resume command, so the printed path is always absolute regardless of the user's cwd at re-run time."
+        }
+      ],
+      "resolutions": {
+        "ATK-001": "fixed",
+        "ATK-002": "fixed",
+        "ATK-003": "fixed",
+        "ATK-004": "fixed",
+        "ATK-005": "fixed",
+        "ATK-006": "fixed",
+        "ATK-007": "fixed"
+      }
+    }
+  ],
+  "unresolved": [],
+  "total_findings": 7,
+  "total_resolved": 7
+}
