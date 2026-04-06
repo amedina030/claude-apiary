@@ -149,6 +149,8 @@ def run_claude(prompt: str, model: str) -> tuple[int, str, str]:
     if model:
         cmd.extend(["--model", model])
     result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=cfg("executor", "timeout", 300))
+    from cost_emit import emit_usage_xml
+    emit_usage_xml(result.stdout)
     return result.returncode, result.stdout, result.stderr
 
 

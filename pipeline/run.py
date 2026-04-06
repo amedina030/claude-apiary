@@ -66,6 +66,13 @@ def extract_usage_block(text: str) -> str | None:
     return match.group(0) if match else None
 
 
+def extract_all_usage_blocks(text: str) -> list[str]:
+    """Return all <usage>...</usage> blocks found in text."""
+    if not text:
+        return []
+    return _USAGE_RE.findall(text)
+
+
 def parse_usage_fields(usage_xml: str) -> dict:
     """Parse numeric fields from a <usage> XML block. Returns dict with int values."""
     result = {}
@@ -113,23 +120,36 @@ def update_board_status(intake_uuid: str, new_status: str) -> None:
 
 
 def record_stage_cost(stage_name: str, pipeline_uuid: str, stdout_text: str, stderr_text: str, stage_costs: list) -> None:
-    """Parse usage from stage output and log cost. Appends a status entry to stage_costs."""
-    # Scan stdout first, then stderr independently — avoids splicing a cross-stream pseudo-block
-    usage_xml = extract_usage_block(stdout_text or '') or extract_usage_block(stderr_text or '')
-    if usage_xml is None:
+    """Parse usage from stage output and log cost. Appends a status entry to stage_costs.
+
+    Stages may make multiple Claude calls (retries, multi-step execution, harden rounds),
+    each emitting a <usage> block to stderr. All blocks are summed per stage.
+    """
+    blocks = extract_all_usage_blocks(stdout_text or '') + extract_all_usage_blocks(stderr_text or '')
+    if not blocks:
         stage_costs.append({'stage': stage_name, 'tokens': 0, 'tool_uses': 0, 'duration_ms': 0, 'status': 'no_usage'})
         return
-    fields = parse_usage_fields(usage_xml)
-    if fields.get('_malformed'):
-        print(f'WARN: malformed <usage> block in stage {stage_name}', file=sys.stderr)
-        # Spec: treat as zero tokens, warn, continue — do not forward malformed XML to cost logger
-        stage_costs.append({'stage': stage_name, 'tokens': 0, 'tool_uses': 0, 'duration_ms': 0, 'status': 'malformed'})
-        return
-    tokens = fields.get('total_tokens', 0)
-    tool_uses = fields.get('tool_uses', 0)
-    duration_ms = fields.get('duration_ms', 0)
-    log_stage_cost(stage_name, pipeline_uuid, usage_xml)
-    stage_costs.append({'stage': stage_name, 'tokens': tokens, 'tool_uses': tool_uses, 'duration_ms': duration_ms, 'status': 'logged'})
+
+    total_tokens = 0
+    total_tool_uses = 0
+    total_duration_ms = 0
+    any_malformed = False
+    for usage_xml in blocks:
+        fields = parse_usage_fields(usage_xml)
+        if fields.get('_malformed'):
+            any_malformed = True
+            continue
+        total_tokens += fields.get('total_tokens', 0)
+        total_tool_uses += fields.get('tool_uses', 0)
+        total_duration_ms += fields.get('duration_ms', 0)
+        # Log each call separately so the budgeter sees per-call granularity
+        log_stage_cost(stage_name, pipeline_uuid, usage_xml)
+
+    if any_malformed:
+        print(f'WARN: one or more malformed <usage> blocks in stage {stage_name}', file=sys.stderr)
+
+    status = 'logged' if total_tokens > 0 else ('malformed' if any_malformed else 'no_usage')
+    stage_costs.append({'stage': stage_name, 'tokens': total_tokens, 'tool_uses': total_tool_uses, 'duration_ms': total_duration_ms, 'status': status})
 
 
 def print_cost_summary(stage_costs: list) -> None:
@@ -155,7 +175,6 @@ def print_cost_summary(stage_costs: list) -> None:
             total_tokens += tokens
             any_logged = True
     print(f'  TOTAL: {total_tokens} tokens')
-    print('  (note: only the first <usage> block per stage is counted)')
 
 
 def run_stage(name: str, script_path: Path, input_path: Path) -> tuple[bool, str, str, float]:

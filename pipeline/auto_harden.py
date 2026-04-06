@@ -75,6 +75,8 @@ def run_claude(prompt: str, model: str | None = None) -> tuple[int, str, str]:
         cmd.extend(["--model", model])
     timeout = cfg("harden", "timeout", 300)
     result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout)
+    from cost_emit import emit_usage_xml
+    emit_usage_xml(result.stdout)
     return result.returncode, result.stdout, result.stderr
 
 

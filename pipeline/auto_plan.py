@@ -106,6 +106,8 @@ def run_claude(prompt: str) -> tuple[int, str, str]:
         ["claude", "-p", "-", "--output-format", "json"],
         input=prompt, capture_output=True, text=True, timeout=cfg("plan", "timeout", 300),
     )
+    from cost_emit import emit_usage_xml
+    emit_usage_xml(result.stdout)
     return result.returncode, result.stdout, result.stderr
 
 
