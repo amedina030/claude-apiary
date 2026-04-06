@@ -22,6 +22,26 @@ from typing import Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CLI_LOOKUP_PATH = REPO_ROOT / 'docs' / 'reference' / 'cli_lookup.py'
 CLI_TOOLS_MD = REPO_ROOT / 'docs' / 'reference' / 'cli-tools.md'
+LOG_PATH = REPO_ROOT / 'core' / 'hooks' / 'enforce_cli_lookup.log'
+
+
+def _log(decision: str, reason: str, session_id: str = '', command: str = '') -> None:
+    """Append a one-line forensic record. Never raises."""
+    try:
+        import datetime
+        ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        cmd_snip = (command or '').replace('\n', ' ')[:200]
+        rec = {
+            'ts': ts,
+            'decision': decision,
+            'reason': reason,
+            'session_id': session_id,
+            'command': cmd_snip,
+        }
+        with open(LOG_PATH, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(rec) + '\n')
+    except Exception:
+        pass
 
 
 def _fail_open(msg: str = '') -> None:
@@ -138,51 +158,69 @@ def _transcript_has_lookup_for(transcript_path: Path, tool: str) -> bool:
 
 
 def main():
+    session_id = ''
+    command = ''
     try:
         raw = sys.stdin.read()
         if not raw:
+            _log('allow', 'empty_stdin')
             _fail_open()
 
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
+            _log('allow', 'bad_json')
             _fail_open()
 
         if payload.get('tool_name') != 'Bash':
+            _log('allow', 'not_bash', payload.get('session_id') or '')
             sys.exit(0)
 
         tool_input = payload.get('tool_input') or {}
         command = tool_input.get('command') or ''
+        session_id = payload.get('session_id') or ''
         if not command:
+            _log('allow', 'empty_command', session_id, command)
             sys.exit(0)
 
-        session_id = payload.get('session_id') or ''
         cwd = payload.get('cwd') or os.getcwd()
 
         known = _load_known_tools()
         if not known:
+            _log('allow', 'known_tools_empty', session_id, command)
             sys.exit(0)
 
         subcommands = _split_subcommands(command)
         if not subcommands:
+            _log('allow', 'no_subcommands', session_id, command)
             sys.exit(0)
 
         missing: list[str] = []
+        looked_up: list[str] = []
+        unmatched_count = 0
         for subcmd in subcommands:
             if _is_cli_lookup_invocation(subcmd):
                 continue
             tokens = _tokens(subcmd)
             matched = _match_tool(tokens, known)
             if matched is None:
+                unmatched_count += 1
                 continue
             project_key = _project_key_from_cwd(cwd)
             transcript_path = (
                 Path.home() / '.claude' / 'projects' / project_key / f'{session_id}.jsonl'
             )
-            if not _transcript_has_lookup_for(transcript_path, matched):
+            if _transcript_has_lookup_for(transcript_path, matched):
+                looked_up.append(matched)
+            else:
                 missing.append(matched)
 
         if not missing:
+            if looked_up:
+                reason = f'lookup_found:{",".join(sorted(set(looked_up)))}'
+            else:
+                reason = f'no_known_tool_in_command(unmatched={unmatched_count})'
+            _log('allow', reason, session_id, command)
             sys.exit(0)
 
         # Deduplicate preserving order
@@ -201,9 +239,13 @@ def main():
                 file=sys.stderr,
             )
 
+        _log('block', f'missing:{",".join(deduped)}', session_id, command)
         sys.exit(2)
 
+    except SystemExit:
+        raise
     except Exception as e:
+        _log('allow', f'internal_error:{e}', session_id, command)
         _fail_open(f'enforce_cli_lookup internal error: {e}')
 
 

@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Hook forensic logs
+core/hooks/*.log
+
 # Budgeter runtime data
 budgeter/tmp/
 budgeter/data/
