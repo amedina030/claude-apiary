@@ -5,9 +5,6 @@ __pycache__/
 # Hook forensic logs
 core/hooks/*.log
 
-# enforce_cli_lookup per-session served-docs state
-core/hooks/served.json
-
 # Budgeter runtime data
 budgeter/tmp/
 budgeter/data/

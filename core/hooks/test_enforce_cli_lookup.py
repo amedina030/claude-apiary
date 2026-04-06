@@ -53,12 +53,10 @@ def _write_transcript(home: Path, cwd: str, session_id: str, lines: list[dict]) 
     return path
 
 
-def _run_hook(payload: dict, home: Path, state_path: Path = None) -> subprocess.CompletedProcess:
+def _run_hook(payload: dict, home: Path) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
-    if state_path is not None:
-        env["ENFORCE_CLI_LOOKUP_STATE"] = str(state_path)
     return subprocess.run(
         [PYTHON, str(HOOK)],
         input=json.dumps(payload),
@@ -74,15 +72,12 @@ class EnforceCliLookupTests(unittest.TestCase):
         self.home = Path(self._tmp.name)
         self.cwd = "D:\\Professional\\claude-apiary"
         self.session_id = "test-session-0001"
-        # Isolate per-session "served" state so tests don't pollute each other
-        # or the real served.json file.
-        self.state_path = self.home / "served.json"
 
     def tearDown(self):
         self._tmp.cleanup()
 
     def _run(self, payload: dict) -> subprocess.CompletedProcess:
-        return _run_hook(payload, self.home, self.state_path)
+        return _run_hook(payload, self.home)
 
     def _payload(self, command: str) -> dict:
         return {
@@ -100,8 +95,10 @@ class EnforceCliLookupTests(unittest.TestCase):
         self.assertTrue(deny, f"expected deny payload, got: {result.stdout!r}")
         reason = deny.get("permissionDecisionReason", "")
         self.assertIn("notes.py", reason)
-        # The hook should embed cli_lookup output in the deny reason.
-        self.assertIn("cli_lookup.py notes.py", reason)
+        # Reason nags about cli_lookup.py but does NOT embed its output.
+        self.assertIn("cli_lookup.py", reason)
+        self.assertNotIn("Subcommand", reason)
+        self.assertNotIn("---", reason)
 
     def test_allows_repo_tool_after_prior_lookup(self):
         _write_transcript(
@@ -169,24 +166,6 @@ class EnforceCliLookupTests(unittest.TestCase):
         result = self._run(self._payload(cmd))
         self.assertEqual(result.returncode, 0)
         self.assertFalse(_parse_deny(result.stdout))
-
-    def test_retry_after_block_is_allowed_via_served_state(self):
-        """First call: no lookup in transcript → block + serve docs + mark
-        served. Second call (same session, same tool): allowed because the
-        served-state file says we already served the docs."""
-        _write_transcript(self.home, self.cwd, self.session_id, [])
-        first = self._run(self._payload("python scribe/notes.py list"))
-        self.assertEqual(first.returncode, 0)
-        self.assertTrue(_parse_deny(first.stdout))
-        # Served state file should now exist with the tool recorded.
-        self.assertTrue(self.state_path.exists())
-        state = json.loads(self.state_path.read_text(encoding="utf-8"))
-        self.assertIn("scribe/notes.py", state.get(self.session_id, []))
-        # Retry the exact same Bash call → must now be allowed.
-        second = self._run(self._payload("python scribe/notes.py list"))
-        self.assertEqual(second.returncode, 0)
-        self.assertFalse(_parse_deny(second.stdout))
-
 
 if __name__ == "__main__":
     unittest.main()
