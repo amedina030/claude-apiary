@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import importlib.util
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,71 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CLI_LOOKUP_PATH = REPO_ROOT / 'docs' / 'reference' / 'cli_lookup.py'
 CLI_TOOLS_MD = REPO_ROOT / 'docs' / 'reference' / 'cli-tools.md'
 LOG_PATH = REPO_ROOT / 'core' / 'hooks' / 'enforce_cli_lookup.log'
+DEFAULT_STATE_PATH = REPO_ROOT / 'core' / 'hooks' / 'served.json'
+
+
+def _state_path() -> Path:
+    """Per-session 'already-served' state file. Override via env for tests."""
+    override = os.environ.get('ENFORCE_CLI_LOOKUP_STATE')
+    return Path(override) if override else DEFAULT_STATE_PATH
+
+
+def _load_served() -> dict:
+    try:
+        with open(_state_path(), encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _mark_served(session_id: str, tools: list[str]) -> None:
+    if not session_id or not tools:
+        return
+    try:
+        state = _load_served()
+        existing = set(state.get(session_id, []))
+        existing.update(tools)
+        state[session_id] = sorted(existing)
+        path = _state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(state, f)
+    except OSError:
+        pass
+
+
+def _already_served(session_id: str, tool: str) -> bool:
+    if not session_id:
+        return False
+    return tool in _load_served().get(session_id, [])
+
+
+def _run_cli_lookup(basename: str) -> str:
+    """Run cli_lookup.py for `basename` and return its stdout (or a fallback)."""
+    try:
+        result = subprocess.run(
+            [sys.executable, str(CLI_LOOKUP_PATH), basename],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return (result.stdout or result.stderr or '(cli_lookup produced no output)').rstrip()
+    except Exception as e:
+        return f'(cli_lookup.py invocation failed: {e})'
+
+
+def _emit_deny(reason: str) -> None:
+    """Print a PreToolUse deny response (modern hookSpecificOutput schema) and exit 0."""
+    out = {
+        'hookSpecificOutput': {
+            'hookEventName': 'PreToolUse',
+            'permissionDecision': 'deny',
+            'permissionDecisionReason': reason,
+        }
+    }
+    print(json.dumps(out))
+    sys.exit(0)
 
 
 def _log(decision: str, reason: str, session_id: str = '', command: str = '') -> None:
@@ -212,6 +278,10 @@ def main():
             )
             if _transcript_has_lookup_for(transcript_path, matched):
                 looked_up.append(matched)
+            elif _already_served(session_id, matched):
+                # Hook served docs for this tool earlier in the session via deny
+                # path. Treat as looked-up so the retry can proceed.
+                looked_up.append(matched)
             else:
                 missing.append(matched)
 
@@ -231,16 +301,23 @@ def main():
                 seen.add(m)
                 deduped.append(m)
 
+        # Build a single deny message that includes the cli_lookup output for
+        # every missing tool, so Claude has the docs in context on retry.
+        sections: list[str] = [
+            'Blocked by enforce_cli_lookup: the following repo CLI tool(s) were'
+            ' invoked without a prior `cli_lookup.py` call in this session:'
+            f' {", ".join(deduped)}.',
+            'The hook has fetched the lookup output below. Read it, then retry'
+            ' your original command — the hook will allow it on the next attempt.',
+        ]
         for m in deduped:
             basename = m.rsplit('/', 1)[-1]
-            print(
-                f'Blocked: run `python docs/reference/cli_lookup.py {basename}` before using'
-                f' {m} in this session (cli_lookup.py teaches the correct flags).',
-                file=sys.stderr,
-            )
+            docs = _run_cli_lookup(basename)
+            sections.append(f'--- cli_lookup.py {basename} ---\n{docs}')
 
+        _mark_served(session_id, deduped)
         _log('block', f'missing:{",".join(deduped)}', session_id, command)
-        sys.exit(2)
+        _emit_deny('\n\n'.join(sections))
 
     except SystemExit:
         raise
