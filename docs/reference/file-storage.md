@@ -4,12 +4,27 @@ title: File Storage
 scope: project
 description: Runtime data locations — where JSONL logs, flags, transcripts, and session state live
 framework_version: "1.0"
-last_verified: 2026-04-03
+last_verified: 2026-04-05
 ---
 
 # File Storage
 
 All runtime data is stored outside the repo under `~/.claude/` (git-ignored), with a few exceptions for repo-local state.
+
+## Pipeline data
+
+All pipeline artifacts are repo-local under `pipeline/`:
+
+| Directory | Description |
+|-----------|-------------|
+| `pipeline/intake/` | Intake JSON files (`<uuid>.json`) — pipeline input |
+| `pipeline/specs/` | Refined spec JSON files (`<uuid>.json`) — stage 2 output |
+| `pipeline/plans/` | Plan JSON files (`<uuid>.json`) — stage 3 output |
+| `pipeline/executions/` | Execution log JSON files (`<uuid>.json`) — stage 4 output |
+| `pipeline/hardens/` | Harden result JSON files (`<uuid>.json`) — stage 5 output |
+| `pipeline/reports/` | Approval report JSON files (`<uuid>.json`) — stage 6 output |
+
+Each pipeline run is keyed by a UUID generated at intake creation. All artifact directories are git-ignored except `pipeline/intake/`.
 
 ## Flag files
 

@@ -4,10 +4,33 @@ title: Config Files
 scope: project
 description: All configuration files, their location, format, and editable fields
 framework_version: "1.0"
-last_verified: 2026-04-02
+last_verified: 2026-04-05
 ---
 
 # Config Files
+
+## pipeline/config.json
+
+Pipeline stage settings. Located in the repo at `pipeline/config.json`. All values have built-in defaults — the file is optional.
+
+| Section | Field | Type | Default | Description |
+|---------|-------|------|---------|-------------|
+| `refine` | `max_retries` | int | `3` | Max retries for spec generation |
+| `refine` | `model` | string | `"opus"` | Claude model alias for refiner |
+| `refine` | `timeout` | int | `300` | Per-retry timeout (seconds) |
+| `plan` | `max_retries` | int | `3` | Max retries for plan generation |
+| `plan` | `model` | string | `"opus"` | Claude model alias for planner |
+| `plan` | `timeout` | int | `300` | Per-retry timeout (seconds) |
+| `executor` | `model` | string | `"sonnet"` | Claude model alias for executor |
+| `executor` | `max_retries_per_step` | int | `2` | Retries per execution step |
+| `executor` | `timeout` | int | `300` | Per-step timeout (seconds) |
+| `harden` | `max_rounds` | int | `1` | Attack-defend rounds |
+| `harden` | `attacker_model` | string | `"opus"` | Attacker Claude model alias |
+| `harden` | `defender_model` | string | `"sonnet"` | Defender Claude model alias |
+| `harden` | `timeout` | int | `300` | Per-round timeout (seconds) |
+| `orchestrator` | `stage_timeout` | int | `3600` | Max seconds per stage before kill |
+
+Loaded by `pipeline/config_loader.py`: `get(section, key, default)`.
 
 ## budgeter/config.json
 

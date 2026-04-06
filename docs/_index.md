@@ -5,6 +5,7 @@ Framework version: **1.0** | Last updated: 2026-04-02
 ## Reference
 
 - [CLI Tools](reference/cli-tools.md) — Python CLI entry points, subcommands, and flags
+- [CLI Tools Index](reference/cli-index.md) — Quick-reference table of all CLI tools
 - [Slash Commands](reference/slash-commands.md) — All slash commands and when to use them
 - [Hooks](reference/hooks.md) — All hooks, lifecycle events, and what each does
 - [Config Files](reference/config-files.md) — Configuration and state files

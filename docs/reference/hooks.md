@@ -4,7 +4,7 @@ title: Hooks
 scope: project
 description: All registered hooks, their lifecycle events, and what each does
 framework_version: "1.0"
-last_verified: 2026-04-02
+last_verified: 2026-04-05
 ---
 
 # Hooks
@@ -37,6 +37,8 @@ Hooks are Python scripts registered in `~/.claude/settings.json` that fire at Cl
 | Install checker cleanup | Stop | `core/hooks/check_install_stop.py` | Removes the "already checked" flag file |
 | Session injector | PreToolUse | `core/hooks/inject_session.py` | Injects session identity (session_id, role, mission) into hook context |
 | Transcript saver | Stop | `core/hooks/save_transcript.py` | Saves a stripped copy of the session transcript for handoff generation |
+| Startup context injector | UserPromptSubmit | `core/hooks/startup_prompt_hook.py` | Injects identity, notes summary, learnings, and CLI reference on the first user message |
+| Unseen session detector | PreToolUse | `core/hooks/startup_hook.py` | Detects unseen session transcripts on first tool call (gated by `auto-startup` flag) |
 
 ## Hook execution order
 

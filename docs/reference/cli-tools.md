@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-04-03"
+last_verified: "2026-04-05"
 ---
 
 # CLI Tools
@@ -273,6 +273,167 @@ python setup.py --check
 | `--check` | Validate installation without making changes |
 | `--with-test-suite` | Also install clarifier test fixtures (global only) |
 
+## pipeline/run.py
+
+End-to-end pipeline orchestrator. Sequences all 6 stages, passes artifact paths via UUID convention, stops on any stage failure.
+
+```bash
+python pipeline/run.py pipeline/intake/<uuid>.json
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `intake_path` | yes | Path to intake JSON file (`pipeline/intake/<uuid>.json`) |
+
+Stages run in order: validate_intake → auto_refine → auto_plan → executor → auto_harden → approval. Each stage's input path is derived from the UUID. Prints per-stage status and elapsed time. Exit 0 if all stages pass; exit 1 on first failure.
+
+Stage timeout is configurable via `pipeline/config.json` under `orchestrator.stage_timeout` (default: 3600s).
+
+## pipeline/create_intake.py
+
+Create an intake file for the autonomous pipeline. Generates a UUID-keyed JSON at `pipeline/intake/<uuid>.json`.
+
+```bash
+python pipeline/create_intake.py --title "Add caching" --problem "Repeated DB queries" --description "Add Redis cache layer" --scope "api/cache.py"
+python pipeline/create_intake.py --from-todo 42
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--title TEXT` | yes* | Short title for the task |
+| `--problem TEXT` | yes* | Problem statement (min 20 chars) |
+| `--description TEXT` | yes* | Detailed description (min 20 chars) |
+| `--scope TEXT` | yes* | What's in scope for this pipeline run |
+| `--context TEXT` | no | Additional context (optional) |
+| `--from-todo ID` | no | Scribe TODO ID to seed from (replaces manual fields) |
+
+\* Required unless `--from-todo` is used.
+
+## pipeline/validate_intake.py
+
+Validate an intake JSON file. Checks required fields, types, minimum content thresholds, and ISO date format.
+
+```bash
+python pipeline/validate_intake.py pipeline/intake/<uuid>.json
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `file` | yes | Path to intake JSON file |
+
+Exit 0 on valid. Exit 1 with error details on invalid.
+
+## pipeline/auto_refine.py
+
+Autonomous refiner — Stage 2. Reads a validated intake JSON, launches a Claude Code subprocess to explore the codebase and produce a structured spec.
+
+```bash
+python pipeline/auto_refine.py pipeline/intake/<uuid>.json
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `intake` | yes | Path to intake JSON file |
+
+Output: `pipeline/specs/<uuid>.json`. Model and retries configurable via `pipeline/config.json` under `refine`.
+
+## pipeline/validate_spec.py
+
+Validate a spec JSON file against the 8 handoff validation rules.
+
+```bash
+python pipeline/validate_spec.py pipeline/specs/<uuid>.json
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `file` | yes | Path to spec JSON file |
+
+Exit 0 on valid. Exit 1 with error details on invalid.
+
+## pipeline/auto_plan.py
+
+Autonomous planner — Stage 3. Reads a validated spec JSON, launches a Claude Code subprocess to produce a step-by-step implementation plan.
+
+```bash
+python pipeline/auto_plan.py pipeline/specs/<uuid>.json
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `spec` | yes | Path to spec JSON file |
+
+Output: `pipeline/plans/<uuid>.json`. Model and retries configurable via `pipeline/config.json` under `plan`.
+
+## pipeline/validate_plan.py
+
+Validate a plan JSON file for the autonomous pipeline.
+
+```bash
+python pipeline/validate_plan.py pipeline/plans/<uuid>.json
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `file` | yes | Path to plan JSON file |
+
+Exit 0 on valid. Exit 1 with error details on invalid.
+
+## pipeline/executor.py
+
+Executor — Stage 4. Reads a validated plan JSON, creates a feature branch (`pipeline/<uuid>`), and executes each step via Claude Code subprocess.
+
+```bash
+python pipeline/executor.py pipeline/plans/<uuid>.json
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `plan` | yes | Path to plan JSON file |
+
+Output: `pipeline/executions/<uuid>.json`. Creates branch `pipeline/<uuid>`. Model and retries configurable via `pipeline/config.json` under `executor`.
+
+**Edge case:** Fails if branch `pipeline/<uuid>` already exists (not idempotent for re-runs).
+
+## pipeline/auto_harden.py
+
+Autonomous hardener — Stage 5. Runs attack-defend rounds against the executor's code changes using the existing `harden/` infrastructure.
+
+```bash
+python pipeline/auto_harden.py pipeline/executions/<uuid>.json
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `execution_log` | yes | Path to execution log JSON |
+
+Output: `pipeline/hardens/<uuid>.json`. Rounds, models, and timeout configurable via `pipeline/config.json` under `harden` (default: 1 round).
+
+## pipeline/approval.py
+
+Approval — Stage 6. Reads the harden verdict and either auto-merges (all resolved), flags for review (unresolved findings), or rejects. Includes a deferral review sub-step that uses Claude to evaluate deferred findings.
+
+```bash
+python pipeline/approval.py pipeline/hardens/<uuid>.json
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `harden_result` | yes | Path to harden result JSON |
+
+Output: `pipeline/reports/<uuid>.json`. Verdicts: `auto-merged`, `pending-review`, or stage failure.
+
+## pipeline/config_loader.py
+
+Shared config loader. Library module — not a CLI tool. Used by pipeline stages to read `pipeline/config.json`.
+
+```python
+from config_loader import get as cfg
+timeout = cfg("orchestrator", "stage_timeout", 3600)
+```
+
+Falls back to defaults if `pipeline/config.json` is missing.
+
 ## Test scripts
 
 All tests use `unittest` and are run directly:
@@ -284,4 +445,5 @@ python clarifier/test_write_log.py
 python clarifier/test_log_cost.py
 python harden/test_validators.py
 python harden/test_assign_ids.py
+python pipeline/test_orchestrator.py
 ```
