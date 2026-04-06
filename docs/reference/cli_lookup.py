@@ -15,6 +15,25 @@ from pathlib import Path
 REFERENCE = Path(__file__).resolve().parent / "cli-tools.md"
 
 
+def list_known_tools() -> list[str]:
+    """Return the list of known repo CLI tool paths from cli-tools.md."""
+    if not REFERENCE.exists():
+        return []
+    text = REFERENCE.read_text(encoding="utf-8")
+    tools = []
+    for line in text.splitlines():
+        if line.startswith("## ") and not line.startswith("### "):
+            header = line[3:].strip()
+            if not header:
+                continue
+            if header == "docs/reference/cli_lookup.py":
+                continue
+            if Path(header).name == "cli_lookup.py":
+                continue
+            tools.append(header)
+    return list(dict.fromkeys(tools))
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: cli_lookup.py <tool-name>", file=sys.stderr)

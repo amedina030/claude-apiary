@@ -65,6 +65,14 @@ Stop hooks fire on session end:
 |------|-------|------|-------------|
 | Standards reminder | PreToolUse | `docs/hooks/remind_standards.py` | On Write/Edit of `.py` or `docs/*.md` files, injects a one-line reminder to consult the relevant standards doc. Once per file category per session. |
 
+### Project hooks
+
+Registered via the project-level `.claude/settings.json` (not user-global), so they only fire when Claude Code runs inside this repo.
+
+| Hook | Event | File | Description |
+|------|-------|------|-------------|
+| CLI lookup enforcer | PreToolUse | `hooks/enforce_cli_lookup.py` | On Bash, blocks invocations of known repo CLI tools (from `cli-tools.md`) unless `cli_lookup.py` was run for that tool earlier in the session transcript. Exempts `cli_lookup.py` itself. Fails open on internal error. |
+
 ## Utility scripts in hooks directories
 
 These scripts live under `hooks/` directories but are not registered as Claude Code hooks. They are invoked directly by other tools.

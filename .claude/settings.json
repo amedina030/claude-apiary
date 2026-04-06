@@ -8,5 +8,18 @@
       "Read(*/.claude/.session-identity-*)",
       "Read(*/core/config/session-registry.json)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python hooks/enforce_cli_lookup.py"
+          }
+        ]
+      }
+    ]
   }
 }
