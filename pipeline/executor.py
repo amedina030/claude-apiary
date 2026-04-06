@@ -196,18 +196,37 @@ def execute_step(step: dict, spec: dict, model: str) -> dict:
                     result["error"] = f"Claude Code error (attempt {attempt}): {stderr.strip()[:500]}"
                     continue
 
-                # Parse verify result
+                # Parse verify result — handle envelope, code fences, and prose
+                verify = {"passed": False, "explanation": "Unparseable output"}
                 try:
-                    # Handle Claude envelope
                     envelope = json.loads(stdout)
                     if isinstance(envelope, dict) and "result" in envelope:
-                        verify = json.loads(envelope["result"])
+                        text = envelope["result"].strip()
                     elif isinstance(envelope, dict) and "passed" in envelope:
                         verify = envelope
+                        text = None
                     else:
-                        verify = {"passed": False, "explanation": "Unparseable output"}
+                        text = stdout.strip()
+
+                    if text is not None:
+                        # Strip markdown code fences if present
+                        if text.startswith("```"):
+                            lines = text.splitlines()
+                            if lines[-1].strip() == "```":
+                                lines = lines[1:-1]
+                            else:
+                                lines = lines[1:]
+                            text = "\n".join(lines).strip()
+                        # Find first { and last } to extract JSON from prose
+                        start = text.find("{")
+                        end = text.rfind("}")
+                        if start != -1 and end > start:
+                            try:
+                                verify = json.loads(text[start:end + 1])
+                            except json.JSONDecodeError:
+                                pass
                 except (json.JSONDecodeError, TypeError):
-                    verify = {"passed": False, "explanation": "Unparseable output"}
+                    pass
 
                 if verify.get("passed"):
                     result["status"] = "passed"
