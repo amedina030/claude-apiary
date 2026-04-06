@@ -1,0 +1,9 @@
+{
+  "id": "387d389f-b31d-4c2f-93b4-f959e1d606a6",
+  "title": "Pipeline resume support and branch collision handling",
+  "problem": "If any stage fails after a 15-minute run, the entire pipeline must restart from stage 1. Stages 2-3 redo expensive Claude calls, and stage 4 fails because the branch already exists. There is no way to resume from where it stopped.",
+  "description": "Add resume-from capability to the orchestrator and make the executor handle existing branches: (1) run.py accepts --resume-from <stage_name> flag that skips earlier stages and picks up from the specified stage using existing artifacts, (2) run.py validates that prerequisite artifacts exist before resuming (e.g. resuming from stage 4 requires plans/<uuid>.json), (3) executor.py detects if branch pipeline/<uuid> already exists and checks it out instead of failing, (4) on pipeline failure, run.py prints the exact resume command to rerun from the failed stage.",
+  "scope": "Modified: pipeline/run.py (--resume-from flag, artifact validation, resume command on failure). Modified: pipeline/executor.py (existing branch detection and checkout). No new files.",
+  "context": "Stages are: validate_intake, auto_refine, auto_plan, executor, auto_harden, approval. Artifact paths are all UUID-derived and predictable. The executor currently does git checkout -b pipeline/<uuid> which fails if the branch exists. Resume should checkout the existing branch instead.",
+  "created_at": "2026-04-06T03:22:31.665846+00:00"
+}

@@ -1,0 +1,238 @@
+{
+  "uuid": "d0cd0b6c-205a-42a0-8d2e-73fda55901c3",
+  "executor_model": "sonnet",
+  "spec": {
+    "goal": {
+      "problem": "Ideas and deferred work live scattered across conversations and scribe notes with no staging area, status tracking, or promotion gate before entering the pipeline intake.",
+      "solution": "Add a file-based ticket management layer with a backlog directory for drafts, a markdown board for status tracking, and CLI tools to draft and promote tickets into the pipeline.",
+      "value": "Pipeline users get a structured path from idea to execution \u2014 drafts are reviewable before committing resources, and board.md provides at-a-glance visibility into all ticket states."
+    },
+    "shape": {
+      "components": [
+        {
+          "name": "pipeline/backlog/",
+          "description": "Directory holding draft ticket JSON files with human-readable filenames (slugified title). Uses the same schema as intake files but without a UUID id field \u2014 the id is assigned on promotion."
+        },
+        {
+          "name": "pipeline/draft_ticket.py",
+          "description": "CLI script that creates a backlog JSON from --title/--problem/--description/--scope args or from a scribe note via --from-todo <id>. Writes to pipeline/backlog/<slug>.json and appends a row to board.md with status 'backlog'."
+        },
+        {
+          "name": "pipeline/promote.py",
+          "description": "CLI script that validates a backlog ticket against validate_intake.py rules, assigns a UUID, copies to pipeline/intake/<uuid>.json, removes the backlog file, and updates the board.md row from 'backlog' to 'ready'."
+        },
+        {
+          "name": "pipeline/board.md",
+          "description": "Markdown table tracking all tickets through statuses (backlog, ready, running, done, failed) with columns for slug, title, status, intake UUID, and notes. Updated by draft_ticket.py, promote.py, and run.py."
+        },
+        {
+          "name": "pipeline/run.py (modified)",
+          "description": "Existing orchestrator updated to set board.md status to 'running' at pipeline start and 'done' or 'failed' at pipeline end, keyed by intake UUID."
+        }
+      ],
+      "integration_point": "Sits upstream of the existing pipeline/create_intake.py \u2192 run.py flow, replacing direct intake creation with a draft \u2192 promote \u2192 run lifecycle",
+      "pattern": "Follows the existing create_intake.py pattern: CLI with argparse, --from-todo for scribe integration, JSON file output, validation via validate_intake.py, sys.exit(1) on error",
+      "data_flow": "CLI args or scribe note \u2192 draft_ticket.py \u2192 pipeline/backlog/<slug>.json + board.md row(backlog) \u2192 promote.py \u2192 pipeline/intake/<uuid>.json + board.md row(ready) \u2192 run.py \u2192 board.md row(running\u2192done/failed)",
+      "dependencies": "pipeline/validate_intake.py (reused for promotion validation), scribe/notes.py (for --from-todo lookups), pipeline/run.py (for board status updates), Python 3 standard library (argparse, json, uuid, re, datetime)"
+    },
+    "behavior": {
+      "input": "draft_ticket.py: --title, --problem, --description, --scope, --context (optional), --from-todo <note_id> (optional). promote.py: positional arg <slug> (backlog filename without .json). run.py: existing intake JSON path (unchanged).",
+      "processing": "draft_ticket.py: (1) parse args, (2) if --from-todo fetch note content via scribe/notes.py get <id> and use as default description, (3) slugify title to filename, (4) write JSON to pipeline/backlog/<slug>.json with fields title/problem/description/scope/context/source/created_at, (5) append row to board.md with status backlog. promote.py: (1) read pipeline/backlog/<slug>.json, (2) assign UUID as id field, (3) validate via validate_intake.py logic, (4) on pass write to pipeline/intake/<uuid>.json, (5) delete backlog file, (6) update board.md row status from backlog to ready and fill in UUID column. run.py changes: (1) after intake validation passes update board.md row matching UUID to running, (2) after final stage update row to done or failed.",
+      "output": "draft_ticket.py prints backlog file path on success. promote.py prints intake file path and UUID on success. run.py prints existing output plus board status updates. board.md is a persistent markdown table file.",
+      "error_cases": [
+        {
+          "trigger": "draft_ticket.py: --from-todo references a note ID that does not exist",
+          "behavior": "Print 'Error: note <id> not found' to stderr and exit 1"
+        },
+        {
+          "trigger": "draft_ticket.py: required args (--title, --problem, --scope) missing and no --from-todo provided",
+          "behavior": "Argparse prints usage error and exits 2"
+        },
+        {
+          "trigger": "draft_ticket.py: slugified filename collides with existing backlog file",
+          "behavior": "Print 'Error: backlog ticket <slug>.json already exists' to stderr and exit 1"
+        },
+        {
+          "trigger": "promote.py: slug does not match any file in pipeline/backlog/",
+          "behavior": "Print 'Error: backlog ticket <slug>.json not found' to stderr and exit 1"
+        },
+        {
+          "trigger": "promote.py: backlog ticket fails validate_intake.py validation rules",
+          "behavior": "Print validation errors to stderr and exit 1 without creating intake file or modifying board.md"
+        },
+        {
+          "trigger": "run.py: board.md does not exist or has no row matching the intake UUID",
+          "behavior": "Skip board update silently \u2014 board tracking is optional and must not block pipeline execution"
+        }
+      ],
+      "edge_cases": [
+        {
+          "condition": "Title contains special characters, unicode, or very long text when slugified",
+          "behavior": "Slugify strips non-alphanumeric chars except hyphens, lowercases, truncates to 60 chars, and deduplicates consecutive hyphens"
+        },
+        {
+          "condition": "board.md does not exist when draft_ticket.py runs for the first time",
+          "behavior": "Create board.md with markdown table header row before appending the first entry"
+        },
+        {
+          "condition": "promote.py is called on a ticket that was already promoted (file missing from backlog)",
+          "behavior": "Print 'Error: backlog ticket <slug>.json not found' to stderr and exit 1 \u2014 same as missing file case"
+        },
+        {
+          "condition": "Multiple pipelines running concurrently update board.md",
+          "behavior": "Each update reads the full file, modifies the target row, and writes back atomically. Concurrent writes may clobber \u2014 acceptable for a lightweight file-based system"
+        },
+        {
+          "condition": "--from-todo note content is too short to meet the 20-char minimum for problem or description",
+          "behavior": "draft_ticket.py writes the draft as-is; validation happens at promote time, not draft time"
+        }
+      ]
+    },
+    "boundaries": {
+      "in_scope": [
+        "pipeline/backlog/ directory creation and JSON schema",
+        "pipeline/draft_ticket.py CLI with --from-todo support",
+        "pipeline/promote.py CLI with validation and UUID assignment",
+        "pipeline/board.md markdown table creation and updates",
+        "pipeline/run.py modifications for board.md status updates at start and end",
+        "Slug generation from ticket titles"
+      ],
+      "out_of_scope": [
+        {
+          "item": "Modifying existing stage scripts (auto_refine.py, auto_plan.py, executor.py, auto_harden.py, approval.py)",
+          "reason": "Task scope explicitly excludes changes to existing stage scripts"
+        },
+        {
+          "item": "Replacing or deprecating create_intake.py",
+          "reason": "draft_ticket.py + promote.py is a parallel path; create_intake.py remains valid for direct intake creation"
+        },
+        {
+          "item": "Database or server-based tracking",
+          "reason": "Project convention is file-based and minimal; board.md is a markdown table, not a database"
+        },
+        {
+          "item": "Concurrent write safety beyond simple read-modify-write",
+          "reason": "File-based system accepts the small risk of concurrent clobber; adding file locking is overengineering for this use case"
+        },
+        {
+          "item": "Web UI or interactive board view",
+          "reason": "board.md is readable in any text editor or GitHub; no UI layer needed"
+        },
+        {
+          "item": "Automatic promotion or scheduling of backlog tickets",
+          "reason": "Promotion is an explicit human gate; automation would bypass the review intent"
+        }
+      ],
+      "must_not_break": [
+        "Existing pipeline/run.py stage sequencing and exit behavior \u2014 board.md updates must not cause pipeline failure",
+        "Existing pipeline/intake/<uuid>.json schema \u2014 promoted tickets must be identical in format to create_intake.py output",
+        "Existing validate_intake.py validation rules \u2014 promote.py reuses them, does not bypass or weaken them",
+        "Existing scribe/notes.py get <id> interface \u2014 draft_ticket.py calls it the same way create_intake.py does",
+        "Pipeline ID validation and path traversal protections in run.py"
+      ]
+    },
+    "acceptance_criteria": [
+      "Given no pipeline/backlog/ directory exists, when draft_ticket.py is run with --title 'My Feature' --problem '...' --description '...' --scope '...', then pipeline/backlog/my-feature.json is created with all fields populated and the script prints the file path to stdout",
+      "Given a scribe note with ID 42 exists, when draft_ticket.py is run with --from-todo 42 --title 'From Note' --scope '...', then the note content is used as the description field in the created backlog JSON and the source field is set to '42'",
+      "Given --from-todo references note ID 999 which does not exist, when draft_ticket.py runs, then it prints 'Error: note 999 not found' to stderr and exits with code 1",
+      "Given draft_ticket.py is run without --title, when argparse processes the args, then it prints a usage error to stderr and exits with code 2",
+      "Given pipeline/backlog/my-feature.json already exists, when draft_ticket.py is run with --title 'My Feature', then it prints 'Error: backlog ticket my-feature.json already exists' to stderr and exits with code 1",
+      "Given a title with special characters like 'Fix: The $100 (Bug)!!', when draft_ticket.py slugifies it, then the filename is 'fix-the-100-bug.json' with non-alphanumeric chars stripped and consecutive hyphens deduplicated",
+      "Given a title longer than 60 characters, when draft_ticket.py slugifies it, then the slug is truncated to 60 characters",
+      "Given board.md does not exist, when draft_ticket.py creates the first backlog ticket, then board.md is created with a markdown table header (Slug | Title | Status | UUID | Notes) and one data row with status 'backlog'",
+      "Given a valid backlog ticket at pipeline/backlog/my-feature.json, when promote.py my-feature is run, then a UUID is assigned, pipeline/intake/<uuid>.json is created with all required intake fields, pipeline/backlog/my-feature.json is deleted, and the board.md row is updated from 'backlog' to 'ready' with the UUID filled in",
+      "Given promote.py is run with slug 'nonexistent', when no pipeline/backlog/nonexistent.json exists, then it prints 'Error: backlog ticket nonexistent.json not found' to stderr and exits with code 1",
+      "Given a backlog ticket with problem field shorter than 20 characters, when promote.py runs validation, then it prints the validation errors to stderr and exits with code 1 without creating an intake file or modifying board.md",
+      "Given a promoted ticket with UUID abc123 in board.md with status 'ready', when run.py pipeline/intake/abc123.json starts and intake validation passes, then the board.md row for abc123 is updated to status 'running'",
+      "Given a pipeline run completes all 6 stages successfully for UUID abc123, when run.py finishes, then the board.md row for abc123 is updated to status 'done'",
+      "Given a pipeline run fails at any stage for UUID abc123, when run.py exits, then the board.md row for abc123 is updated to status 'failed'",
+      "Given board.md does not exist when run.py executes, when run.py attempts to update board status, then it skips the update silently and pipeline execution continues unaffected",
+      "Given board.md has no row matching the current intake UUID, when run.py attempts to update board status, then it skips the update silently and pipeline execution continues unaffected",
+      "Given a backlog ticket that was already promoted (file deleted), when promote.py is run with that slug, then it prints 'Error: backlog ticket <slug>.json not found' to stderr and exits with code 1",
+      "Given a promoted intake file, when its JSON is compared to one created by create_intake.py, then both have identical schema: id, title, problem, description, scope, context, created_at fields with the same types and validation rules",
+      "Given a backlog ticket with --from-todo whose note content is only 10 characters, when draft_ticket.py writes the draft, then it succeeds without validation error \u2014 validation is deferred to promote time"
+    ],
+    "id": "d0cd0b6c-205a-42a0-8d2e-73fda55901c3",
+    "intake_id": "d0cd0b6c-205a-42a0-8d2e-73fda55901c3",
+    "valid": true
+  },
+  "steps": [
+    {
+      "step_number": 1,
+      "type": "create",
+      "description": "Create pipeline/backlog/ directory with a .gitkeep file",
+      "action": "create",
+      "files": [
+        "pipeline/backlog/.gitkeep"
+      ],
+      "depends_on": [],
+      "code_spec": "Create an empty .gitkeep file at pipeline/backlog/.gitkeep to ensure the directory is tracked by git. The directory will hold draft ticket JSON files."
+    },
+    {
+      "step_number": 2,
+      "type": "create",
+      "description": "Create pipeline/board.md with markdown table header",
+      "action": "create",
+      "files": [
+        "pipeline/board.md"
+      ],
+      "depends_on": [],
+      "code_spec": "Create pipeline/board.md with the following content:\n\n```\n| Slug | Title | Status | UUID | Notes |\n|------|-------|--------|------|-------|\n```\n\nThis is the initial empty board table. draft_ticket.py will also create this if missing, but seeding it makes the repo cleaner."
+    },
+    {
+      "step_number": 3,
+      "type": "create",
+      "description": "Create pipeline/draft_ticket.py CLI for backlog ticket creation",
+      "action": "create",
+      "files": [
+        "pipeline/draft_ticket.py"
+      ],
+      "depends_on": [],
+      "code_spec": "Create pipeline/draft_ticket.py with the following structure:\n\n```python\n#!/usr/bin/env python3\n\"\"\"Create a backlog draft ticket for the pipeline.\n\nWrites a JSON file to pipeline/backlog/<slug>.json and appends a row\nto pipeline/board.md with status 'backlog'.\n\nUsage:\n    draft_ticket.py --title '...' --problem '...' --description '...' --scope '...'\n    draft_ticket.py --from-todo <id> --title '...' --scope '...'\n\"\"\"\nimport argparse\nimport json\nimport os\nimport re\nimport subprocess\nimport sys\nfrom datetime import datetime, timezone\nfrom pathlib import Path\n\nSCRIPT_DIR = Path(__file__).resolve().parent\nBACKLOG_DIR = SCRIPT_DIR / \"backlog\"\nBOARD_PATH = SCRIPT_DIR / \"board.md\"\nNOTES_SCRIPT = SCRIPT_DIR.parent / \"scribe\" / \"notes.py\"\n```\n\n**Function: slugify(title: str) -> str**\n- Lowercase the title\n- Replace any non-alphanumeric character (except hyphen) with hyphen: re.sub(r'[^a-z0-9-]', '-', lowered)\n- Collapse consecutive hyphens: re.sub(r'-+', '-', result)\n- Strip leading/trailing hyphens: result.strip('-')\n- Truncate to 60 characters. If truncation lands mid-hyphen-sequence, strip trailing hyphens again.\n- Return the slug string\n\n**Function: read_todo(todo_id: str) -> str**\n- Copy the exact pattern from create_intake.py:\n  - subprocess.run([sys.executable, str(NOTES_SCRIPT), 'get', str(todo_id)], capture_output=True, text=True)\n  - If returncode != 0: print(f'Error: note {todo_id} not found', file=sys.stderr); sys.exit(1)\n  - Parse output: split on '---' separator, take content after it, strip\n  - If no '---' found, use full stdout stripped\n  - If content empty: print(f'Error: note {todo_id} not found', file=sys.stderr); sys.exit(1)\n  - Return content string\n\n**Function: ensure_board() -> None**\n- If BOARD_PATH does not exist, create it with the header:\n  ```\n  | Slug | Title | Status | UUID | Notes |\\n|------|-------|--------|------|-------|\\n\n  ```\n- Write with encoding='utf-8'\n\n**Function: append_board_row(slug: str, title: str) -> None**\n- Call ensure_board()\n- Read BOARD_PATH text (utf-8)\n- Append a new line: f'| {slug} | {title} | backlog | | |\\n'\n- Write back the full text\n\n**Function: main()**\n- argparse setup:\n  - parser.add_argument('--from-todo', dest='from_todo', help='Scribe note ID to seed from')\n  - parser.add_argument('--title', required=False, help='Short title')\n  - parser.add_argument('--problem', required=False, help='Problem statement')\n  - parser.add_argument('--description', required=False, help='Detailed description')\n  - parser.add_argument('--scope', required=False, help='Scope of work')\n  - parser.add_argument('--context', default='', help='Additional context (optional)')\n- Parse args\n- If args.from_todo: todo_content = read_todo(args.from_todo); source = str(args.from_todo)\n  else: todo_content = None; source = None\n- Resolve description: args.description if provided, else todo_content\n- Check required fields (title, problem, scope must be truthy; description must be truthy):\n  - If any missing and no --from-todo fallback covers it: print missing fields to stderr, sys.exit(1)\n  - NOTE: argparse handles truly missing required args with exit code 2, but since we mark them required=False to allow --from-todo flow, we do manual checking with exit code 1\n- slug = slugify(args.title)\n- BACKLOG_DIR.mkdir(parents=True, exist_ok=True)\n- file_path = BACKLOG_DIR / f'{slug}.json'\n- If file_path.exists(): print(f'Error: backlog ticket {slug}.json already exists', file=sys.stderr); sys.exit(1)\n- Build ticket dict:\n  ```python\n  ticket = {\n      'title': args.title,\n      'problem': args.problem,\n      'description': description,\n      'scope': args.scope,\n      'context': args.context,\n      'created_at': datetime.now(timezone.utc).isoformat(),\n  }\n  if source is not None:\n      ticket['source'] = source\n  ```\n- Write file_path with json.dumps(ticket, indent=2), encoding='utf-8'\n- Call append_board_row(slug, args.title)\n- Print str(file_path) to stdout\n\nNote: No validation at draft time \u2014 validation is deferred to promote.py. The backlog JSON intentionally omits the 'id' field (UUID assigned at promotion)."
+    },
+    {
+      "step_number": 4,
+      "type": "create",
+      "description": "Create pipeline/promote.py CLI for promoting backlog tickets to intake",
+      "action": "create",
+      "files": [
+        "pipeline/promote.py"
+      ],
+      "depends_on": [],
+      "code_spec": "Create pipeline/promote.py with the following structure:\n\n```python\n#!/usr/bin/env python3\n\"\"\"Promote a backlog ticket to pipeline intake.\n\nValidates, assigns a UUID, copies to intake/, removes the backlog file,\nand updates board.md status from 'backlog' to 'ready'.\n\nUsage:\n    promote.py <slug>\n\"\"\"\nimport json\nimport subprocess\nimport sys\nimport uuid\nfrom datetime import datetime, timezone\nfrom pathlib import Path\n\nSCRIPT_DIR = Path(__file__).resolve().parent\nBACKLOG_DIR = SCRIPT_DIR / \"backlog\"\nINTAKE_DIR = SCRIPT_DIR / \"intake\"\nBOARD_PATH = SCRIPT_DIR / \"board.md\"\nVALIDATE_SCRIPT = SCRIPT_DIR / \"validate_intake.py\"\n```\n\n**Function: update_board_row(slug: str, new_status: str, intake_uuid: str) -> None**\n- If BOARD_PATH does not exist: return (silently skip)\n- Read BOARD_PATH text (utf-8)\n- Split into lines\n- For each line, check if it starts with f'| {slug} ' (match the slug column)\n- If found, replace the line with: f'| {slug} | {title} | {new_status} | {intake_uuid} | |'\n  - To get title: parse from the existing row (split by '|', index 2 stripped)\n- Write back the full text\n- If no matching row found: return silently\n\n**Function: main()**\n- If len(sys.argv) < 2: print('Usage: promote.py <slug>', file=sys.stderr); sys.exit(1)\n- slug = sys.argv[1]\n- backlog_path = BACKLOG_DIR / f'{slug}.json'\n- If not backlog_path.exists(): print(f'Error: backlog ticket {slug}.json not found', file=sys.stderr); sys.exit(1)\n- Read and parse backlog JSON (utf-8)\n- Assign UUID: intake_id = str(uuid.uuid4())\n- Build intake dict from backlog data + id:\n  ```python\n  intake = {\n      'id': intake_id,\n      'title': data['title'],\n      'problem': data['problem'],\n      'description': data['description'],\n      'scope': data['scope'],\n      'context': data.get('context', ''),\n      'created_at': data['created_at'],\n  }\n  if 'source' in data:\n      intake['source'] = data['source']\n  ```\n- INTAKE_DIR.mkdir(parents=True, exist_ok=True)\n- Write intake to temp path first: intake_path = INTAKE_DIR / f'{intake_id}.json'\n- intake_path.write_text(json.dumps(intake, indent=2), encoding='utf-8')\n- Validate via subprocess:\n  ```python\n  result = subprocess.run(\n      [sys.executable, str(VALIDATE_SCRIPT), str(intake_path)],\n      capture_output=True, text=True\n  )\n  ```\n- If result.returncode != 0:\n  - Delete intake_path (intake_path.unlink(missing_ok=True))\n  - Print validation errors to stderr: print(result.stderr.strip(), file=sys.stderr)\n  - sys.exit(1)\n  - Do NOT modify board.md or delete backlog file\n- On validation success:\n  - Delete backlog file: backlog_path.unlink()\n  - Update board row: update_board_row(slug, 'ready', intake_id)\n  - Print intake_path and UUID: print(f'{intake_path}'); or print both on separate lines: print(str(intake_path)) then print(intake_id) \u2014 spec says 'prints intake file path and UUID on success'\n\nNote: The promoted intake JSON must have identical schema to create_intake.py output (id, title, problem, description, scope, context, created_at, optionally source)."
+    },
+    {
+      "step_number": 5,
+      "type": "modify",
+      "description": "Modify pipeline/run.py to update board.md status at pipeline start and end",
+      "action": "modify",
+      "files": [
+        "pipeline/run.py"
+      ],
+      "depends_on": [],
+      "code_spec": "Modify pipeline/run.py with these changes:\n\n**1. Add BOARD_PATH constant near the top (after SCRIPT_DIR):**\n```python\nBOARD_PATH = SCRIPT_DIR / \"board.md\"\n```\n\n**2. Add update_board_status helper function (before main()):**\n```python\ndef update_board_status(intake_uuid: str, new_status: str) -> None:\n    \"\"\"Update board.md row matching intake_uuid to new_status. Silently skips if board.md missing or no matching row.\"\"\"\n    if not BOARD_PATH.exists():\n        return\n    try:\n        text = BOARD_PATH.read_text(encoding='utf-8')\n    except OSError:\n        return\n    lines = text.splitlines(keepends=True)\n    updated = False\n    for i, line in enumerate(lines):\n        # Split by | and check if UUID column (index 4 after leading empty) matches\n        cols = line.split('|')\n        # Table row format: | slug | title | status | uuid | notes |\n        # split('|') gives: ['', ' slug ', ' title ', ' status ', ' uuid ', ' notes ', '']\n        if len(cols) >= 6:\n            uuid_col = cols[4].strip()\n            if uuid_col == intake_uuid:\n                cols[3] = f' {new_status} '\n                lines[i] = '|'.join(cols)\n                updated = True\n                break\n    if updated:\n        try:\n            BOARD_PATH.write_text(''.join(lines), encoding='utf-8')\n        except OSError:\n            pass  # Board update must not block pipeline\n```\n\n**3. In main(), after intake validation passes (after the first stage loop iteration where name == 'validate_intake' succeeds), add:**\n- After the `stages_completed += 1` line inside the success branch of the first stage, call:\n  `update_board_status(uuid, 'running')`\n- More precisely: add the call right after `stages_completed += 1` but only when i == 1 (first stage). Alternatively, call it once before the stage loop starts but after intake_path is confirmed valid \u2014 but the spec says 'after intake validation passes'. Simplest approach: call update_board_status(uuid, 'running') once, right after the first stage (validate_intake) succeeds.\n\nBetter approach for clarity: call it right before the loop starts at the print('Pipeline: ...') line area \u2014 NO, the spec says 'after intake validation passes'. Best: add a check after the first stage succeeds:\n\nInside the for loop, after `stages_completed += 1`, add:\n```python\n                if stages_completed == 1:  # validate_intake just passed\n                    update_board_status(uuid, 'running')\n```\n\n**4. On pipeline failure (in the `else` branch where ok is False), before sys.exit(1), add:**\n```python\n                update_board_status(uuid, 'failed')\n```\n\n**5. On pipeline success (after the 'All stages completed' comment, before/after the print statements), add:**\n```python\n    update_board_status(uuid, 'done')\n```\n\n**6. On KeyboardInterrupt, in the except block before sys.exit(1), add:**\n```python\n        update_board_status(uuid, 'failed')\n```\n\nCRITICAL: All board updates are wrapped in the helper which silently handles missing board.md or missing rows. Board updates must NEVER cause pipeline failure \u2014 all exceptions are caught and suppressed in the helper."
+    },
+    {
+      "step_number": 6,
+      "type": "verify",
+      "description": "Verify all files exist, syntax is valid, and acceptance criteria are met",
+      "action": "verify",
+      "files": [
+        "pipeline/backlog/.gitkeep",
+        "pipeline/board.md",
+        "pipeline/draft_ticket.py",
+        "pipeline/promote.py",
+        "pipeline/run.py"
+      ],
+      "depends_on": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "code_spec": "Run the following verification checks:\n\n1. **Syntax check all Python files:**\n   ```bash\n   python -c \"import py_compile; py_compile.compile('pipeline/draft_ticket.py', doraise=True)\"\n   python -c \"import py_compile; py_compile.compile('pipeline/promote.py', doraise=True)\"\n   python -c \"import py_compile; py_compile.compile('pipeline/run.py', doraise=True)\"\n   ```\n\n2. **Verify directory structure:**\n   - pipeline/backlog/ directory exists\n   - pipeline/board.md exists with correct header\n\n3. **Test draft_ticket.py happy path:**\n   ```bash\n   python pipeline/draft_ticket.py --title 'Test Ticket' --problem 'This is a test problem statement for verification' --description 'This is a test description for the verification step' --scope 'verification only'\n   ```\n   - Verify pipeline/backlog/test-ticket.json exists with correct fields (no 'id' field)\n   - Verify board.md has a row with slug 'test-ticket', status 'backlog'\n\n4. **Test draft_ticket.py duplicate detection:**\n   ```bash\n   python pipeline/draft_ticket.py --title 'Test Ticket' --problem '...' --description '...' --scope '...'\n   ```\n   - Verify exit code 1 and stderr contains 'already exists'\n\n5. **Test draft_ticket.py slugification:**\n   ```bash\n   python pipeline/draft_ticket.py --title 'Fix: The $100 (Bug)!!' --problem 'This is a test problem statement xxxx' --description 'This is a test description for slug test' --scope 'test'\n   ```\n   - Verify file is named 'fix-the-100-bug.json' (special chars stripped, consecutive hyphens collapsed)\n\n6. **Test promote.py happy path:**\n   ```bash\n   python pipeline/promote.py test-ticket\n   ```\n   - Verify pipeline/backlog/test-ticket.json is deleted\n   - Verify a new pipeline/intake/<uuid>.json exists with 'id' field\n   - Verify board.md row for test-ticket now shows status 'ready' and has UUID filled in\n\n7. **Test promote.py missing slug:**\n   ```bash\n   python pipeline/promote.py nonexistent\n   ```\n   - Verify exit code 1 and stderr contains 'not found'\n\n8. **Test promote.py validation failure:**\n   - Create a backlog file manually with problem shorter than 20 chars\n   - Run promote.py on it\n   - Verify exit code 1, intake file not created, board.md not modified\n\n9. **Verify run.py still works:**\n   ```bash\n   python -c \"import py_compile; py_compile.compile('pipeline/run.py', doraise=True)\"\n   ```\n   - Verify the update_board_status function exists and handles missing board.md gracefully\n\n10. **Clean up test artifacts:**\n    - Remove any test backlog files and test intake files created during verification\n    - Remove test rows from board.md (or reset board.md to header-only)\n\n**Acceptance criteria coverage:**\n- Steps 3-5 cover draft_ticket.py criteria (happy path, duplicate, slugify, board creation)\n- Step 6 covers promote.py happy path (UUID assignment, file move, board update)\n- Steps 7-8 cover promote.py error cases (missing slug, validation failure)\n- Step 9 covers run.py modifications (syntax valid, function exists)\n- Schema compatibility verified in step 6 (promoted file has same fields as create_intake.py output)"
+    }
+  ],
+  "valid": true
+}

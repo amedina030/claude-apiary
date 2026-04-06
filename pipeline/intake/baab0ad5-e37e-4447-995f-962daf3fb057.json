@@ -1,0 +1,9 @@
+{
+  "id": "baab0ad5-e37e-4447-995f-962daf3fb057",
+  "title": "Per-step model override in executor",
+  "problem": "The executor uses a single model (from config) for all plan steps. Some steps require stronger reasoning (e.g. complex refactors) while others are simple (e.g. adding imports). There is no way to specify a different model for individual steps.",
+  "description": "Add optional per-step model override to the executor: (1) executor.py reads an optional model field from each step in the plan JSON, (2) if present, that model is used for the claude -p call for that step instead of the config default, (3) if absent, falls back to executor.model from config.json as today, (4) validate_plan.py accepts the optional model field without erroring (must be a known alias: opus, sonnet, haiku).",
+  "scope": "Modified: pipeline/executor.py (per-step model read and subprocess call). Modified: pipeline/validate_plan.py (accept optional model field, validate alias). No new files.",
+  "context": "Plan JSON has a steps array where each step has fields like description, files, instructions. The new model field would sit alongside these. Config default is executor.model = sonnet. Known model aliases are opus, sonnet, haiku.",
+  "created_at": "2026-04-06T03:22:45.093746+00:00"
+}

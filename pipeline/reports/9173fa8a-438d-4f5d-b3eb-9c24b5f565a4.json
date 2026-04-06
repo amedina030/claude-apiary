@@ -1,0 +1,29 @@
+{
+  "uuid": "9173fa8a-438d-4f5d-b3eb-9c24b5f565a4",
+  "title": "Orchestrator test",
+  "verdict": "all_resolved",
+  "path_taken": "auto-merged",
+  "timestamps": {
+    "intake_created": "2026-04-05T20:07:49.531514+00:00",
+    "approval_completed": "2026-04-05T22:09:02.827765+00:00"
+  },
+  "stats": {
+    "total_steps": 2,
+    "steps_passed": 2,
+    "total_findings": 23,
+    "findings_resolved": 18,
+    "findings_unresolved": 0,
+    "harden_rounds": 3
+  },
+  "files_changed": [
+    "pipeline/test_orchestrator.py"
+  ],
+  "artifacts": {
+    "intake": "D:\\Professional\\claude-apiary\\pipeline\\intake\\9173fa8a-438d-4f5d-b3eb-9c24b5f565a4.json",
+    "spec": "D:\\Professional\\claude-apiary\\pipeline\\specs\\9173fa8a-438d-4f5d-b3eb-9c24b5f565a4.json",
+    "plan": "D:\\Professional\\claude-apiary\\pipeline\\plans\\9173fa8a-438d-4f5d-b3eb-9c24b5f565a4.json",
+    "execution": "D:\\Professional\\claude-apiary\\pipeline\\executions\\9173fa8a-438d-4f5d-b3eb-9c24b5f565a4.json",
+    "harden": "D:\\Professional\\claude-apiary\\pipeline\\hardens\\9173fa8a-438d-4f5d-b3eb-9c24b5f565a4.json",
+    "report": "D:\\Professional\\claude-apiary\\pipeline\\reports\\9173fa8a-438d-4f5d-b3eb-9c24b5f565a4.json"
+  }
+}
