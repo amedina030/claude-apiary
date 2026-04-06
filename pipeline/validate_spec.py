@@ -46,7 +46,10 @@ VAGUE_PATTERNS = re.compile(
 )
 
 PLACEHOLDER_PATTERNS = re.compile(
-    r"\b(TODO|TBD|FIXME|placeholder|fill\s+in|to\s+be\s+determined)\b",
+    r"(?<![/-])\b(TODO|TBD|FIXME)\b(?![-])"   # standalone markers, not --from-todo or TODO-123
+    r"|\bplaceholder\b"
+    r"|(?<!\w)fill\s+in(?=\s+(this|here|later|above|below|the\s+blank))"  # "fill in" only when clearly a placeholder instruction
+    r"|\bto\s+be\s+determined\b",
     re.IGNORECASE,
 )
 
