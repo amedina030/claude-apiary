@@ -88,6 +88,7 @@ python budgeter/report.py [options]
 | `--by-turn` | Group by session > task (default) |
 | `--all` | Include zero-delta entries |
 | `--by-agent` | Show per-agent-type token breakdown |
+| `--by-request` | Group by `request_id` (sums multi-call chains like one pipeline run; entries without a `request_id` bucket into `(no request)`) |
 | `--weighted` | Weight tokens by type: cache 0.1x, output 5x |
 | `--feedback` | Show warning precision and rule breakdown |
 
@@ -110,7 +111,7 @@ python budgeter/tune.py [options]
 Log background agent token costs. Reads `<usage>` XML from stdin.
 
 ```bash
-echo '<usage>...</usage>' | python budgeter/log_agent_cost.py --session-id ID [--agent NAME] [--cwd DIR]
+echo '<usage>...</usage>' | python budgeter/log_agent_cost.py --session-id ID [--agent NAME] [--cwd DIR] [--request-id ID]
 ```
 
 | Flag | Required | Description |
@@ -118,6 +119,7 @@ echo '<usage>...</usage>' | python budgeter/log_agent_cost.py --session-id ID [-
 | `--session-id ID` | yes | Current session ID |
 | `--agent NAME` | no | Agent name (e.g. "startup") |
 | `--cwd DIR` | no | Working directory for config resolution |
+| `--request-id ID` | no | Optional grouping id for multi-call chains (e.g. one pipeline run). Surfaces in `report.py --by-request`. |
 
 ## clarifier/log_cost.py
 

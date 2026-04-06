@@ -40,7 +40,12 @@ _USAGE_RE = re.compile(r'<usage>.*?</usage>', re.DOTALL)
 
 
 def log_stage_cost(stage_name: str, pipeline_uuid: str, usage_xml: str) -> None:
-    """Pipe a <usage> XML block to budgeter/log_agent_cost.py. Never raises."""
+    """Pipe a <usage> XML block to budgeter/log_agent_cost.py. Never raises.
+
+    pipeline_uuid is used both as session_id (one logical session per pipeline run)
+    and as request_id (so 'budgeter/report.py --by-request' can sum every Claude call
+    that belonged to the same pipeline run, across all stages).
+    """
     if not LOG_AGENT_COST_SCRIPT.exists():
         print(f'WARN: cost logging skipped for {stage_name}: {LOG_AGENT_COST_SCRIPT} not found', file=sys.stderr)
         return
@@ -49,6 +54,7 @@ def log_stage_cost(stage_name: str, pipeline_uuid: str, usage_xml: str) -> None:
         '--session-id', pipeline_uuid,
         '--agent', f'pipeline-{stage_name}',
         '--cwd', str(REPO_ROOT),
+        '--request-id', pipeline_uuid,
     ]
     try:
         result = subprocess.run(cmd, input=usage_xml, text=True, capture_output=True, timeout=30, cwd=str(REPO_ROOT))

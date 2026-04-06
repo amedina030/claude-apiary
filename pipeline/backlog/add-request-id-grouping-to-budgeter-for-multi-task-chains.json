@@ -1,9 +1,0 @@
-{
-  "title": "Add request_id grouping to budgeter for multi-task chains",
-  "problem": "Budgeter currently groups tokens by session and task only. There is no way to ask 'how much did one pipeline run cost?' or 'how much did this discuss to elaborate to approve chain cost?' because the constituent agent calls are scattered across unrelated tasks in the same session. Without this, planning usage budgets for full pipeline runs requires manual stitching.",
-  "description": "TODO: Request grouping (request_id) for multi-task chains. Would link discuss \u2192 elaborate \u2192 approve chains under one ID and sum costs in report. Problem: unrelated tasks between flag and approval inflate the group total. Keep task-level accounting as default; request grouping only as optional report view (--by-request). Don't change feedback/tune.py cost basis. On hold \u2014 needs cleaner heuristic for what belongs in a group.\n\nAlso on hold: tune.py v2+ roadmap \u2014 keyword suggestions via TF-IDF analysis of expensive vs cheap tasks, new group proposals via clustering, and eventually a lightweight classifier trained on feedback.jsonl. All manual-confirm (no auto-writes). See archived note #7 for full design notes.",
-  "scope": "budgeter/log_agent_cost.py (accept --request-id), budgeter/report.py (--by-request view), pipeline/run.py and stage wrappers (propagate a per-run request_id to every spawned claude -p call), no changes to feedback/tune.py cost basis, no changes to default report views",
-  "context": "",
-  "created_at": "2026-04-06T16:00:47.009607+00:00",
-  "source": "7"
-}

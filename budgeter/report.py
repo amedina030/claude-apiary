@@ -324,6 +324,38 @@ def print_by_agent(entries, weighted=False):
         print(f"  Grand total: {sum(val(e) for e in entries):,} tokens")
 
 
+def print_by_request(entries, weighted=False):
+    """Group entries by the optional request_id field. Entries without a
+    request_id are bucketed into '(no request)' so the user can see what
+    fraction of activity is unattributed."""
+    val = weighted_delta if weighted else net_delta
+
+    by_req = {}
+    for e in entries:
+        rid = e.get("request_id") or "(no request)"
+        by_req.setdefault(rid, []).append(e)
+
+    if not by_req:
+        print("No entries found.")
+        return
+
+    print(f"{'REQUEST ID':<40} {'CALLS':>6} {'TOTAL':>14} {'MEDIAN':>12} {'MAX':>12}")
+    print("-" * 90)
+    # Sort by total tokens desc; "(no request)" naturally falls wherever its size puts it
+    for rid in sorted(by_req, key=lambda r: -sum(val(e) for e in by_req[r])):
+        items = by_req[rid]
+        deltas = [val(e) for e in items]
+        total = sum(deltas)
+        med = median(deltas)
+        mx = max(deltas)
+        rid_display = rid if len(rid) <= 38 else rid[:35] + "..."
+        print(f"  {rid_display:<38} {len(items):>6} {total:>14,} {med:>12,} {mx:>12,}")
+
+    print("-" * 90)
+    all_deltas = [val(e) for e in entries]
+    print(f"  {'TOTAL':<38} {len(entries):>6} {sum(all_deltas):>14,} {median(all_deltas):>12,} {max(all_deltas):>12,}")
+
+
 def _percentile(values, p):
     if not values:
         return 0
@@ -416,6 +448,7 @@ def main():
     parser.add_argument("--grouped", action="store_true", help="Group by session only (no task breakdown)")
     parser.add_argument("--by-turn", action="store_true", help="Alias for default (session > task grouping)")
     parser.add_argument("--by-agent", action="store_true", help="Show per-agent-type token breakdown")
+    parser.add_argument("--by-request", action="store_true", help="Group by request_id (sums multi-call chains like one pipeline run)")
     parser.add_argument("--all", action="store_true", help="Include zero-delta entries")
     parser.add_argument("--weighted", action="store_true", help="Weight tokens by type: cache 0.1x, output 5x (relative to input)")
     parser.add_argument("--feedback", action="store_true", help="Show warning precision and rule breakdown")
@@ -449,7 +482,9 @@ def main():
         print("No entries found.")
         return
 
-    if args.by_agent:
+    if args.by_request:
+        print_by_request(entries, weighted=args.weighted)
+    elif args.by_agent:
         print_by_agent(entries, weighted=args.weighted)
     elif args.flat:
         print_flat(entries, weighted=args.weighted)

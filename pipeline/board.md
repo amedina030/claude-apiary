@@ -6,6 +6,6 @@
 | pipeline-run-py-shows-full-stage-stderr-on-failure | Pipeline run.py shows full stage stderr on failure | done | | hand-fixed manually, not via pipeline |
 | make-claude-apiary-fully-portable-across-machines-and-oses | Make claude-apiary fully portable across machines and OSes | backlog | | |
 | document-portability-rules-in-memory-notes-and-claude-md | Document portability rules in memory notes and CLAUDE.md | done |  | memory files + MEMORY.md index + CLAUDE.md Portability section + scribe notes #174/#175 + settings.json audit appended to portability epic context. Scope item 8 (/dev/null line) skipped — that string lives in the harness env block, not user CLAUDE.md. |
-| add-request-id-grouping-to-budgeter-for-multi-task-chains | Add request_id grouping to budgeter for multi-task chains | backlog | | |
+| add-request-id-grouping-to-budgeter-for-multi-task-chains | Add request_id grouping to budgeter for multi-task chains | done |  | log_agent_cost.py --request-id flag, pipeline/run.py threads pipeline_uuid as request_id, report.py --by-request view. Smoke-tested end-to-end. Backward compat: pre-existing entries bucket into (no request). |
 | overnight-cron-pipeline-with-morning-branch-review-workflow | Overnight cron pipeline with morning branch review workflow | backlog | | |
 | pipeline-mark-done-cli-for-hand-fixed-tickets | Pipeline mark-done CLI for hand-fixed tickets | done |  | self-hosted: closed itself after build + smoke test |

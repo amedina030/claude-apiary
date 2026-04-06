@@ -29,12 +29,22 @@ _MAX_STDIN_BYTES = 64 * 1024  # 64 KB — far more than any <usage> block needs
 # (UUID format). Reject anything that could navigate the filesystem.
 _SESSION_ID_RE = re.compile(r'^[0-9a-fA-F\-]{1,64}$')
 
+# request_id may be a UUID or a short slug-style id; allow alphanumerics + hyphen + underscore
+_REQUEST_ID_RE = re.compile(r'^[0-9a-zA-Z_\-]{1,64}$')
+
 
 def _validate_session_id(session_id: str) -> str:
     """Raise ValueError if session_id contains path-traversal or unexpected chars."""
     if not session_id or not _SESSION_ID_RE.match(session_id):
         raise ValueError(f"Invalid session_id: {session_id!r}")
     return session_id
+
+
+def _validate_request_id(request_id: str) -> str:
+    """Raise ValueError if request_id contains unexpected chars."""
+    if not request_id or not _REQUEST_ID_RE.match(request_id):
+        raise ValueError(f"Invalid request_id: {request_id!r}")
+    return request_id
 
 
 def parse_usage(raw: str) -> dict:
@@ -53,6 +63,8 @@ def main():
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--agent", default="background-agent")
     parser.add_argument("--cwd", default="")
+    parser.add_argument("--request-id", default="",
+                        help="Optional grouping id for multi-call chains (e.g. one pipeline run)")
     args = parser.parse_args()
 
     if not flags.is_enabled("budgeter-log"):
@@ -63,6 +75,14 @@ def main():
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
+
+    request_id = ""
+    if args.request_id:
+        try:
+            request_id = _validate_request_id(args.request_id)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
 
     if args.cwd:
         logger.configure_for_project(args.cwd)
@@ -89,6 +109,8 @@ def main():
         "scope_flags": [],
         "project": args.cwd,
     }
+    if request_id:
+        entry["request_id"] = request_id
     logger.append_entry(entry)
     print(f"Logged {tokens} tokens for {args.agent}")
 
