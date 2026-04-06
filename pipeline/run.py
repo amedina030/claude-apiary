@@ -80,7 +80,13 @@ def extract_all_usage_blocks(text: str) -> list[str]:
 
 
 def parse_usage_fields(usage_xml: str) -> dict:
-    """Parse numeric fields from a <usage> XML block. Returns dict with int values."""
+    """Parse numeric fields from a <usage> XML block. Returns dict with int values.
+
+    Parses both the required legacy fields (total_tokens/tool_uses/duration_ms)
+    and the optional per-category breakdown (input/cache_read/cache_creation/
+    output) emitted by pipeline/cost_emit.py. Missing optional fields default
+    to 0 without setting _malformed — only missing legacy fields are flagged.
+    """
     result = {}
     for tag in ('total_tokens', 'tool_uses', 'duration_ms'):
         m = re.search(rf'<{tag}>\s*(\d+)\s*</{tag}>', usage_xml)
@@ -94,6 +100,16 @@ def parse_usage_fields(usage_xml: str) -> dict:
             result[tag] = 0
             if f'<{tag}>' in usage_xml:
                 result['_malformed'] = True
+    for tag in ('input_tokens', 'cache_read_input_tokens',
+                'cache_creation_input_tokens', 'output_tokens'):
+        m = re.search(rf'<{tag}>\s*(\d+)\s*</{tag}>', usage_xml)
+        if m:
+            try:
+                result[tag] = int(m.group(1))
+            except ValueError:
+                result[tag] = 0
+        else:
+            result[tag] = 0
     return result
 
 
@@ -139,6 +155,10 @@ def record_stage_cost(stage_name: str, pipeline_uuid: str, stdout_text: str, std
     total_tokens = 0
     total_tool_uses = 0
     total_duration_ms = 0
+    total_input = 0
+    total_cache_read = 0
+    total_cache_create = 0
+    total_output = 0
     any_malformed = False
     for usage_xml in blocks:
         fields = parse_usage_fields(usage_xml)
@@ -148,6 +168,10 @@ def record_stage_cost(stage_name: str, pipeline_uuid: str, stdout_text: str, std
         total_tokens += fields.get('total_tokens', 0)
         total_tool_uses += fields.get('tool_uses', 0)
         total_duration_ms += fields.get('duration_ms', 0)
+        total_input += fields.get('input_tokens', 0)
+        total_cache_read += fields.get('cache_read_input_tokens', 0)
+        total_cache_create += fields.get('cache_creation_input_tokens', 0)
+        total_output += fields.get('output_tokens', 0)
         # Log each call separately so the budgeter sees per-call granularity
         log_stage_cost(stage_name, pipeline_uuid, usage_xml)
 
@@ -155,32 +179,80 @@ def record_stage_cost(stage_name: str, pipeline_uuid: str, stdout_text: str, std
         print(f'WARN: one or more malformed <usage> blocks in stage {stage_name}', file=sys.stderr)
 
     status = 'logged' if total_tokens > 0 else ('malformed' if any_malformed else 'no_usage')
-    stage_costs.append({'stage': stage_name, 'tokens': total_tokens, 'tool_uses': total_tool_uses, 'duration_ms': total_duration_ms, 'status': status})
+    stage_costs.append({
+        'stage': stage_name,
+        'tokens': total_tokens,
+        'tool_uses': total_tool_uses,
+        'duration_ms': total_duration_ms,
+        'input_tokens': total_input,
+        'cache_read_tokens': total_cache_read,
+        'cache_create_tokens': total_cache_create,
+        'output_tokens': total_output,
+        'status': status,
+    })
 
 
 def print_cost_summary(stage_costs: list) -> None:
-    """Print a per-stage token cost summary."""
+    """Print a per-stage token cost summary.
+
+    When per-category breakdown is present (new cost_emit.py format), also
+    prints the cache-read fraction and a weighted token estimate using the
+    same input=1.0 / cache=0.1 / output=5.0 weights as budgeter/report.py.
+    """
     if not stage_costs:
         print('Cost summary: (no stages executed)')
         return
     print('Cost summary:')
     total_tokens = 0
+    total_weighted = 0
+    total_cache_read = 0
+    total_input_plus_create = 0
+    total_output = 0
     any_logged = False
+    any_breakdown = False
     for entry in stage_costs:
         stage = entry['stage']
         status = entry['status']
         if status == 'no_usage':
             print(f'  pipeline-{stage}: no usage reported')
-        elif status == 'malformed':
+            continue
+        if status == 'malformed':
             print(f'  pipeline-{stage}: malformed usage (counted as 0)')
+            continue
+        tokens = entry['tokens']
+        tool_uses = entry['tool_uses']
+        duration_ms = entry.get('duration_ms', 0)
+        input_t = entry.get('input_tokens', 0)
+        cache_read_t = entry.get('cache_read_tokens', 0)
+        cache_create_t = entry.get('cache_create_tokens', 0)
+        output_t = entry.get('output_tokens', 0)
+        has_breakdown = (input_t + cache_read_t + cache_create_t + output_t) > 0
+        if has_breakdown:
+            any_breakdown = True
+            # Match budgeter/report.py weights: input=1.0, cache=0.1, output=5.0.
+            # Cache-creation behaves like fresh input for cap accounting.
+            weighted = int((input_t + cache_create_t) * 1.0
+                           + cache_read_t * 0.1
+                           + output_t * 5.0)
+            fresh_in = input_t + cache_read_t + cache_create_t
+            cache_pct = (cache_read_t * 100.0 / fresh_in) if fresh_in > 0 else 0.0
+            print(f'  pipeline-{stage}: {tokens} tokens '
+                  f'(weighted ~{weighted}, cache {cache_pct:.0f}%, '
+                  f'{tool_uses} tool uses, {duration_ms}ms)')
+            total_weighted += weighted
+            total_cache_read += cache_read_t
+            total_input_plus_create += input_t + cache_create_t
+            total_output += output_t
         else:
-            tokens = entry['tokens']
-            tool_uses = entry['tool_uses']
-            duration_ms = entry.get('duration_ms', 0)
             print(f'  pipeline-{stage}: {tokens} tokens ({tool_uses} tool uses, {duration_ms}ms)')
-            total_tokens += tokens
-            any_logged = True
-    print(f'  TOTAL: {total_tokens} tokens')
+        total_tokens += tokens
+        any_logged = True
+    if any_breakdown:
+        fresh_total = total_input_plus_create + total_cache_read
+        cache_pct = (total_cache_read * 100.0 / fresh_total) if fresh_total > 0 else 0.0
+        print(f'  TOTAL: {total_tokens} tokens (weighted ~{total_weighted}, cache {cache_pct:.0f}%)')
+    else:
+        print(f'  TOTAL: {total_tokens} tokens')
 
 
 def run_stage(name: str, script_path: Path, input_path: Path) -> tuple[bool, str, str, float]:

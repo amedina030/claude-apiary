@@ -48,9 +48,23 @@ def _validate_request_id(request_id: str) -> str:
 
 
 def parse_usage(raw: str) -> dict:
-    """Extract fields from a <usage> XML block."""
+    """Extract fields from a <usage> XML block.
+
+    Recognizes both the legacy 3-field format (total_tokens/tool_uses/duration_ms)
+    and the extended 7-field format emitted by pipeline/cost_emit.py which
+    breaks out per-category token counts for weighted reporting.
+    """
     result = {}
-    for tag in ("total_tokens", "tool_uses", "duration_ms"):
+    tags = (
+        "total_tokens",
+        "input_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+        "output_tokens",
+        "tool_uses",
+        "duration_ms",
+    )
+    for tag in tags:
         # Limit digit match to 15 digits to avoid ReDoS / integer overflow
         match = re.search(rf"<{tag}>(\d{{1,15}})</{tag}>", raw)
         if match:
@@ -94,6 +108,19 @@ def main():
     if tokens <= 0:
         return
 
+    # Per-category breakdown for weighted reporting. Pipeline stages emit
+    # the extended <usage> format via pipeline/cost_emit.py; legacy 3-field
+    # callers simply leave these at 0 and fall back to net_delta in
+    # budgeter/report.py's weighted_delta().
+    input_tokens = usage.get("input_tokens", 0)
+    cache_read_tokens = usage.get("cache_read_input_tokens", 0)
+    cache_create_tokens = usage.get("cache_creation_input_tokens", 0)
+    output_tokens = usage.get("output_tokens", 0)
+    # Cache-creation writes cost ~1.25x fresh input; lump them into the
+    # fresh-input bucket since the budgeter's weighted model only has
+    # input/cache/output weights. Close enough for cap accounting.
+    input_tokens_delta = input_tokens + cache_create_tokens
+
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "session_id": session_id,
@@ -102,6 +129,9 @@ def main():
         "assistant_message": f"[background] {args.agent}",
         "user_message": "",
         "tokens_delta": tokens,
+        "input_tokens_delta": input_tokens_delta,
+        "cache_tokens_delta": cache_read_tokens,
+        "output_tokens_delta": output_tokens,
         "context_tokens": 0,
         "net_tokens_delta": tokens,
         "turn_number": 0,
