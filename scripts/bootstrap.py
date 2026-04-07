@@ -24,7 +24,7 @@ from core.utils.project import get_project_key, project_key_from_path  # noqa: E
 # legacy-state guard below to detect "needs migration first" scenarios.
 SCRIBE_OWNED = ("notes.jsonl", "learnings.jsonl", "memory")
 
-MIN_PYTHON = (3, 9)
+MIN_PYTHON = (3, 11)
 CLAUDE_DIR = Path.home() / ".claude"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
 AUTO_STARTUP_FLAG = CLAUDE_DIR / "auto-startup-enabled"
