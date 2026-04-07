@@ -4,7 +4,13 @@ Stop hook — preserves session metadata and history for handoff generation.
 
 Tracks current session in .last-session.json and maintains a ring buffer
 of recent sessions in .session-history.json with identity tags (role/mission).
+
+Skipped entirely when ``APIARY_RUNNER_SUBPROCESS=1`` is set in the env —
+runner stage subprocesses are not real user sessions and must not appear
+in the history ring buffer (#223). The constant name matches the canonical
+``RUNNER_SUBPROCESS_ENV_VAR`` defined in ``runner/claude_subprocess.py``.
 """
+import os
 import sys
 import json
 from datetime import datetime, timezone
@@ -17,6 +23,10 @@ CLAUDE_DIR = Path.home() / ".claude"
 SESSION_PATH = CLAUDE_DIR / ".last-session.json"
 HISTORY_PATH = CLAUDE_DIR / ".session-history.json"
 MAX_HISTORY = 10
+
+# Mirror of runner/claude_subprocess.py::RUNNER_SUBPROCESS_ENV_VAR. Hardcoded
+# rather than imported to avoid a core → runner dependency edge.
+RUNNER_SUBPROCESS_ENV_VAR = "APIARY_RUNNER_SUBPROCESS"
 
 
 def _append_to_history(session_id, transcript_path):
@@ -54,6 +64,13 @@ def _append_to_history(session_id, transcript_path):
 
 
 def main():
+    # Runner stage subprocesses are not real user sessions — never log them
+    # to .session-history.json or .last-session.json. They would otherwise
+    # appear permanently in the unseen-sessions list every time a fresh
+    # session starts (#223).
+    if os.environ.get(RUNNER_SUBPROCESS_ENV_VAR) == "1":
+        sys.exit(0)
+
     try:
         payload = json.loads(sys.stdin.read())
     except json.JSONDecodeError:
