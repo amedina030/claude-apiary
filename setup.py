@@ -69,12 +69,13 @@ def file_hash(path):
 
 
 def build_core_hooks():
-    """Build UserPromptSubmit, PreToolUse, and Stop hook entries for core hooks."""
+    """Build UserPromptSubmit, PreToolUse, PostToolUse, and Stop hook entries for core hooks."""
     prompt_startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_prompt_hook.py", PYTHON)
     install_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install.py", PYTHON)
     session_cmd = hook_cmd(CORE_DIR / "hooks" / "inject_session.py", PYTHON)
     startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_hook.py", PYTHON)
     stop_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install_stop.py", PYTHON)
+    error_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "context_rule_error_reminder.py", PYTHON)
     return {
         "UserPromptSubmit": [
             {"hooks": [{"type": "command", "command": prompt_startup_cmd}]},
@@ -83,6 +84,9 @@ def build_core_hooks():
             {"matcher": "", "hooks": [{"type": "command", "command": install_cmd}]},
             {"matcher": "", "hooks": [{"type": "command", "command": session_cmd}]},
             {"matcher": "", "hooks": [{"type": "command", "command": startup_cmd}]},
+        ],
+        "PostToolUse": [
+            {"matcher": "Bash", "hooks": [{"type": "command", "command": error_reminder_cmd}]},
         ],
         "Stop": [
             {"hooks": [{"type": "command", "command": stop_cmd}]}

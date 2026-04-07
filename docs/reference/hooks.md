@@ -39,6 +39,7 @@ Hooks are Python scripts registered in `~/.claude/settings.json` that fire at Cl
 | Transcript saver | Stop | `core/hooks/save_transcript.py` | Saves a stripped copy of the session transcript for handoff generation |
 | Startup context injector | UserPromptSubmit | `core/hooks/startup_prompt_hook.py` | Injects identity, notes summary, learnings, and CLI reference on the first user message |
 | Unseen session detector | PreToolUse | `core/hooks/startup_hook.py` | Detects unseen session transcripts on first tool call (gated by `auto-startup` flag) |
+| Context-rule error reminder | PostToolUse | `core/hooks/context_rule_error_reminder.py` | On Bash failure (non-zero exit, traceback, interrupted, is_error), injects the `recover_from_trivial_errors` behavioral rule and the `Errors Signal Doc Gaps` principle. Skips successes and hook denials. |
 
 ## Hook execution order
 
