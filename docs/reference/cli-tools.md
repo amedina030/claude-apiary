@@ -268,6 +268,40 @@ python setup.py --check
 | `--project-path PATH` | Install budgeter hooks for a specific project |
 | `--check` | Validate installation without making changes |
 
+## scripts/install_context_rules.py
+
+Install / sync / audit shareable context-rules into `~/.claude/CLAUDE.md`. Owns a marked managed zone wrapped in `<!-- apiary-context-rules-start --> ... <!-- apiary-context-rules-end -->` sentinels — content outside that zone is never touched. Hand-edits inside the zone are detected as tampering and require `--force`.
+
+```bash
+python scripts/install_context_rules.py                # interactive y/n/v per rule
+python scripts/install_context_rules.py --list
+python scripts/install_context_rules.py --install-all
+python scripts/install_context_rules.py --install <id>...
+python scripts/install_context_rules.py --install-category behavioral
+python scripts/install_context_rules.py --uninstall <id>...
+python scripts/install_context_rules.py --sync
+python scripts/install_context_rules.py --check
+python scripts/install_context_rules.py --diff <id>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--list` | List all rules with installed/out-of-date/tampered status |
+| `--install ID...` | Install specific rule ids |
+| `--install-all` | Install every rule under `context-rules/` |
+| `--install-category CAT` | Install all rules in a category (e.g. `behavioral`) |
+| `--uninstall ID...` | Remove specific rule ids; leaves outer zone intact |
+| `--sync` | Re-render currently-installed rules from source |
+| `--check` | Audit only; exit 1 on drift, 2 on tampering, 0 clean |
+| `--diff ID` | Unified diff between installed body and source body |
+| `--dry-run` | Print what would change without writing |
+| `--force` | Bypass tamper checks and rebuild the zone |
+| `--replace-stopgap` | Strip known stopgap inline rule paragraphs before injecting |
+| `--target PATH` | Override CLAUDE.md target (default: `~/.claude/CLAUDE.md`) |
+| `--rules-dir PATH` | Override source rules directory (default: `context-rules/`) |
+
+Exit codes: `0` clean, `1` drift detected, `2` tampering detected, `64` usage error.
+
 ## runner/run.py
 
 End-to-end runner orchestrator. Sequences all 6 stages, passes artifact paths via UUID convention, stops on any stage failure.

@@ -75,7 +75,16 @@ Quick decision tree:
 
 ## Git commits
 
-**Never add `Co-Authored-By: Claude` (or any model-specific variant) to commit messages.** This overrides the default Claude Code commit guidance baked into the system prompt. The user does not want Claude attributed as a co-author on the contributor graph. Applies to all flavors of commit — direct, amend, merge, squash, cherry-pick, `/commit` skill, etc.
+The "no Co-Authored-By Claude" rule is now a context-rule shipped via apiary's
+context-rules system. Install it (along with the other behavioral rules) into
+your global `~/.claude/CLAUDE.md` with:
+
+```bash
+python scripts/install_context_rules.py --install-all
+```
+
+Source: `context-rules/behavioral/no_coauthored_by.md`. The bootstrap script
+prompts to install all context-rules on first run.
 
 ---
 

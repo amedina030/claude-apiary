@@ -185,6 +185,64 @@ def _print_summary(result: BootstrapResult, project_key: str, quiet: bool) -> No
             print(f"  ! {w}")
 
 
+def _prompt_context_rules_install(quiet: bool, assume_yes: bool) -> None:
+    """Final bootstrap phase: offer to install apiary context-rules into
+    ~/.claude/CLAUDE.md. Idempotent — if everything is already installed and
+    in sync, this is a no-op (silent under --quiet).
+    """
+    try:
+        from core import context_rules as cr  # noqa: WPS433 (lazy import is intentional)
+    except Exception:
+        return
+
+    try:
+        rules = cr.load_all_rules()
+    except Exception:
+        return
+    if not rules:
+        return
+
+    claude_md = CLAUDE_DIR / "CLAUDE.md"
+    text = claude_md.read_text(encoding="utf-8") if claude_md.exists() else ""
+
+    try:
+        report = cr.compute_drift(text, rules)
+    except Exception:
+        return
+
+    if not report.not_installed and report.clean:
+        if not quiet:
+            print("context-rules: already installed and in sync")
+        return
+
+    print()
+    print("context-rules available for install into ~/.claude/CLAUDE.md:")
+    for rid in report.not_installed:
+        print(f"  + {rid}")
+    if report.hash_mismatch:
+        print(f"  ~ {len(report.hash_mismatch)} rule(s) out of date")
+    if report.tampered_bodies or report.stray_text:
+        print("  ! managed zone has manual edits — install will refuse without --force")
+
+    if assume_yes:
+        answer = "y"
+    else:
+        try:
+            answer = input("install all? [Y/n]: ").strip().lower() or "y"
+        except EOFError:
+            answer = "n"
+    if answer != "y":
+        print("skipped context-rules install")
+        return
+
+    import subprocess
+    cmd = [sys.executable, str(REPO_ROOT / "scripts" / "install_context_rules.py"), "--install-all"]
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"context-rules install failed (exit {e.returncode})")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -192,10 +250,24 @@ def main() -> int:
         action="store_true",
         help="Only print warnings and a project-key line if anything was created.",
     )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Assume 'yes' to all prompts (e.g. context-rules install).",
+    )
+    parser.add_argument(
+        "--no-context-rules",
+        action="store_true",
+        help="Skip the context-rules install prompt.",
+    )
     args = parser.parse_args()
 
     result = bootstrap(REPO_ROOT)
     _print_summary(result, get_project_key(REPO_ROOT), quiet=args.quiet)
+
+    if not args.no_context_rules:
+        _prompt_context_rules_install(quiet=args.quiet, assume_yes=args.yes)
+
     return 1 if result.warnings else 0
 
 
