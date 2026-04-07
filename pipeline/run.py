@@ -11,14 +11,22 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import re
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 from config_loader import get as cfg
+from detached_lib import (
+    slugify, short_uuid, pick_backlog_item, hygiene_precheck,
+    all_backlog_items_claimed, append_overnight_log,
+    git_create_branch, git_commit_all, git_checkout,
+    OVERNIGHT_LOG, BACKLOG_DIR, INTAKE_DIR,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
@@ -255,6 +263,180 @@ def print_cost_summary(stage_costs: list) -> None:
         print(f'  TOTAL: {total_tokens} tokens')
 
 
+def cumulative_tokens(stage_costs: list) -> int:
+    """Sum tokens across all stage cost entries."""
+    return sum(entry.get('tokens', 0) for entry in stage_costs)
+
+
+def run_detached(cli_args) -> int:
+    """Run pipeline in detached (cron) mode. Returns exit code 0 or 1."""
+    token_cap = cli_args.token_cap if cli_args.token_cap is not None else cfg('detached', 'token_cap', 2000000)
+    max_unreviewed = cli_args.max_unreviewed if cli_args.max_unreviewed is not None else cfg('detached', 'max_unreviewed', 5)
+    start_ts = datetime.datetime.utcnow().isoformat() + 'Z'
+
+    def _now() -> str:
+        return datetime.datetime.utcnow().isoformat() + 'Z'
+
+    # Hygiene precheck
+    reason = hygiene_precheck(max_unreviewed)
+    if reason:
+        append_overnight_log({
+            'start_ts': start_ts,
+            'end_ts': _now(),
+            'exit_status': f'skipped: {reason}',
+            'stages_completed': 0,
+            'total_tokens': 0,
+            'uuid': None,
+            'slug': None,
+            'branch': None,
+        })
+        return 0
+
+    # Resolve intake path
+    if cli_args.intake is not None:
+        picked_path = Path(cli_args.intake)
+        from_backlog = False
+    else:
+        picked_path = pick_backlog_item()
+        from_backlog = True
+        if picked_path is None:
+            reason = 'all in progress' if all_backlog_items_claimed() else 'backlog empty'
+            append_overnight_log({
+                'start_ts': start_ts,
+                'end_ts': _now(),
+                'exit_status': f'skipped: {reason}',
+                'stages_completed': 0,
+                'total_tokens': 0,
+                'uuid': None,
+                'slug': None,
+                'branch': None,
+            })
+            return 0
+
+    # Load intake JSON
+    try:
+        intake = json.loads(picked_path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError) as e:
+        print(f'ERROR: could not read intake file {picked_path}: {e}', file=sys.stderr)
+        append_overnight_log({
+            'start_ts': start_ts,
+            'end_ts': _now(),
+            'exit_status': 'intake_read_failed',
+            'stages_completed': 0,
+            'total_tokens': 0,
+            'uuid': None,
+            'slug': None,
+            'branch': None,
+        })
+        return 1
+
+    uuid = intake.get('id')
+    if not isinstance(uuid, str):
+        uuid = None
+    if uuid:
+        uuid = uuid.strip()
+    if not uuid:
+        print('ERROR: intake file missing id field', file=sys.stderr)
+        append_overnight_log({
+            'start_ts': start_ts,
+            'end_ts': _now(),
+            'exit_status': 'intake_invalid_id',
+            'stages_completed': 0,
+            'total_tokens': 0,
+            'uuid': None,
+            'slug': None,
+            'branch': None,
+        })
+        return 1
+
+    title = intake.get('title', 'Untitled')
+    slug = slugify(title)
+    branch = f'pipeline/{slug}-{short_uuid()}'
+
+    # Create branch
+    ok, err = git_create_branch(branch)
+    if not ok:
+        print(f'ERROR: git branch setup failed: {err}', file=sys.stderr)
+        append_overnight_log({
+            'start_ts': start_ts,
+            'end_ts': _now(),
+            'exit_status': 'git_setup_failed',
+            'stderr': err,
+            'uuid': uuid,
+            'slug': slug,
+            'branch': None,
+            'stages_completed': 0,
+            'total_tokens': 0,
+        })
+        return 1
+
+    # Move backlog item to intake dir
+    INTAKE_DIR.mkdir(parents=True, exist_ok=True)
+    intake_dest = INTAKE_DIR / f'{uuid}.json'
+    if from_backlog and picked_path.resolve() != intake_dest.resolve():
+        shutil.copy2(str(picked_path), str(intake_dest))
+        try:
+            picked_path.unlink()
+        except OSError as e:
+            print(f'WARN: could not remove backlog file {picked_path}: {e}', file=sys.stderr)
+
+    # Build artifacts dict
+    artifacts = {
+        'intake':    SCRIPT_DIR / 'intake'     / f'{uuid}.json',
+        'spec':      SCRIPT_DIR / 'specs'      / f'{uuid}.json',
+        'plan':      SCRIPT_DIR / 'plans'      / f'{uuid}.json',
+        'execution': SCRIPT_DIR / 'executions' / f'{uuid}.json',
+        'harden':    SCRIPT_DIR / 'hardens'    / f'{uuid}.json',
+        'report':    SCRIPT_DIR / 'reports'    / f'{uuid}.json',
+    }
+
+    stage_costs: list[dict] = []
+    stages_completed = 0
+    exit_status = 'ok'
+
+    for name, script_name, input_key in STAGES:
+        script_path = SCRIPT_DIR / script_name
+        input_path = artifacts[input_key]
+
+        ok, stdout_text, stderr_text, _elapsed = run_stage(name, script_path, input_path)
+        record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
+
+        if cumulative_tokens(stage_costs) > token_cap:
+            exit_status = 'token_cap_exceeded'
+            break
+
+        if not ok:
+            exit_status = f'stage_failed:{name}'
+            break
+
+        stages_completed += 1
+
+    # Commit work
+    commit_msg = f'pipeline/{uuid}: {title}'
+    commit_ok, commit_err = git_commit_all(commit_msg)
+    if not commit_ok:
+        print(f'WARN: git commit failed: {commit_err}', file=sys.stderr)
+
+    end_ts = _now()
+    entry = {
+        'start_ts': start_ts,
+        'end_ts': end_ts,
+        'uuid': uuid,
+        'slug': slug,
+        'branch': branch,
+        'stages_completed': stages_completed,
+        'total_tokens': cumulative_tokens(stage_costs),
+        'exit_status': exit_status,
+    }
+    append_overnight_log(entry)
+
+    checkout_ok, checkout_err = git_checkout('master')
+    if not checkout_ok:
+        print(f'WARN: git checkout master failed: {checkout_err}', file=sys.stderr)
+
+    return 0 if exit_status == 'ok' else 1
+
+
 def run_stage(name: str, script_path: Path, input_path: Path) -> tuple[bool, str, str, float]:
     """Run a stage subprocess. Returns (success, stdout, stderr, elapsed_seconds)."""
     if not script_path.exists():
@@ -282,15 +464,29 @@ def run_stage(name: str, script_path: Path, input_path: Path) -> tuple[bool, str
 
 def main():
     parser = argparse.ArgumentParser(description="Pipeline orchestrator")
-    parser.add_argument("intake", help="Path to intake JSON file")
+    parser.add_argument("intake", nargs='?', default=None, help="Path to intake JSON file")
     parser.add_argument("--resume-from", dest="resume_from", default=None,
                         help="Resume from a specific stage (skip earlier stages)")
+    parser.add_argument("--detached", action="store_true", default=False,
+                        help="Run in detached (cron) mode: pick from backlog, branch, commit, log")
+    parser.add_argument("--token-cap", dest="token_cap", type=int, default=None,
+                        help="Per-run token cap (detached mode); defaults to config detached.token_cap")
+    parser.add_argument("--max-unreviewed", dest="max_unreviewed", type=int, default=None,
+                        help="Max unmerged pipeline branches before skipping (detached mode)")
     cli_args = parser.parse_args()
+
+    # Detached mode: hand off entirely, then exit
+    if cli_args.detached:
+        sys.exit(run_detached(cli_args))
 
     # Validate --resume-from against known stage names
     stage_names = [name for name, _, _ in STAGES]
     if cli_args.resume_from is not None and cli_args.resume_from not in stage_names:
         print(f"Unknown stage: {cli_args.resume_from}. Valid stages: {', '.join(stage_names)}", file=sys.stderr)
+        sys.exit(1)
+
+    if cli_args.intake is None:
+        print("intake path is required in interactive mode (use --detached for cron mode)", file=sys.stderr)
         sys.exit(1)
 
     intake_path = Path(cli_args.intake)
