@@ -59,17 +59,26 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "",
         "## Instructions",
         "",
-        "1. Read only the specific files mentioned in the spec (e.g. "
+        "1. ALWAYS read CLAUDE.md (project root) and docs/standards/code-style.md "
+        "BEFORE deciding on test frameworks, library choices, naming conventions, "
+        "module structure, or file I/O patterns. These two files document hard "
+        "rules in this codebase: stdlib only (no external dependencies), "
+        "use unittest (no pytest), explicit encoding='utf-8' on file I/O, "
+        "pathlib.Path end-to-end (no string concatenation), no shell=True, no "
+        "absolute paths. Reading these two files does NOT count against the "
+        "search budget below. A plan that proposes pytest, requests, or any "
+        "external dependency will be rejected by the validator.",
+        "2. Read only the specific files mentioned in the spec (e.g. "
         "files_to_modify, related_files, or files referenced in acceptance "
         "criteria). If you must locate something the spec does not name, use "
         "Grep/Glob sparingly — at most 3 search queries total, and prefer "
         "narrow glob patterns over broad content searches. Do not do "
         "exploratory reading of unrelated parts of the codebase: every extra "
         "file you open is charged against this stage's token budget.",
-        "2. Decompose the spec into ordered implementation steps. Each step should be "
+        "3. Decompose the spec into ordered implementation steps. Each step should be "
         "granular enough that a coding model (Sonnet) can implement it without "
         "making design decisions.",
-        "3. For each step, write a code_spec whose format depends on the action:",
+        "4. For each step, write a code_spec whose format depends on the action:",
         "   - action='create'/'modify'/'delete': freeform pseudocode — function "
         "signatures, logic flow, imports, what to add/change. Be specific.",
         "   - action='test': a SINGLE shell command on one line, with NO "
@@ -80,13 +89,13 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "fails (e.g. 'Run' is tried as a Windows binary).",
         "   - action='verify': the verification check description (what to "
         "confirm and how). The executor passes it to a Claude verify call.",
-        "4. For 'modify' and 'delete' actions, the files listed MUST exist in the "
+        "5. For 'modify' and 'delete' actions, the files listed MUST exist in the "
         "codebase. For 'create' actions, the files are new.",
-        "5. Always include at least one 'verify' step at the end that describes "
+        "6. Always include at least one 'verify' step at the end that describes "
         "how to confirm the implementation works.",
-        "6. Ensure every acceptance criterion from the spec is covered by at "
+        "7. Ensure every acceptance criterion from the spec is covered by at "
         "least one step's description or code_spec.",
-        "7. Set depends_on to reference step_numbers that must complete before "
+        "8. Set depends_on to reference step_numbers that must complete before "
         "this step can start. No circular dependencies.",
         "",
         "## Output format",

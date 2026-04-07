@@ -34,6 +34,19 @@ _PROSE_STARTERS = {
     "please", "here", "the", "we", "you",
 }
 
+# Banned tokens — substrings that, if found in any step's code_spec or
+# description, indicate the planner ignored project conventions documented
+# in CLAUDE.md and docs/standards/code-style.md. Hard rule violations only:
+# things the codebase forbids outright. Extend this map as new violations
+# are caught in pipeline runs. The reason string is shown to the planner
+# on retry so it can correct course.
+_BANNED_TOKENS = {
+    "pytest": "use unittest (stdlib) — see docs/standards/code-style.md",
+    "shell=true": "shell=True is banned — use list-form subprocess args",
+    "import requests": "external dependencies are banned — stdlib only",
+    "from requests": "external dependencies are banned — stdlib only",
+}
+
 
 def _detect_cycles(steps: list[dict]) -> list[str]:
     """Detect circular dependencies in step graph. Returns error strings."""
@@ -115,6 +128,31 @@ def _check_test_code_spec_format(steps: list[dict]) -> list[str]:
                 f"'{first_word}' — must begin with the actual shell command "
                 f"itself (e.g. 'python -m unittest ...')."
             )
+    return errors
+
+
+def _check_banned_tokens(steps: list[dict]) -> list[str]:
+    """Reject plans whose code_spec or description references banned tokens.
+
+    The planner has access to CLAUDE.md and docs/standards/code-style.md and
+    is explicitly told the hard rules in the auto_plan prompt. If it still
+    proposes pytest, shell=True, or external imports, the validator catches
+    it before any code gets written. Errors flow into the existing 3-attempt
+    retry loop in auto_plan, so the planner gets a chance to self-correct.
+    """
+    errors = []
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        haystack = " ".join([
+            str(step.get("code_spec", "")),
+            str(step.get("description", "")),
+        ]).lower()
+        for token, reason in _BANNED_TOKENS.items():
+            if token in haystack:
+                errors.append(
+                    f"step[{i}]: banned token '{token}' found in plan — {reason}"
+                )
     return errors
 
 
@@ -238,6 +276,9 @@ def validate(data: dict) -> list[str]:
 
     # Test-action code_spec format check (must be a shell command, not prose)
     errors.extend(_check_test_code_spec_format(steps))
+
+    # Banned-token check (project convention violations: pytest, shell=True, etc.)
+    errors.extend(_check_banned_tokens(steps))
 
     # Acceptance criteria coverage
     if isinstance(spec, dict):
