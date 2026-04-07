@@ -22,11 +22,18 @@ from pathlib import Path
 
 from config_loader import get as cfg
 from detached_lib import (
-    slugify, short_uuid, pick_backlog_item, hygiene_precheck,
+    slugify, pick_backlog_item, hygiene_precheck,
     all_backlog_items_claimed, append_overnight_log,
     git_create_branch, git_commit_all, git_checkout,
     OVERNIGHT_LOG, BACKLOG_DIR, INTAKE_DIR,
 )
+
+# Stages that legitimately make no Claude calls and so always emit zero
+# <usage> blocks. Used by run_detached's no_usage safety check (ATK-010):
+# any other stage producing no_usage in detached mode is treated as a
+# token-accounting failure and aborts the run, since cumulative tokens
+# would otherwise stay 0 forever and bypass the cap.
+NO_USAGE_STAGES = frozenset({'validate_intake'})
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
@@ -272,10 +279,10 @@ def run_detached(cli_args) -> int:
     """Run pipeline in detached (cron) mode. Returns exit code 0 or 1."""
     token_cap = cli_args.token_cap if cli_args.token_cap is not None else cfg('detached', 'token_cap', 2000000)
     max_unreviewed = cli_args.max_unreviewed if cli_args.max_unreviewed is not None else cfg('detached', 'max_unreviewed', 5)
-    start_ts = datetime.datetime.utcnow().isoformat() + 'Z'
+    start_ts = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
 
     def _now() -> str:
-        return datetime.datetime.utcnow().isoformat() + 'Z'
+        return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
 
     # Hygiene precheck
     reason = hygiene_precheck(max_unreviewed)
@@ -349,9 +356,35 @@ def run_detached(cli_args) -> int:
         })
         return 1
 
+    # ATK-008: reject path-traversal characters in uuid before it is interpolated
+    # into intake_dest and artifact paths. Mirrors the guard in interactive main().
+    if (
+        '\\' in uuid
+        or '\x00' in uuid
+        or uuid in ('.', '..')
+        or Path(uuid) != Path(Path(uuid).name)
+        or not Path(uuid).name
+    ):
+        print('ERROR: intake id field contains invalid characters (path separators not allowed)', file=sys.stderr)
+        append_overnight_log({
+            'start_ts': start_ts,
+            'end_ts': _now(),
+            'exit_status': 'intake_invalid_id_path',
+            'stages_completed': 0,
+            'total_tokens': 0,
+            'uuid': None,
+            'slug': None,
+            'branch': None,
+        })
+        return 1
+
     title = intake.get('title', 'Untitled')
     slug = slugify(title)
-    branch = f'pipeline/{slug}-{short_uuid()}'
+    # ATK-003/004/005: encode the full intake uuid in the branch name so
+    # _branch_exists_for_uuid's substring match actually works. Without this,
+    # pick_backlog_item / all_backlog_items_claimed could not detect that an
+    # item is already claimed by an in-flight branch.
+    branch = f'pipeline/{slug}-{uuid}'
 
     # Create branch
     ok, err = git_create_branch(branch)
@@ -401,6 +434,21 @@ def run_detached(cli_args) -> int:
         ok, stdout_text, stderr_text, _elapsed = run_stage(name, script_path, input_path)
         record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
 
+        # ATK-010: in detached mode the cap is the only safety against runaway
+        # cost. A stage that emits zero <usage> blocks would leave cumulative
+        # tokens at 0 forever, defeating the cap. Stages in NO_USAGE_STAGES are
+        # known to make no Claude calls; for any other stage, no_usage means
+        # token accounting is broken and we must abort fail-closed.
+        last = stage_costs[-1] if stage_costs else None
+        if (
+            ok
+            and last is not None
+            and last.get('status') == 'no_usage'
+            and name not in NO_USAGE_STAGES
+        ):
+            exit_status = f'no_usage_in_stage:{name}'
+            break
+
         if cumulative_tokens(stage_costs) > token_cap:
             exit_status = 'token_cap_exceeded'
             break
@@ -411,11 +459,25 @@ def run_detached(cli_args) -> int:
 
         stages_completed += 1
 
-    # Commit work
+    # Commit work. ATK-001: capture commit failure into exit_status so the log
+    # entry does not falsely report 'ok' when no artifacts were committed.
     commit_msg = f'pipeline/{uuid}: {title}'
     commit_ok, commit_err = git_commit_all(commit_msg)
     if not commit_ok:
         print(f'WARN: git commit failed: {commit_err}', file=sys.stderr)
+        if exit_status == 'ok':
+            exit_status = 'commit_failed'
+
+    # ATK-002: must_not_break requires that cron always restore master on exit.
+    # If the checkout fails, capture it in the entry's exit_status (so morning
+    # review surfaces it) and return non-zero so cron sees the failure.
+    checkout_ok, checkout_err = git_checkout('master')
+    if not checkout_ok:
+        print(f'ERROR: git checkout master failed: {checkout_err}', file=sys.stderr)
+        if exit_status == 'ok':
+            exit_status = 'checkout_master_failed'
+        else:
+            exit_status = f'{exit_status}+checkout_master_failed'
 
     end_ts = _now()
     entry = {
@@ -429,10 +491,6 @@ def run_detached(cli_args) -> int:
         'exit_status': exit_status,
     }
     append_overnight_log(entry)
-
-    checkout_ok, checkout_err = git_checkout('master')
-    if not checkout_ok:
-        print(f'WARN: git checkout master failed: {checkout_err}', file=sys.stderr)
 
     return 0 if exit_status == 'ok' else 1
 

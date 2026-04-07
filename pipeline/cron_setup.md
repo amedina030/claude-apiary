@@ -39,8 +39,8 @@ Edit `pipeline/config.json` to tune limits before registering:
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `token_cap` | 50000 | Max tokens Claude may spend per detached run |
-| `max_unreviewed` | 3 | Blocks new runs when this many pipeline branches await review |
+| `token_cap` | 2000000 | Max tokens Claude may spend per detached run |
+| `max_unreviewed` | 5 | Blocks new runs when this many pipeline branches await review |
 
 ## Morning review
 
