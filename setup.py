@@ -2,7 +2,7 @@
 """
 Setup script for claude-apiary.
 
-Installs all tools (budgeter hooks, clarifier agent/commands) into the Claude Code
+Installs all tools (budgeter hooks, scribe commands, etc.) into the Claude Code
 environment. Safe to re-run — existing claude-apiary entries are replaced, not duplicated.
 
 Usage:
@@ -21,7 +21,6 @@ from pathlib import Path
 
 APIS_DIR = Path(__file__).parent.resolve()
 BUDGETER_DIR = APIS_DIR / "budgeter"
-CLARIFIER_DIR = APIS_DIR / "clarifier"
 SCRIBE_DIR = APIS_DIR / "scribe"
 DOCS_DIR = APIS_DIR / "docs"
 REFINER_DIR = APIS_DIR / "refiner"
@@ -136,13 +135,10 @@ def install_pre_commit_hook():
 
 def write_manifest(claude_dir: Path):
     """Write .install-manifest.json with hashes of all installed files."""
-    installed_files = [
-        {"label": "clarifier agent", "installed_path": str(claude_dir / "agents" / "clarifier.md"),
-         "source_path": str(CLARIFIER_DIR / "agents" / "clarifier.md")},
-    ]
+    installed_files = []
 
     # Add all command files
-    for cmd_dir in [BUDGETER_DIR / "commands", CLARIFIER_DIR / "commands", SCRIBE_DIR / "commands", CORE_DIR / "commands", DOCS_DIR / "commands", REFINER_DIR / "commands", HARDEN_DIR / "commands"]:
+    for cmd_dir in [BUDGETER_DIR / "commands", SCRIBE_DIR / "commands", CORE_DIR / "commands", DOCS_DIR / "commands", REFINER_DIR / "commands", HARDEN_DIR / "commands"]:
         if cmd_dir.is_dir():
             for cmd_file in cmd_dir.glob("*.md"):
                 installed_files.append({
@@ -177,15 +173,10 @@ def check_claude_md(claude_dir: Path):
         print(f"  CLAUDE.md        : {claude_md} not found (create manually)")
 
 
-def install_clarifier(claude_dir: Path):
-    """Copy clarifier agent and command files into the Claude Code directories."""
-    agents_dir = claude_dir / "agents"
+def install_commands(claude_dir: Path):
+    """Copy budgeter, scribe, and core command files into ~/.claude/commands/."""
     commands_dir = claude_dir / "commands"
-    agents_dir.mkdir(parents=True, exist_ok=True)
     commands_dir.mkdir(parents=True, exist_ok=True)
-
-    shutil.copy2(CLARIFIER_DIR / "agents" / "clarifier.md", agents_dir / "clarifier.md")
-    shutil.copy2(CLARIFIER_DIR / "commands" / "run-clarifier-tests.md", commands_dir / "run-clarifier-tests.md")
 
     # Budgeter commands
     for cmd_file in (BUDGETER_DIR / "commands").glob("*.md"):
@@ -199,24 +190,7 @@ def install_clarifier(claude_dir: Path):
     for cmd_file in (CORE_DIR / "commands").glob("*.md"):
         shutil.copy2(cmd_file, commands_dir / cmd_file.name)
 
-    print(f"  Clarifier agent  : {agents_dir / 'clarifier.md'}")
     print(f"  Commands         : {commands_dir}")
-
-
-def install_test_suite(claude_dir: Path):
-    """Optionally install clarifier test suite files."""
-    fixtures_dst = claude_dir / "test-fixtures"
-    fixtures_dst.mkdir(parents=True, exist_ok=True)
-
-    shutil.copy2(
-        CLARIFIER_DIR / "test-suite" / "clarifier-test-suite.md",
-        claude_dir / "clarifier-test-suite.md",
-    )
-    for f in (CLARIFIER_DIR / "test-suite" / "fixtures").glob("*"):
-        shutil.copy2(f, fixtures_dst / f.name)
-
-    print(f"  Test suite       : {claude_dir / 'clarifier-test-suite.md'}")
-    print(f"  Test fixtures    : {fixtures_dst}")
 
 
 def run_check():
@@ -327,12 +301,7 @@ def run_check():
     print(f"  {'ON  ' if warn_flag.exists() else 'OFF '} budgeter-warn: {warn_flag}")
     print()
 
-    # 3. Clarifier
-    print("[Clarifier]")
-    check_file(claude_dir / "agents" / "clarifier.md", "Agent definition")
-    print()
-
-    # 4. Commands
+    # 3. Commands
     print("[Commands]")
     commands_dir = claude_dir / "commands"
     if commands_dir.is_dir():
@@ -344,7 +313,7 @@ def run_check():
         fail("Commands directory not found")
     print()
 
-    # 5. Manifest / drift detection
+    # 4. Manifest / drift detection
     print("[Manifest]")
     manifest_path = claude_dir / ".install-manifest.json"
     if manifest_path.exists():
@@ -373,7 +342,7 @@ def run_check():
         fail("Manifest: not found (run setup.py --global to create)")
     print()
 
-    # 6. Pre-commit hook
+    # 5. Pre-commit hook
     print("[Pre-commit]")
     git_hooks_dir = APIS_DIR / ".git" / "hooks"
     pre_commit = git_hooks_dir / "pre-commit"
@@ -389,7 +358,7 @@ def run_check():
             fail(f"Pre-commit hook exists but doesn't run docs/check.py")
     print()
 
-    # 7. Python
+    # 6. Python
     print("[Runtime]")
     ok(f"Python: {PYTHON}")
     ok(f"claude-apiary: {APIS_DIR}")
@@ -478,11 +447,6 @@ def main():
         action="store_true",
         help="Validate the installation without making changes",
     )
-    parser.add_argument(
-        "--with-test-suite",
-        action="store_true",
-        help="Also install the clarifier test suite files (global install only)",
-    )
     args = parser.parse_args()
 
     if args.check:
@@ -521,11 +485,9 @@ def main():
                 json.dump(default_config, f, indent=2)
         (claude_dir / "budgeter-tmp").mkdir(exist_ok=True)
 
-    # Install clarifier (global only — agent/command files live in ~/.claude)
+    # Install commands (global only — command files live in ~/.claude)
     if args.global_install:
-        install_clarifier(claude_dir)
-        if args.with_test_suite:
-            install_test_suite(claude_dir)
+        install_commands(claude_dir)
         check_claude_md(claude_dir)
 
         # Docs commands

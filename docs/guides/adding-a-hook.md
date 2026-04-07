@@ -4,7 +4,7 @@ title: Adding a Hook
 scope: project
 description: End-to-end steps for writing a new hook, registering it in setup.py, and testing
 framework_version: "1.0"
-last_verified: 2026-04-02
+last_verified: 2026-04-07
 ---
 
 # Adding a Hook
@@ -14,7 +14,7 @@ How to add a new Python hook to the project.
 ## Prerequisites
 
 - Understand the hook lifecycle events: PreToolUse, PostToolUse, Stop (see [Hook Lifecycle](../architecture/hook-lifecycle.md))
-- Know which tool the hook belongs to (budgeter, clarifier, scribe, core, or a new tool)
+- Know which tool the hook belongs to (budgeter, scribe, core, or a new tool)
 
 ## Steps
 

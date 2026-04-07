@@ -51,7 +51,7 @@ def parse_usage(raw: str) -> dict:
     """Extract fields from a <usage> XML block.
 
     Recognizes both the legacy 3-field format (total_tokens/tool_uses/duration_ms)
-    and the extended 7-field format emitted by pipeline/cost_emit.py which
+    and the extended 7-field format emitted by runner/cost_emit.py which
     breaks out per-category token counts for weighted reporting.
     """
     result = {}
@@ -78,7 +78,7 @@ def main():
     parser.add_argument("--agent", default="background-agent")
     parser.add_argument("--cwd", default="")
     parser.add_argument("--request-id", default="",
-                        help="Optional grouping id for multi-call chains (e.g. one pipeline run)")
+                        help="Optional grouping id for multi-call chains (e.g. one runner run)")
     args = parser.parse_args()
 
     if not flags.is_enabled("budgeter-log"):
@@ -108,8 +108,8 @@ def main():
     if tokens <= 0:
         return
 
-    # Per-category breakdown for weighted reporting. Pipeline stages emit
-    # the extended <usage> format via pipeline/cost_emit.py; legacy 3-field
+    # Per-category breakdown for weighted reporting. Runner stages emit
+    # the extended <usage> format via runner/cost_emit.py; legacy 3-field
     # callers simply leave these at 0 and fall back to net_delta in
     # budgeter/report.py's weighted_delta().
     input_tokens = usage.get("input_tokens", 0)

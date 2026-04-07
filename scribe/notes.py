@@ -9,7 +9,7 @@ Requires PYTHONUTF8=1 environment variable on Windows (set by setup.py).
 
 Usage:
     notes.py add --type todo --content "..." --session-id X [--auto] [--role X] [--mission X]
-    notes.py list [--type X] [--session X] [--search X] [--last N] [--all] [--archive] [--role X] [--mission X]
+    notes.py list [--type X] [--session X] [--search X] [--last N | --limit N] [--all] [--archive] [--role X] [--mission X]
     notes.py learn --content "..." [--session-id X] [--role X] [--mission X]
     notes.py learnings [--search X] [--role X] [--mission X]
     notes.py get <id>
@@ -773,7 +773,8 @@ def main():
     p_list.add_argument("--type", choices=VALID_TYPES)
     p_list.add_argument("--session")
     p_list.add_argument("--search")
-    p_list.add_argument("--last", type=int)
+    p_list.add_argument("--last", "--limit", type=int, dest="last",
+                        help="Show only the N most recent matching notes (--limit is an alias)")
     p_list.add_argument("--all", action="store_true", help="Include done notes")
     p_list.add_argument("--archive", action="store_true", help="Search archive instead")
     p_list.add_argument("--role", help="Filter by session role")

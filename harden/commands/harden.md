@@ -240,10 +240,10 @@ The agent must return ONLY a JSON array. Instruct it clearly:
 
 Extract the JSON array from the agent's response. If the response contains markdown fences, strip them.
 
-Write the extracted JSON to a temp file, then run the pipeline to sanitize, validate, and assign IDs in one step:
+Write the extracted JSON to a temp file, then run validate-and-assign to sanitize, validate, and assign IDs in one step:
 
 ```bash
-python <repo_dir>/harden/pipeline.py findings --file <temp_file> --sanitize [--check-files] [--deep]
+python <repo_dir>/harden/validate_and_assign.py findings --file <temp_file> --sanitize [--check-files] [--deep]
 ```
 
 Use `--check-files` in code mode. Use `--deep` if the deep flag is set. The `--sanitize` flag auto-strips unknown fields (e.g. `title`, `fix`) and maps invalid categories (e.g. `correctness` → `logic`) before validation.
@@ -251,7 +251,7 @@ Use `--check-files` in code mode. Use `--deep` if the deep flag is set. The `--s
 **On validation failure:**
 1. Show the error to the user briefly: "Attacker output validation failed: <errors>. Retrying..."
 2. Re-spawn the Attacker with the validation errors appended to the prompt as feedback.
-3. Run the pipeline again on the retry output.
+3. Run validate_and_assign.py again on the retry output.
 4. If retry also fails: show the errors and use AskUserQuestion — "Continue to next round or stop?"
    - Continue → skip this round, proceed to next
    - Stop → jump to Step 3 with partial results
@@ -367,13 +367,13 @@ Collect the expected ATK-IDs from the findings:
 expected_ids = comma-separated list of all ATK-NNN IDs from the findings
 ```
 
-Write the extracted JSON to a temp file, then run the pipeline to validate and assign IDs in one step:
+Write the extracted JSON to a temp file, then run validate-and-assign to validate and assign IDs in one step:
 
 ```bash
-python <repo_dir>/harden/pipeline.py response --file <temp_file> --expected-ids <expected_ids> [--check-files]
+python <repo_dir>/harden/validate_and_assign.py response --file <temp_file> --expected-ids <expected_ids> [--check-files]
 ```
 
-Use `--check-files` in code mode. The pipeline handles extracting the `responses` array, assigning DEF-IDs, and validating the full object.
+Use `--check-files` in code mode. validate_and_assign.py handles extracting the `responses` array, assigning DEF-IDs, and validating the full object.
 
 **On validation failure:** same retry pattern as Attacker (one retry, then ask user).
 

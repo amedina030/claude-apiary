@@ -39,7 +39,7 @@ Two storage locations, two purposes.
 
 - Source code, hooks, slash commands, tests.
 - `.claude-project-key` — the stable directory name for this repo's local state.
-- Standards, docs, pipeline backlog.
+- Standards, docs, runner backlog.
 
 Anything checked into git is shared across all clones of the repo.
 

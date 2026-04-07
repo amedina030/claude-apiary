@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Shared utilities for harden validators and pipeline scripts.
+Shared utilities for harden validators and the validate-and-assign script.
 
 Provides JSON input reading (stdin or file), path safety checks,
 and error reporting.

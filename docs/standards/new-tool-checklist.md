@@ -4,12 +4,12 @@ title: New Tool Checklist
 scope: project
 description: What a new tool needs — directory structure, hooks, commands, tests, docs, and setup.py integration
 framework_version: "1.0"
-last_verified: 2026-04-02
+last_verified: 2026-04-07
 ---
 
 # New Tool Checklist
 
-When adding a new top-level tool to the project (like budgeter, clarifier, or scribe), every item below must be addressed.
+When adding a new top-level tool to the project (like budgeter, scribe, or harden), every item below must be addressed.
 
 ## Directory structure
 
@@ -72,6 +72,6 @@ When adding a new top-level tool to the project (like budgeter, clarifier, or sc
 - [ ] Run `python docs/check.py` to verify conformance
 
 ### 8. CLAUDE.md rules (if needed)
-- [ ] Add behavioral rules to the tool's own `CLAUDE.md` (like `clarifier/CLAUDE.md`)
+- [ ] Add behavioral rules to the tool's own `CLAUDE.md`
 - [ ] Document that users need to append rules to `~/.claude/CLAUDE.md`
 - [ ] `setup.py` warns if rules are missing

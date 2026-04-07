@@ -35,11 +35,11 @@ SKIP_FILES = {"_framework.md", "_index.md"}
 SKIP_DIRS = {"commands", "hooks"}  # Not docs — command defs and hook scripts
 
 VALID_TYPES = {"reference", "architecture", "standard", "guide"}
-VALID_SCOPES = {"budgeter", "clarifier", "scribe", "core", "project", "docs"}
+VALID_SCOPES = {"budgeter", "scribe", "core", "project", "docs"}
 REQUIRED_FIELDS = {"type", "title", "scope", "description", "framework_version", "last_verified"}
 
 # Top-level tool dirs that should have at least one reference doc mentioning them
-KNOWN_TOOLS = {"budgeter", "clarifier", "scribe", "core"}
+KNOWN_TOOLS = {"budgeter", "scribe", "core"}
 
 
 def parse_frontmatter(path: Path) -> dict | None:

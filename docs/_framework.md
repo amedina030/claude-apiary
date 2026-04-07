@@ -45,7 +45,7 @@ Every doc (except `_framework.md` and `_index.md`) must have this frontmatter:
 ---
 type: reference | architecture | standard | guide
 title: Human-readable title
-scope: budgeter | clarifier | scribe | core | project | docs
+scope: budgeter | scribe | core | project | docs
 description: One-line summary (used for relevance filtering and index)
 framework_version: "1.0"
 last_verified: YYYY-MM-DD

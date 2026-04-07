@@ -9,9 +9,9 @@ last_verified: 2026-04-05
 
 # Config Files
 
-## pipeline/config.json
+## runner/config.json
 
-Pipeline stage settings. Located in the repo at `pipeline/config.json`. All values have built-in defaults — the file is optional.
+Runner stage settings. Located in the repo at `runner/config.json`. All values have built-in defaults — the file is optional.
 
 | Section | Field | Type | Default | Description |
 |---------|-------|------|---------|-------------|
@@ -30,7 +30,7 @@ Pipeline stage settings. Located in the repo at `pipeline/config.json`. All valu
 | `harden` | `timeout` | int | `300` | Per-round timeout (seconds) |
 | `orchestrator` | `stage_timeout` | int | `3600` | Max seconds per stage before kill |
 
-Loaded by `pipeline/config_loader.py`: `get(section, key, default)`.
+Loaded by `runner/config_loader.py`: `get(section, key, default)`.
 
 ## budgeter/config.json
 

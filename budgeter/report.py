@@ -448,7 +448,7 @@ def main():
     parser.add_argument("--grouped", action="store_true", help="Group by session only (no task breakdown)")
     parser.add_argument("--by-turn", action="store_true", help="Alias for default (session > task grouping)")
     parser.add_argument("--by-agent", action="store_true", help="Show per-agent-type token breakdown")
-    parser.add_argument("--by-request", action="store_true", help="Group by request_id (sums multi-call chains like one pipeline run)")
+    parser.add_argument("--by-request", action="store_true", help="Group by request_id (sums multi-call chains like one runner run)")
     parser.add_argument("--all", action="store_true", help="Include zero-delta entries")
     parser.add_argument("--weighted", action="store_true", help="Weight tokens by type: cache 0.1x, output 5x (relative to input)")
     parser.add_argument("--feedback", action="store_true", help="Show warning precision and rule breakdown")

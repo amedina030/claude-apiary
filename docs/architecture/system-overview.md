@@ -4,7 +4,7 @@ title: System Overview
 scope: project
 description: High-level component map, data flow, and how the tools connect
 framework_version: "1.0"
-last_verified: 2026-04-02
+last_verified: 2026-04-07
 ---
 
 # System Overview
@@ -34,12 +34,7 @@ last_verified: 2026-04-02
    ┌─────────────────────────────────────┐
    │           Slash Commands            │
    │  /startup  /note  /notes            │
-   │  /budgeter-*  /clarifier            │
-   └─────────────────────────────────────┘
-
-   ┌─────────────────────────────────────┐
-   │          Clarifier Agent            │
-   │  (subagent, spawned on demand)      │
+   │  /budgeter-*                        │
    └─────────────────────────────────────┘
 ```
 
@@ -48,8 +43,9 @@ last_verified: 2026-04-02
 | Tool | What it does | How it integrates |
 |------|-------------|-------------------|
 | **Budgeter** | Tracks token consumption, warns before expensive operations | Hooks (PreToolUse, PostToolUse, Stop) |
-| **Clarifier** | Detects assumptions in specs, prompts, and plans before execution | Subagent (spawned by behavioral rules in CLAUDE.md) |
 | **Scribe** | Manages cross-session notes, learnings, handoffs | Slash commands + startup skill |
+| **Refiner** | Turns fuzzy ideas into structured handoff specs via adversarial questioning | Slash command (`/refine`) |
+| **Harden** | Attack-defend loop that stress-tests code or plans | Slash command (`/harden`) |
 | **Core** | Shared infrastructure: flags, config, session, hooks | Library imported by all tools |
 
 ## Data flow
@@ -116,10 +112,6 @@ All tools import from `core/` rather than reimplementing common patterns:
 ### Why hooks, not inline prompts?
 
 Hooks run as shell commands at zero token cost. If budgeter ran as an inline prompt, every tool call would add its analysis tokens to the session — compounding cost for the entire conversation. Hooks are invisible to the token counter.
-
-### Why a subagent for the clarifier?
-
-The clarifier's assumption detection runs as a subagent so its analysis tokens stay out of the main context. Only the JSON result (list of assumptions) returns to the caller. See [Clarifier v2 architecture](clarifier.md) for the full design.
 
 ### Why scribe notes over git/comments?
 

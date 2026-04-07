@@ -4,7 +4,7 @@ Tests for claude-apiary budgeter hooks and logger.
 
 Covers:
   - Unit tests for logger (append_entry zero-delta filter, baseline, snapshot)
-  - Integration test: PRE -> POST -> STOP pipeline
+  - Integration test: PRE -> POST -> STOP sequence
   - PRE-to-PRE baseline: PRE saves prev_tool_name for next PRE to attribute correctly
   - task_turn: baseline stores task_turn; [CONT] prefix causes continuation to inherit task_turn
   - count_tasks: counts unique (session_id, task_turn) pairs, not raw entries
@@ -142,10 +142,10 @@ def test_snapshot_save_load_delete(tmp_dir):
 
 
 # ---------------------------------------------------------------------------
-# Integration tests: hook pipeline
+# Integration tests: hook sequence
 # ---------------------------------------------------------------------------
 
-def test_pre_post_stop_pipeline(tmp_dir):
+def test_pre_post_stop_sequence(tmp_dir):
     """PRE -> POST -> STOP with empty transcript. Verifies plumbing end-to-end."""
     project_dir = make_test_project(tmp_dir / "project")
     log_path = project_dir / ".claude" / "budgeter-log.jsonl"
@@ -733,7 +733,7 @@ def main():
         print("OK")
 
         print("Integration: PRE -> POST -> STOP ........ ", end="")
-        test_pre_post_stop_pipeline(tmp_dir)
+        test_pre_post_stop_sequence(tmp_dir)
         print("OK")
 
         print("Integration: PRE-to-PRE baseline ....... ", end="")

@@ -1,9 +1,0 @@
-{
-  "id": "9173fa8a-438d-4f5d-b3eb-9c24b5f565a4",
-  "title": "Orchestrator test",
-  "problem": "Testing the orchestrator runs stages in order correctly",
-  "description": "This is a test intake to verify the orchestrator sequences stages",
-  "scope": "pipeline orchestrator only",
-  "context": "",
-  "created_at": "2026-04-05T20:07:49.531514+00:00"
-}

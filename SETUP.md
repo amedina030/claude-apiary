@@ -26,32 +26,20 @@ python setup.py --global
 
 This will:
 - Register all hooks (budgeter, transcript saver, install checker) in `~/.claude/settings.json`
-- Copy the clarifier agent to `~/.claude/agents/clarifier.md`
-- Copy slash commands to `~/.claude/commands/` (budgeter, clarifier, scribe, startup)
-- Check whether the clarifier and scribe rules are present in `~/.claude/CLAUDE.md`
+- Copy slash commands to `~/.claude/commands/` (budgeter, scribe, startup, etc.)
+- Check whether `~/.claude/CLAUDE.md` exists
 
-### 3. Add clarifier rules to CLAUDE.md (if warned)
+### 3. Start a new Claude Code session
 
-If setup prints a warning about `CLAUDE.md`, append the clarifier rules manually:
+Hooks and command files are loaded at session start. Restart Claude Code after setup.
 
-```bash
-cat /path/to/claude-apiary/clarifier/CLAUDE.md >> ~/.claude/CLAUDE.md
-```
-
-This only needs to be done once. The clarifier rules define when and how ambiguity detection fires — they live in `CLAUDE.md` because they govern Claude's core behavior, not a specific hook.
-
-### 4. Start a new Claude Code session
-
-Hooks and agent files are loaded at session start. Restart Claude Code after setup.
-
-### 5. Enable the features you want
+### 4. Enable the features you want
 
 In any Claude Code session:
 
 ```
 /budgeter-log     # start recording token usage
 /budgeter-warn    # enable expensive-call warnings
-/clarifier        # enable ambiguity detection
 ```
 
 Scribe (notes, learnings, handoffs) and the `/startup` skill are always active — no toggle needed.
@@ -68,17 +56,7 @@ To scope budgeter logging to a single project instead of globally:
 python setup.py --project-path /path/to/your/project
 ```
 
-This creates `.claude/budgeter.json` inside the project with independent config and stores logs at `.claude/budgeter-log.jsonl`. The clarifier is always global — it's not project-scoped.
-
----
-
-## Optional: Install Test Suite
-
-To install the clarifier test fixtures (needed for `/run-clarifier-tests`):
-
-```bash
-python setup.py --global --with-test-suite
-```
+This creates `.claude/budgeter.json` inside the project with independent config and stores logs at `.claude/budgeter-log.jsonl`.
 
 ---
 
@@ -95,8 +73,6 @@ git pull
 python setup.py --global
 ```
 
-If `clarifier/CLAUDE.md` has changed, re-apply the updated rules to `~/.claude/CLAUDE.md` manually.
-
 ---
 
 ## Uninstalling
@@ -104,10 +80,6 @@ If `clarifier/CLAUDE.md` has changed, re-apply the updated rules to `~/.claude/C
 **Budgeter:**
 - Remove the budgeter hook entries from `~/.claude/settings.json` (any entry containing `claude-apiary`)
 - Optionally delete `~/.claude/budgeter-log-enabled` and `~/.claude/budgeter-warn-enabled`
-
-**Clarifier:**
-- Delete `~/.claude/agents/clarifier.md`
-- Delete `~/.claude/commands/run-clarifier-tests.md`
 
 **Scribe:**
 - Delete `~/.claude/commands/note.md`, `~/.claude/commands/notes.md`, `~/.claude/commands/startup.md`

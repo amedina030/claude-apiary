@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-04-05"
+last_verified: "2026-04-07"
 ---
 
 # CLI Tools
@@ -43,7 +43,7 @@ Core note and learning management.
 | `--if-no-handoff-for ID` | add | Only add if no handoff exists for this session |
 | `--full` | learnings | Print full content (not truncated) |
 | `--search TEXT` | list, learnings | Full-text search |
-| `--last N` | list | Show last N notes |
+| `--last N` / `--limit N` | list | Show last N notes (both spellings accepted as aliases) |
 | `--all` | list | Include done notes |
 | `--archive` | list | Search archive instead of active |
 | `--role ROLE` | add, list, learn | Session role filter |
@@ -88,7 +88,7 @@ python budgeter/report.py [options]
 | `--by-turn` | Group by session > task (default) |
 | `--all` | Include zero-delta entries |
 | `--by-agent` | Show per-agent-type token breakdown |
-| `--by-request` | Group by `request_id` (sums multi-call chains like one pipeline run; entries without a `request_id` bucket into `(no request)`) |
+| `--by-request` | Group by `request_id` (sums multi-call chains like one runner run; entries without a `request_id` bucket into `(no request)`) |
 | `--weighted` | Weight tokens by type: cache 0.1x, output 5x |
 | `--feedback` | Show warning precision and rule breakdown |
 
@@ -106,6 +106,21 @@ python budgeter/tune.py [options]
 | `--percentile N` | Expensive threshold percentile (default: from config) |
 | `--yes` | Apply changes without confirmation prompt |
 
+## budgeter/query_request.py
+
+Sum total tokens logged for a given `request_id` from the budgeter log. Used by `/harden` and other multi-call flows to query their running spend for the current request.
+
+```bash
+python budgeter/query_request.py --request-id <rid> [--cwd <project_dir>]
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--request-id ID` | yes | The `APIARY_REQUEST_ID` value to query |
+| `--cwd DIR` | no | Project working directory (selects per-project log via `logger.configure_for_project`) |
+
+Prints the total token count (single integer) to stdout on success. Exits non-zero with the error message on stderr if the cwd is invalid or the query fails. Intended for use in Bash pipelines where the caller captures stdout and checks the exit status.
+
 ## budgeter/log_agent_cost.py
 
 Log background agent token costs. Reads `<usage>` XML from stdin.
@@ -119,28 +134,7 @@ echo '<usage>...</usage>' | python budgeter/log_agent_cost.py --session-id ID [-
 | `--session-id ID` | yes | Current session ID |
 | `--agent NAME` | no | Agent name (e.g. "startup") |
 | `--cwd DIR` | no | Working directory for config resolution |
-| `--request-id ID` | no | Optional grouping id for multi-call chains (e.g. one pipeline run). Surfaces in `report.py --by-request`. |
-
-## clarifier/log_cost.py
-
-Track and finalize clarifier session costs.
-
-### Subcommands
-
-| Subcommand | Usage | Description |
-|------------|-------|-------------|
-| `tally` | `log_cost.py tally --id UUID --tokens N --tools N --duration N` | Accumulate costs for one invocation |
-| `finalize` | `log_cost.py finalize --id UUID --log FILE --prompt "..." [--session-id ID] [--budgeter-tmp PATH]` | Write cost.log entry and clean up |
-
-## clarifier/write_log.py
-
-Manage clarifier session log files. Reads JSON from stdin or file argument.
-
-```bash
-python clarifier/write_log.py [file]           # init new session
-python clarifier/write_log.py --append [file]   # append round
-python clarifier/write_log.py --complete [file]  # finalize session
-```
+| `--request-id ID` | no | Optional grouping id for multi-call chains (e.g. one runner run). Surfaces in `report.py --by-request`. |
 
 ## refiner/round_counter.py
 
@@ -163,14 +157,14 @@ Track refinement round counts per session. Used by the `/refine` skill to enforc
 
 State is stored at `refiner/tmp/round_<session-id>.json`. Directory is auto-created on first write.
 
-## harden/pipeline.py
+## harden/validate_and_assign.py
 
-Combined validate + assign-IDs pipeline. Preferred over calling validators and assign_ids separately.
+Combined validate + assign-IDs script. Preferred over calling validators and assign_ids separately.
 
 ```bash
-echo '<json>' | python harden/pipeline.py findings [--check-files] [--deep] [--sanitize]
-python harden/pipeline.py findings --file findings.json [--check-files] [--deep] [--sanitize]
-python harden/pipeline.py response --file response.json --expected-ids ATK-001,ATK-002 [--check-files]
+echo '<json>' | python harden/validate_and_assign.py findings [--check-files] [--deep] [--sanitize]
+python harden/validate_and_assign.py findings --file findings.json [--check-files] [--deep] [--sanitize]
+python harden/validate_and_assign.py response --file response.json --expected-ids ATK-001,ATK-002 [--check-files]
 ```
 
 ### Subcommands
@@ -273,31 +267,30 @@ python setup.py --check
 | `--global` | Install globally in `~/.claude/settings.json` |
 | `--project-path PATH` | Install budgeter hooks for a specific project |
 | `--check` | Validate installation without making changes |
-| `--with-test-suite` | Also install clarifier test fixtures (global only) |
 
-## pipeline/run.py
+## runner/run.py
 
-End-to-end pipeline orchestrator. Sequences all 6 stages, passes artifact paths via UUID convention, stops on any stage failure.
+End-to-end runner orchestrator. Sequences all 6 stages, passes artifact paths via UUID convention, stops on any stage failure.
 
 ```bash
-python pipeline/run.py pipeline/intake/<uuid>.json
+python runner/run.py runner/intake/<uuid>.json
 ```
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `intake_path` | yes | Path to intake JSON file (`pipeline/intake/<uuid>.json`) |
+| `intake_path` | yes | Path to intake JSON file (`runner/intake/<uuid>.json`) |
 
 Stages run in order: validate_intake → auto_refine → auto_plan → executor → auto_harden → approval. Each stage's input path is derived from the UUID. Prints per-stage status and elapsed time. Exit 0 if all stages pass; exit 1 on first failure.
 
-Stage timeout is configurable via `pipeline/config.json` under `orchestrator.stage_timeout` (default: 3600s).
+Stage timeout is configurable via `runner/config.json` under `orchestrator.stage_timeout` (default: 3600s).
 
-## pipeline/create_intake.py
+## runner/create_intake.py
 
-Create an intake file for the autonomous pipeline. Generates a UUID-keyed JSON at `pipeline/intake/<uuid>.json`.
+Create an intake file for the autonomous runner. Generates a UUID-keyed JSON at `runner/intake/<uuid>.json`.
 
 ```bash
-python pipeline/create_intake.py --title "Add caching" --problem "Repeated DB queries" --description "Add Redis cache layer" --scope "api/cache.py"
-python pipeline/create_intake.py --from-todo 42
+python runner/create_intake.py --title "Add caching" --problem "Repeated DB queries" --description "Add Redis cache layer" --scope "api/cache.py"
+python runner/create_intake.py --from-todo 42
 ```
 
 | Flag | Required | Description |
@@ -305,19 +298,19 @@ python pipeline/create_intake.py --from-todo 42
 | `--title TEXT` | yes* | Short title for the task |
 | `--problem TEXT` | yes* | Problem statement (min 20 chars) |
 | `--description TEXT` | yes* | Detailed description (min 20 chars) |
-| `--scope TEXT` | yes* | What's in scope for this pipeline run |
+| `--scope TEXT` | yes* | What's in scope for this runner run |
 | `--context TEXT` | no | Additional context (optional) |
 | `--explore-hints CSV` | no | Comma-separated repo-relative paths the refiner should start with (refiner can still branch out) |
 | `--from-todo ID` | no | Scribe TODO ID to seed from (replaces manual fields) |
 
 \* Required unless `--from-todo` is used.
 
-## pipeline/validate_intake.py
+## runner/validate_intake.py
 
 Validate an intake JSON file. Checks required fields, types, minimum content thresholds, and ISO date format.
 
 ```bash
-python pipeline/validate_intake.py pipeline/intake/<uuid>.json
+python runner/validate_intake.py runner/intake/<uuid>.json
 ```
 
 | Argument | Required | Description |
@@ -326,26 +319,26 @@ python pipeline/validate_intake.py pipeline/intake/<uuid>.json
 
 Exit 0 on valid. Exit 1 with error details on invalid.
 
-## pipeline/auto_refine.py
+## runner/auto_refine.py
 
 Autonomous refiner — Stage 2. Reads a validated intake JSON, launches a Claude Code subprocess to explore the codebase and produce a structured spec.
 
 ```bash
-python pipeline/auto_refine.py pipeline/intake/<uuid>.json
+python runner/auto_refine.py runner/intake/<uuid>.json
 ```
 
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `intake` | yes | Path to intake JSON file |
 
-Output: `pipeline/specs/<uuid>.json`. Model and retries configurable via `pipeline/config.json` under `refine`.
+Output: `runner/specs/<uuid>.json`. Model and retries configurable via `runner/config.json` under `refine`.
 
-## pipeline/validate_spec.py
+## runner/validate_spec.py
 
 Validate a spec JSON file against the 8 handoff validation rules.
 
 ```bash
-python pipeline/validate_spec.py pipeline/specs/<uuid>.json
+python runner/validate_spec.py runner/specs/<uuid>.json
 ```
 
 | Argument | Required | Description |
@@ -354,26 +347,26 @@ python pipeline/validate_spec.py pipeline/specs/<uuid>.json
 
 Exit 0 on valid. Exit 1 with error details on invalid.
 
-## pipeline/auto_plan.py
+## runner/auto_plan.py
 
 Autonomous planner — Stage 3. Reads a validated spec JSON, launches a Claude Code subprocess to produce a step-by-step implementation plan.
 
 ```bash
-python pipeline/auto_plan.py pipeline/specs/<uuid>.json
+python runner/auto_plan.py runner/specs/<uuid>.json
 ```
 
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `spec` | yes | Path to spec JSON file |
 
-Output: `pipeline/plans/<uuid>.json`. Model and retries configurable via `pipeline/config.json` under `plan`.
+Output: `runner/plans/<uuid>.json`. Model and retries configurable via `runner/config.json` under `plan`.
 
-## pipeline/validate_plan.py
+## runner/validate_plan.py
 
-Validate a plan JSON file for the autonomous pipeline.
+Validate a plan JSON file for the autonomous runner.
 
 ```bash
-python pipeline/validate_plan.py pipeline/plans/<uuid>.json
+python runner/validate_plan.py runner/plans/<uuid>.json
 ```
 
 | Argument | Required | Description |
@@ -382,57 +375,57 @@ python pipeline/validate_plan.py pipeline/plans/<uuid>.json
 
 Exit 0 on valid. Exit 1 with error details on invalid.
 
-## pipeline/executor.py
+## runner/executor.py
 
-Executor — Stage 4. Reads a validated plan JSON, creates a feature branch (`pipeline/<uuid>`), and executes each step via Claude Code subprocess.
+Executor — Stage 4. Reads a validated plan JSON, creates a feature branch (`runner/<uuid>`), and executes each step via Claude Code subprocess.
 
 ```bash
-python pipeline/executor.py pipeline/plans/<uuid>.json
+python runner/executor.py runner/plans/<uuid>.json
 ```
 
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `plan` | yes | Path to plan JSON file |
 
-Output: `pipeline/executions/<uuid>.json`. Creates branch `pipeline/<uuid>`. Model and retries configurable via `pipeline/config.json` under `executor`.
+Output: `runner/executions/<uuid>.json`. Creates branch `runner/<uuid>`. Model and retries configurable via `runner/config.json` under `executor`.
 
-**Edge case:** Fails if branch `pipeline/<uuid>` already exists (not idempotent for re-runs).
+**Edge case:** Fails if branch `runner/<uuid>` already exists (not idempotent for re-runs).
 
-## pipeline/auto_harden.py
+## runner/auto_harden.py
 
 Autonomous hardener — Stage 5. Runs attack-defend rounds against the executor's code changes using the existing `harden/` infrastructure.
 
 ```bash
-python pipeline/auto_harden.py pipeline/executions/<uuid>.json
+python runner/auto_harden.py runner/executions/<uuid>.json
 ```
 
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `execution_log` | yes | Path to execution log JSON |
 
-Output: `pipeline/hardens/<uuid>.json`. Rounds, models, and timeout configurable via `pipeline/config.json` under `harden` (default: 1 round).
+Output: `runner/hardens/<uuid>.json`. Rounds, models, and timeout configurable via `runner/config.json` under `harden` (default: 1 round).
 
-## pipeline/approval.py
+## runner/approval.py
 
 Approval — Stage 6. Reads the harden verdict and either auto-merges (all resolved), flags for review (unresolved findings), or rejects. Includes a deferral review sub-step that uses Claude to evaluate deferred findings.
 
 ```bash
-python pipeline/approval.py pipeline/hardens/<uuid>.json
+python runner/approval.py runner/hardens/<uuid>.json
 ```
 
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `harden_result` | yes | Path to harden result JSON |
 
-Output: `pipeline/reports/<uuid>.json`. Verdicts: `auto-merged`, `pending-review`, or stage failure.
+Output: `runner/reports/<uuid>.json`. Verdicts: `auto-merged`, `pending-review`, or stage failure.
 
-## pipeline/draft_ticket.py
+## runner/draft_ticket.py
 
-Create a backlog draft ticket. Writes a JSON to `pipeline/backlog/<slug>.json` and appends a `backlog` row to `pipeline/board.md`. Slug is derived from the title.
+Create a backlog draft ticket. Writes a JSON to `runner/backlog/<slug>.json` and appends a `backlog` row to `runner/board.md`. Slug is derived from the title.
 
 ```bash
-python pipeline/draft_ticket.py --title "..." --problem "..." --description "..." --scope "..."
-python pipeline/draft_ticket.py --from-todo 42 --title "..." --problem "..." --scope "..."
+python runner/draft_ticket.py --title "..." --problem "..." --description "..." --scope "..."
+python runner/draft_ticket.py --from-todo 42 --title "..." --problem "..." --scope "..."
 ```
 
 | Flag | Required | Description |
@@ -448,36 +441,36 @@ python pipeline/draft_ticket.py --from-todo 42 --title "..." --problem "..." --s
 
 **Gotcha:** `--from-todo` is *not* a one-stop shortcut — it only seeds `--description`. You must still pass `--title`, `--problem`, and `--scope` explicitly.
 
-## pipeline/promote.py
+## runner/promote.py
 
-Promote a backlog draft to a pipeline intake file. Validates against the intake schema, assigns a UUID, copies to `pipeline/intake/<uuid>.json`, removes the backlog file, and updates `pipeline/board.md` status from `backlog` to `ready`.
+Promote a backlog draft to a runner intake file. Validates against the intake schema, assigns a UUID, copies to `runner/intake/<uuid>.json`, removes the backlog file, and updates `runner/board.md` status from `backlog` to `ready`.
 
 ```bash
-python pipeline/promote.py <slug>
+python runner/promote.py <slug>
 ```
 
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `slug` | yes | Backlog ticket slug — the filename **without** directory or `.json` extension |
 
-**Gotcha:** Pass the slug only (e.g. `my-feature`), not a path (e.g. `pipeline/backlog/my-feature.json`). Path separators are rejected to prevent traversal. The script always looks in `pipeline/backlog/<slug>.json`.
+**Gotcha:** Pass the slug only (e.g. `my-feature`), not a path (e.g. `runner/backlog/my-feature.json`). Path separators are rejected to prevent traversal. The script always looks in `runner/backlog/<slug>.json`.
 
-## pipeline/mark_done.py
+## runner/mark_done.py
 
-Mark a backlog ticket as done **without** running it through the pipeline. For tickets small enough to fix by hand. Deletes `pipeline/backlog/<slug>.json` and rewrites the matching `pipeline/board.md` row's status column to `done`.
+Mark a backlog ticket as done **without** running it through the runner. For tickets small enough to fix by hand. Deletes `runner/backlog/<slug>.json` and rewrites the matching `runner/board.md` row's status column to `done`.
 
 ```bash
-python pipeline/mark_done.py <slug> [--note "explanation"]
+python runner/mark_done.py <slug> [--note "explanation"]
 ```
 
 | Argument / Flag | Required | Description |
 |-----------------|----------|-------------|
 | `slug` | yes | Backlog ticket slug — the filename **without** directory or `.json` extension |
-| `--note TEXT` | no | Optional note appended to the board row's notes column (e.g. "hand-fixed manually, not via pipeline") |
+| `--note TEXT` | no | Optional note appended to the board row's notes column (e.g. "hand-fixed manually, not via runner") |
 
-**Refuses to operate** if the board row is not in `backlog` status — guards against clobbering pipeline-run state (`ready`, `running`, `failed`, `done`). Use `promote.py` first if you actually want the ticket to run through the pipeline.
+**Refuses to operate** if the board row is not in `backlog` status — guards against clobbering runner-run state (`ready`, `running`, `failed`, `done`). Use `promote.py` first if you actually want the ticket to run through the runner.
 
-## pipeline/cost_emit.py
+## runner/cost_emit.py
 
 Shared helper used by every stage's `run_claude` wrapper. Library module — not a CLI tool. Parses a `claude -p --output-format json` envelope and emits a `<usage>` XML block to stderr that the orchestrator scrapes for cost tracking.
 
@@ -488,16 +481,16 @@ emit_usage_xml(claude_subprocess_stdout)  # writes <usage>...</usage> to stderr
 
 Silent on any failure — cost logging never breaks a stage. Sums all numeric fields under the envelope's `usage` key (input + output + cache_*) into a single `total_tokens` value.
 
-## pipeline/config_loader.py
+## runner/config_loader.py
 
-Shared config loader. Library module — not a CLI tool. Used by pipeline stages to read `pipeline/config.json`.
+Shared config loader. Library module — not a CLI tool. Used by runner stages to read `runner/config.json`.
 
 ```python
 from config_loader import get as cfg
 timeout = cfg("orchestrator", "stage_timeout", 3600)
 ```
 
-Falls back to defaults if `pipeline/config.json` is missing.
+Falls back to defaults if `runner/config.json` is missing.
 
 ## Test scripts
 
@@ -506,9 +499,7 @@ All tests use `unittest` and are run directly:
 ```bash
 python budgeter/test_hooks.py
 python scribe/test_notes.py
-python clarifier/test_write_log.py
-python clarifier/test_log_cost.py
 python harden/test_validators.py
 python harden/test_assign_ids.py
-python pipeline/test_orchestrator.py
+python runner/test_orchestrator.py
 ```

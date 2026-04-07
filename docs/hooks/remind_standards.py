@@ -69,7 +69,7 @@ def _classify_file(file_path: str) -> str | None:
         parts = rel.parts
         if len(parts) >= 1:
             top_dir = REPO_ROOT / parts[0]
-            known_dirs = {"budgeter", "clarifier", "scribe", "core", "docs", ".claude"}
+            known_dirs = {"budgeter", "scribe", "core", "docs", ".claude"}
             if parts[0] not in known_dirs and top_dir.is_dir():
                 return "tool"
         return "code"

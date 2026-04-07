@@ -37,33 +37,6 @@ When warnings are enabled and enough task history exists, the pre-hook evaluates
 
 ---
 
-### Clarifier
-
-Automatic ambiguity detection and resolution before Claude acts on your requests.
-
-Claude tends to make assumptions when a request is unclear — it picks one interpretation and runs with it. For consequential tasks, a wrong assumption means redoing work or losing something. Clarifier inserts a checkpoint between "you ask" and "Claude acts", specifically for requests where the assumptions matter.
-
-**What it does:**
-- Spawns when Claude detects meaningful ambiguity (judgment-based, not every request)
-- Asks you targeted, numbered questions — only what is genuinely needed
-- Incorporates your answers into a refined prompt, re-checks for remaining ambiguity, and repeats if needed
-- Presents you the final cleaned-up prompt for explicit approval before Claude acts
-- Saves a session log of every clarification round to `~/.claude/clarifier-logs/`
-
-**When it triggers:**
-- The request has multiple meaningfully different valid interpretations
-- A consequential assumption about scope, target, or approach would be required
-- The intended outcome isn't specific enough to verify completion
-
-**When it stays quiet:** iterative design discussions, requests that build on prior context, straightforward tasks even if they touch multiple files.
-
-**Toggle:**
-```
-/clarifier        # turn clarifier on/off
-```
-
----
-
 ### Scribe
 
 Structured note management for cross-session continuity.
@@ -122,6 +95,39 @@ An automated attack-defend loop where an Attacker agent finds weaknesses (edge c
 
 ---
 
+### Runner
+
+Autonomous six-stage orchestrator that takes a backlog ticket from fuzzy idea to review-ready code without a human in the loop. Designed to run overnight via cron.
+
+Where the other tools extend an in-session Claude Code loop, Runner *replaces* that loop — it composes Refiner, the executor, Harden, and Budgeter into a hands-off build system. You pick a ticket, it runs, and you review the resulting branch the next morning.
+
+**The six stages** (each a separate script consuming the previous stage's JSON artifact):
+
+1. **validate_intake** — schema-checks the intake file
+2. **auto_refine** — turns the intake into a structured spec via the refiner
+3. **auto_plan** — turns the spec into a step-by-step execution plan
+4. **executor** — creates a feature branch (`runner/<uuid>`) and makes the code changes, committing per step
+5. **auto_harden** — runs the attack-defend loop on the resulting branch
+6. **approval** — final gate; auto-merges clean runs or flags for review
+
+**Artifacts** flow through per-stage directories keyed by UUID: `intake/ → specs/ → plans/ → executions/ → hardens/ → reports/`.
+
+**Ticket lifecycle:**
+```
+python runner/draft_ticket.py --title "..." --problem "..." --scope "..."   # creates backlog JSON
+python runner/promote.py <slug>                                              # backlog → ready (intake)
+python runner/run.py runner/intake/<uuid>.json                               # runs all 6 stages
+python runner/mark_done.py <slug>                                            # close a ticket hand-fixed outside the runner
+```
+
+**Cost accounting:** every stage's `<usage>` XML is piped to `budgeter/log_agent_cost.py` with the run UUID as both `session_id` and `request_id`, so `budgeter/report.py --by-request` sums the entire run as one line.
+
+**Safety:** `NO_USAGE_STAGES` whitelists stages that legitimately make no Claude calls; any other zero-usage stage aborts the run so token caps can't be bypassed. Each handoff is gated by a validator (`validate_intake.py`, `validate_spec.py`, `validate_plan.py`).
+
+**Overnight / detached mode:** `detached_lib.py` handles branch creation, claim-based backlog picking, hygiene prechecks, and appends to an overnight log. Cron setup is in `runner/cron_setup.md`.
+
+---
+
 ## Repository Structure
 
 ```
@@ -153,22 +159,6 @@ claude-apiary/
 │   ├── report.py                # CLI report tool
 │   └── test_hooks.py            # Unit + integration tests
 │
-├── clarifier/                   # Ambiguity detection and resolution tool
-│   ├── agents/
-│   │   └── clarifier.md         # Clarifier sub-agent definition (8-step interactive flow)
-│   ├── commands/
-│   │   ├── clarifier.md         # /clarifier toggle command definition
-│   │   └── run-clarifier-tests.md  # /run-clarifier-tests command definition
-│   ├── test-suite/
-│   │   ├── clarifier-test-suite.md  # 24 automated + 6 manual test cases
-│   │   └── fixtures/            # Test fixture markdown files
-│   ├── write_log.py             # Session log writer (init/append/complete modes)
-│   ├── test_write_log.py        # Tests for write_log.py (14 cases)
-│   ├── log_cost.py              # Token cost tracker (tally/finalize subcommands)
-│   ├── test_log_cost.py         # Tests for log_cost.py (12 cases)
-│   ├── CLAUDE.md                # Clarifier trigger rules (synced to ~/.claude/CLAUDE.md)
-│   └── what-is-clarifier.md     # User-facing overview doc
-│
 ├── scribe/                      # Structured note management for session continuity
 │   ├── commands/
 │   │   ├── note.md              # /note command — add a typed note
@@ -190,8 +180,39 @@ claude-apiary/
 │   ├── assign_ids.py            # Post-processor: assigns ATK-NNN / DEF-NNN IDs
 │   ├── validate_findings.py     # Validates Attacker output structure
 │   ├── validate_response.py     # Validates Defender output structure
+│   ├── validate_and_assign.py   # Combined validate + assign-IDs step
 │   ├── round_counter.py         # Round tracking for harden loops
 │   └── tmp/                     # Runtime — round state files (git-ignored)
+│
+├── runner/                      # Autonomous 6-stage orchestrator
+│   ├── run.py                   # End-to-end orchestrator (all 6 stages)
+│   ├── validate_intake.py       # Stage 1: schema-check intake JSON
+│   ├── auto_refine.py           # Stage 2: intake → spec
+│   ├── validate_spec.py         # Spec schema gate
+│   ├── auto_plan.py             # Stage 3: spec → plan
+│   ├── validate_plan.py         # Plan schema gate
+│   ├── executor.py              # Stage 4: plan → code changes on runner/<uuid> branch
+│   ├── auto_harden.py           # Stage 5: attack-defend loop on the resulting branch
+│   ├── approval.py              # Stage 6: auto-merge or flag for review
+│   ├── create_intake.py         # Create an intake JSON directly
+│   ├── draft_ticket.py          # Create a backlog draft ticket
+│   ├── promote.py               # Promote a backlog draft to intake
+│   ├── mark_done.py             # Close a ticket hand-fixed outside the runner
+│   ├── queue.py                 # Backlog queue helpers
+│   ├── detached_lib.py          # Overnight/cron detached-mode helpers
+│   ├── claude_subprocess.py     # Claude CLI wrapper shared by stages
+│   ├── cost_emit.py             # Emits <usage> XML from Claude envelope
+│   ├── config_loader.py         # Shared config loader
+│   ├── config.json              # Default orchestrator/stage config
+│   ├── board.md                 # Human-readable ticket status board
+│   ├── cron_setup.md            # Cron registration instructions
+│   ├── backlog/                 # Draft tickets (ticketed but not yet run)
+│   ├── intake/                  # Stage 1 input JSON files (<uuid>.json)
+│   ├── specs/                   # Stage 2 output (git-ignored)
+│   ├── plans/                   # Stage 3 output (git-ignored)
+│   ├── executions/              # Stage 4 output (git-ignored)
+│   ├── hardens/                 # Stage 5 output (git-ignored)
+│   └── reports/                 # Stage 6 output (git-ignored)
 │
 ├── setup.py                     # Unified installer for all tools
 ├── SETUP.md                     # Setup instructions
@@ -244,20 +265,10 @@ python budgeter/report.py --date 2026-03-14  # single date
 python budgeter/report.py --since 2026-03-01 # from date onwards
 ```
 
-When the clarifier is in use, sessions that triggered it will show a token attribution breakdown:
-
-```
-Session 17c0c0df  2026-03-15 14:59:30  (1,763,590 tokens)
-  [clarifier: 41,766 tokens | main: 1,721,824 tokens]
-```
-
-This is sourced from `~/.claude/clarifier-logs/cost.log`, which records session ID, token usage, and duration for every clarifier invocation.
-
 ---
 
 ## Testing
 
 ```bash
 python budgeter/test_hooks.py      # unit + integration tests for budgeter
-/run-clarifier-tests               # inline test runner for clarifier (24 cases)
 ```

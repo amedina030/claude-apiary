@@ -1,0 +1,9 @@
+{
+  "id": "d0cd0b6c-205a-42a0-8d2e-73fda55901c3",
+  "title": "Runner ticket management: backlog, board, draft, promote",
+  "problem": "There is no structured way to go from ideas/notes to runner intake files. Ideas live scattered in conversation and scribe notes with no staging area, no status tracking, and no promotion gate before entering the runner.",
+  "description": "Add a lightweight ticket management layer around the runner: (1) runner/backlog/ directory for draft ticket JSONs using the same schema as intake files but with human-readable filenames, (2) runner/board.md as a markdown table tracking all tickets through statuses backlog->ready->running->done/failed with columns for ID, title, status, intake UUID, and notes, (3) runner/draft_ticket.py that takes ideas from CLI args or a scribe note ID and writes a structured backlog JSON, (4) runner/promote.py that validates a backlog ticket, assigns a UUID, copies to runner/intake/, and updates board.md to ready, (5) run.py updates board.md at runner start (running) and end (done/failed).",
+  "scope": "New files: runner/backlog/ dir, runner/board.md, runner/draft_ticket.py, runner/promote.py. Modified: runner/run.py (board.md updates). No changes to existing stage scripts.",
+  "context": "The runner already has create_intake.py with --from-todo support. draft_ticket.py is similar but outputs to backlog/ with readable filenames instead of UUIDs. promote.py is the validation+promotion gate. board.md is a simple markdown table, not a database. Keep it file-based and minimal like the rest of the project.",
+  "created_at": "2026-04-06T03:22:00.146073+00:00"
+}

@@ -15,25 +15,24 @@ refiner/tmp/
 # Harden runtime data
 harden/tmp/
 
-# Pipeline runtime artifacts (untracked; live only on disk so branch switches don't move them)
+# Runner runtime artifacts (untracked; live only on disk so branch switches don't move them)
 # Use trailing /* not /  — git cannot re-include files inside a fully-excluded directory.
-pipeline/specs/*
-pipeline/plans/*
-pipeline/executions/*
-pipeline/hardens/*
-pipeline/reports/*
-!pipeline/specs/.gitkeep
-!pipeline/plans/.gitkeep
-!pipeline/executions/.gitkeep
-!pipeline/hardens/.gitkeep
-!pipeline/reports/.gitkeep
-!pipeline/reports/.gitkeep
+runner/specs/*
+runner/plans/*
+runner/executions/*
+runner/hardens/*
+runner/reports/*
+!runner/specs/.gitkeep
+!runner/plans/.gitkeep
+!runner/executions/.gitkeep
+!runner/hardens/.gitkeep
+!runner/reports/.gitkeep
+!runner/reports/.gitkeep
 
 # Session runtime artifacts
 .claude-session-identity.json
 session_*.txt
 
-# Scribe / clarifier runtime
+# Scribe runtime
 .claude/notes.md
-.claude/clarifier-logs/
 .claude/issues.md

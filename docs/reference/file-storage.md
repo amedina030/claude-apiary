@@ -4,27 +4,27 @@ title: File Storage
 scope: project
 description: Runtime data locations — where JSONL logs, flags, transcripts, and session state live
 framework_version: "1.0"
-last_verified: 2026-04-05
+last_verified: 2026-04-07
 ---
 
 # File Storage
 
 All runtime data is stored outside the repo under `~/.claude/` (git-ignored), with a few exceptions for repo-local state.
 
-## Pipeline data
+## Runner data
 
-All pipeline artifacts are repo-local under `pipeline/`:
+All runner artifacts are repo-local under `runner/`:
 
 | Directory | Description |
 |-----------|-------------|
-| `pipeline/intake/` | Intake JSON files (`<uuid>.json`) — pipeline input |
-| `pipeline/specs/` | Refined spec JSON files (`<uuid>.json`) — stage 2 output |
-| `pipeline/plans/` | Plan JSON files (`<uuid>.json`) — stage 3 output |
-| `pipeline/executions/` | Execution log JSON files (`<uuid>.json`) — stage 4 output |
-| `pipeline/hardens/` | Harden result JSON files (`<uuid>.json`) — stage 5 output |
-| `pipeline/reports/` | Approval report JSON files (`<uuid>.json`) — stage 6 output |
+| `runner/intake/` | Intake JSON files (`<uuid>.json`) — runner input |
+| `runner/specs/` | Refined spec JSON files (`<uuid>.json`) — stage 2 output |
+| `runner/plans/` | Plan JSON files (`<uuid>.json`) — stage 3 output |
+| `runner/executions/` | Execution log JSON files (`<uuid>.json`) — stage 4 output |
+| `runner/hardens/` | Harden result JSON files (`<uuid>.json`) — stage 5 output |
+| `runner/reports/` | Approval report JSON files (`<uuid>.json`) — stage 6 output |
 
-Each pipeline run is keyed by a UUID generated at intake creation. All artifact directories are git-ignored except `pipeline/intake/`.
+Each runner run is keyed by a UUID generated at intake creation. All artifact directories are git-ignored except `runner/intake/`.
 
 ## Flag files
 
@@ -57,13 +57,6 @@ All scribe data is project-scoped under `~/.claude/projects/<project-key>/`:
 
 The `<project-key>` is derived from the absolute path of the working directory (e.g. `D--Professional-claude-apiary`).
 
-## Clarifier data
-
-| File | Path | Description |
-|------|------|-------------|
-| Session logs | `~/.claude/clarifier-logs/clarifier-*.md` | One log per clarifier session |
-| Cost log | `~/.claude/clarifier-logs/cost.log` | Token usage per clarifier invocation |
-
 ## Refiner data
 
 | File | Path | Description |
@@ -89,5 +82,4 @@ These are copied from the repo by `setup.py --global`:
 
 | Source | Destination |
 |--------|-------------|
-| `clarifier/agents/clarifier.md` | `~/.claude/agents/clarifier.md` |
 | `*/commands/*.md` | `~/.claude/commands/<name>.md` |

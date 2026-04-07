@@ -8,8 +8,8 @@ learnings, CLI reference) is injected earlier via the UserPromptSubmit
 hook (startup_prompt_hook.py).
 
 Skipped entirely when ``auto-startup`` flag is off — the user triggers
-/startup manually in that mode. Also skipped for pipeline subprocesses
-that set ``APIARY_PIPELINE_SUBPROCESS=1``.
+/startup manually in that mode. Also skipped for runner subprocesses
+that set ``APIARY_RUNNER_SUBPROCESS=1``.
 """
 import os
 import sys
@@ -34,9 +34,9 @@ def main():
 
 
 def _run():
-    # Pipeline subprocesses skip this hook — see startup_prompt_hook.py
+    # Runner subprocesses skip this hook — see startup_prompt_hook.py
     # for the rationale.
-    if os.environ.get("APIARY_PIPELINE_SUBPROCESS") == "1":
+    if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
         hook_allow()
         return
 

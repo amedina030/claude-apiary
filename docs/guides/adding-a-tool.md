@@ -4,12 +4,12 @@ title: Adding a Tool
 scope: project
 description: End-to-end steps for creating a new top-level tool from scratch
 framework_version: "1.0"
-last_verified: 2026-04-02
+last_verified: 2026-04-07
 ---
 
 # Adding a Tool
 
-How to add a new top-level tool to the project (like budgeter, clarifier, or scribe).
+How to add a new top-level tool to the project (like budgeter, scribe, or harden).
 
 This is the most involved task — see [New Tool Checklist](../standards/new-tool-checklist.md) for the full requirements list. This guide walks through the steps in order.
 
@@ -64,7 +64,7 @@ See [Adding a Command](adding-a-command.md).
 
 ### 9. Add CLAUDE.md rules (if needed)
 
-If the tool requires behavioral rules (like the clarifier's trigger rules):
+If the tool requires behavioral rules:
 - Write them in `<tool>/CLAUDE.md`
 - Document that users append them to `~/.claude/CLAUDE.md`
 - Add a setup.py warning if rules are missing

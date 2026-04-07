@@ -13,9 +13,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 ALLOW = {
-    'pipeline/validate_plan.py',
-    'pipeline/test_validate_plan.py',
-    'pipeline/auto_plan.py',
+    'runner/validate_plan.py',
+    'runner/test_validate_plan.py',
+    'runner/auto_plan.py',
     'core/hooks/enforce_cli_lookup.py',
     'scripts/audit_portability.py',
 }

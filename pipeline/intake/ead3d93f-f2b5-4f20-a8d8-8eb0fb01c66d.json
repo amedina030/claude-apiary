@@ -1,9 +1,0 @@
-{
-  "id": "ead3d93f-f2b5-4f20-a8d8-8eb0fb01c66d",
-  "title": "Pipeline cost visibility via orchestrator",
-  "problem": "Pipeline stages run as Claude subprocesses (claude -p) outside the main session. The budgeter hooks never fire for these, so token consumption across 5+ subprocess calls is a complete black box.",
-  "description": "Wire cost tracking into the orchestrator: (1) run.py captures token usage from each claude -p subprocess output, (2) after each stage completes, run.py pipes the usage data through budgeter/log_agent_cost.py with the stage name as the agent identifier, (3) at pipeline end, run.py prints a cost summary showing per-stage and total token usage, (4) costs appear in budgeter report.py output grouped under the pipeline session.",
-  "scope": "Modified: pipeline/run.py (capture subprocess token output, pipe to log_agent_cost.py, print cost summary). No changes to individual stage scripts or budgeter internals.",
-  "context": "The claude -p command outputs token usage in its response. log_agent_cost.py accepts usage XML from stdin: echo '<usage>...</usage>' | python budgeter/log_agent_cost.py --session-id ID --agent NAME --cwd DIR. The backfill-handoffs agent already uses this pattern successfully.",
-  "created_at": "2026-04-06T03:22:38.714369+00:00"
-}
