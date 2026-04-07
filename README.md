@@ -4,6 +4,14 @@ A unified ecosystem of tools that extend and optimize the [Claude Code](https://
 
 ---
 
+## Requirements
+
+- **Python >= 3.11** (declared minimum supported version)
+- **Standard library only** by default; the only third-party dependency is `pytest` (for the test suites). All deps are pinned to version ranges in `requirements.txt`.
+- See [`docs/standards/code-style.md`](docs/standards/code-style.md) for the stdlib-only rule and [`CLAUDE.md`](CLAUDE.md) for portability rules.
+
+---
+
 ## Tools
 
 ### Budgeter

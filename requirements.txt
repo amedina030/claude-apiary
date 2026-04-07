@@ -1,0 +1,6 @@
+# Third-party Python dependencies for claude-apiary.
+# Project is primarily stdlib-only (see CLAUDE.md / docs/standards/code-style.md).
+# Pinned to version RANGES, not exact versions, per the portability epic (T5).
+
+# Test runner — only required for running the test suites.
+pytest>=8.0,<9.0

@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python core/hooks/enforce_cli_lookup.py"
+            "command": "python $CLAUDE_PROJECT_DIR/core/hooks/enforce_cli_lookup.py"
           }
         ]
       }
