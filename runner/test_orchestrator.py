@@ -144,12 +144,12 @@ class TestRunStage:
 class TestMainCLIValidation:
 
     def test_no_args(self, monkeypatch, capsys):
-        """main() exits 1 with usage message when no args provided."""
+        """main() exits 1 with a clear error when no intake path is given."""
         monkeypatch.setattr(sys, "argv", ["run.py"])
         with pytest.raises(SystemExit) as exc:
             orchestrator.main()
         assert exc.value.code == 1
-        assert "Usage:" in capsys.readouterr().err
+        assert "intake path is required" in capsys.readouterr().err
 
     def test_nonexistent_file(self, monkeypatch, capsys, tmp_path):
         """main() exits 1 when intake file doesn't exist."""
