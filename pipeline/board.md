@@ -11,7 +11,7 @@
 | pipeline-mark-done-cli-for-hand-fixed-tickets | Pipeline mark-done CLI for hand-fixed tickets | done |  | self-hosted: closed itself after build + smoke test |
 | refine-to-plan-file-handoff-to-cut-auto-plan-token-cost | Refine-to-plan file handoff to cut auto_plan token cost | backlog | | |
 | pipeline-executor-architecture-hardening-from-t4-failures | Pipeline executor architecture hardening from T4 failures | done |  | hand-fixed manually, not via pipeline. Items A/B/C/D landed in 631c69f, 04635f1, 46a2dbc, 9cc0117. 23 unittest cases in pipeline/test_validate_plan.py + pipeline/test_executor.py. |
-| portability-t5a-settings-json-paths-and-interpreter-normaliz | Portability T5a: settings.json paths and interpreter normalization | backlog |  | first run 111c31a2 failed at executor step 1 (pipeline cannot commit out-of-repo files — blocker #203); re-scoped 2026-04-07 to in-repo items only; ~/.claude/settings.json rewrite moved to scribe TODO #205 for hand-edit |
+| portability-t5a-settings-json-paths-and-interpreter-normaliz | Portability T5a: settings.json paths and interpreter normalization | failed | b1bb662c-12e7-4d2f-aa2e-ff8def40dc75 | |
 | portability-t5b-cross-platform-shell-hygiene-audit | Portability T5b: cross-platform shell hygiene audit | backlog | | |
 | portability-t5c-bootstrap-script-and-stable-project-key | Portability T5c: bootstrap script and stable project key | backlog | | |
 | portability-t5d-portability-docs-and-fresh-vm-validation | Portability T5d: PORTABILITY docs and fresh-VM validation | backlog | | |
