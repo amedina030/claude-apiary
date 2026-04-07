@@ -44,13 +44,14 @@ DEFAULT_TARGET = Path.home() / ".claude" / "CLAUDE.md"
 
 # Substrings used by --replace-stopgap to detect inline rule bodies that
 # pre-date the installer. Each entry is a tuple of (rule_id, marker substr).
-# When --replace-stopgap is set, the installer scans CLAUDE.md outside the
-# managed zone for these markers and removes the surrounding paragraph(s)
-# before injecting the zone. Conservative: only matches exact phrases.
+# Markers must be distinctive phrases that appear in the stopgap inline
+# content AND in the source rule body (since the stopgap is a copy of the
+# rule). _strip_stopgap_paragraphs() restricts matching to text OUTSIDE
+# any existing managed zone so it never strips zone contents.
 STOPGAP_MARKERS = (
-    ("recover_from_trivial_errors", "### Recover from trivial errors inline"),
-    ("keep_chaining_mid_plan", "### Keep chaining after successful mid-plan steps"),
-    ("no_coauthored_by", "### Never add Co-Authored-By Claude to commits"),
+    ("recover_from_trivial_errors", "fix it and retry in the same turn"),
+    ("keep_chaining_mid_plan", "Over-chunking successful work"),
+    ("no_coauthored_by", "Co-Authored-By: Claude"),
 )
 
 EXIT_OK = 0
@@ -105,20 +106,36 @@ def _zone_or_empty(target: Path) -> tuple[str, dict[str, cr.InstalledRule], bool
 # ---------------------------------------------------------------------------
 
 
-def _strip_stopgap_paragraphs(text: str) -> str:
-    """Remove paragraphs containing known stopgap markers from `text`.
-
-    Splits on blank lines and drops any paragraph whose content contains
-    one of the STOPGAP_MARKERS substrings. Conservative: this only fires
-    when --replace-stopgap is passed.
-    """
+def _strip_paragraphs_in(text: str) -> str:
+    """Drop blank-line-separated paragraphs containing any STOPGAP_MARKERS phrase."""
+    if not text:
+        return text
     paragraphs = text.split("\n\n")
-    keep: list[str] = []
-    for p in paragraphs:
-        if any(marker in p for _, marker in STOPGAP_MARKERS):
-            continue
-        keep.append(p)
+    keep = [p for p in paragraphs if not any(m in p for _, m in STOPGAP_MARKERS)]
     return "\n\n".join(keep)
+
+
+def _strip_stopgap_paragraphs(text: str) -> str:
+    """Remove stopgap paragraphs from `text`, ONLY in regions outside any
+    existing managed zone.
+
+    The stopgap markers are distinctive phrases that appear in both the
+    inline stopgap copy AND in the source rule body inside the managed
+    zone. Restricting the strip to outside-zone regions ensures the
+    installer never accidentally chops out a real rule body.
+    """
+    try:
+        zone = cr.find_managed_zone(text)
+    except cr.ZoneTamperError:
+        zone = None
+
+    if zone is None:
+        return _strip_paragraphs_in(text)
+
+    prefix = text[: zone.start]
+    middle = text[zone.start : zone.end]  # untouched
+    suffix = text[zone.end :]
+    return _strip_paragraphs_in(prefix) + middle + _strip_paragraphs_in(suffix)
 
 
 # ---------------------------------------------------------------------------

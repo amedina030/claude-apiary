@@ -195,13 +195,13 @@ class TestTamperEnforcement(InstallerTestCase):
 class TestReplaceStopgap(InstallerTestCase):
     def test_strips_known_stopgap_paragraphs(self):
         # Simulate a CLAUDE.md with the inline stopgap content above the zone.
+        # Use the actual phrasing the project's stopgap used: paragraphs
+        # containing the marker phrases, no `###` subheaders.
         stopgap = (
             "# Global Claude Code Rules\n\n"
             "## Behavioral rules\n\n"
-            "### Recover from trivial errors inline\n\n"
-            "Some inline content.\n\n"
-            "### Keep chaining after successful mid-plan steps\n\n"
-            "More inline content.\n\n"
+            "When a tool call fails with a trivial cause — fix it and retry in the same turn.\n\n"
+            "**Why:** Over-chunking successful work forces the user to babysit a multi-step task they already approved.\n\n"
             "## Other section\n\n"
             "Keep this.\n"
         )
@@ -209,11 +209,29 @@ class TestReplaceStopgap(InstallerTestCase):
         result = run(*self._common("--install-all", "--replace-stopgap"))
         self.assertEqual(result.exit_code, 0)
         text = self._read()
-        self.assertNotIn("### Recover from trivial errors inline", text.split(cr.OUTER_START)[0])
-        self.assertNotIn("### Keep chaining after successful mid-plan steps", text.split(cr.OUTER_START)[0])
+        before_zone = text.split(cr.OUTER_START)[0]
+        self.assertNotIn("fix it and retry in the same turn", before_zone)
+        self.assertNotIn("Over-chunking successful work", before_zone)
         self.assertIn("Other section", text)
         self.assertIn("Keep this.", text)
         self.assertIn(cr.OUTER_START, text)
+        # Confirm the rule bodies inside the zone still contain the markers.
+        self.assertIn("fix it and retry in the same turn", text)
+        self.assertIn("Over-chunking successful work", text)
+
+    def test_does_not_strip_inside_existing_zone(self):
+        # Pre-install once, then reinstall with --replace-stopgap. The
+        # markers in the existing zone bodies must not be stripped.
+        run(*self._common("--install-all"))
+        before = self._read()
+        result = run(*self._common("--install-all", "--replace-stopgap"))
+        self.assertEqual(result.exit_code, 0)
+        after = self._read()
+        # The rule bodies survived (no double-strip of zone content).
+        self.assertIn("fix it and retry in the same turn", after)
+        self.assertIn("Over-chunking successful work", after)
+        # Idempotent reinstall should produce the same content.
+        self.assertEqual(after, before)
 
 
 class TestList(InstallerTestCase):
