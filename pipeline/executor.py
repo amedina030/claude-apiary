@@ -270,7 +270,14 @@ def execute_step(step: dict, spec: dict, model: str) -> dict:
                     result["error"] = None
                     return result
                 else:
-                    result["error"] = f"Test failed (attempt {attempt}): {output[:500]}"
+                    # Store full output (no truncation) — test failures need
+                    # complete tracebacks for diagnosis. The execution log is
+                    # JSON, not console output, so length is not a concern.
+                    result["error"] = f"Test failed (attempt {attempt}): {output}"
+                    # Test files don't change between attempts in the same
+                    # executor run, so retrying is guaranteed to waste a slot.
+                    # Bail out of the retry loop after the first failure.
+                    break
 
             elif action == "verify":
                 prompt = build_verify_prompt(step, spec)

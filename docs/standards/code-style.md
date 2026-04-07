@@ -4,7 +4,7 @@ title: Code Style
 scope: project
 description: Naming, structure, imports, error handling, and testing conventions for Python code
 framework_version: "1.0"
-last_verified: 2026-04-02
+last_verified: 2026-04-07
 ---
 
 # Code Style
@@ -74,6 +74,9 @@ Each Python file follows this order:
 - Each test method tests one behavior. Name it `test_<what_it_tests>`.
 - Use `tempfile.TemporaryDirectory()` for tests that write files — never touch real user data.
 - Integration tests that depend on real data should be isolated (see `test_hooks.py` for pattern).
+- **Pipeline-package import convention.** Tests that live inside a sibling-of-root package (e.g. `pipeline/test_*.py`) are run as `python -m unittest pipeline.test_X` from repo root, which loads the file under the `pipeline` package. A bare `import detached_lib` will then fail with `ModuleNotFoundError` because `sys.path` has the repo root, not `pipeline/`. Use one of these two patterns instead:
+  - `from pipeline import detached_lib` (preferred for new files)
+  - `_PIPELINE_DIR = Path(__file__).resolve().parent; sys.path.insert(0, str(_PIPELINE_DIR))` then bare `import detached_lib  # noqa: E402` (matches existing `pipeline/test_run_detached.py` and `pipeline/test_validate_plan.py`)
 
 ## CLI patterns
 

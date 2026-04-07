@@ -10,9 +10,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from executor import load_previous_log
+import executor
+from executor import execute_step, load_previous_log
 
 
 class TestLoadPreviousLog(unittest.TestCase):
@@ -86,6 +88,42 @@ class TestLoadPreviousLog(unittest.TestCase):
         self.assertEqual(entry["duration_ms"], 12345)
         self.assertEqual(entry["custom"], "value")
         self.assertEqual(entry["files_changed"], ["pipeline/x.py"])
+
+
+class TestExecuteStepTestAction(unittest.TestCase):
+    """execute_step('test', ...) must not retry on failure (test files
+    don't change between attempts in the same run, so retries waste a slot)
+    and must store the FULL test output (not a truncated prefix) so
+    diagnosis isn't blocked by mid-traceback cutoffs. Both behaviors guard
+    sub-bugs (2) and (3) from TODO #197."""
+
+    def test_failed_test_action_does_not_retry(self):
+        step = {"step_number": 1, "action": "test", "code_spec": "fail-me", "files": []}
+        call_count = {"n": 0}
+
+        def fake_run(_):
+            call_count["n"] += 1
+            return False, "boom"
+
+        with mock.patch.object(executor, "run_test_command", side_effect=fake_run):
+            result = execute_step(step, spec={}, model="sonnet")
+
+        self.assertEqual(call_count["n"], 1, "test action must not retry")
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("boom", result["error"])
+
+    def test_failed_test_action_stores_full_output(self):
+        # Long traceback-shaped output — must be preserved verbatim, not
+        # truncated at 500 chars (the previous behavior cut tracebacks
+        # mid-line at 'File "D:\\Professional\\claude-' on T4).
+        long_output = "Traceback line " + ("X" * 2000)
+        step = {"step_number": 1, "action": "test", "code_spec": "x", "files": []}
+
+        with mock.patch.object(executor, "run_test_command", return_value=(False, long_output)):
+            result = execute_step(step, spec={}, model="sonnet")
+
+        self.assertIn(long_output, result["error"])
+        self.assertGreater(len(result["error"]), 1500)
 
 
 if __name__ == "__main__":
