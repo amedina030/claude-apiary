@@ -25,6 +25,7 @@ from scribe.notes import (
 
 HISTORY_PATH = CLAUDE_DIR / ".session-history.json"
 REGISTRY_PATH = PROJECT_ROOT / "core" / "config" / "session-registry.json"
+BACKFILL_SKIP_PATH = CLAUDE_DIR / "projects" / "claude-apiary" / "backfill_skip.json"
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +77,33 @@ def validate_registry(role, mission):
         return False
 
 
+def load_skip_prefixes():
+    """Load 8-char lowercase session-id prefixes from backfill_skip.json.
+
+    Tolerates missing/empty/malformed file by returning an empty set.
+    """
+    try:
+        data = json.loads(BACKFILL_SKIP_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    skipped = data.get("skipped")
+    if not isinstance(skipped, list):
+        return set()
+    prefixes = set()
+    for entry in skipped:
+        if not isinstance(entry, dict):
+            continue
+        sid = entry.get("session_id", "")
+        if not isinstance(sid, str) or not sid:
+            continue
+        prefix = sid.strip()[:8].lower()
+        if prefix:
+            prefixes.add(prefix)
+    return prefixes
+
+
 def get_unseen_sessions(session_id, wants_role, wants_mission, project_key):
     """Find sessions that match wants and don't have handoff notes yet."""
     # Read session history
@@ -106,6 +134,7 @@ def get_unseen_sessions(session_id, wants_role, wants_mission, project_key):
         for n in notes
         if n.get("type") == "handoff" and n.get("status") != "done"
     }
+    handoff_sids |= load_skip_prefixes()
 
     # Filter to unseen
     unseen = []
