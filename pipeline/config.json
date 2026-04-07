@@ -22,5 +22,9 @@
   },
   "orchestrator": {
     "stage_timeout": 3600
+  },
+  "detached": {
+    "token_cap": 2000000,
+    "max_unreviewed": 5
   }
 }
