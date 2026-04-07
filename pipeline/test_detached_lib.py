@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """Unit tests for pipeline/detached_lib.py."""
-import json, tempfile, unittest
+import json, sys, tempfile, unittest
 from pathlib import Path
 from unittest import mock
-import detached_lib
+
+# Ensure pipeline dir is on sys.path so detached_lib can be imported when
+# this module is loaded as 'pipeline.test_detached_lib' via `python -m unittest`.
+_PIPELINE_DIR = Path(__file__).resolve().parent
+if str(_PIPELINE_DIR) not in sys.path:
+    sys.path.insert(0, str(_PIPELINE_DIR))
+
+import detached_lib  # noqa: E402  (path manipulation above is intentional)
 
 class TestSlug(unittest.TestCase):
     def test_basic(self):
