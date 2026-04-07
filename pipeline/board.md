@@ -10,4 +10,4 @@
 | overnight-cron-pipeline-with-morning-branch-review-workflow | Overnight cron pipeline with morning branch review workflow | backlog |  | abandoned previous run (uuid 5029f36e) after structural pipeline-executor failures; re-promote after architecture hardening lands |
 | pipeline-mark-done-cli-for-hand-fixed-tickets | Pipeline mark-done CLI for hand-fixed tickets | done |  | self-hosted: closed itself after build + smoke test |
 | refine-to-plan-file-handoff-to-cut-auto-plan-token-cost | Refine-to-plan file handoff to cut auto_plan token cost | backlog | | |
-| pipeline-executor-architecture-hardening-from-t4-failures | Pipeline executor architecture hardening from T4 failures | backlog | | |
+| pipeline-executor-architecture-hardening-from-t4-failures | Pipeline executor architecture hardening from T4 failures | done |  | hand-fixed manually, not via pipeline. Items A/B/C/D landed in 631c69f, 04635f1, 46a2dbc, 9cc0117. 23 unittest cases in pipeline/test_validate_plan.py + pipeline/test_executor.py. |
