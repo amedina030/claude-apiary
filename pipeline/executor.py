@@ -20,6 +20,15 @@ import sys
 from pathlib import Path
 
 from config_loader import get as cfg
+# Eager-import claude_subprocess (and transitively cost_emit) at module top.
+# These modules MUST be resolved while the working tree is still on the
+# parent branch (typically master). If we let run_claude() do a deferred
+# import, Python loads the source AFTER executor.main() has done
+# `git checkout pipeline/<uuid>`, which silently picks up whatever older
+# copies happen to live on the pipeline branch and shadows every fix we
+# ship on master. Loading them now caches the master versions in
+# sys.modules so all later calls use them regardless of working-tree state.
+from claude_subprocess import run_claude as _spawn_claude
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 EXECUTIONS_DIR = SCRIPT_DIR / "executions"
@@ -201,8 +210,7 @@ def build_verify_prompt(step: dict, spec: dict) -> str:
 
 def run_claude(prompt: str, model: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess with the specified model."""
-    from claude_subprocess import run_claude as _spawn
-    return _spawn(prompt, timeout=cfg("executor", "timeout", 300), model=model)
+    return _spawn_claude(prompt, timeout=cfg("executor", "timeout", 300), model=model)
 
 
 def run_test_command(code_spec: str) -> tuple[bool, str]:
