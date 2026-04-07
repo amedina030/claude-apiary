@@ -46,7 +46,7 @@ VAGUE_PATTERNS = re.compile(
 )
 
 PLACEHOLDER_PATTERNS = re.compile(
-    r"(?<![/-])\b(TODO|TBD|FIXME)\b(?![-])"   # standalone markers, not --from-todo or TODO-123
+    r"(?<![/-])\b(TODO|TBD|FIXME)\b(?![-]|\s*#)"   # standalone markers, not --from-todo / TODO-123 / TODO #205 (scribe note ref)
     r"|\bplaceholder\b"
     r"|(?<!\w)fill\s+in(?=\s+(this|here|later|above|below|the\s+blank))"  # "fill in" only when clearly a placeholder instruction
     r"|\bto\s+be\s+determined\b",
@@ -174,9 +174,14 @@ def validate(data: dict) -> list[str]:
     if isinstance(out_of_scope, list):
         for i, item in enumerate(out_of_scope):
             if isinstance(item, dict):
-                if not item.get("reason") or _is_empty(item.get("reason")):
+                reason = item.get("reason")
+                if not reason:
                     errors.append(
                         f"Rule 6: boundaries.out_of_scope[{i}] missing 'reason'"
+                    )
+                elif _is_empty(reason):
+                    errors.append(
+                        f"Rule 6: boundaries.out_of_scope[{i}] 'reason' is empty or contains placeholder-like content: {reason!r}"
                     )
             elif isinstance(item, str):
                 # String entries should be rejected — need structured format

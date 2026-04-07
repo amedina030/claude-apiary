@@ -79,10 +79,27 @@ def create_branch(branch: str):
 
 
 def commit_files(files: list[str], message: str):
-    """Stage specific files and commit."""
+    """Stage specific files and commit.
+
+    Before committing, verify the add actually staged a change. If the
+    subprocess claimed to edit a file but didn't (e.g. decided no edit was
+    needed, wrote to the wrong path, or silently failed), `git commit` would
+    fail with "no changes added to commit" — an error that historically
+    looked identical to a real git failure and masked subprocess bugs. Fail
+    fast with a distinct error in that case.
+    """
     if not files:
         return
     git("add", *files)
+    staged = git("diff", "--cached", "--quiet", "--", *files)
+    if staged.returncode == 0:
+        # `git diff --cached --quiet` exits 0 when there is no diff, meaning
+        # nothing was actually staged for these files.
+        raise RuntimeError(
+            f"Subprocess made no changes to expected files ({', '.join(files)}). "
+            f"The step's implementation subprocess either decided no edit was needed, "
+            f"edited a different path, or silently failed. Check the subprocess transcript."
+        )
     result = git("commit", "-m", message)
     if result.returncode != 0:
         raise RuntimeError(_format_git_error(
