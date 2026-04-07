@@ -26,6 +26,14 @@ VALID_ACTIONS = {"create", "modify", "delete", "test", "verify"}
 VALID_MODELS = {"opus", "sonnet", "haiku"}
 REQUIRED_STEP_FIELDS = ["step_number", "type", "description", "action", "files", "depends_on", "code_spec"]
 
+# Words that indicate a test code_spec is prose, not a shell command. The
+# executor passes test code_spec directly to subprocess.run(shell=True), so
+# 'Run python -m pytest ...' tries to execute literal 'Run' as a binary.
+_PROSE_STARTERS = {
+    "run", "execute", "use", "call", "then", "now", "this", "make",
+    "please", "here", "the", "we", "you",
+}
+
 
 def _detect_cycles(steps: list[dict]) -> list[str]:
     """Detect circular dependencies in step graph. Returns error strings."""
@@ -64,6 +72,49 @@ def _detect_cycles(steps: list[dict]) -> list[str]:
         if color[node] == WHITE:
             dfs(node, [])
 
+    return errors
+
+
+def _check_test_code_spec_format(steps: list[dict]) -> list[str]:
+    """Reject test-action steps whose code_spec is prose, not a shell command.
+
+    The executor's run_test_command does subprocess.run(code_spec, shell=True),
+    so the planner MUST emit a single shell command for test steps. Two cheap
+    heuristics catch the failure mode that bit T4 step 6 ('Run python -m
+    pytest ...' tried to execute literal 'Run' as a Windows binary):
+
+    1. The stripped code_spec must not contain newlines (real commands fit
+       on one line; prose almost never does).
+    2. The first whitespace-separated token must not be a known prose starter
+       like 'Run', 'Execute', 'Use', etc.
+    """
+    errors = []
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        if step.get("action") != "test":
+            continue
+        code_spec = step.get("code_spec", "")
+        if not isinstance(code_spec, str):
+            continue
+        stripped = code_spec.strip()
+        if not stripped:
+            # 'empty' is already caught by the required-field check
+            continue
+        if "\n" in stripped:
+            errors.append(
+                f"step[{i}] (action='test'): code_spec must be a single shell "
+                f"command on one line — no newlines, no prose. The executor "
+                f"passes it directly to subprocess.run(shell=True)."
+            )
+            continue
+        first_word = stripped.split(None, 1)[0].rstrip(":,.").lower()
+        if first_word in _PROSE_STARTERS:
+            errors.append(
+                f"step[{i}] (action='test'): code_spec starts with prose word "
+                f"'{first_word}' — must begin with the actual shell command "
+                f"itself (e.g. 'python -m unittest ...')."
+            )
     return errors
 
 
@@ -184,6 +235,9 @@ def validate(data: dict) -> list[str]:
 
     # Circular dependency check
     errors.extend(_detect_cycles(steps))
+
+    # Test-action code_spec format check (must be a shell command, not prose)
+    errors.extend(_check_test_code_spec_format(steps))
 
     # Acceptance criteria coverage
     if isinstance(spec, dict):

@@ -69,8 +69,17 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "2. Decompose the spec into ordered implementation steps. Each step should be "
         "granular enough that a coding model (Sonnet) can implement it without "
         "making design decisions.",
-        "3. For each step, write detailed code_spec pseudocode: function signatures, "
-        "logic flow, imports, what to add/change. Be specific.",
+        "3. For each step, write a code_spec whose format depends on the action:",
+        "   - action='create'/'modify'/'delete': freeform pseudocode — function "
+        "signatures, logic flow, imports, what to add/change. Be specific.",
+        "   - action='test': a SINGLE shell command on one line, with NO "
+        "surrounding prose. Example: 'python -m unittest pipeline.test_foo'. "
+        "Do NOT write 'Run the tests with python -m unittest...' or any other "
+        "prose. The executor passes code_spec directly to "
+        "subprocess.run(shell=True), so any prose becomes a shell command and "
+        "fails (e.g. 'Run' is tried as a Windows binary).",
+        "   - action='verify': the verification check description (what to "
+        "confirm and how). The executor passes it to a Claude verify call.",
         "4. For 'modify' and 'delete' actions, the files listed MUST exist in the "
         "codebase. For 'create' actions, the files are new.",
         "5. Always include at least one 'verify' step at the end that describes "
