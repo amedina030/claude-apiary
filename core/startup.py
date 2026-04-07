@@ -102,7 +102,7 @@ def get_unseen_sessions(session_id, wants_role, wants_mission, project_key):
     # Get existing handoff session IDs from notes
     notes = read_jsonl(notes_path(project_key))
     handoff_sids = {
-        n.get("session_id", "").strip()
+        n.get("session_id", "").strip()[:8].lower()
         for n in notes
         if n.get("type") == "handoff" and n.get("status") != "done"
     }
