@@ -9,7 +9,12 @@ from pathlib import Path
 # validate_plan lives next to this file
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from validate_plan import validate, _check_test_code_spec_format, _check_banned_tokens
+from validate_plan import (
+    validate,
+    _check_test_code_spec_format,
+    _check_banned_tokens,
+    _check_test_failure_language,
+)
 
 
 def _base_plan(steps):
@@ -84,6 +89,60 @@ class TestTestCodeSpecFormat(unittest.TestCase):
         errors = validate(plan)
         self.assertTrue(any("prose word" in e for e in errors),
                         f"expected prose-word error in {errors}")
+
+
+class TestTestFailureLanguage(unittest.TestCase):
+    """The validator must reject test-action steps whose description signals
+    expected failure. The executor treats every test step as a hard pass/fail
+    gate, so a 'this run is expected to report violations' step always aborts.
+    Caught in T5b plan step 3 (#211)."""
+
+    def test_clean_test_step_passes(self):
+        steps = [_step(1, "test", "python -m unittest runner.test_foo",
+                       description="Verify the new helper passes its unit tests")]
+        self.assertEqual(_check_test_failure_language(steps), [])
+
+    def test_expected_to_fail_rejected(self):
+        steps = [_step(1, "test", "python audit.py",
+                       description="Run the audit (expected to fail before fix)")]
+        errors = _check_test_failure_language(steps)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("expected to fail", errors[0])
+
+    def test_expected_to_report_violations_rejected(self):
+        steps = [_step(1, "test", "python audit.py",
+                       description="Run audit (this run is expected to report violations; "
+                                   "it gates subsequent fix steps)")]
+        errors = _check_test_failure_language(steps)
+        self.assertEqual(len(errors), 1)
+        # Both phrases match — the function returns on first match.
+        self.assertTrue(
+            "expected to report violations" in errors[0]
+            or "this run is expected to" in errors[0]
+        )
+
+    def test_should_fail_rejected(self):
+        steps = [_step(1, "test", "python check.py",
+                       description="The pre-fix snapshot — should fail until step 4 lands")]
+        self.assertEqual(len(_check_test_failure_language(steps)), 1)
+
+    def test_non_test_action_ignored(self):
+        steps = [_step(1, "create", "make file",
+                       description="this run is expected to fail before the fix")]
+        self.assertEqual(_check_test_failure_language(steps), [])
+
+    def test_full_validate_surfaces_failure_language(self):
+        plan = _base_plan([
+            _step(1, "create", "Add helper", files=["runner/new_file.py"]),
+            _step(2, "test", "python audit.py",
+                  description="Run the audit script (expected to report violations; "
+                              "gates subsequent fix steps)"),
+        ])
+        errors = validate(plan)
+        self.assertTrue(
+            any("expected" in e and "test" in e for e in errors),
+            f"expected failure-language error in {errors}",
+        )
 
 
 class TestBannedTokens(unittest.TestCase):

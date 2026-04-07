@@ -47,6 +47,22 @@ _BANNED_TOKENS = {
     "from requests": "external dependencies are banned — stdlib only",
 }
 
+# Phrases that, when found in a test-action step's description, indicate the
+# planner is using a test step as a gating audit run rather than a pass/fail
+# verification. The executor treats every test step as a hard gate (non-zero
+# exit aborts the plan), so a "this run is expected to report violations"
+# step always aborts. Pattern caught in T5b plan step 3 (#211). The fix is
+# either to make the audit step a non-test type, or to make it a test step
+# whose code_spec already includes the violation-handling logic.
+_TEST_FAILURE_LANGUAGE = (
+    "expected to fail",
+    "expected to report violations",
+    "expected to enumerate violations",
+    "expected to error",
+    "should fail",
+    "this run is expected to",
+)
+
 
 def _detect_cycles(steps: list[dict]) -> list[str]:
     """Detect circular dependencies in step graph. Returns error strings."""
@@ -128,6 +144,40 @@ def _check_test_code_spec_format(steps: list[dict]) -> list[str]:
                 f"'{first_word}' — must begin with the actual shell command "
                 f"itself (e.g. 'python -m unittest ...')."
             )
+    return errors
+
+
+def _check_test_failure_language(steps: list[dict]) -> list[str]:
+    """Reject test-action steps whose description signals an expected failure.
+
+    The executor treats every test step as a hard pass/fail gate (non-zero
+    exit aborts the plan). A test step described as "expected to report
+    violations" or "this run is expected to fail" therefore always aborts
+    the plan, defeating its purpose. The planner should either drop the
+    gating run entirely, mark it as a non-test step type, or wrap it in
+    code_spec logic that turns the violations into a real assertion.
+    Caught in T5b plan step 3 (#211).
+    """
+    errors = []
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        if step.get("action") != "test":
+            continue
+        description = step.get("description", "")
+        if not isinstance(description, str):
+            continue
+        lower = description.lower()
+        for phrase in _TEST_FAILURE_LANGUAGE:
+            if phrase in lower:
+                errors.append(
+                    f"step[{i}] (action='test'): description signals expected "
+                    f"failure ('{phrase}'). Test steps are hard gates — a non-"
+                    f"zero exit aborts the plan. Either change the step type "
+                    f"away from 'test' or wrap the audit logic in code_spec "
+                    f"so it returns 0 on the expected condition."
+                )
+                break
     return errors
 
 
@@ -276,6 +326,9 @@ def validate(data: dict) -> list[str]:
 
     # Test-action code_spec format check (must be a shell command, not prose)
     errors.extend(_check_test_code_spec_format(steps))
+
+    # Test-action description must not signal expected failure (#211)
+    errors.extend(_check_test_failure_language(steps))
 
     # Banned-token check (project convention violations: pytest, shell=True, etc.)
     errors.extend(_check_banned_tokens(steps))
