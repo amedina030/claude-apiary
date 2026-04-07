@@ -13,7 +13,7 @@ Conventions derived from the existing codebase. Follow these when writing or mod
 
 ## General
 
-- **Python 3.9+** — use modern syntax (type hints, `pathlib`, f-strings) but stay within 3.9 compatibility.
+- **Python 3.11+** — use modern syntax (type hints, `pathlib`, f-strings, union `X | Y`, match statements) but stay within 3.11 compatibility.
 - **Stdlib only** — no external dependencies. This is a hard rule.
 - **UTF-8 everywhere** — always pass `encoding="utf-8"` to `open()`, `read_text()`, `write_text()`.
 

@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.11+
 - [Claude Code](https://claude.ai/claude-code) installed and configured
 
 No external Python dependencies.
