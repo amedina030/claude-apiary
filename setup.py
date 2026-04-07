@@ -32,6 +32,61 @@ from core.hooks_lib import to_bash_path, hook_cmd, load_settings, save_settings,
 PYTHON = Path(sys.executable)
 MARKER = "claude-apiary"
 
+# Path-suffix substrings that identify a hook entry as ours even when its
+# command uses a portable $CLAUDE_PROJECT_DIR template (no absolute path
+# containing the literal MARKER). Both forward- and back-slash variants
+# are matched to handle Windows hand-edited entries. (#227)
+_APIARY_PATH_SUBSTRINGS = (
+    "/budgeter/hooks/", "\\budgeter\\hooks\\",
+    "/core/hooks/", "\\core\\hooks\\",
+    "/scribe/", "\\scribe\\",
+    "/docs/hooks/", "\\docs\\hooks\\",
+    "/refiner/", "\\refiner\\",
+    "/harden/", "\\harden\\",
+    "/runner/", "\\runner\\",
+)
+
+
+def _is_apiary_entry(entry) -> bool:
+    """Return True if a settings.json hook entry was installed by apiary.
+
+    Recognizes two formats:
+      1. Absolute-path entries written by `setup.py --global` whose path
+         contains the literal MARKER ("claude-apiary").
+      2. Portable hand-edited entries that use `$CLAUDE_PROJECT_DIR/<sub>/...`
+         and therefore lack the marker. Detected by known apiary subpath
+         substrings (budgeter/hooks/, core/hooks/, scribe/, etc.).
+    """
+    blob = json.dumps(entry)
+    if MARKER in blob:
+        return True
+    return any(sub in blob for sub in _APIARY_PATH_SUBSTRINGS)
+
+
+def _expand_hook_script_path(script_path: str) -> Path:
+    """Expand a hook command's script-path string to an actual filesystem
+    path that can be checked with `.exists()`.
+
+    Handles three forms in order:
+      - $CLAUDE_PROJECT_DIR/foo → APIS_DIR/foo (the canonical apiary repo
+        root, which is what Claude Code itself sets at hook-fire time).
+      - $VAR/foo or %VAR%/foo → standard env-var expansion via os.path.
+      - /c/Users/... → C:/Users/... (bash-style absolute paths from
+        `setup.py --global` on Windows).
+    """
+    # Apiary-specific: $CLAUDE_PROJECT_DIR resolves to the repo root.
+    expanded = script_path.replace("$CLAUDE_PROJECT_DIR", str(APIS_DIR))
+    # Then standard env vars and ~.
+    import os
+    expanded = os.path.expandvars(os.path.expanduser(expanded))
+    p = Path(expanded)
+    if p.exists():
+        return p
+    # Fallback: bash-style /c/Users/... → C:/Users/...
+    import re as _re
+    win = _re.sub(r"^/([a-z])/", lambda m: m.group(1).upper() + ":/", expanded)
+    return Path(win)
+
 
 def build_budgeter_hooks():
     """Build PreToolUse, PostToolUse, and Stop hook entries for the budgeter."""
@@ -235,7 +290,7 @@ def run_check():
 
         for event in ["PreToolUse", "PostToolUse", "Stop"]:
             entries = hooks.get(event, [])
-            apis_entries = [e for e in entries if MARKER in json.dumps(e)]
+            apis_entries = [e for e in entries if _is_apiary_entry(e)]
             if apis_entries:
                 ok(f"{event} hooks: {len(apis_entries)} registered")
             else:
@@ -245,27 +300,23 @@ def run_check():
         all_cmds = []
         for entries in hooks.values():
             for entry in entries:
+                if not _is_apiary_entry(entry):
+                    continue
                 for h in entry.get("hooks", []):
                     cmd = h.get("command", "")
-                    if MARKER in cmd or "budgeter" in cmd:
+                    if cmd:
                         all_cmds.append(cmd)
 
         for cmd in all_cmds:
             parts = cmd.split()
-            if len(parts) >= 2:
-                # Convert bash path back to check existence
-                script_path = parts[-1]
-                # Try as-is first, then try Windows path conversion
-                sp = Path(script_path)
-                if not sp.exists():
-                    # Convert /c/Users/... to C:/Users/...
-                    import re as _re
-                    win_path = _re.sub(r'^/([a-z])/', lambda m: m.group(1).upper() + ':/', script_path)
-                    sp = Path(win_path)
-                if sp.exists():
-                    ok(f"Hook script: {sp.name}")
-                else:
-                    fail(f"Hook script: {script_path} not found")
+            if len(parts) < 2:
+                continue
+            script_path = parts[-1]
+            sp = _expand_hook_script_path(script_path)
+            if sp.exists():
+                ok(f"Hook script: {sp.name}")
+            else:
+                fail(f"Hook script: {script_path} not found")
     print()
 
     # 2. Budgeter
