@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.session import CLAUDE_DIR, SessionId, load_identity
-from core.utils.project import project_key_from_path
+from core.utils.project import get_project_key
 from scribe.notes import (
     read_jsonl, notes_path, learnings_path,
     format_age, run_auto_archive,
@@ -140,7 +140,7 @@ def run_init(session_id: str, first_message: str, repo_dir: str) -> dict:
     identity_file.write_text(json.dumps(identity_data), encoding="utf-8")
 
     # Find unseen sessions
-    project_key = project_key_from_path(repo_dir)
+    project_key = get_project_key(repo_dir)
     unseen = get_unseen_sessions(
         session_id,
         identity["wants_role"],
@@ -173,7 +173,7 @@ def _matches_role_mission(note, role, mission):
 def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> str:
     """Run summary logic and return the text output."""
     repo_dir = repo_dir or str(PROJECT_ROOT)
-    project_key = project_key_from_path(repo_dir)
+    project_key = get_project_key(repo_dir)
 
     # Prune stale notes before loading
     archived_count = run_auto_archive(project_key)

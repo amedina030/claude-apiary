@@ -58,7 +58,7 @@ def _load_session_identity():
         return "", "", ""
 
 
-from core.utils.project import project_key_from_path  # moved to core; re-exported
+from core.utils.project import get_project_key  # moved to core; re-exported
 
 
 _PROJECT_KEY_RE = re.compile(r'^[A-Za-z0-9_.\-]{1,200}$')
@@ -83,7 +83,7 @@ def _project_key(project_override=None):
             )
             sys.exit(1)
         return project_override
-    return project_key_from_path(Path.cwd())
+    return get_project_key(Path.cwd())
 
 
 def notes_path(project_key):

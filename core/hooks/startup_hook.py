@@ -22,7 +22,7 @@ from core.flags import is_enabled
 from core.session import SessionId, load_identity
 from core.hook_context import context_block, hook_allow, read_payload
 from core.startup import get_unseen_sessions
-from core.utils.project import project_key_from_path
+from core.utils.project import get_project_key
 
 
 def main():
@@ -74,7 +74,7 @@ def _run():
     wants_mission = identity.get("wants_mission", "general")
 
     # Detect unseen sessions
-    project_key = project_key_from_path(cwd)
+    project_key = get_project_key(cwd)
     try:
         unseen = get_unseen_sessions(sid.full, wants_role, wants_mission, project_key)
     except Exception:
