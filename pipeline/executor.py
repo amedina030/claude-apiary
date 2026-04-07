@@ -97,6 +97,28 @@ def get_current_branch() -> str:
     return result.stdout.strip()
 
 
+def load_previous_log(log_path: Path) -> dict:
+    """Read a prior execution log and return {step_number: entry} or {}.
+
+    Used on resume so we can preserve the per-step status from previous
+    runs (especially verify/test steps, which don't commit and therefore
+    can't be recovered from git log alone). Returns an empty dict if the
+    file is missing or unreadable — callers treat that as "no prior data"
+    and fall back to fresh entries.
+    """
+    if not log_path.exists():
+        return {}
+    try:
+        prior = json.loads(log_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    by_num = {}
+    for entry in prior.get("steps", []):
+        if isinstance(entry, dict) and isinstance(entry.get("step_number"), int):
+            by_num[entry["step_number"]] = entry
+    return by_num
+
+
 def get_completed_step_numbers(uuid: str) -> set:
     """Return the set of step numbers already committed on the current branch.
 
@@ -406,6 +428,12 @@ def main():
     # Execute
     EXECUTIONS_DIR.mkdir(parents=True, exist_ok=True)
     log_path = EXECUTIONS_DIR / f"{uuid}.json"
+
+    # Read prior execution log (if any) BEFORE we start writing the new one.
+    # The map lets us preserve verify/test step status from previous runs,
+    # which git log can't recover because verify/test steps don't commit.
+    previous_entries = load_previous_log(log_path)
+
     execution_log = {
         "uuid": uuid,
         "branch": branch,
@@ -423,14 +451,23 @@ def main():
         # Resume: carry forward already-committed steps as passed without
         # re-running them. Their commit already exists on the branch, so
         # re-running would produce "nothing to commit" and abort the pipeline.
+        # If the previous execution log has a richer entry for this step
+        # (real files_changed list, original timing, etc.), prefer that
+        # over the bland stub. Otherwise fall back to the stub.
         if step_num in completed_step_numbers:
-            execution_log["steps"].append({
-                "step_number": step_num,
-                "status": "passed",
-                "files_changed": step.get("files", []),
-                "error": None,
-                "note": "carried forward from previous run (commit on branch)",
-            })
+            prior = previous_entries.get(step_num)
+            if isinstance(prior, dict) and prior.get("status") == "passed":
+                carried = dict(prior)
+                carried["note"] = "carried forward from previous run (commit on branch)"
+                execution_log["steps"].append(carried)
+            else:
+                execution_log["steps"].append({
+                    "step_number": step_num,
+                    "status": "passed",
+                    "files_changed": step.get("files", []),
+                    "error": None,
+                    "note": "carried forward from previous run (commit on branch)",
+                })
             continue
 
         # Skip if any dependency failed/skipped
