@@ -44,7 +44,7 @@ def make_test_project(tmp_dir):
     claude_dir = tmp_dir / ".claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
     config = {"monitored_tools": ["Agent", "Bash", "Read", "Write"]}
-    (claude_dir / "budgeter.json").write_text(json.dumps(config))
+    (claude_dir / "budgeter.json").write_text(json.dumps(config), encoding="utf-8")
     return tmp_dir
 
 
@@ -60,7 +60,7 @@ def run_hook(script, payload):
 def log_entry_count(log_path):
     if not log_path.exists():
         return 0
-    return sum(1 for line in log_path.read_text().splitlines() if line.strip())
+    return sum(1 for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip())
 
 
 # ---------------------------------------------------------------------------

@@ -36,7 +36,7 @@ def _file_lock(path):
     try:
         while time.monotonic() < deadline:
             try:
-                fd = open(lock_path, "x")  # exclusive create — atomic on most FS
+                fd = open(lock_path, "x", encoding="utf-8")  # exclusive create — atomic on most FS
                 acquired = True
                 break
             except FileExistsError:

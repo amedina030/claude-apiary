@@ -18,7 +18,7 @@ class FileLock:
 
     def __enter__(self):
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-        self._fh = open(self.lock_path, "w")
+        self._fh = open(self.lock_path, "w", encoding="utf-8")
         deadline = time.monotonic() + self.timeout
         while True:
             try:

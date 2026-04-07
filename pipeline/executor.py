@@ -15,6 +15,7 @@ Usage:
 """
 import argparse
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -254,16 +255,25 @@ def run_claude(prompt: str, model: str) -> tuple[int, str, str]:
 
 def run_test_command(code_spec: str) -> tuple[bool, str]:
     """Execute a test command from code_spec. Returns (passed, output)."""
-    # The code_spec for test steps contains the command to run
     command = code_spec.strip()
     if not command:
-        return False, "No test command in code_spec"
-
-    result = subprocess.run(
-        command, shell=True,
-        capture_output=True, text=True, timeout=120,
-    )
-    output = result.stdout + result.stderr
+        return False, 'No test command in code_spec'
+    try:
+        argv = shlex.split(command)
+    except ValueError as e:
+        return False, f'could not parse test command: {e}'
+    if not argv:
+        return False, 'No test command in code_spec'
+    try:
+        result = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except FileNotFoundError as e:
+        return False, f'test command not found: {argv[0]} — code_spec must be a single command starting with an executable on PATH ({e})'
+    output = (result.stdout or '') + (result.stderr or '')
     return result.returncode == 0, output.strip()
 
 
