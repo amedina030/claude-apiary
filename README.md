@@ -204,7 +204,6 @@ claude-apiary/
 │   ├── cost_emit.py             # Emits <usage> XML from Claude envelope
 │   ├── config_loader.py         # Shared config loader
 │   ├── config.json              # Default orchestrator/stage config
-│   ├── board.md                 # Human-readable ticket status board
 │   ├── cron_setup.md            # Cron registration instructions
 │   ├── backlog/                 # Draft tickets (ticketed but not yet run)
 │   ├── intake/                  # Stage 1 input JSON files (<uuid>.json)

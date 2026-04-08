@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Create a backlog draft ticket for the runner.
 
-Writes a JSON file to runner/backlog/<slug>.json and appends a row
-to runner/board.md with status 'backlog'.
+Writes a JSON file to runner/backlog/<slug>.json.
 
 Usage:
     draft_ticket.py --title '...' --problem '...' --description '...' --scope '...'
@@ -18,7 +17,6 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 BACKLOG_DIR = SCRIPT_DIR / "backlog"
-BOARD_PATH = SCRIPT_DIR / "board.md"
 NOTES_SCRIPT = SCRIPT_DIR.parent / "scribe" / "notes.py"
 
 
@@ -53,23 +51,6 @@ def read_todo(todo_id: str) -> str:
         sys.exit(1)
 
     return content
-
-
-def ensure_board() -> None:
-    if not BOARD_PATH.exists():
-        BOARD_PATH.write_text(
-            '| Slug | Title | Status | UUID | Notes |\n'
-            '|------|-------|--------|------|-------|\n',
-            encoding='utf-8'
-        )
-
-
-def append_board_row(slug: str, title: str) -> None:
-    ensure_board()
-    safe_title = title.replace('|', r'\|')
-    text = BOARD_PATH.read_text(encoding='utf-8')
-    text += f'| {slug} | {safe_title} | backlog | | |\n'
-    BOARD_PATH.write_text(text, encoding='utf-8')
 
 
 def main():
@@ -127,7 +108,6 @@ def main():
         ticket['source'] = source
 
     file_path.write_text(json.dumps(ticket, indent=2), encoding='utf-8')
-    append_board_row(slug, args.title)
     print(str(file_path))
 
 

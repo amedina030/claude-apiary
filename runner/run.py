@@ -37,7 +37,6 @@ NO_USAGE_STAGES = frozenset({'validate_intake'})
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
-BOARD_PATH = SCRIPT_DIR / "board.md"
 LOG_AGENT_COST_SCRIPT = REPO_ROOT / 'budgeter' / 'log_agent_cost.py'
 
 # Stage definitions: (name, script, input_artifact_key)
@@ -126,34 +125,6 @@ def parse_usage_fields(usage_xml: str) -> dict:
         else:
             result[tag] = 0
     return result
-
-
-def update_board_status(intake_uuid: str, new_status: str) -> None:
-    """Update board.md row matching intake_uuid to new_status. Silently skips if board.md missing or no matching row."""
-    if not BOARD_PATH.exists():
-        return
-    try:
-        text = BOARD_PATH.read_text(encoding='utf-8')
-    except OSError:
-        return
-    lines = text.splitlines(keepends=True)
-    updated = False
-    for i, line in enumerate(lines):
-        # Table row format: | slug | title | status | uuid | notes |
-        # split('|') gives: ['', ' slug ', ' title ', ' status ', ' uuid ', ' notes ', '']
-        cols = line.split('|')
-        if len(cols) >= 6:
-            uuid_col = cols[4].strip()
-            if uuid_col == intake_uuid:
-                cols[3] = f' {new_status} '
-                lines[i] = '|'.join(cols)
-                updated = True
-                break
-    if updated:
-        try:
-            BOARD_PATH.write_text(''.join(lines), encoding='utf-8')
-        except OSError:
-            pass  # Board update must not block runner
 
 
 def record_stage_cost(stage_name: str, runner_uuid: str, stdout_text: str, stderr_text: str, stage_costs: list) -> None:
@@ -656,8 +627,6 @@ def main():
                     last_line = output.strip().splitlines()[-1]
                     print(f"  -> {last_line}")
                 stages_completed += 1
-                if name == "validate_intake":  # ATK-003: check stage name, not count
-                    update_board_status(uuid, 'running')
                 final_output = output
             else:
                 print(f"  FAILED ({elapsed:.1f}s)")
@@ -672,7 +641,6 @@ def main():
                 print(f"FAILED at stage {i}: {name}")
                 print(f"Stages completed: {stages_completed}/{len(STAGES)}")
                 print(f"Total time: {time.time() - total_start:.1f}s")
-                update_board_status(uuid, 'failed')
                 try:
                     print_cost_summary(stage_costs)
                 except Exception:
@@ -683,13 +651,11 @@ def main():
     except KeyboardInterrupt:
         print(f"\n\nInterrupted during stage {current_stage_idx}: {current_stage_name}")  # ATK-004
         print(f"Stages completed: {stages_completed}/{len(STAGES)}")
-        update_board_status(uuid, 'failed')
         print_cost_summary(stage_costs)
         print(f"To resume: python runner/run.py {intake_path_abs} --resume-from {current_stage_name}", file=sys.stderr)  # ATK-007
         sys.exit(1)
 
     # All stages completed
-    update_board_status(uuid, 'done')
     total_elapsed = time.time() - total_start
     print(f"\n{'=' * 60}")
 

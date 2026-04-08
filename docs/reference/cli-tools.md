@@ -455,7 +455,7 @@ Output: `runner/reports/<uuid>.json`. Verdicts: `auto-merged`, `pending-review`,
 
 ## runner/draft_ticket.py
 
-Create a backlog draft ticket. Writes a JSON to `runner/backlog/<slug>.json` and appends a `backlog` row to `runner/board.md`. Slug is derived from the title.
+Create a backlog draft ticket. Writes a JSON to `runner/backlog/<slug>.json`. Slug is derived from the title.
 
 ```bash
 python runner/draft_ticket.py --title "..." --problem "..." --description "..." --scope "..."
@@ -477,7 +477,7 @@ python runner/draft_ticket.py --from-todo 42 --title "..." --problem "..." --sco
 
 ## runner/promote.py
 
-Promote a backlog draft to a runner intake file. Validates against the intake schema, assigns a UUID, copies to `runner/intake/<uuid>.json`, removes the backlog file, and updates `runner/board.md` status from `backlog` to `ready`.
+Promote a backlog draft to a runner intake file. Validates against the intake schema, assigns a UUID, copies to `runner/intake/<uuid>.json`, and removes the backlog file.
 
 ```bash
 python runner/promote.py <slug>
@@ -491,7 +491,7 @@ python runner/promote.py <slug>
 
 ## runner/mark_done.py
 
-Mark a backlog ticket as done **without** running it through the runner. For tickets small enough to fix by hand. Deletes `runner/backlog/<slug>.json` and rewrites the matching `runner/board.md` row's status column to `done`.
+Mark a backlog ticket as done **without** running it through the runner. For tickets small enough to fix by hand. Deletes `runner/backlog/<slug>.json`.
 
 ```bash
 python runner/mark_done.py <slug> [--note "explanation"]
@@ -500,9 +500,9 @@ python runner/mark_done.py <slug> [--note "explanation"]
 | Argument / Flag | Required | Description |
 |-----------------|----------|-------------|
 | `slug` | yes | Backlog ticket slug — the filename **without** directory or `.json` extension |
-| `--note TEXT` | no | Optional note appended to the board row's notes column (e.g. "hand-fixed manually, not via runner") |
+| `--note TEXT` | no | Optional note describing the manual completion (currently informational only) |
 
-**Refuses to operate** if the board row is not in `backlog` status — guards against clobbering runner-run state (`ready`, `running`, `failed`, `done`). Use `promote.py` first if you actually want the ticket to run through the runner.
+The presence of the backlog file is itself the safety check — `promote.py` removes the backlog file when a ticket enters intake, so a backlog file that still exists is guaranteed not to be in flight. Use `promote.py` first if you actually want the ticket to run through the runner.
 
 ## runner/cost_emit.py
 

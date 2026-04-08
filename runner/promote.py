@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Promote a backlog ticket to runner intake.
 
-Validates, assigns a UUID, copies to intake/, removes the backlog file,
-and updates board.md status from 'backlog' to 'ready'.
+Validates, assigns a UUID, copies to intake/, and removes the backlog file.
 
 Usage:
     promote.py <slug>
@@ -17,24 +16,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 BACKLOG_DIR = SCRIPT_DIR / "backlog"
 INTAKE_DIR = SCRIPT_DIR / "intake"
-BOARD_PATH = SCRIPT_DIR / "board.md"
 VALIDATE_SCRIPT = SCRIPT_DIR / "validate_intake.py"
-
-
-def update_board_row(slug: str, new_status: str, intake_uuid: str) -> None:
-    if not BOARD_PATH.exists():
-        return
-    text = BOARD_PATH.read_text(encoding='utf-8')
-    lines = text.splitlines(keepends=True)
-    updated = []
-    for line in lines:
-        cols = line.split('|')
-        # Exact slug column match (col index 1) to avoid prefix collisions
-        if len(cols) >= 6 and cols[1].strip() == slug:
-            title = cols[2].strip()
-            line = f'| {slug} | {title} | {new_status} | {intake_uuid} | |\n'
-        updated.append(line)
-    BOARD_PATH.write_text(''.join(updated), encoding='utf-8')
 
 
 def main():
@@ -94,7 +76,6 @@ def main():
         sys.exit(1)
 
     backlog_path.unlink()
-    update_board_row(slug, 'ready', intake_id)
     print(str(intake_path))
     print(intake_id)
 
