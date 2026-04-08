@@ -189,5 +189,90 @@ class TestGetUnseenSessionsSkipIntegration(unittest.TestCase):
         self.assertEqual(self._sids(result), {"aaaaaaaa", "bbbbbbbb"})
 
 
+class TestGetUnseenSessionsArchiveIntegration(unittest.TestCase):
+    """Handoffs that have been moved to notes_archive.jsonl must still
+    count as 'seen' — otherwise archived sessions reappear forever."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp.name)
+        self.history_path = self.tmp_dir / ".session-history.json"
+        self.skip_path = self.tmp_dir / "backfill_skip.json"
+        self.notes_file = self.tmp_dir / "notes.jsonl"
+        self.archive_file = self.tmp_dir / "notes_archive.jsonl"
+
+        history = [
+            {"session_id": "aaaaaaaa-1111-2222-3333-444444444444",
+             "transcript_path": "/t/a.jsonl", "role": "user", "mission": "general"},
+            {"session_id": "bbbbbbbb-1111-2222-3333-444444444444",
+             "transcript_path": "/t/b.jsonl", "role": "user", "mission": "general"},
+        ]
+        self.history_path.write_text(json.dumps(history), encoding="utf-8")
+
+        self._notes_path_patch = patch.object(
+            startup, "notes_path", return_value=self.notes_file
+        )
+        self._archive_path_patch = patch.object(
+            startup, "archive_path", return_value=self.archive_file
+        )
+        self._notes_path_patch.start()
+        self._archive_path_patch.start()
+
+    def tearDown(self):
+        self._notes_path_patch.stop()
+        self._archive_path_patch.stop()
+        self._tmp.cleanup()
+
+    def _write_jsonl(self, path, entries):
+        path.write_text(
+            "\n".join(json.dumps(e) for e in entries) + "\n",
+            encoding="utf-8",
+        )
+
+    def _run(self):
+        current = "99999999-1111-2222-3333-444444444444"
+        with patch.object(startup, "HISTORY_PATH", self.history_path), \
+             patch.object(startup, "BACKFILL_SKIP_PATH", self.skip_path):
+            return startup.get_unseen_sessions(current, "user", "general", "claude-apiary")
+
+    def _sids(self, unseen):
+        return {s["session_id"][:8] for s in unseen}
+
+    def test_archived_handoff_counts_as_seen(self):
+        # aaaaaaaa's handoff lives only in the archive, not active notes
+        self._write_jsonl(self.notes_file, [])
+        self._write_jsonl(self.archive_file, [{
+            "type": "handoff",
+            "status": "active",
+            "session_id": "aaaaaaaa-1111-2222-3333-444444444444",
+        }])
+        result = self._run()
+        self.assertEqual(self._sids(result), {"bbbbbbbb"})
+
+    def test_active_and_archived_handoffs_both_recognized(self):
+        self._write_jsonl(self.notes_file, [{
+            "type": "handoff",
+            "status": "active",
+            "session_id": "bbbbbbbb-1111-2222-3333-444444444444",
+        }])
+        self._write_jsonl(self.archive_file, [{
+            "type": "handoff",
+            "status": "active",
+            "session_id": "aaaaaaaa-1111-2222-3333-444444444444",
+        }])
+        result = self._run()
+        self.assertEqual(self._sids(result), set())
+
+    def test_missing_archive_file_does_not_crash(self):
+        self._write_jsonl(self.notes_file, [{
+            "type": "handoff",
+            "status": "active",
+            "session_id": "aaaaaaaa-1111-2222-3333-444444444444",
+        }])
+        # archive_file deliberately not created
+        result = self._run()
+        self.assertEqual(self._sids(result), {"bbbbbbbb"})
+
+
 if __name__ == "__main__":
     unittest.main()

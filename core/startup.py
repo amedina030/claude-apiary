@@ -19,7 +19,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from core.session import CLAUDE_DIR, SessionId, load_identity
 from core.utils.project import get_project_key
 from scribe.notes import (
-    read_jsonl, notes_path, learnings_path,
+    read_jsonl, notes_path, archive_path, learnings_path,
     format_age, run_auto_archive,
 )
 
@@ -127,8 +127,10 @@ def get_unseen_sessions(session_id, wants_role, wants_mission, project_key):
         and s.get("mission", "general") == wants_mission
     ]
 
-    # Get existing handoff session IDs from notes
-    notes = read_jsonl(notes_path(project_key))
+    # Get existing handoff session IDs from active notes AND archived notes
+    # (handoffs get archived along with regular notes; without checking the
+    # archive, archived sessions reappear as "unseen" forever).
+    notes = read_jsonl(notes_path(project_key)) + read_jsonl(archive_path(project_key))
     handoff_sids = {
         n.get("session_id", "").strip()[:8].lower()
         for n in notes
