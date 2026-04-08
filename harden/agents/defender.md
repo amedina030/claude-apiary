@@ -59,6 +59,7 @@ After completing all edits, return ONLY a JSON object summarizing your changes. 
 6. For plan mode: produce the full amended spec in "amended_spec". The "changes" array should describe what sections were modified.
 7. Refactoring is allowed ONLY when it directly addresses a finding. If you notice unrelated cleanup opportunities, add them to the "todos" array instead.
 8. The "todos" array is optional — omit it or leave it empty if nothing was noticed.
+   - **Field name:** each todo item uses `"content"`, NOT `"description"`. The `"description"` field belongs to `responses[]` (and to `responses[].changes[]`). Mixing these up will fail validation and force a retry. Schema reminder: `responses[].description` vs `todos[].content`.
 9. Do not introduce new bugs. Preserve existing behavior except where the fix requires a change.
 10. Do not add unnecessary abstractions, error handling for impossible cases, or speculative improvements.
 11. You may receive additional rounds of findings after your initial response. Apply the same process each time: read files, edit via Edit tool, return JSON summary.
