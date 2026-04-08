@@ -210,38 +210,21 @@ class TestBannedTokens(unittest.TestCase):
 
 
 class TestPathAllowlist(unittest.TestCase):
-    """#212: absolute paths in step.files must resolve under one of the
-    allowlist roots (repo root, ~/.claude/projects/<project-key>/) or
-    be flat-out rejected. Catches T5b's accidental Windows paths
-    without blocking the legitimate #222 case of writing persistent
-    state under ~/.claude/projects/."""
+    """#212: every path in step.files (relative or absolute) must resolve
+    under the repo working tree. Out-of-repo paths are rejected outright,
+    even legitimate state-dir locations — those must be hand-fixed.
+    Catches both T5b's absolute Windows paths and `../etc/passwd`
+    style traversal in relative paths."""
 
     def setUp(self):
-        # Force a known set of allowlist roots so the tests are
-        # deterministic regardless of the host's home directory layout.
+        # A scratch directory that's guaranteed not to be inside the
+        # repo, used as the "rejected" location.
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        tmp_root = Path(self._tmp.name)
-        self.fake_state_root = tmp_root / "state"
-        self.fake_state_root.mkdir(parents=True)
-        # A definitely-absolute path that lives nowhere near the
-        # fake_state_root or the repo root — used as the "rejected"
-        # case so we don't depend on /tmp existing or being absolute
-        # on Windows.
-        self.outside_root = tmp_root / "outside"
+        self.outside_root = Path(self._tmp.name) / "outside"
         self.outside_root.mkdir(parents=True)
-        self._allow_patch = mock.patch.object(
-            validate_plan,
-            "_allowlist_roots",
-            return_value=[
-                validate_plan._REPO_ROOT.resolve(),
-                self.fake_state_root.resolve(),
-            ],
-        )
-        self._allow_patch.start()
-        self.addCleanup(self._allow_patch.stop)
 
-    def test_relative_path_accepted(self):
+    def test_relative_in_repo_path_accepted(self):
         steps = [_step(1, "create", "x", files=["runner/foo.py"])]
         self.assertEqual(_check_path_allowlist(steps), [])
 
@@ -250,35 +233,47 @@ class TestPathAllowlist(unittest.TestCase):
         steps = [_step(1, "create", "x", files=[str(in_repo)])]
         self.assertEqual(_check_path_allowlist(steps), [])
 
-    def test_absolute_path_under_state_dir_accepted(self):
-        outside = self.fake_state_root / "subdir" / "backfill_skip.json"
-        steps = [_step(1, "create", "x", files=[str(outside)])]
-        self.assertEqual(_check_path_allowlist(steps), [])
-
-    def test_absolute_path_outside_allowlist_rejected(self):
+    def test_absolute_path_outside_repo_rejected(self):
         bad = str(self.outside_root / "random.json")
         steps = [_step(1, "create", "x", files=[bad])]
         errors = _check_path_allowlist(steps)
         self.assertEqual(len(errors), 1)
-        self.assertIn("outside the allowlist", errors[0])
+        self.assertIn("outside the repo working tree", errors[0])
         self.assertIn(bad, errors[0])
+
+    def test_state_dir_path_rejected(self):
+        # ~/.claude/projects/<key>/ used to be allowlisted; the design
+        # was reversed to keep the runner inside the worktree. Such
+        # tickets must be hand-fixed.
+        bad = str(Path.home() / ".claude" / "projects" / "claude-apiary" / "backfill_skip.json")
+        steps = [_step(1, "create", "x", files=[bad])]
+        errors = _check_path_allowlist(steps)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("outside the repo working tree", errors[0])
+
+    def test_relative_traversal_rejected(self):
+        # `../../etc/passwd` resolves out of the repo at validation time.
+        steps = [_step(1, "create", "x", files=["../../etc/passwd"])]
+        errors = _check_path_allowlist(steps)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("outside the repo working tree", errors[0])
 
     def test_windows_style_absolute_path_rejected(self):
         # T5b regression: planner emitted C:\Users\... paths in files[].
+        # On POSIX the literal is parsed as a relative path that, when
+        # resolved against repo root, falls under the repo (so it would
+        # be accepted, technically as relative). Only assert the rejection
+        # on platforms where the parser treats it as absolute.
         steps = [_step(1, "create", "x", files=["C:\\Users\\amedi\\.claude\\CLAUDE.md"])]
         errors = _check_path_allowlist(steps)
-        # On non-Windows, "C:\\..." may be parsed as relative; either accepted
-        # (relative) or rejected, but never accepted *as* an out-of-allowlist
-        # absolute. Skip the strict check on POSIX where the parser is lenient.
         if Path("C:\\Users\\amedi\\.claude\\CLAUDE.md").is_absolute():
             self.assertEqual(len(errors), 1)
-            self.assertIn("outside the allowlist", errors[0])
+            self.assertIn("outside the repo working tree", errors[0])
 
     def test_mixed_files_in_one_step(self):
         ok_in_repo = str(validate_plan._REPO_ROOT / "runner" / "foo.py")
-        ok_state = str(self.fake_state_root / "state.json")
         bad = str(self.outside_root / "path.json")
-        steps = [_step(1, "create", "x", files=[ok_in_repo, ok_state, bad])]
+        steps = [_step(1, "create", "x", files=[ok_in_repo, bad])]
         errors = _check_path_allowlist(steps)
         self.assertEqual(len(errors), 1)
         self.assertIn(bad, errors[0])
@@ -289,7 +284,7 @@ class TestPathAllowlist(unittest.TestCase):
             _step(1, "create", "noop spec", files=[bad]),
         ])
         errors = validate(plan)
-        self.assertTrue(any("outside the allowlist" in e for e in errors),
+        self.assertTrue(any("outside the repo working tree" in e for e in errors),
                         f"expected allowlist error in {errors}")
 
 

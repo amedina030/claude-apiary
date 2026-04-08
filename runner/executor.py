@@ -14,7 +14,6 @@ Usage:
     executor.py <path_to_plan.json>
 """
 import argparse
-import hashlib
 import json
 import shlex
 import subprocess
@@ -33,7 +32,6 @@ from config_loader import get as cfg
 from claude_subprocess import run_claude as _spawn_claude
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent
 EXECUTIONS_DIR = SCRIPT_DIR / "executions"
 
 MAX_STEP_RETRIES = cfg("executor", "max_retries_per_step", 2)
@@ -81,119 +79,35 @@ def create_branch(branch: str):
         raise RuntimeError(_format_git_error(f"creating branch '{branch}'", result))
 
 
-def _path_is_outside_repo(file_str: str) -> bool:
-    """True if `file_str` resolves to a path outside the repo working tree.
+def commit_files(files: list[str], message: str):
+    """Stage specific files and commit.
 
-    Used by commit_or_verify_files() to split the file list into in-repo
-    files (verified via git) and out-of-repo files (verified via content
-    hash). #212.
-    """
-    try:
-        resolved = Path(file_str).resolve()
-        resolved.relative_to(REPO_ROOT.resolve())
-        return False
-    except (ValueError, OSError, RuntimeError):
-        return True
-
-
-def _hash_file(path: Path) -> str:
-    """Return sha256 hex of `path`'s contents, or empty string if missing.
-
-    Empty-string sentinel is intentional: a file that didn't exist before
-    a step but exists after still counts as 'changed' (empty != non-empty
-    digest), which is exactly what we want.
-    """
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except (FileNotFoundError, IsADirectoryError, PermissionError):
-        return ""
-
-
-def hash_outside_files(files: list[str]) -> dict[str, str]:
-    """Snapshot content hashes of out-of-repo files in `files`.
-
-    Returns {file_str: sha256_hex}, with empty string for missing files.
-    Caller passes the result to commit_or_verify_files() after the
-    subprocess runs to verify at least one out-of-repo file changed.
-    """
-    out: dict[str, str] = {}
-    for f in files:
-        if not isinstance(f, str) or not f:
-            continue
-        if _path_is_outside_repo(f):
-            out[f] = _hash_file(Path(f))
-    return out
-
-
-def commit_or_verify_files(
-    files: list[str],
-    message: str,
-    prior_outside_hashes: dict[str, str] | None = None,
-) -> None:
-    """Verify expected file changes and commit the in-repo subset (#212).
-
-    Before committing, verify the subprocess actually changed the files
-    it claimed to. Splits `files` into two buckets:
-
-    * **in-repo**: staged with `git add` and verified via
-      `git diff --cached --quiet`. If nothing is staged, the subprocess
-      either no-op'd, wrote to the wrong path, or silently failed.
-
-    * **outside-repo**: verified by re-hashing each path and comparing
-      to the snapshot in `prior_outside_hashes`. At least one hash must
-      differ. Outside files are NOT staged or committed (they live
-      outside the worktree).
-
-    A commit is created only if there is at least one in-repo file with
-    a real diff. If every file in the step is outside the repo, the
-    function still verifies them and returns without touching git.
+    Before committing, verify the add actually staged a change. If the
+    subprocess claimed to edit a file but didn't (e.g. decided no edit was
+    needed, wrote to the wrong path, or silently failed), `git commit` would
+    fail with "no changes added to commit" — an error that historically
+    looked identical to a real git failure and masked subprocess bugs. Fail
+    fast with a distinct error in that case.
     """
     if not files:
         return
-    prior_outside_hashes = prior_outside_hashes or {}
-
-    in_repo = [f for f in files if not _path_is_outside_repo(f)]
-    outside = [f for f in files if _path_is_outside_repo(f)]
-
-    # Verify outside files via content hash diff.
-    if outside:
-        unchanged_outside = []
-        for f in outside:
-            current = _hash_file(Path(f))
-            if current == prior_outside_hashes.get(f, ""):
-                unchanged_outside.append(f)
-        if len(unchanged_outside) == len(outside):
-            raise RuntimeError(
-                f"Subprocess made no changes to expected files ({', '.join(outside)}). "
-                f"All listed out-of-repo paths have the same content hash they had "
-                f"before the step ran — the implementation subprocess either decided "
-                f"no edit was needed, wrote to the wrong path, or silently failed."
-            )
-
-    # Verify and commit in-repo files via git.
-    if in_repo:
-        git("add", *in_repo)
-        staged = git("diff", "--cached", "--quiet", "--", *in_repo)
-        if staged.returncode == 0:
-            # `git diff --cached --quiet` exits 0 when there is no diff,
-            # meaning nothing was actually staged for these files.
-            raise RuntimeError(
-                f"Subprocess made no changes to expected files ({', '.join(in_repo)}). "
-                f"The step's implementation subprocess either decided no edit was "
-                f"needed, edited a different path, or silently failed. Check the "
-                f"subprocess transcript."
-            )
-        result = git("commit", "-m", message)
-        if result.returncode != 0:
-            raise RuntimeError(_format_git_error(
-                "committing",
-                result,
-                extra=f"staged files: {', '.join(in_repo)}",
-            ))
-
-
-# Backward-compat alias for any callers that imported the old name.
-commit_files = commit_or_verify_files
+    git("add", *files)
+    staged = git("diff", "--cached", "--quiet", "--", *files)
+    if staged.returncode == 0:
+        # `git diff --cached --quiet` exits 0 when there is no diff, meaning
+        # nothing was actually staged for these files.
+        raise RuntimeError(
+            f"Subprocess made no changes to expected files ({', '.join(files)}). "
+            f"The step's implementation subprocess either decided no edit was needed, "
+            f"edited a different path, or silently failed. Check the subprocess transcript."
+        )
+    result = git("commit", "-m", message)
+    if result.returncode != 0:
+        raise RuntimeError(_format_git_error(
+            "committing",
+            result,
+            extra=f"staged files: {', '.join(files)}",
+        ))
 
 
 def get_current_branch() -> str:
@@ -604,12 +518,6 @@ def main():
 
         print(f"Executing step {step_num}: {step.get('description', '')}", file=sys.stderr)
         resolved_model = step.get("model") or default_model
-
-        # Snapshot any out-of-repo files BEFORE the subprocess runs so
-        # commit_or_verify_files() can detect that they actually changed
-        # (the git-based check can't see paths outside the worktree). #212.
-        prior_outside_hashes = hash_outside_files(step.get("files", []))
-
         step_result = execute_step(step, spec, resolved_model)
         execution_log["steps"].append(step_result)
 
@@ -618,11 +526,7 @@ def main():
             files = step.get("files", [])
             if files and step.get("action") not in ("test", "verify"):
                 try:
-                    commit_or_verify_files(
-                        files,
-                        f"runner/{uuid} step {step_num}: {step.get('description', '')}",
-                        prior_outside_hashes,
-                    )
+                    commit_files(files, f"runner/{uuid} step {step_num}: {step.get('description', '')}")
                 except RuntimeError as e:
                     print(f"Git error: {e}", file=sys.stderr)
                     step_result["status"] = "failed"

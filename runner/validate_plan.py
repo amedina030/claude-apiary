@@ -64,56 +64,31 @@ _TEST_FAILURE_LANGUAGE = (
 )
 
 
-# --- Path allowlist (#212) ---
+# --- Path allowlist (#212, revised) ---
 #
-# Plans may legitimately reference files outside the repo working tree —
-# specifically persistent state under ~/.claude/projects/<project-key>/, per
-# the portability rule that user state lives there. But we still need to
-# reject *accidental* absolute paths (T5b had Windows C:\ paths slip through).
+# Runner plans must operate exclusively on files inside the repo working
+# tree. Out-of-repo paths are rejected outright — including legitimate
+# state files under ~/.claude/projects/<project-key>/ — because the
+# executor's git-based verifier can't see anything outside the worktree
+# and we don't want a parallel non-git verification path. Hand-fix any
+# ticket whose work would touch out-of-repo state.
 #
-# Resolution: any absolute path in step.files must, after resolving, fall
-# under one of the allowlist roots below. Relative paths are unconditionally
-# accepted (they're inherently in-repo when the runner cd's to repo root).
+# Every step.files entry is resolved (relative paths against the runner's
+# cwd, which is always the repo root) and must fall under REPO_ROOT.
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _read_project_key() -> str:
-    """Read .claude-project-key from repo root, or fall back to a default.
-
-    Mirrors the resolution used by core/utils/project.py but kept local
-    so runner stages don't have to import from core (different package).
-    """
-    key_file = _REPO_ROOT / ".claude-project-key"
-    try:
-        key = key_file.read_text(encoding="utf-8").strip()
-        if key:
-            return key
-    except OSError:
-        pass
-    return "claude-apiary"
-
-
-def _allowlist_roots() -> list[Path]:
-    """Return the list of resolved roots that absolute paths may live under."""
-    return [
-        _REPO_ROOT.resolve(),
-        (Path.home() / ".claude" / "projects" / _read_project_key()).resolve(),
-    ]
-
-
-def _path_under_any(path: Path, roots: list[Path]) -> bool:
+def _path_under_repo(path: Path) -> bool:
     try:
         resolved = path.resolve()
     except (OSError, RuntimeError):
         return False
-    for root in roots:
-        try:
-            resolved.relative_to(root)
-            return True
-        except ValueError:
-            continue
-    return False
+    try:
+        resolved.relative_to(_REPO_ROOT.resolve())
+        return True
+    except ValueError:
+        return False
 
 
 def _detect_cycles(steps: list[dict]) -> list[str]:
@@ -234,18 +209,19 @@ def _check_test_failure_language(steps: list[dict]) -> list[str]:
 
 
 def _check_path_allowlist(steps: list[dict]) -> list[str]:
-    """Reject plans whose step.files contain absolute paths outside the
-    allowlist roots (#212).
+    """Reject plans whose step.files contain paths outside the repo (#212).
 
-    Catches T5b-style accidents (e.g. raw C:\\Users\\... paths slipping into
-    a plan) without blocking the legitimate case of writing persistent
-    state under ~/.claude/projects/<project-key>/.
+    Every file entry is resolved — relative paths against the runner's
+    cwd (always repo root), absolute paths against themselves — and the
+    result must fall under REPO_ROOT. Catches both T5b-style absolute
+    Windows paths and `../../etc/passwd` style escapes.
 
-    Relative paths are unconditionally accepted — they're resolved against
-    the working tree at execution time, which is always the repo root.
+    Out-of-repo paths are rejected even when they target legitimate
+    persistent-state locations (e.g. ~/.claude/projects/<key>/) — those
+    must be hand-fixed, because the executor's git-based verifier
+    cannot see anything outside the worktree.
     """
     errors = []
-    roots = _allowlist_roots()
     for i, step in enumerate(steps):
         if not isinstance(step, dict):
             continue
@@ -255,13 +231,11 @@ def _check_path_allowlist(steps: list[dict]) -> list[str]:
         for f in files:
             if not isinstance(f, str) or not f:
                 continue
-            p = Path(f)
-            if not p.is_absolute():
-                continue
-            if not _path_under_any(p, roots):
+            if not _path_under_repo(Path(f)):
                 errors.append(
-                    f"step[{i}]: absolute path '{f}' is outside the allowlist "
-                    f"(must be under repo root or ~/.claude/projects/<project-key>/)"
+                    f"step[{i}]: path '{f}' is outside the repo working "
+                    f"tree (runner only operates on in-repo files; "
+                    f"hand-fix if you need to touch out-of-repo state)"
                 )
     return errors
 
