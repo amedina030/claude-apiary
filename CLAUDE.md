@@ -6,15 +6,15 @@ A unified ecosystem of tools that extend Claude Code: **budgeter**, **scribe**, 
 
 ## Session behavior
 
-### CLI tool lookup is mandatory
+### CLI tool lookup
 
-Before calling any repo CLI tool for the first time in a session, look up its full flags:
+When in doubt about a repo CLI tool's flags, look it up rather than guessing — LLM muscle memory for flag names (`--limit` vs `--last`, `--max` vs `--count`, etc.) is not reliable:
 
 ```bash
 python docs/reference/cli_lookup.py <tool>   # e.g. notes, report, round_counter
 ```
 
-The `enforce_cli_lookup` PreToolUse hook blocks first invocations that skip this. **When in doubt later in the session, look it up again** — LLM muscle memory for flag names (`--limit` vs `--last`, `--max` vs `--count`, etc.) is not reliable and the hook only re-blocks the first call per session.
+Not enforced — just the recommended habit.
 
 ### Handoff backfilling
 

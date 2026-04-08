@@ -16,7 +16,6 @@ ALLOW = {
     'runner/validate_plan.py',
     'runner/test_validate_plan.py',
     'runner/auto_plan.py',
-    'core/hooks/enforce_cli_lookup.py',
     'scripts/audit_portability.py',
 }
 

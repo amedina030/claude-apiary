@@ -72,7 +72,7 @@ class TestFailureDetection(unittest.TestCase):
         self.assertFalse(hook_mod._looks_like_failure(s))
 
     def test_hook_denial_dict_excluded(self):
-        resp = {"stderr": "Blocked by enforce_cli_lookup: ..."}
+        resp = {"stderr": "Blocked by some_hook: ..."}
         self.assertFalse(hook_mod._looks_like_failure(resp))
 
     def test_plain_success(self):
