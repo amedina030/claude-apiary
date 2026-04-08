@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import re
 import sys
 from pathlib import Path
 
@@ -106,8 +107,22 @@ def _zone_or_empty(target: Path) -> tuple[str, dict[str, cr.InstalledRule], bool
 # ---------------------------------------------------------------------------
 
 
+# Splits a markdown document into chunks at every level-2-or-deeper header
+# line, keeping the header attached to its following body. Level-1 (`# `)
+# headers are treated as document titles, not section boundaries — this
+# matches the convention used in this project's CLAUDE.md files (single
+# top-level title + ## / ### subsections) and lets paragraphs that sit
+# directly under the title fall through to paragraph-level stripping.
+_HEADER_SPLIT_RE = re.compile(r"(?m)^(?=#{2,6}[ \t])")
+
+
 def _strip_paragraphs_in(text: str) -> str:
-    """Drop blank-line-separated paragraphs containing any STOPGAP_MARKERS phrase."""
+    """Drop blank-line-separated paragraphs containing any STOPGAP_MARKERS phrase.
+
+    This is the fallback used for text that has no preceding markdown
+    header — e.g. stopgap paragraphs inserted at the very top of CLAUDE.md
+    above any section heading.
+    """
     if not text:
         return text
     paragraphs = text.split("\n\n")
@@ -115,14 +130,50 @@ def _strip_paragraphs_in(text: str) -> str:
     return "\n\n".join(keep)
 
 
+def _strip_sections_in(text: str) -> str:
+    """Drop entire markdown sections containing any STOPGAP_MARKERS phrase.
+
+    A "section" is a markdown header line plus all following lines up to
+    the next header (any level). Whole sections are removed when any
+    marker substring appears anywhere in the section body — this handles
+    multi-paragraph rule bodies where only one paragraph contains the
+    distinctive phrase but every adjacent paragraph belongs to the same
+    rule and must go with it (#230).
+
+    Content before the first header has no enclosing section, so it falls
+    back to paragraph-level stripping.
+    """
+    if not text:
+        return text
+    chunks = _HEADER_SPLIT_RE.split(text)
+    if not chunks:
+        return text
+    out: list[str] = []
+    # Pre-header preamble: paragraph-level fallback.
+    preamble = chunks[0]
+    if preamble:
+        out.append(_strip_paragraphs_in(preamble))
+    # Each remaining chunk starts with a header line.
+    for chunk in chunks[1:]:
+        if any(m in chunk for _, m in STOPGAP_MARKERS):
+            continue
+        out.append(chunk)
+    return "".join(out)
+
+
 def _strip_stopgap_paragraphs(text: str) -> str:
-    """Remove stopgap paragraphs from `text`, ONLY in regions outside any
+    """Remove stopgap content from `text`, ONLY in regions outside any
     existing managed zone.
 
     The stopgap markers are distinctive phrases that appear in both the
     inline stopgap copy AND in the source rule body inside the managed
     zone. Restricting the strip to outside-zone regions ensures the
     installer never accidentally chops out a real rule body.
+
+    Section-level removal is used so that multi-paragraph rule bodies are
+    dropped atomically — earlier paragraph-level stripping (#230) left
+    orphan paragraphs from the same rule when only one paragraph carried
+    the marker substring.
     """
     try:
         zone = cr.find_managed_zone(text)
@@ -130,12 +181,12 @@ def _strip_stopgap_paragraphs(text: str) -> str:
         zone = None
 
     if zone is None:
-        return _strip_paragraphs_in(text)
+        return _strip_sections_in(text)
 
     prefix = text[: zone.start]
     middle = text[zone.start : zone.end]  # untouched
     suffix = text[zone.end :]
-    return _strip_paragraphs_in(prefix) + middle + _strip_paragraphs_in(suffix)
+    return _strip_sections_in(prefix) + middle + _strip_sections_in(suffix)
 
 
 # ---------------------------------------------------------------------------

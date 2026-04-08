@@ -233,6 +233,80 @@ class TestReplaceStopgap(InstallerTestCase):
         # Idempotent reinstall should produce the same content.
         self.assertEqual(after, before)
 
+    def test_strips_full_section_when_only_one_paragraph_matches(self):
+        # #230 regression: a multi-paragraph rule body where only one
+        # paragraph contains the marker substring. The whole section
+        # (header + every paragraph through the next header) must go.
+        stopgap = (
+            "# Global Claude Code Rules\n\n"
+            "### Recover from trivial errors inline\n\n"
+            "When a tool call fails with a *trivial* cause, fix it and retry in the same turn.\n\n"
+            "**Self-check before narrating any tool failure:** is the fix obvious?\n\n"
+            "**Why:** Burning a turn on \"here's the error\" is noise.\n\n"
+            "### Other section\n\n"
+            "Keep this entirely.\n"
+        )
+        self._write(stopgap)
+        result = run(*self._common("--install-all", "--replace-stopgap"))
+        self.assertEqual(result.exit_code, 0)
+        text = self._read()
+        before_zone = text.split(cr.OUTER_START)[0]
+        # The marker paragraph and ALL its siblings under the same header
+        # are gone from the pre-zone region.
+        self.assertNotIn("Recover from trivial errors inline", before_zone)
+        self.assertNotIn("Self-check before narrating", before_zone)
+        self.assertNotIn("Burning a turn on", before_zone)
+        self.assertNotIn("fix it and retry in the same turn", before_zone)
+        # The unrelated section is preserved verbatim.
+        self.assertIn("### Other section", before_zone)
+        self.assertIn("Keep this entirely.", before_zone)
+
+    def test_preserves_unrelated_sections_with_marker_neighbors(self):
+        # Two adjacent ### sections; only one carries a marker. The other
+        # must be preserved untouched even though they share blank-line
+        # paragraph boundaries.
+        stopgap = (
+            "# Global Claude Code Rules\n\n"
+            "### Unrelated section\n\n"
+            "This paragraph stays.\n\n"
+            "And so does this one.\n\n"
+            "### Co-Authored-By rule\n\n"
+            "Never add Co-Authored-By: Claude to commits.\n\n"
+            "**Why:** Clean contributor graph.\n"
+        )
+        self._write(stopgap)
+        result = run(*self._common("--install-all", "--replace-stopgap"))
+        self.assertEqual(result.exit_code, 0)
+        before_zone = self._read().split(cr.OUTER_START)[0]
+        # Unrelated section intact.
+        self.assertIn("### Unrelated section", before_zone)
+        self.assertIn("This paragraph stays.", before_zone)
+        self.assertIn("And so does this one.", before_zone)
+        # Co-Authored-By section gone.
+        self.assertNotIn("Co-Authored-By rule", before_zone)
+        self.assertNotIn("Co-Authored-By: Claude", before_zone)
+        self.assertNotIn("Clean contributor graph", before_zone)
+
+    def test_pre_header_preamble_falls_back_to_paragraph_strip(self):
+        # If the marker appears in a paragraph BEFORE any markdown header,
+        # there is no enclosing section to drop, so the paragraph-level
+        # fallback handles it.
+        stopgap = (
+            "# Global Claude Code Rules\n\n"
+            "Quick note: never add Co-Authored-By: Claude to commits.\n\n"
+            "Some other unrelated paragraph that should survive.\n\n"
+            "### Real section\n\n"
+            "Body of the real section.\n"
+        )
+        self._write(stopgap)
+        result = run(*self._common("--install-all", "--replace-stopgap"))
+        self.assertEqual(result.exit_code, 0)
+        before_zone = self._read().split(cr.OUTER_START)[0]
+        self.assertNotIn("Co-Authored-By: Claude", before_zone)
+        self.assertIn("Some other unrelated paragraph", before_zone)
+        self.assertIn("### Real section", before_zone)
+        self.assertIn("Body of the real section.", before_zone)
+
 
 class TestList(InstallerTestCase):
     def test_list_runs_clean(self):
