@@ -1,0 +1,8 @@
+{
+  "title": "Use word boundaries in validate_plan banned-token check",
+  "problem": "runner/validate_plan.py::_check_banned_tokens uses naive substring matching against the planner's code_spec and description text. Substrings like 'from requests' falsely match legitimate non-banned imports such as 'from requests_mock import ...', rejecting valid plans and eroding trust in the validator.",
+  "description": "Convert _check_banned_tokens from substring matching to word-boundary regex matching.\n\nEach entry in _BANNED_TOKENS becomes a precompiled regex with appropriate word boundaries:\n- 'pytest' -> r'\\bpytest\\b'\n- 'shell=true' -> r'\\bshell\\s*=\\s*True\\b' (case-insensitive)\n- 'import requests' -> r'\\bimport\\s+requests\\b'\n- 'from requests' -> r'\\bfrom\\s+requests\\b'\n\nKeep the {token: reason} mapping shape so the error messages still surface the human-readable reason on retry. Compile the regexes once at module level.\n\nAdd tests covering: 'pytest' alone still rejected; 'pytest_mock' alone NOT rejected (boundary works); 'from requests_mock import' NOT rejected; 'from requests import get' still rejected; 'shell=True' (real spelling) still rejected; case variants of shell=True still rejected.",
+  "scope": "runner/validate_plan.py and runner/test_validate_plan.py",
+  "context": "Filed as scribe TODO #239 during the #212 follow-up review. Pure refinement of an existing check; no new validation surface, no behavior change for legitimate use.",
+  "created_at": "2026-04-08T02:37:45.709671+00:00"
+}
