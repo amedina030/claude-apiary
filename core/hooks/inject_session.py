@@ -6,7 +6,12 @@ from the budgeter, so any process (startup, scribe, etc.) can use it.
 
 Runs once per session using a flag file, cleaned up by the companion
 Stop hook (check_install_stop.py).
+
+Skipped entirely when ``APIARY_RUNNER_SUBPROCESS=1`` is set in the env —
+runner stage subprocesses already know their own session_id and don't
+need the context injection (#228).
 """
+import os
 import sys
 from pathlib import Path
 
@@ -16,6 +21,11 @@ from core.hook_context import context_block, hook_allow, read_payload
 
 
 def main():
+    # Runner subprocesses skip this hook entirely (#228).
+    if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
+        hook_allow()
+        return
+
     payload = read_payload()
 
     raw_id = payload.get("session_id", "")

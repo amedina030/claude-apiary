@@ -18,7 +18,12 @@ Failure heuristics (any of):
 
 The hook never blocks a tool call and never raises — it fails open on any
 internal error so a buggy reminder never wedges the session.
+
+Skipped entirely when ``APIARY_RUNNER_SUBPROCESS=1`` is set in the env —
+runner stage subprocesses are one-shot workers and the behavioral-rule
+nudge is just token bloat for them (#228).
 """
+import os
 import sys
 import json
 
@@ -113,6 +118,10 @@ def _emit_reminder() -> None:
 
 def main() -> None:
     try:
+        # Runner subprocesses skip this hook entirely (#228).
+        if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
+            _fail_open()
+
         raw = sys.stdin.read()
         if not raw:
             _fail_open()

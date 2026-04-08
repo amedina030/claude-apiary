@@ -6,7 +6,12 @@ tool call of each session. Injects a warning if any files are stale.
 Runs once per session: writes a session flag file on first run, exits
 immediately on subsequent calls. The flag file is cleaned up by the
 companion Stop hook.
+
+Skipped entirely when ``APIARY_RUNNER_SUBPROCESS=1`` is set in the env —
+runner stage subprocesses don't need stale-file warnings and shouldn't
+write per-session flag files (#228).
 """
+import os
 import sys
 import json
 import hashlib
@@ -57,6 +62,12 @@ def check_manifest():
 
 
 def main():
+    # Runner subprocesses skip this hook entirely (#228) — they are
+    # one-shot workers, not real user sessions.
+    if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
+        hook_allow()
+        return
+
     payload = read_payload()
 
     raw_id = payload.get("session_id", "")
