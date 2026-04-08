@@ -64,6 +64,58 @@ _TEST_FAILURE_LANGUAGE = (
 )
 
 
+# --- Path allowlist (#212) ---
+#
+# Plans may legitimately reference files outside the repo working tree —
+# specifically persistent state under ~/.claude/projects/<project-key>/, per
+# the portability rule that user state lives there. But we still need to
+# reject *accidental* absolute paths (T5b had Windows C:\ paths slip through).
+#
+# Resolution: any absolute path in step.files must, after resolving, fall
+# under one of the allowlist roots below. Relative paths are unconditionally
+# accepted (they're inherently in-repo when the runner cd's to repo root).
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _read_project_key() -> str:
+    """Read .claude-project-key from repo root, or fall back to a default.
+
+    Mirrors the resolution used by core/utils/project.py but kept local
+    so runner stages don't have to import from core (different package).
+    """
+    key_file = _REPO_ROOT / ".claude-project-key"
+    try:
+        key = key_file.read_text(encoding="utf-8").strip()
+        if key:
+            return key
+    except OSError:
+        pass
+    return "claude-apiary"
+
+
+def _allowlist_roots() -> list[Path]:
+    """Return the list of resolved roots that absolute paths may live under."""
+    return [
+        _REPO_ROOT.resolve(),
+        (Path.home() / ".claude" / "projects" / _read_project_key()).resolve(),
+    ]
+
+
+def _path_under_any(path: Path, roots: list[Path]) -> bool:
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError):
+        return False
+    for root in roots:
+        try:
+            resolved.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
 def _detect_cycles(steps: list[dict]) -> list[str]:
     """Detect circular dependencies in step graph. Returns error strings."""
     # Build adjacency: step_number -> list of step_numbers it depends on
@@ -178,6 +230,39 @@ def _check_test_failure_language(steps: list[dict]) -> list[str]:
                     f"so it returns 0 on the expected condition."
                 )
                 break
+    return errors
+
+
+def _check_path_allowlist(steps: list[dict]) -> list[str]:
+    """Reject plans whose step.files contain absolute paths outside the
+    allowlist roots (#212).
+
+    Catches T5b-style accidents (e.g. raw C:\\Users\\... paths slipping into
+    a plan) without blocking the legitimate case of writing persistent
+    state under ~/.claude/projects/<project-key>/.
+
+    Relative paths are unconditionally accepted — they're resolved against
+    the working tree at execution time, which is always the repo root.
+    """
+    errors = []
+    roots = _allowlist_roots()
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        files = step.get("files", [])
+        if not isinstance(files, list):
+            continue
+        for f in files:
+            if not isinstance(f, str) or not f:
+                continue
+            p = Path(f)
+            if not p.is_absolute():
+                continue
+            if not _path_under_any(p, roots):
+                errors.append(
+                    f"step[{i}]: absolute path '{f}' is outside the allowlist "
+                    f"(must be under repo root or ~/.claude/projects/<project-key>/)"
+                )
     return errors
 
 
@@ -332,6 +417,9 @@ def validate(data: dict) -> list[str]:
 
     # Banned-token check (project convention violations: pytest, shell=True, etc.)
     errors.extend(_check_banned_tokens(steps))
+
+    # Path allowlist (#212): reject absolute paths outside repo + state dir.
+    errors.extend(_check_path_allowlist(steps))
 
     # Acceptance criteria coverage
     if isinstance(spec, dict):

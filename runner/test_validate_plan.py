@@ -3,18 +3,22 @@
 
 Stdlib unittest only (no pytest), per docs/standards/code-style.md.
 """
+import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 # validate_plan lives next to this file
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_plan import (
     validate,
     _check_test_code_spec_format,
     _check_banned_tokens,
     _check_test_failure_language,
+    _check_path_allowlist,
 )
+import validate_plan
 
 
 def _base_plan(steps):
@@ -203,6 +207,90 @@ class TestBannedTokens(unittest.TestCase):
         errors = validate(plan)
         self.assertTrue(any("banned token" in e for e in errors),
                         f"expected banned-token error in {errors}")
+
+
+class TestPathAllowlist(unittest.TestCase):
+    """#212: absolute paths in step.files must resolve under one of the
+    allowlist roots (repo root, ~/.claude/projects/<project-key>/) or
+    be flat-out rejected. Catches T5b's accidental Windows paths
+    without blocking the legitimate #222 case of writing persistent
+    state under ~/.claude/projects/."""
+
+    def setUp(self):
+        # Force a known set of allowlist roots so the tests are
+        # deterministic regardless of the host's home directory layout.
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        tmp_root = Path(self._tmp.name)
+        self.fake_state_root = tmp_root / "state"
+        self.fake_state_root.mkdir(parents=True)
+        # A definitely-absolute path that lives nowhere near the
+        # fake_state_root or the repo root — used as the "rejected"
+        # case so we don't depend on /tmp existing or being absolute
+        # on Windows.
+        self.outside_root = tmp_root / "outside"
+        self.outside_root.mkdir(parents=True)
+        self._allow_patch = mock.patch.object(
+            validate_plan,
+            "_allowlist_roots",
+            return_value=[
+                validate_plan._REPO_ROOT.resolve(),
+                self.fake_state_root.resolve(),
+            ],
+        )
+        self._allow_patch.start()
+        self.addCleanup(self._allow_patch.stop)
+
+    def test_relative_path_accepted(self):
+        steps = [_step(1, "create", "x", files=["runner/foo.py"])]
+        self.assertEqual(_check_path_allowlist(steps), [])
+
+    def test_absolute_path_under_repo_accepted(self):
+        in_repo = validate_plan._REPO_ROOT / "runner" / "foo.py"
+        steps = [_step(1, "create", "x", files=[str(in_repo)])]
+        self.assertEqual(_check_path_allowlist(steps), [])
+
+    def test_absolute_path_under_state_dir_accepted(self):
+        outside = self.fake_state_root / "subdir" / "backfill_skip.json"
+        steps = [_step(1, "create", "x", files=[str(outside)])]
+        self.assertEqual(_check_path_allowlist(steps), [])
+
+    def test_absolute_path_outside_allowlist_rejected(self):
+        bad = str(self.outside_root / "random.json")
+        steps = [_step(1, "create", "x", files=[bad])]
+        errors = _check_path_allowlist(steps)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("outside the allowlist", errors[0])
+        self.assertIn(bad, errors[0])
+
+    def test_windows_style_absolute_path_rejected(self):
+        # T5b regression: planner emitted C:\Users\... paths in files[].
+        steps = [_step(1, "create", "x", files=["C:\\Users\\amedi\\.claude\\CLAUDE.md"])]
+        errors = _check_path_allowlist(steps)
+        # On non-Windows, "C:\\..." may be parsed as relative; either accepted
+        # (relative) or rejected, but never accepted *as* an out-of-allowlist
+        # absolute. Skip the strict check on POSIX where the parser is lenient.
+        if Path("C:\\Users\\amedi\\.claude\\CLAUDE.md").is_absolute():
+            self.assertEqual(len(errors), 1)
+            self.assertIn("outside the allowlist", errors[0])
+
+    def test_mixed_files_in_one_step(self):
+        ok_in_repo = str(validate_plan._REPO_ROOT / "runner" / "foo.py")
+        ok_state = str(self.fake_state_root / "state.json")
+        bad = str(self.outside_root / "path.json")
+        steps = [_step(1, "create", "x", files=[ok_in_repo, ok_state, bad])]
+        errors = _check_path_allowlist(steps)
+        self.assertEqual(len(errors), 1)
+        self.assertIn(bad, errors[0])
+
+    def test_full_validate_surfaces_allowlist_errors(self):
+        bad = str(self.outside_root / "path.json")
+        plan = _base_plan([
+            _step(1, "create", "noop spec", files=[bad]),
+        ])
+        errors = validate(plan)
+        self.assertTrue(any("outside the allowlist" in e for e in errors),
+                        f"expected allowlist error in {errors}")
 
 
 if __name__ == "__main__":
