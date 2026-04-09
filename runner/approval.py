@@ -28,10 +28,9 @@ REPORTS_DIR = SCRIPT_DIR / "reports"
 NOTES_SCRIPT = REPO_DIR / "scribe" / "notes.py"
 
 
-# -- Git helpers --
+# -- Git helpers (#253: shared via runner/git_lib.py) --
 
-def git(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git"] + list(args), capture_output=True, text=True)
+from git_lib import git
 
 
 def get_current_branch() -> str:

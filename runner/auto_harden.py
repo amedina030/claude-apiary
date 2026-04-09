@@ -35,10 +35,9 @@ ASSIGN_IDS = HARDEN_DIR / "assign_ids.py"
 MAX_ROUNDS = cfg("harden", "max_rounds", 3)
 
 
-# -- Git helpers --
+# -- Git helpers (#253: shared via runner/git_lib.py) --
 
-def git(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git"] + list(args), capture_output=True, text=True)
+from git_lib import git
 
 
 def branch_exists(branch: str) -> bool:

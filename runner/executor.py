@@ -38,40 +38,15 @@ EXECUTIONS_DIR = SCRIPT_DIR / "executions"
 MAX_STEP_RETRIES = cfg("executor", "max_retries_per_step", 2)
 
 
-# -- Git helpers --
+# -- Git helpers (#253: shared via runner/git_lib.py) --
 
-def git(*args: str) -> subprocess.CompletedProcess:
-    """Run a git command and return the result."""
-    return subprocess.run(
-        ["git"] + list(args),
-        capture_output=True, text=True,
-    )
+from git_lib import git, format_git_error as _format_git_error
 
 
 def branch_exists(branch: str) -> bool:
     # ATK-006: check refs/heads/ explicitly so remote tracking refs don't match
     result = git("rev-parse", "--verify", f"refs/heads/{branch}")
     return result.returncode == 0
-
-
-def _format_git_error(action: str, result: subprocess.CompletedProcess, extra: str = "") -> str:
-    """Build a RuntimeError message that includes both stdout and stderr.
-
-    Git often writes failure context (e.g. 'nothing to commit') to stdout, not
-    stderr, so surfacing only stderr leaves operators with empty error messages.
-    """
-    parts = [f"Git error {action} (exit {result.returncode})"]
-    if extra:
-        parts.append(extra)
-    stdout = (result.stdout or "").strip()
-    stderr = (result.stderr or "").strip()
-    if stdout:
-        parts.append(f"stdout: {stdout}")
-    if stderr:
-        parts.append(f"stderr: {stderr}")
-    if not stdout and not stderr:
-        parts.append("(no output captured)")
-    return "\n".join(parts)
 
 
 def create_branch(branch: str):
