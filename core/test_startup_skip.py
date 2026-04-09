@@ -1,5 +1,13 @@
-"""Tests for backfill_skip.json loader and get_unseen_sessions integration."""
+"""Tests for backfill_skip.json loader and get_unseen_sessions integration.
+
+All tests in this file exercise the legacy per-project state layout. Each
+test class pins ``APIARY_STATE_LAYOUT=legacy`` at setUp time so the tests
+continue to cover that fallback even though the module default flipped
+to the in-repo layout in todo #268. Repo-layout behavior has its own tests
+in core/test_startup_repo_layout.py.
+"""
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -9,14 +17,26 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core import startup
+import scribe.notes as scribe_notes
+
+
+def _force_legacy_layout():
+    """Return a started mock.patch.dict handle pinning the legacy layout."""
+    handle = patch.dict(
+        os.environ, {scribe_notes.STATE_LAYOUT_ENV: "legacy"}
+    )
+    handle.start()
+    return handle
 
 
 class TestLoadSkipPrefixes(unittest.TestCase):
     def setUp(self):
+        self._layout_patch = _force_legacy_layout()
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp_path = Path(self._tmp.name) / "backfill_skip.json"
 
     def tearDown(self):
+        self._layout_patch.stop()
         self._tmp.cleanup()
 
     def _write(self, content):
@@ -100,6 +120,7 @@ class TestLoadSkipPrefixes(unittest.TestCase):
 
 class TestGetUnseenSessionsSkipIntegration(unittest.TestCase):
     def setUp(self):
+        self._layout_patch = _force_legacy_layout()
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp_dir = Path(self._tmp.name)
         self.history_path = self.tmp_dir / ".session-history.json"
@@ -145,6 +166,7 @@ class TestGetUnseenSessionsSkipIntegration(unittest.TestCase):
     def tearDown(self):
         self._notes_patch.stop()
         self._notes_path_patch.stop()
+        self._layout_patch.stop()
         self._tmp.cleanup()
 
     def _run(self):
@@ -194,6 +216,7 @@ class TestGetUnseenSessionsArchiveIntegration(unittest.TestCase):
     count as 'seen' — otherwise archived sessions reappear forever."""
 
     def setUp(self):
+        self._layout_patch = _force_legacy_layout()
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp_dir = Path(self._tmp.name)
         self.history_path = self.tmp_dir / ".session-history.json"
@@ -221,6 +244,7 @@ class TestGetUnseenSessionsArchiveIntegration(unittest.TestCase):
     def tearDown(self):
         self._notes_path_patch.stop()
         self._archive_path_patch.stop()
+        self._layout_patch.stop()
         self._tmp.cleanup()
 
     def _write_jsonl(self, path, entries):

@@ -26,6 +26,7 @@ from core.session import SessionId
 from core.hook_context import context_block, hook_allow, read_payload
 from core.sanitizer import sanitize_and_report
 from core.startup import run_init, run_summary
+from scribe.notes import _git_repo_root, _use_repo_layout, STATE_LAYOUT_ENV
 
 # Sanitizer hit log lives in the in-repo umbrella state directory.
 # Pre-stages the umbrella state layout decided in note #269 — the first
@@ -103,6 +104,16 @@ def _run():
     first_message = payload.get("message", "")
     cwd = payload.get("cwd", str(PROJECT_ROOT))
 
+    # Repo-layout gate (decision #269, todo #264). When APIARY_STATE_LAYOUT=repo,
+    # scribe state is loaded from <session-repo>/.apiary/scribe/ via git rev-parse
+    # on the session's cwd. Sessions started outside a git repo skip notes/
+    # summary/learnings injection rather than falsely loading apiary's own state.
+    # Default layout (env var unset) is unchanged — still reads from
+    # ~/.claude/projects/<project_key>/.
+    repo_layout = _use_repo_layout()
+    session_repo_root = _git_repo_root(Path(cwd)) if repo_layout else None
+    skip_notes_injection = repo_layout and session_repo_root is None
+
     # --- 1. Init: identity ---
     identity = {}
     try:
@@ -121,32 +132,51 @@ def _run():
     # --- 2. Summary: active notes, latest handoff ---
     role = identity.get("role", "user")
     mission = identity.get("mission", "general")
-    try:
-        summary_text = run_summary(cwd, role, mission)
-        if summary_text:
-            scrubbed, hits = sanitize_and_report(summary_text)
-            _log_sanitizer_hits("summary", hits, sid.full)
-            parts.append("")
-            parts.append(scrubbed)
-    except Exception:
-        parts.append("summary: failed (non-critical)")
+    if skip_notes_injection:
+        parts.append("")
+        parts.append(
+            "summary: skipped (APIARY_STATE_LAYOUT=repo and session cwd "
+            "is not inside a git repo)"
+        )
+    else:
+        try:
+            summary_text = run_summary(cwd, role, mission)
+            if summary_text:
+                scrubbed, hits = sanitize_and_report(summary_text)
+                _log_sanitizer_hits("summary", hits, sid.full)
+                parts.append("")
+                parts.append(scrubbed)
+        except Exception:
+            parts.append("summary: failed (non-critical)")
 
     # --- 3. Learnings (subprocess — scribe/ not importable from core/) ---
-    try:
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "scribe" / "notes.py"),
-             "learnings", "--full"],
-            capture_output=True, text=True, timeout=5,
-            cwd=str(PROJECT_ROOT),
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            scrubbed, hits = sanitize_and_report(result.stdout.strip())
-            _log_sanitizer_hits("learnings", hits, sid.full)
-            parts.append("")
-            parts.append("--- learnings ---")
-            parts.append(scrubbed)
-    except Exception:
-        pass
+    # In repo layout the subprocess must run from the session's repo so that
+    # its own git rev-parse resolves to <session-repo>/.apiary/scribe/, and
+    # it must inherit APIARY_STATE_LAYOUT=repo. In legacy layout both are
+    # left alone.
+    if not skip_notes_injection:
+        try:
+            learnings_env = os.environ.copy()
+            if repo_layout:
+                learnings_env[STATE_LAYOUT_ENV] = "repo"
+                learnings_cwd = str(session_repo_root)
+            else:
+                learnings_cwd = str(PROJECT_ROOT)
+            result = subprocess.run(
+                [sys.executable, str(PROJECT_ROOT / "scribe" / "notes.py"),
+                 "learnings", "--full"],
+                capture_output=True, text=True, timeout=5,
+                cwd=learnings_cwd,
+                env=learnings_env,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                scrubbed, hits = sanitize_and_report(result.stdout.strip())
+                _log_sanitizer_hits("learnings", hits, sid.full)
+                parts.append("")
+                parts.append("--- learnings ---")
+                parts.append(scrubbed)
+        except Exception:
+            pass
 
     # --- 4. CLI index (compact; use cli_lookup.py for full details) ---
     try:

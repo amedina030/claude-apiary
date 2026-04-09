@@ -12,9 +12,11 @@ Three separate stores. Pick the right one up front — moving entries between th
 
 | Store | Location | Lifespan | Good for |
 |---|---|---|---|
-| **Memory** | `~/.claude/projects/claude-apiary/memory/*.md` (indexed via `MEMORY.md`) | Permanent — still true in 3 months | User preferences, project facts, reference patterns, cross-session conventions |
-| **Notes** | `~/.claude/projects/claude-apiary/notes.jsonl` via `scribe/notes.py` | Decays; auto-archived after 30 days | Operational state — TODOs, handoffs, decisions, blockers, wishlists, current-work context |
-| **Learnings** | `~/.claude/projects/claude-apiary/learnings.jsonl` via `scribe/notes.py learn` | Permanent (no auto-archive) | Project-specific error workarounds, non-obvious patterns, tool quirks you figured out |
+| **Memory** | `<repo-root>/.apiary/scribe/memory/*.md` (indexed via `MEMORY.md`) | Permanent — still true in 3 months | User preferences, project facts, reference patterns, cross-session conventions |
+| **Notes** | `<repo-root>/.apiary/scribe/notes.jsonl` via `scribe/notes.py` | Decays; auto-archived after 30 days | Operational state — TODOs, handoffs, decisions, blockers, wishlists, current-work context |
+| **Learnings** | `<repo-root>/.apiary/scribe/learnings.jsonl` via `scribe/notes.py learn` | Permanent (no auto-archive) | Project-specific error workarounds, non-obvious patterns, tool quirks you figured out |
+
+> **Transition status.** The canonical paths above are selected when `APIARY_STATE_LAYOUT=repo` is set. Until todo #268 flips the default, the legacy location is `~/.claude/projects/claude-apiary/{notes,notes_archive,learnings}.jsonl` and `~/.claude/projects/claude-apiary/memory/`. The data was mirrored into the new layout in step #266; writes currently still land in the legacy store. Decision #269 tracks the migration.
 
 **Quick decision:** Is it still true in 3 months → memory. Is it a workaround or a non-obvious thing I learned → learning. Is it about current work that will decay → note.
 
@@ -89,7 +91,7 @@ python scribe/notes.py unlearn <id>
 
 ## Memory
 
-Memory lives at `~/.claude/projects/claude-apiary/memory/` (stable key, not cwd-derived). The directory contains:
+Memory lives at `<repo-root>/.apiary/scribe/memory/` (inside the repo checkout, under the umbrella `.apiary/` state dir). The directory contains:
 
 - `MEMORY.md` — one-line index pointing to each memory file. Loaded into startup context.
 - `<topic>.md` — one file per distinct memory entry. Filename is `kebab-case-description.md`.
@@ -108,7 +110,7 @@ Memory lives at `~/.claude/projects/claude-apiary/memory/` (stable key, not cwd-
 
 ### Writing a new memory entry
 
-1. Create `~/.claude/projects/claude-apiary/memory/<kebab-case-topic>.md` with YAML frontmatter:
+1. Create `<repo-root>/.apiary/scribe/memory/<kebab-case-topic>.md` with YAML frontmatter:
 
     ```markdown
     ---
@@ -120,7 +122,7 @@ Memory lives at `~/.claude/projects/claude-apiary/memory/` (stable key, not cwd-
     Body content here — markdown, as long as needed.
     ```
 
-2. Add a one-line entry to `~/.claude/projects/claude-apiary/memory/MEMORY.md`:
+2. Add a one-line entry to `<repo-root>/.apiary/scribe/memory/MEMORY.md`:
 
     ```markdown
     - [Short name](kebab-case-topic.md) — one-line hook

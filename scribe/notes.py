@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
@@ -36,6 +37,16 @@ from pathlib import Path
 
 CLAUDE_DIR = Path.home() / ".claude"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
+
+# In-repo state layout (decision #269, todos #262–#268).
+# Scribe reads/writes its state from <git-repo-root>/.apiary/scribe/ under
+# the umbrella .apiary/ directory shared with other apiary tools. The
+# APIARY_STATE_LAYOUT=legacy environment variable is an escape hatch that
+# falls back to the historical ~/.claude/projects/<project_key>/ path.
+# Default (env unset) is the in-repo layout as of todo #268.
+STATE_LAYOUT_ENV = "APIARY_STATE_LAYOUT"
+APIARY_STATE_DIRNAME = ".apiary"
+SCRIBE_SUBDIR = "scribe"
 
 VALID_TYPES = ["todo", "handoff", "decision", "wishlist", "reference", "blocker", "context"]
 AUTO_ARCHIVE_DAYS = 30
@@ -86,15 +97,97 @@ def _project_key(project_override=None):
     return get_project_key(Path.cwd())
 
 
-def notes_path(project_key):
+def _use_repo_layout() -> bool:
+    """Return True when the repo-root state layout is active.
+
+    Default is the in-repo layout under ``<git-repo-root>/.apiary/scribe/``
+    (flipped in todo #268). Set ``APIARY_STATE_LAYOUT=legacy``
+    (case-insensitive) as an escape hatch to fall back to the historical
+    ``~/.claude/projects/<project_key>/`` location.
+    """
+    return os.environ.get(STATE_LAYOUT_ENV, "").strip().lower() != "legacy"
+
+
+def _git_repo_root(start: Path | None = None) -> Path | None:
+    """Return the git repo root containing *start* (or cwd), or None.
+
+    Uses ``git rev-parse --show-toplevel`` via list-form subprocess for
+    portability. Returns None when git is unavailable, when *start* is not
+    inside a repo, or when the command fails for any other reason.
+    """
+    cwd = str(start) if start is not None else str(Path.cwd())
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    top = result.stdout.strip()
+    if not top:
+        return None
+    return Path(top)
+
+
+def _repo_scribe_dir(start: Path | None = None) -> Path:
+    """Return the in-repo scribe state directory for the new layout.
+
+    Resolves to ``<git-repo-root>/.apiary/scribe/`` when *start* (or cwd) is
+    inside a git repo, and falls back to ``<cwd>/.apiary/scribe/`` when it
+    is not. The caller is responsible for ensuring APIARY_STATE_LAYOUT=repo
+    before using this; see _use_repo_layout().
+    """
+    root = _git_repo_root(start) or (start or Path.cwd())
+    return Path(root) / APIARY_STATE_DIRNAME / SCRIBE_SUBDIR
+
+
+def scribe_state_dir(start: Path | None = None) -> Path | None:
+    """Return the scribe state *directory* under the active layout.
+
+    Repo layout (APIARY_STATE_LAYOUT=repo): resolves ``<git-repo-root>/.apiary/scribe/``
+    via git rev-parse run from *start* (or cwd). Returns ``None`` when *start*
+    is not inside a git repo — callers must decide whether to fall back to the
+    legacy path, skip state loading, or error.
+
+    Legacy layout: returns ``None``. Legacy callers use the project-key helpers
+    below instead of the state-dir concept.
+    """
+    if not _use_repo_layout():
+        return None
+    root = _git_repo_root(start)
+    if root is None:
+        return None
+    return root / APIARY_STATE_DIRNAME / SCRIBE_SUBDIR
+
+
+def notes_path(project_key, *, start: Path | None = None):
+    """Return the path to notes.jsonl for *project_key* (legacy) or *start*.
+
+    In repo layout, resolves under ``<git-root(start)>/.apiary/scribe/``.
+    *start* lets callers (e.g. startup_prompt_hook) point resolution at the
+    Claude session's cwd rather than the hook process's own cwd. Ignored in
+    legacy layout.
+    """
+    if _use_repo_layout():
+        return _repo_scribe_dir(start) / "notes.jsonl"
     return PROJECTS_DIR / project_key / "notes.jsonl"
 
 
-def archive_path(project_key):
+def archive_path(project_key, *, start: Path | None = None):
+    if _use_repo_layout():
+        return _repo_scribe_dir(start) / "notes_archive.jsonl"
     return PROJECTS_DIR / project_key / "notes_archive.jsonl"
 
 
-def learnings_path(project_key):
+def learnings_path(project_key, *, start: Path | None = None):
+    if _use_repo_layout():
+        return _repo_scribe_dir(start) / "learnings.jsonl"
     return PROJECTS_DIR / project_key / "learnings.jsonl"
 
 
@@ -281,10 +374,15 @@ def _auto_archive(notes, notes_path, archive_path):
     return remaining, to_archive
 
 
-def run_auto_archive(project_key: str) -> int:
-    """Run auto-archive for a project. Returns count of archived notes."""
-    np = notes_path(project_key)
-    ap = archive_path(project_key)
+def run_auto_archive(project_key: str, *, start: Path | None = None) -> int:
+    """Run auto-archive for a project. Returns count of archived notes.
+
+    *start* threads the session's repo dir through to the repo-layout
+    resolver so the hook process's cwd doesn't decide where state lives
+    (decision #269, todo #264).
+    """
+    np = notes_path(project_key, start=start)
+    ap = archive_path(project_key, start=start)
     with _notes_and_archive_lock(np, ap):
         notes = read_jsonl(np)
         _remaining, archived = _auto_archive(notes, np, ap)

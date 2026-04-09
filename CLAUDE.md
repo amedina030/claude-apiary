@@ -31,13 +31,15 @@ echo '<usage>...</usage>' | python $CLAUDE_PROJECT_DIR/budgeter/log_agent_cost.p
 
 ### Auto-memory path correction
 
-The session turn-0 context injected by the harness may reference a memory directory derived from `cwd` (e.g. `C:\Users\...\projects\D--Professional-claude-apiary\memory\`). The **actual** memory directory for this repo, after the T5c stable-project-key migration, is:
+The session turn-0 context injected by the harness may reference a memory directory derived from `cwd` (e.g. `C:\Users\...\projects\D--Professional-claude-apiary\memory\`). The **canonical** memory directory for this repo lives inside the repo checkout itself, under the umbrella `.apiary/` state directory:
 
 ```
-~/.claude/projects/claude-apiary/memory/
+<repo-root>/.apiary/scribe/memory/
 ```
 
-Always use the stable-key path above when reading or writing memory files. Do not write to the cwd-derived path — it is a stale leftover and the harness will not index what you put there.
+Always use the in-repo path above when reading or writing memory files. Do not write to the cwd-derived harness path — the harness will not index what you put there.
+
+**Transition note.** The in-repo layout is selected by `APIARY_STATE_LAYOUT=repo`. Until the migration fully lands (todo #268), the default is still the legacy `~/.claude/projects/claude-apiary/` location, and scribe/startup_prompt_hook honor the env var to opt in. Decision #269 and todos #262–#268 track the migration.
 
 ---
 
@@ -53,7 +55,7 @@ Summary rules (see `PORTABILITY.md` for the canonical list):
 - **Paths:** `pathlib.Path` end-to-end. Never concatenate with `/` or `\` literals.
 - **Null device:** `os.devnull` / `subprocess.DEVNULL`, never literal `NUL` or `/dev/null`.
 - **File I/O:** always explicit `encoding="utf-8"`.
-- **Persistent state:** lives under `~/.claude/projects/claude-apiary/` (stable key, not cwd-derived).
+- **Persistent state:** lives under `<repo-root>/.apiary/` (umbrella directory, self-ignored via `.apiary/.gitignore`). Scribe state is at `<repo-root>/.apiary/scribe/`. Until todo #268 flips the default, access is gated on `APIARY_STATE_LAYOUT=repo` and the legacy `~/.claude/projects/claude-apiary/` remains the fallback.
 
 If you spot a portability violation while doing unrelated work, add it to the backlog rather than fixing it inline — the user wants the portability sweep to land in coherent passes.
 
@@ -67,7 +69,7 @@ This repo uses **scribe** (`scribe/notes.py`) for operational state (TODOs, hand
 
 Quick decision tree:
 
-- Still true in 3 months → **memory** (`~/.claude/projects/claude-apiary/memory/`)
+- Still true in 3 months → **memory** (`<repo-root>/.apiary/scribe/memory/`)
 - Decays / operational / about current work → **note** (`scribe/notes.py add --type ...`)
 - Error workaround or non-obvious pattern discovered during task → **learning** (`scribe/notes.py learn`)
 

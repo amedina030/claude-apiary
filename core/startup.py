@@ -20,12 +20,34 @@ from core.session import CLAUDE_DIR, SessionId, load_identity
 from core.utils.project import get_project_key
 from scribe.notes import (
     read_jsonl, notes_path, archive_path, learnings_path,
-    format_age, run_auto_archive,
+    format_age, run_auto_archive, scribe_state_dir, _use_repo_layout,
 )
 
 HISTORY_PATH = CLAUDE_DIR / ".session-history.json"
 REGISTRY_PATH = PROJECT_ROOT / "core" / "config" / "session-registry.json"
+# Legacy backfill_skip.json location. Repo layout (APIARY_STATE_LAYOUT=repo,
+# decision #269 / todo #265) resolves it under the session's repo root
+# instead via _resolve_backfill_skip_path(). Existing tests that monkey-patch
+# this module global continue to exercise the legacy code path.
 BACKFILL_SKIP_PATH = CLAUDE_DIR / "projects" / "claude-apiary" / "backfill_skip.json"
+
+
+def _resolve_backfill_skip_path(start=None):
+    """Return the backfill_skip.json path under the active state layout.
+
+    Repo layout: ``<scribe_state_dir(start)>/backfill_skip.json`` when the
+    session's cwd (*start*) is inside a git repo; ``None`` when it is not
+    — callers must treat None as "no skip list" (empty set).
+
+    Legacy layout: returns the module-level ``BACKFILL_SKIP_PATH`` so that
+    existing monkey-patches on that global keep working verbatim.
+    """
+    if _use_repo_layout():
+        state_dir = scribe_state_dir(start)
+        if state_dir is None:
+            return None
+        return state_dir / "backfill_skip.json"
+    return BACKFILL_SKIP_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -77,13 +99,21 @@ def validate_registry(role, mission):
         return False
 
 
-def load_skip_prefixes():
+def load_skip_prefixes(start=None):
     """Load 8-char lowercase session-id prefixes from backfill_skip.json.
+
+    *start* optionally points resolution at a specific session's repo
+    (repo layout, todo #265). When omitted, the active layout decides
+    whether to read from the legacy ~/.claude/projects/ path or the
+    in-repo .apiary/scribe/ path via _resolve_backfill_skip_path().
 
     Tolerates missing/empty/malformed file by returning an empty set.
     """
+    path = _resolve_backfill_skip_path(start)
+    if path is None:
+        return set()
     try:
-        data = json.loads(BACKFILL_SKIP_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return set()
     if not isinstance(data, dict):
@@ -104,8 +134,12 @@ def load_skip_prefixes():
     return prefixes
 
 
-def get_unseen_sessions(session_id, wants_role, wants_mission, project_key):
-    """Find sessions that match wants and don't have handoff notes yet."""
+def get_unseen_sessions(session_id, wants_role, wants_mission, project_key, *, start=None):
+    """Find sessions that match wants and don't have handoff notes yet.
+
+    *start* optionally points path resolution at the session's repo (used by
+    the repo-layout code path in startup_prompt_hook — decision #269, todo #264).
+    """
     # Read session history
     if not HISTORY_PATH.exists():
         return []
@@ -130,13 +164,16 @@ def get_unseen_sessions(session_id, wants_role, wants_mission, project_key):
     # Get existing handoff session IDs from active notes AND archived notes
     # (handoffs get archived along with regular notes; without checking the
     # archive, archived sessions reappear as "unseen" forever).
-    notes = read_jsonl(notes_path(project_key)) + read_jsonl(archive_path(project_key))
+    notes = (
+        read_jsonl(notes_path(project_key, start=start))
+        + read_jsonl(archive_path(project_key, start=start))
+    )
     handoff_sids = {
         n.get("session_id", "").strip()[:8].lower()
         for n in notes
         if n.get("type") == "handoff" and n.get("status") != "done"
     }
-    handoff_sids |= load_skip_prefixes()
+    handoff_sids |= load_skip_prefixes(start=start)
 
     # Filter to unseen
     unseen = []
@@ -170,13 +207,18 @@ def run_init(session_id: str, first_message: str, repo_dir: str) -> dict:
     }
     identity_file.write_text(json.dumps(identity_data), encoding="utf-8")
 
-    # Find unseen sessions
+    # Find unseen sessions. In repo layout (APIARY_STATE_LAYOUT=repo) path
+    # helpers resolve state under <git-root(repo_dir)>/.apiary/scribe/; the
+    # legacy layout keeps using the project key. Passing start=repo_dir makes
+    # the resolution work even when the hook process's cwd differs from the
+    # session's cwd.
     project_key = get_project_key(repo_dir)
     unseen = get_unseen_sessions(
         session_id,
         identity["wants_role"],
         identity["wants_mission"],
         project_key,
+        start=Path(repo_dir) if repo_dir else None,
     )
 
     return {
@@ -205,16 +247,20 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
     """Run summary logic and return the text output."""
     repo_dir = repo_dir or str(PROJECT_ROOT)
     project_key = get_project_key(repo_dir)
+    # Repo-layout callers (decision #269, todo #264) resolve scribe state
+    # from repo_dir's git root. Legacy callers ignore *start* and use
+    # project_key. Passing start always is safe: legacy helpers accept it.
+    start = Path(repo_dir)
 
     # Prune stale notes before loading
-    archived_count = run_auto_archive(project_key)
+    archived_count = run_auto_archive(project_key, start=start)
 
     lines = []
     if archived_count:
         lines.append(f"[auto-archived {archived_count} notes]")
 
-    notes = read_jsonl(notes_path(project_key))
-    learnings = read_jsonl(learnings_path(project_key))
+    notes = read_jsonl(notes_path(project_key, start=start))
+    learnings = read_jsonl(learnings_path(project_key, start=start))
 
     # Active, unresolved notes matching role/mission
     active = [

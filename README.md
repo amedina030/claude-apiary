@@ -44,7 +44,7 @@ Structured note management for cross-session continuity.
 Claude Code sessions are isolated — each one starts fresh with no memory of what happened before. Scribe bridges that gap with project-scoped notes that persist across sessions and are loaded automatically at startup.
 
 **What it does:**
-- **Notes** — typed operational state (TODOs, handoffs, blockers, decisions, wishlists, context) stored in `notes.jsonl` per project under `~/.claude/projects/<key>/`
+- **Notes** — typed operational state (TODOs, handoffs, blockers, decisions, wishlists, context) stored in `notes.jsonl` inside the repo checkout at `<repo-root>/.apiary/scribe/` (under the umbrella `.apiary/` state directory, self-ignored via `.apiary/.gitignore`)
 - **Learnings** — project-specific knowledge Claude discovers during task execution (workarounds, better approaches, platform quirks). Stored separately in `learnings.jsonl`, no auto-archive
 - **Handoffs** — structured session summaries generated automatically on startup from the previous session's transcript, so the next session knows what happened
 - **Auto-archive** — notes older than 30 days are moved to an archive file. Learnings persist indefinitely
@@ -58,7 +58,7 @@ Claude Code sessions are isolated — each one starts fresh with no memory of wh
 /startup          # session init — generates handoff + loads notes and learnings
 ```
 
-**Storage:** `~/.claude/projects/<project-key>/notes.jsonl` and `learnings.jsonl` — project-scoped, git-ignored.
+**Storage:** `<repo-root>/.apiary/scribe/notes.jsonl` and `learnings.jsonl` — repo-local and self-ignored via the umbrella `.apiary/.gitignore`. Gated by `APIARY_STATE_LAYOUT=repo` during the migration window (todo #268 flips the default); the legacy path `~/.claude/projects/<project-key>/` remains the fallback until then.
 
 ---
 

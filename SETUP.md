@@ -84,7 +84,7 @@ python setup.py --global
 **Scribe:**
 - Delete `~/.claude/commands/note.md`, `~/.claude/commands/notes.md`, `~/.claude/commands/startup.md`
 - Remove the scribe/learnings sections from `~/.claude/CLAUDE.md`
-- Optionally delete `~/.claude/projects/*/notes.jsonl`, `learnings.jsonl`, and `notes_archive.jsonl`
+- Optionally delete the repo-local scribe state at `<repo-root>/.apiary/scribe/` (new canonical location under the umbrella `.apiary/` dir). If the repo still has pre-migration state at `~/.claude/projects/*/notes.jsonl`, `learnings.jsonl`, and `notes_archive.jsonl`, delete those too.
 
 **Docs framework:**
 - Delete `~/.claude/commands/review.md`

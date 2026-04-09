@@ -4,12 +4,12 @@ title: File Storage
 scope: project
 description: Runtime data locations — where JSONL logs, flags, transcripts, and session state live
 framework_version: "1.0"
-last_verified: 2026-04-07
+last_verified: 2026-04-09
 ---
 
 # File Storage
 
-All runtime data is stored outside the repo under `~/.claude/` (git-ignored), with a few exceptions for repo-local state.
+Runtime data splits across two locations: user-global state under `~/.claude/` (git-ignored, shared across all repos) and repo-local state under `<repo-root>/.apiary/` (self-ignored via `.apiary/.gitignore`, travels with the checkout). Scribe state lives in the repo-local umbrella; budgeter logs, transcripts, and Claude Code's own session files stay under `~/.claude/`.
 
 ## Runner data
 
@@ -47,15 +47,19 @@ Managed via `core/flags.py`: `flags.is_enabled("budgeter-log")`, `flags.enable(n
 
 ## Scribe data
 
-All scribe data is project-scoped under `~/.claude/projects/<project-key>/`:
+All scribe data lives inside the repo checkout at `<repo-root>/.apiary/scribe/`, under the umbrella `<repo-root>/.apiary/` state directory. The umbrella self-ignores via `.apiary/.gitignore` (contents: `*`), so nothing inside it is tracked by git.
 
 | File | Description |
 |------|-------------|
 | `notes.jsonl` | Active notes (TODOs, handoffs, decisions, etc.) |
-| `learnings.jsonl` | Project-specific learnings (no auto-archive) |
 | `notes_archive.jsonl` | Archived notes (older than 30 days) |
+| `learnings.jsonl` | Project-specific learnings (no auto-archive) |
+| `backfill_skip.json` | Session IDs skipped from unseen-session detection |
+| `memory/` | Permanent memory files, indexed via `MEMORY.md` |
 
-The `<project-key>` is derived from the absolute path of the working directory (e.g. `D--Professional-claude-apiary`).
+**Layout gate.** Scribe's path resolution is selected by the `APIARY_STATE_LAYOUT` environment variable. When set to `repo`, the helpers in `scribe.notes` run `git rev-parse --show-toplevel` on the session's cwd and resolve state under `<repo-root>/.apiary/scribe/`. When unset (current default), they fall back to the legacy per-project location `~/.claude/projects/<project-key>/{notes,notes_archive,learnings}.jsonl` where `<project-key>` comes from the `.claude-project-key` marker file. Todo #268 flips the default; decision #269 tracks the migration.
+
+**Historical note.** Before decision #269, scribe state was project-scoped under `~/.claude/projects/<project-key>/`. The `<project-key>` was originally derived from the absolute cwd path (e.g. `D--Professional-claude-apiary`); the T5c migration moved it to a stable key read from the `.claude-project-key` marker file. The current in-repo layout supersedes both schemes.
 
 ## Refiner data
 

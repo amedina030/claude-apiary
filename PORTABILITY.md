@@ -43,15 +43,22 @@ Two storage locations, two purposes.
 
 Anything checked into git is shared across all clones of the repo.
 
-### Local to each machine (`~/.claude/projects/<key>/`)
+### Local to each checkout (`<repo-root>/.apiary/`)
 
-- `notes.jsonl` — scribe's operational notes (TODOs, decisions, handoffs, context)
-- `notes_archive.jsonl` — auto-archived old notes
-- `learnings.jsonl` — accumulated project learnings
-- `memory/` — long-lived memory facts loaded at session start
-- Plus session transcripts and identity files written by Claude Code itself
+Scribe state lives in the repo checkout under the umbrella `.apiary/` directory, which self-ignores via `.apiary/.gitignore` (contents: `*`). Each subdirectory is owned by one apiary tool:
 
-**This state is intentionally per-machine and is not portable.** Notes, learnings, memory, and budgeter logs reflect what *this* machine's Claude has been working on, with paths, session IDs, and timing rooted in that machine's history. Copying them to another machine usually creates more confusion than value (stale paths, dangling session references, conflicting handoffs). If you switch machines, start fresh on the new one — the repo is the source of truth, the local state is short-horizon scratchpad.
+- `<repo-root>/.apiary/scribe/notes.jsonl` — scribe's operational notes (TODOs, decisions, handoffs, context)
+- `<repo-root>/.apiary/scribe/notes_archive.jsonl` — auto-archived old notes
+- `<repo-root>/.apiary/scribe/learnings.jsonl` — accumulated project learnings
+- `<repo-root>/.apiary/scribe/backfill_skip.json` — sessions skipped from unseen-session detection
+- `<repo-root>/.apiary/scribe/memory/` — long-lived memory facts loaded at session start
+- `<repo-root>/.apiary/hooks/` — hook runtime state (sanitizer hit log, etc.)
+
+Session transcripts and identity files written by Claude Code itself stay under `~/.claude/` — those belong to Claude Code, not apiary.
+
+**This state is intentionally per-checkout and is not portable.** Notes, learnings, memory, and budgeter logs reflect what *this* checkout's Claude has been working on, with paths, session IDs, and timing rooted in that machine's history. Copying them to another machine usually creates more confusion than value (stale paths, dangling session references, conflicting handoffs). If you switch machines, start fresh on the new one — the repo is the source of truth, the local state is short-horizon scratchpad.
+
+**Migration status.** The in-repo layout is gated on `APIARY_STATE_LAYOUT=repo` during the migration window. The legacy path `~/.claude/projects/<project-key>/` remains the default until todo #268 flips it and cleans up the old location. Decision #269 and todos #262–#268 track the work. Data was mirrored into the new layout in step #266, but writes currently still hit the legacy store.
 
 If you have a specific reason to move a single artifact (e.g. one decision note you want to carry forward), copy it by hand. There is deliberately no export/import script.
 
@@ -86,4 +93,4 @@ You have scribe state under the legacy cwd-derived key. Run `python scripts/migr
 Make sure you're running them through Git Bash (or WSL), not PowerShell or `cmd.exe`. Claude Code on Windows expects bash for hook commands.
 
 **Notes from another machine I copied over look broken.**
-Per the state-locality section, scribe state is intentionally not portable. Don't copy `~/.claude/projects/<key>/` between machines.
+Per the state-locality section, scribe state is intentionally not portable. Don't copy `<repo-root>/.apiary/` (or the legacy `~/.claude/projects/<key>/`) between machines.

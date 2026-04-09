@@ -28,6 +28,12 @@ HARDEN_DIR = APIS_DIR / "harden"
 
 sys.path.insert(0, str(APIS_DIR))
 from core.hooks_lib import to_bash_path, hook_cmd, load_settings, save_settings, register_hooks
+from core.utils.apiary_pointer import (
+    DEFAULT_POINTER_PATH,
+    get_repo_path as read_pointer_repo_path,
+    read_pointer as read_apiary_pointer,
+    write_pointer as write_apiary_pointer,
+)
 
 PYTHON = Path(sys.executable)
 MARKER = "claude-apiary"
@@ -397,7 +403,31 @@ def run_check():
         fail("Manifest: not found (run setup.py --global to create)")
     print()
 
-    # 5. Pre-commit hook
+    # 5. Apiary pointer file (todo #263 — lets hooks locate the repo)
+    print("[Apiary pointer]")
+    if not DEFAULT_POINTER_PATH.exists():
+        fail(f"Pointer file: {DEFAULT_POINTER_PATH} not found (run setup.py --global)")
+    else:
+        payload = read_apiary_pointer()
+        if payload is None:
+            fail(f"Pointer file: {DEFAULT_POINTER_PATH} malformed")
+        else:
+            repo_path = read_pointer_repo_path()
+            if repo_path is None:
+                fail(
+                    f"Pointer file: repo_path {payload.get('repo_path')!r} does "
+                    f"not exist on disk"
+                )
+            elif repo_path.resolve() != APIS_DIR.resolve():
+                fail(
+                    f"Pointer file: repo_path={repo_path} does not match "
+                    f"current checkout {APIS_DIR}"
+                )
+            else:
+                ok(f"Pointer file: {DEFAULT_POINTER_PATH} -> {repo_path}")
+    print()
+
+    # 6. Pre-commit hook
     print("[Pre-commit]")
     git_hooks_dir = APIS_DIR / ".git" / "hooks"
     pre_commit = git_hooks_dir / "pre-commit"
@@ -542,6 +572,12 @@ def main():
 
     # Install commands (global only — command files live in ~/.claude)
     if args.global_install:
+        # Apiary pointer file: lets hooks locate the apiary repo regardless
+        # of which repo the Claude Code session was started in. Part of the
+        # in-repo scribe state migration (decision #269, todo #263).
+        pointer_path = write_apiary_pointer(APIS_DIR)
+        print(f"  Apiary pointer   : {pointer_path} -> {APIS_DIR}")
+
         install_commands(claude_dir)
         check_claude_md(claude_dir)
 
