@@ -444,5 +444,329 @@ class TestDetachedRun(unittest.TestCase):
         self.assertIn('unknown', buf.getvalue())
 
 
+class TestRunCleanup(unittest.TestCase):
+    """#245: run.py --cleanup <uuid> is the abort path — delete runner
+    branch(es) and archive the execution log so the operator doesn't
+    have to hand-unwind a killed/interrupted run."""
+
+    def test_find_branches_exact_match(self):
+        refs = ["runner/abc-123", "runner/def-456", "master"]
+        self.assertEqual(
+            run._find_runner_branches_from_refs(refs, "abc-123"),
+            ["runner/abc-123"],
+        )
+
+    def test_find_branches_slug_suffix_match(self):
+        # Detached naming: runner/<slug>-<uuid>
+        refs = ["runner/fix-bug-abc-123", "runner/other-999"]
+        self.assertEqual(
+            run._find_runner_branches_from_refs(refs, "abc-123"),
+            ["runner/fix-bug-abc-123"],
+        )
+
+    def test_find_branches_both_forms(self):
+        refs = [
+            "runner/abc-123",            # interactive form
+            "runner/my-feature-abc-123", # detached form
+            "runner/unrelated",
+        ]
+        out = run._find_runner_branches_from_refs(refs, "abc-123")
+        self.assertEqual(set(out), {"runner/abc-123", "runner/my-feature-abc-123"})
+
+    def test_find_branches_rejects_non_runner_refs(self):
+        refs = ["feature/abc-123", "master", "runner/ok-abc-123"]
+        self.assertEqual(
+            run._find_runner_branches_from_refs(refs, "abc-123"),
+            ["runner/ok-abc-123"],
+        )
+
+    def test_find_branches_no_matches(self):
+        refs = ["runner/abc-123", "master"]
+        self.assertEqual(
+            run._find_runner_branches_from_refs(refs, "missing-uuid"),
+            [],
+        )
+
+    def test_find_branches_handles_non_strings(self):
+        refs = ["runner/abc-123", None, 42, "runner/ok-abc-123"]
+        out = run._find_runner_branches_from_refs(refs, "abc-123")
+        self.assertEqual(set(out), {"runner/abc-123", "runner/ok-abc-123"})
+
+    def test_archive_execution_log_moves_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            executions = Path(tmp) / "executions"
+            executions.mkdir()
+            (executions / "abc-123.json").write_text('{"uuid":"abc-123"}',
+                                                     encoding="utf-8")
+            archived = run._archive_execution_log(executions, "abc-123")
+            self.assertIsNotNone(archived)
+            self.assertTrue(archived.exists())
+            self.assertFalse((executions / "abc-123.json").exists())
+            self.assertEqual(archived.parent.name, "archive")
+
+    def test_archive_execution_log_missing_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            executions = Path(tmp) / "executions"
+            executions.mkdir()
+            self.assertIsNone(
+                run._archive_execution_log(executions, "nope")
+            )
+
+    def test_record_stage_cost_counts_malformed(self):
+        # #249: a <usage> block missing a required field becomes
+        # malformed (detected via parse_usage_fields's _malformed flag)
+        # and contributes to the stage's malformed_count so the run
+        # summary can flag the drop.
+        stage_costs = []
+        good = _make_fake_usage(500)
+        # Missing total_tokens value renders the block malformed.
+        bad = '<usage><total_tokens></total_tokens><tool_uses>1</tool_uses><duration_ms>10</duration_ms></usage>'
+        blended = good + "\n" + bad
+        with mock.patch("run.log_stage_cost"):
+            run.record_stage_cost("executor", "uid", blended, "", stage_costs)
+        self.assertEqual(stage_costs[0]["malformed_count"], 1)
+        self.assertEqual(stage_costs[0]["tokens"], 500)  # good block still counts
+
+    def test_print_cost_summary_flags_malformed_totals(self):
+        stage_costs = [
+            {
+                "stage": "executor", "tokens": 100, "tool_uses": 1,
+                "duration_ms": 10, "input_tokens": 0,
+                "cache_read_tokens": 0, "cache_create_tokens": 0,
+                "output_tokens": 0, "status": "logged",
+                "attempts": 1, "attempts_detail": [{"attempt": 1}],
+                "malformed_count": 2,
+            },
+            {
+                "stage": "auto_harden", "tokens": 50, "tool_uses": 1,
+                "duration_ms": 10, "input_tokens": 0,
+                "cache_read_tokens": 0, "cache_create_tokens": 0,
+                "output_tokens": 0, "status": "logged",
+                "attempts": 1, "attempts_detail": [{"attempt": 1}],
+                "malformed_count": 1,
+            },
+        ]
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            run.print_cost_summary(stage_costs)
+        out = buf.getvalue()
+        self.assertIn("3 malformed", out)
+        self.assertIn("2 stage(s)", out)
+        self.assertIn("executor", out)
+        self.assertIn("auto_harden", out)
+
+    def test_print_cost_summary_no_malformed_note_when_clean(self):
+        stage_costs = [{
+            "stage": "executor", "tokens": 100, "tool_uses": 1,
+            "duration_ms": 10, "input_tokens": 0,
+            "cache_read_tokens": 0, "cache_create_tokens": 0,
+            "output_tokens": 0, "status": "logged",
+            "attempts": 1, "attempts_detail": [{"attempt": 1}],
+            "malformed_count": 0,
+        }]
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            run.print_cost_summary(stage_costs)
+        self.assertNotIn("malformed", buf.getvalue())
+
+    def test_record_stage_cost_tracks_per_attempt(self):
+        # #248: multiple <usage> blocks in one stage stdout are parsed
+        # as separate attempts with the per-attempt list preserved.
+        stage_costs = []
+        two_attempts = _make_fake_usage(500) + "\n" + _make_fake_usage(750)
+        with mock.patch("run.log_stage_cost"):
+            run.record_stage_cost("executor", "uid", two_attempts, "", stage_costs)
+        self.assertEqual(len(stage_costs), 1)
+        entry = stage_costs[0]
+        self.assertEqual(entry["tokens"], 1250)
+        self.assertEqual(entry["attempts"], 2)
+        self.assertEqual(len(entry["attempts_detail"]), 2)
+        self.assertEqual(entry["attempts_detail"][0]["attempt"], 1)
+        self.assertEqual(entry["attempts_detail"][0]["tokens"], 500)
+        self.assertEqual(entry["attempts_detail"][1]["tokens"], 750)
+
+    def test_record_stage_cost_single_attempt(self):
+        stage_costs = []
+        with mock.patch("run.log_stage_cost"):
+            run.record_stage_cost(
+                "executor", "uid", _make_fake_usage(100), "", stage_costs,
+            )
+        self.assertEqual(stage_costs[0]["attempts"], 1)
+        self.assertEqual(len(stage_costs[0]["attempts_detail"]), 1)
+
+    def test_print_cost_summary_marks_retries(self):
+        stage_costs = [{
+            "stage": "executor",
+            "tokens": 1250,
+            "tool_uses": 4,
+            "duration_ms": 1000,
+            "input_tokens": 0, "cache_read_tokens": 0,
+            "cache_create_tokens": 0, "output_tokens": 0,
+            "status": "logged",
+            "attempts": 2,
+            "attempts_detail": [{"attempt": 1}, {"attempt": 2}],
+        }]
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            run.print_cost_summary(stage_costs)
+        out = buf.getvalue()
+        self.assertIn("[2 attempts]", out)
+
+    def test_print_cost_summary_no_retry_tag_for_single_attempt(self):
+        stage_costs = [{
+            "stage": "executor",
+            "tokens": 100,
+            "tool_uses": 1,
+            "duration_ms": 100,
+            "input_tokens": 0, "cache_read_tokens": 0,
+            "cache_create_tokens": 0, "output_tokens": 0,
+            "status": "logged",
+            "attempts": 1,
+            "attempts_detail": [{"attempt": 1}],
+        }]
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            run.print_cost_summary(stage_costs)
+        self.assertNotIn("attempts]", buf.getvalue())
+
+    def test_cumulative_tokens_empty(self):
+        self.assertEqual(run.cumulative_tokens([]), 0)
+
+    def test_cumulative_tokens_sums_entries(self):
+        costs = [{"tokens": 100}, {"tokens": 250}, {"other": "ignored"}]
+        self.assertEqual(run.cumulative_tokens(costs), 350)
+
+    def test_interactive_token_cap_aborts_run(self):
+        """#247: interactive mode must honor --token-cap like detached mode.
+
+        Mock run_stage so every stage returns a fake 1000-token <usage>
+        block. With --token-cap 500 the run should abort after the
+        first stage with exit 1.
+        """
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            intake_dir = td / "intake"
+            intake_dir.mkdir()
+            (td / "specs").mkdir()
+            (td / "plans").mkdir()
+            (td / "executions").mkdir()
+            (td / "hardens").mkdir()
+            (td / "reports").mkdir()
+            intake_file = intake_dir / "abc-123.json"
+            intake_file.write_text(json.dumps({
+                "id": "abc-123", "title": "t",
+            }), encoding="utf-8")
+
+            argv = [
+                "run.py", str(intake_file), "--token-cap", "500",
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch("run.SCRIPT_DIR", td),
+                mock.patch("run.run_stage",
+                           return_value=(True, _make_fake_usage(1000), "", 0.1)),
+                mock.patch("run.print_cost_summary"),
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    run.main()
+            self.assertEqual(ctx.exception.code, 1)
+
+    def test_interactive_no_token_cap_does_not_abort(self):
+        """If --token-cap is unset, cumulative tokens are irrelevant and
+        the run should walk all 6 stages to completion."""
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            for sub in ("intake", "specs", "plans", "executions", "hardens", "reports"):
+                (td / sub).mkdir()
+            intake_file = td / "intake" / "abc-123.json"
+            intake_file.write_text(json.dumps({
+                "id": "abc-123", "title": "t",
+            }), encoding="utf-8")
+
+            argv = ["run.py", str(intake_file)]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch("run.SCRIPT_DIR", td),
+                mock.patch("run.run_stage",
+                           return_value=(True, _make_fake_usage(1000), "", 0.1)),
+                mock.patch("run.print_cost_summary"),
+            ):
+                # main() calls sys.exit at the end of a successful run?
+                # Actually no — it returns. But our assertion is just
+                # 'does not raise SystemExit(1)'. Catch any SystemExit
+                # and assert it's not code=1.
+                try:
+                    run.main()
+                except SystemExit as e:
+                    self.assertNotEqual(e.code, 1, "run aborted unexpectedly")
+
+    def test_should_prune_failed_old_log(self):
+        self.assertTrue(
+            run._should_prune_log(
+                {"status": "failed"},
+                mtime_epoch=1000.0,
+                cutoff_epoch=2000.0,
+            )
+        )
+
+    def test_should_prune_aborted_old_log(self):
+        self.assertTrue(
+            run._should_prune_log(
+                {"status": "aborted"}, mtime_epoch=1000.0, cutoff_epoch=2000.0,
+            )
+        )
+
+    def test_should_not_prune_completed_log(self):
+        self.assertFalse(
+            run._should_prune_log(
+                {"status": "completed"}, mtime_epoch=1000.0, cutoff_epoch=2000.0,
+            )
+        )
+
+    def test_should_not_prune_recent_failed_log(self):
+        # mtime > cutoff → too recent → keep
+        self.assertFalse(
+            run._should_prune_log(
+                {"status": "failed"}, mtime_epoch=3000.0, cutoff_epoch=2000.0,
+            )
+        )
+
+    def test_should_not_prune_missing_status(self):
+        self.assertFalse(
+            run._should_prune_log(
+                {"steps": []}, mtime_epoch=1000.0, cutoff_epoch=2000.0,
+            )
+        )
+
+    def test_should_not_prune_non_dict(self):
+        self.assertFalse(
+            run._should_prune_log(
+                None, mtime_epoch=1000.0, cutoff_epoch=2000.0,
+            )
+        )
+
+    def test_archive_execution_log_preserves_existing_archive(self):
+        # A second cleanup for the same uuid must not clobber the first
+        # archived log — the second one gets a timestamp suffix.
+        with tempfile.TemporaryDirectory() as tmp:
+            executions = Path(tmp) / "executions"
+            (executions / "archive").mkdir(parents=True)
+            (executions / "archive" / "abc-123.json").write_text(
+                '{"old":true}', encoding="utf-8")
+            (executions / "abc-123.json").write_text(
+                '{"new":true}', encoding="utf-8")
+            archived = run._archive_execution_log(executions, "abc-123")
+            self.assertIsNotNone(archived)
+            # The original archive file should still exist.
+            self.assertTrue(
+                (executions / "archive" / "abc-123.json").exists()
+            )
+            # The new archive file should be distinct.
+            self.assertNotEqual(
+                archived,
+                executions / "archive" / "abc-123.json",
+            )
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -15,6 +15,7 @@ Usage:
 """
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -79,7 +80,165 @@ def create_branch(branch: str):
         raise RuntimeError(_format_git_error(f"creating branch '{branch}'", result))
 
 
-def commit_files(files: list[str], message: str):
+def assert_files_clean(files: list[str]):
+    """Abort if any of `files` has uncommitted changes (#235).
+
+    Without this pre-check, a pre-existing dirty worktree pollutes the
+    runner: if the user has local edits to a file the step targets, the
+    subsequent `git add` stages those edits, `git diff --cached` reports
+    a real diff, verification passes even though the subprocess did
+    nothing, and the runner commits the user's work under a
+    'runner/<uuid> step N' message — stealing the changes and making
+    them look like the runner authored them.
+
+    We check `git diff HEAD -- <files>` which covers both staged and
+    unstaged differences vs. the committed state. Non-existent files
+    (e.g. for create actions) produce no diff, so they pass cleanly.
+    """
+    if not files:
+        return
+    result = git("diff", "HEAD", "--", *files)
+    if result.returncode != 0:
+        # Diff failure itself shouldn't block the runner — fall through
+        # and let the existing "no changes" check handle weirdness.
+        return
+    if result.stdout.strip():
+        raise RuntimeError(
+            f"Refusing to run step: uncommitted changes exist in target "
+            f"files ({', '.join(files)}). The runner cannot safely edit "
+            f"these without commingling your local work into its commit. "
+            f"Commit or stash your changes before re-running."
+        )
+
+
+def snapshot_worktree_state() -> set:
+    """Capture the full set of porcelain-v1 status lines for the worktree.
+
+    Used as the baseline for assert_no_unexpected_writes (#236). Includes
+    untracked files (--untracked-files=all) so the runner catches a
+    subprocess that writes a brand-new file outside step.files. Returns
+    an empty set on any git failure — the caller treats that as "no
+    baseline" and the post-step check becomes a no-op rather than
+    crashing the runner.
+    """
+    result = git("status", "--porcelain=v1", "--untracked-files=all")
+    if result.returncode != 0:
+        return set()
+    return {line for line in result.stdout.splitlines() if line.strip()}
+
+
+def _porcelain_path(line: str) -> str:
+    """Extract the file path from a `git status --porcelain=v1` line.
+
+    Format: 'XY path' where XY is a two-character status code. Rename
+    and copy records look like 'R  orig -> new' / 'C  orig -> new'; we
+    return the destination path (the one that actually got written).
+    """
+    if len(line) < 4:
+        return ""
+    rest = line[3:]
+    if " -> " in rest:
+        rest = rest.split(" -> ", 1)[1]
+    return rest.strip().strip('"')
+
+
+def _norm_rel(path: str) -> str:
+    """Normalize a repo-relative path for comparison: forward slashes,
+    no leading './'. Preserves case (we rely on normcase elsewhere only
+    where we know we're on Windows; porcelain output is already in the
+    on-disk case)."""
+    p = path.replace("\\", "/").lstrip("./")
+    return p.strip("/")
+
+
+def assert_no_unexpected_writes(
+    pre: set, post: set, expected_files: list,
+):
+    """Raise if the step wrote to any path not listed in step.files (#236).
+
+    Set-difference on porcelain lines so that a file that was already
+    dirty before the step (and is still dirty afterward with the same
+    status code) does NOT show up. Paths are normalized to forward
+    slashes for comparison against step.files.
+
+    The verifier previously only checked that EXPECTED files changed —
+    a subprocess writing garbage to an unrelated path (README.md,
+    core/session.py, etc.) was invisible and shipped. This closes that
+    gap.
+    """
+    new_lines = post - pre
+    if not new_lines:
+        return
+    expected = {_norm_rel(f) for f in expected_files if isinstance(f, str)}
+    unexpected = set()
+    for line in new_lines:
+        path = _porcelain_path(line)
+        if not path:
+            continue
+        if _norm_rel(path) in expected:
+            continue
+        unexpected.add(path)
+    if unexpected:
+        raise RuntimeError(
+            f"Step wrote to unexpected path(s) not declared in step.files: "
+            f"{', '.join(sorted(unexpected))}. The runner only permits "
+            f"writes to files the step explicitly declared — if this "
+            f"write is intentional, add the path to step.files in the "
+            f"plan; otherwise the subprocess is misbehaving and the "
+            f"change would have shipped uncaught."
+        )
+
+
+_ACTION_TO_STATUS_CODES = {
+    "create": {"A"},
+    "modify": {"M"},
+    "delete": {"D"},
+}
+
+
+def _assert_action_matches_staged(action: str, files: list):
+    """Cross-check `git diff --cached --name-status` against the step's
+    declared action (#237).
+
+    Without this, a 'modify' action whose subprocess accidentally DELETES
+    the file passes verification: `git add` stages the deletion, the
+    generic staged-diff check reports a diff, and commit_files calls it
+    good. The action/operation mismatch is silently committed. This
+    helper compares each staged path's status code (A/M/D) against the
+    codes allowed for the declared action.
+    """
+    if action not in _ACTION_TO_STATUS_CODES:
+        return
+    if not files:
+        return
+    result = git("diff", "--cached", "--name-status", "--", *files)
+    if result.returncode != 0:
+        return
+    allowed = _ACTION_TO_STATUS_CODES[action]
+    mismatches = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("\t")
+        # First token is the status code (A/M/D or R<score>/C<score>).
+        code = parts[0][:1]
+        path = parts[-1] if len(parts) > 1 else line
+        if code not in allowed:
+            mismatches.append(
+                f"{path}: staged as '{code}' but action is '{action}'"
+            )
+    if mismatches:
+        raise RuntimeError(
+            f"Step action '{action}' does not match the staged changes: "
+            f"{'; '.join(mismatches)}. The subprocess likely performed a "
+            f"different operation than declared (e.g. a 'modify' that "
+            f"deleted the file, or a 'create' that modified an existing "
+            f"one). Fix the plan's action or the subprocess prompt."
+        )
+
+
+def commit_files(files: list, message: str, action: str = ""):
     """Stage specific files and commit.
 
     Before committing, verify the add actually staged a change. If the
@@ -88,6 +247,10 @@ def commit_files(files: list[str], message: str):
     fail with "no changes added to commit" — an error that historically
     looked identical to a real git failure and masked subprocess bugs. Fail
     fast with a distinct error in that case.
+
+    If `action` is provided, also cross-check that the staged changes
+    match the declared action (#237): a 'modify' action must not produce
+    a deletion, a 'delete' action must not produce an addition, etc.
     """
     if not files:
         return
@@ -101,6 +264,8 @@ def commit_files(files: list[str], message: str):
             f"The step's implementation subprocess either decided no edit was needed, "
             f"edited a different path, or silently failed. Check the subprocess transcript."
         )
+    if action:
+        _assert_action_matches_staged(action, files)
     result = git("commit", "-m", message)
     if result.returncode != 0:
         raise RuntimeError(_format_git_error(
@@ -113,6 +278,110 @@ def commit_files(files: list[str], message: str):
 def get_current_branch() -> str:
     result = git("rev-parse", "--abbrev-ref", "HEAD")
     return result.stdout.strip()
+
+
+_NON_COMMITTING_ACTIONS = frozenset({"test", "verify"})
+
+
+def persist_execution_log(log_path: Path, execution_log: dict):
+    """Atomically write the execution log to disk (#243).
+
+    Used after every state mutation inside the run loop so a crash
+    between steps leaves the log consistent with whichever step last
+    completed. Without this, the log was only written at the very end
+    of main() — a crash mid-loop meant git had the new commits but
+    the log still reflected the previous run, producing the exact
+    drift that validate_resume_state() now catches at the start of
+    the next run.
+
+    The atomic-write pattern (write to .tmp, os.replace) ensures the
+    log file is never partially written even if the process dies
+    mid-flush.
+    """
+    tmp = log_path.with_suffix(log_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(execution_log, indent=2), encoding="utf-8")
+    os.replace(tmp, log_path)
+
+
+def validate_resume_state(
+    completed_step_numbers: set,
+    previous_entries: dict,
+    plan_steps: list,
+) -> list:
+    """Cross-check git commits against the previous execution log (#242).
+
+    Git is authoritative — it's the actual record of what landed on the
+    branch — and the execution log is derivative metadata for steps
+    that can't be recovered from git (verify/test status, timing,
+    subprocess errors). When the two disagree on which modifying steps
+    are done, resume behavior would be undefined, so we refuse to
+    proceed and ask the operator to reconcile by hand.
+
+    Only MODIFYING steps (action in {create, modify, delete}) are
+    cross-checked, because test/verify steps never commit by design
+    and would false-positive on every resume.
+
+    Disagreement shapes:
+    - Log claims a modifying step 'passed' but no matching commit on
+      the branch. This happens after a squash/rebase rewrote history
+      while the log was left in place. Resume would skip the
+      commit-less step and ship a branch missing it.
+    - Log claims a modifying step 'failed'/'skipped' but a matching
+      commit DOES exist. This happens after a hand-fix commit between
+      runs. Resume would carry the step forward as 'passed' with a
+      stale error message — the execution log would lie about what
+      shipped.
+
+    Returns a list of error strings (empty = consistent). Caller
+    aborts on non-empty.
+    """
+    action_by_num = {}
+    for step in plan_steps:
+        if not isinstance(step, dict):
+            continue
+        num = step.get("step_number")
+        if isinstance(num, int):
+            action_by_num[num] = step.get("action", "")
+
+    errors = []
+    for num, entry in previous_entries.items():
+        if not isinstance(entry, dict):
+            continue
+        status = entry.get("status")
+        # #244: an entry with status='started' means the previous run
+        # was interrupted mid-step — partial work may exist in the
+        # worktree, in a Claude session state dir, or as an orphan
+        # commit. Resume cannot safely choose between 'skip this step'
+        # and 'run it again' without knowing what landed. Always flag.
+        if status == "started":
+            errors.append(
+                f"Step {num}: execution log says 'started' — the previous "
+                f"run was interrupted mid-step. Inspect the branch and "
+                f"worktree, then either commit/discard partial work and "
+                f"delete the stale log entry, or delete the whole log "
+                f"to re-run the step from scratch."
+            )
+            continue
+        action = action_by_num.get(num, "")
+        if action in _NON_COMMITTING_ACTIONS:
+            # verify/test steps never commit by design — skip.
+            continue
+        in_git = num in completed_step_numbers
+        if status == "passed" and not in_git:
+            errors.append(
+                f"Step {num}: execution log says 'passed' but no matching "
+                f"commit exists on the branch. History may have been "
+                f"squashed/rewritten. Delete the stale execution log or "
+                f"restore the commit to resume."
+            )
+        elif status in ("failed", "skipped") and in_git:
+            errors.append(
+                f"Step {num}: execution log says '{status}' but a commit "
+                f"matching this step exists on the branch. A hand-fix "
+                f"commit likely landed between runs. Delete the stale "
+                f"execution log to let git state drive resume."
+            )
+    return errors
 
 
 def load_previous_log(log_path: Path) -> dict:
@@ -248,6 +517,72 @@ def build_verify_prompt(step: dict, spec: dict) -> str:
     ])
 
 
+def parse_verify_output(stdout: str) -> dict:
+    """Parse a verify step's Claude Code output into a {passed, explanation} dict.
+
+    Handles every envelope shape the runner has actually seen (#252):
+    - Bare JSON object: {"passed": true, "explanation": "..."}
+    - Claude Code envelope: {"result": "<inner text>"} — inner is then parsed
+    - Markdown-fenced JSON: ```json\\n{...}\\n``` or ```\\n{...}\\n```
+    - JSON embedded in prose: "Here's the result: {...}"
+    - Combination: envelope → inner prose → fenced JSON
+    - Anything unparseable falls through to {"passed": False, "explanation": "Unparseable output"}
+
+    Extracted from execute_step for unit testability — the parser used
+    to be inlined, which meant none of its branches had coverage and a
+    silent regression could break every verify step across every plan.
+    """
+    verify = {"passed": False, "explanation": "Unparseable output"}
+    try:
+        envelope = json.loads(stdout)
+        if isinstance(envelope, dict) and "result" in envelope:
+            text = envelope["result"].strip()
+        elif isinstance(envelope, dict) and "passed" in envelope:
+            return envelope
+        else:
+            text = stdout.strip()
+
+        # Strip markdown code fences if present.
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if lines and lines[-1].strip() == "```":
+                lines = lines[1:-1]
+            else:
+                lines = lines[1:]
+            text = "\n".join(lines).strip()
+        # Find first { and last } to extract JSON from prose.
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end > start:
+            try:
+                parsed = json.loads(text[start:end + 1])
+                if isinstance(parsed, dict) and "passed" in parsed:
+                    verify = parsed
+            except json.JSONDecodeError:
+                pass
+    except (json.JSONDecodeError, TypeError):
+        # stdout is not JSON at all — fall through and try to find a
+        # raw JSON blob in the prose.
+        text = stdout.strip() if isinstance(stdout, str) else ""
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if lines and lines[-1].strip() == "```":
+                lines = lines[1:-1]
+            else:
+                lines = lines[1:]
+            text = "\n".join(lines).strip()
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end > start:
+            try:
+                parsed = json.loads(text[start:end + 1])
+                if isinstance(parsed, dict) and "passed" in parsed:
+                    verify = parsed
+            except json.JSONDecodeError:
+                pass
+    return verify
+
+
 def run_claude(prompt: str, model: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess with the specified model."""
     return _spawn_claude(prompt, timeout=cfg("executor", "timeout", 300), model=model)
@@ -318,37 +653,9 @@ def execute_step(step: dict, spec: dict, model: str) -> dict:
                         break
                     continue
 
-                # Parse verify result — handle envelope, code fences, and prose
-                verify = {"passed": False, "explanation": "Unparseable output"}
-                try:
-                    envelope = json.loads(stdout)
-                    if isinstance(envelope, dict) and "result" in envelope:
-                        text = envelope["result"].strip()
-                    elif isinstance(envelope, dict) and "passed" in envelope:
-                        verify = envelope
-                        text = None
-                    else:
-                        text = stdout.strip()
-
-                    if text is not None:
-                        # Strip markdown code fences if present
-                        if text.startswith("```"):
-                            lines = text.splitlines()
-                            if lines[-1].strip() == "```":
-                                lines = lines[1:-1]
-                            else:
-                                lines = lines[1:]
-                            text = "\n".join(lines).strip()
-                        # Find first { and last } to extract JSON from prose
-                        start = text.find("{")
-                        end = text.rfind("}")
-                        if start != -1 and end > start:
-                            try:
-                                verify = json.loads(text[start:end + 1])
-                            except json.JSONDecodeError:
-                                pass
-                except (json.JSONDecodeError, TypeError):
-                    pass
+                # #252: delegate to the standalone parser so every
+                # envelope/fence/prose shape is exercised by unit tests.
+                verify = parse_verify_output(stdout)
 
                 if verify.get("passed"):
                     result["status"] = "passed"
@@ -468,6 +775,21 @@ def main():
     # which git log can't recover because verify/test steps don't commit.
     previous_entries = load_previous_log(log_path)
 
+    # #242: cross-validate git commits against the previous execution log
+    # before resuming. Disagreement means history was rewritten or a
+    # hand-fix commit landed between runs — either way resume behavior
+    # would be undefined, so abort and ask the operator to reconcile.
+    resume_errors = validate_resume_state(
+        completed_step_numbers, previous_entries, sorted_steps,
+    )
+    if resume_errors:
+        print(
+            "Resume state inconsistent — refusing to proceed:\n  "
+            + "\n  ".join(resume_errors),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     execution_log = {
         "uuid": uuid,
         "branch": branch,
@@ -502,6 +824,7 @@ def main():
                     "error": None,
                     "note": "carried forward from previous run (commit on branch)",
                 })
+            persist_execution_log(log_path, execution_log)  # #243
             continue
 
         # Skip if any dependency failed/skipped
@@ -514,19 +837,91 @@ def main():
             }
             execution_log["steps"].append(step_result)
             failed_steps.add(step_num)
+            persist_execution_log(log_path, execution_log)  # #243
             continue
 
         print(f"Executing step {step_num}: {step.get('description', '')}", file=sys.stderr)
+        # #235: refuse to run if the worktree has pre-existing dirty
+        # state in any of this step's target files — otherwise the
+        # user's uncommitted work would be silently committed as if
+        # the runner authored it.
+        try:
+            step_files = step.get("files", [])
+            if step.get("action") not in ("test", "verify"):
+                assert_files_clean(step_files)
+        except RuntimeError as e:
+            step_result = {
+                "step_number": step_num,
+                "status": "failed",
+                "files_changed": step.get("files", []),
+                "error": str(e),
+            }
+            execution_log["steps"].append(step_result)
+            failed_steps.add(step_num)
+            aborted = True
+            for s in sorted_steps:
+                if s["step_number"] > step_num:
+                    execution_log["steps"].append({
+                        "step_number": s["step_number"],
+                        "status": "skipped",
+                        "files_changed": s.get("files", []),
+                        "error": "Runner aborted",
+                    })
+            persist_execution_log(log_path, execution_log)  # #243
+            break
         resolved_model = step.get("model") or default_model
+        # #244: write a 'started' stub entry BEFORE the subprocess call
+        # and persist it. If the runner is interrupted mid-step, this
+        # marker survives and validate_resume_state() surfaces it on
+        # the next run so the operator can hand-reconcile instead of
+        # silently re-running the step from scratch.
+        started_stub = {
+            "step_number": step_num,
+            "status": "started",
+            "files_changed": step.get("files", []),
+            "error": None,
+        }
+        execution_log["steps"].append(started_stub)
+        persist_execution_log(log_path, execution_log)
+        # #236: snapshot worktree state before the step so we can detect
+        # writes to paths the step didn't declare in step.files.
+        pre_state = snapshot_worktree_state()
         step_result = execute_step(step, spec, resolved_model)
-        execution_log["steps"].append(step_result)
+        # Check for unexpected writes on any non-test/verify step that
+        # succeeded — test/verify steps shell out and shouldn't write
+        # files at all, but they're also not subject to the step.files
+        # contract, so we skip the check for them.
+        if (step_result["status"] == "passed"
+                and step.get("action") not in ("test", "verify")):
+            try:
+                assert_no_unexpected_writes(
+                    pre_state, snapshot_worktree_state(),
+                    step.get("files", []),
+                )
+            except RuntimeError as e:
+                step_result["status"] = "failed"
+                step_result["error"] = str(e)
+        # #244: overwrite the 'started' stub with the real step result
+        # now that execute_step has returned. We know the stub is the
+        # last appended entry because no other append happens between
+        # the started-stub write and here.
+        execution_log["steps"][-1] = step_result
+        # #243: persist the step result BEFORE the commit attempt, so a
+        # crash during commit_files leaves the log honest about what
+        # execute_step produced. Combined with validate_resume_state,
+        # this closes the drift window between git state and log state.
+        persist_execution_log(log_path, execution_log)
 
         if step_result["status"] == "passed":
             # Commit if there are files
             files = step.get("files", [])
             if files and step.get("action") not in ("test", "verify"):
                 try:
-                    commit_files(files, f"runner/{uuid} step {step_num}: {step.get('description', '')}")
+                    commit_files(
+                        files,
+                        f"runner/{uuid} step {step_num}: {step.get('description', '')}",
+                        action=step.get("action", ""),
+                    )
                 except RuntimeError as e:
                     print(f"Git error: {e}", file=sys.stderr)
                     step_result["status"] = "failed"
@@ -542,6 +937,7 @@ def main():
                             "files_changed": r.get("files", []),
                             "error": "Runner aborted",
                         })
+                    persist_execution_log(log_path, execution_log)  # #243
                     break
         else:
             failed_steps.add(step_num)
@@ -557,13 +953,15 @@ def main():
                         "files_changed": s.get("files", []),
                         "error": "Runner aborted",
                     })
+            persist_execution_log(log_path, execution_log)  # #243
             break
 
     if aborted:
         execution_log["status"] = "aborted"
 
-    # Write execution log
-    log_path.write_text(json.dumps(execution_log, indent=2), encoding="utf-8")
+    # Final write — also picks up the top-level status flip above.
+    # Per-step writes happen inside the loop (#243) for durability.
+    persist_execution_log(log_path, execution_log)
 
     if aborted:
         print(f"Runner aborted. Log: {log_path}", file=sys.stderr)

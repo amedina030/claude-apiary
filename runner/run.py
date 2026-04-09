@@ -146,10 +146,13 @@ def record_stage_cost(stage_name: str, runner_uuid: str, stdout_text: str, stder
     total_cache_create = 0
     total_output = 0
     any_malformed = False
-    for usage_xml in blocks:
+    malformed_count = 0  # #249: surface lost cost data in the run summary
+    attempts_detail = []  # #248: per-attempt breakdown for retry visibility
+    for attempt_idx, usage_xml in enumerate(blocks, 1):
         fields = parse_usage_fields(usage_xml)
         if fields.get('_malformed'):
             any_malformed = True
+            malformed_count += 1
             continue
         total_tokens += fields.get('total_tokens', 0)
         total_tool_uses += fields.get('tool_uses', 0)
@@ -158,6 +161,12 @@ def record_stage_cost(stage_name: str, runner_uuid: str, stdout_text: str, stder
         total_cache_read += fields.get('cache_read_input_tokens', 0)
         total_cache_create += fields.get('cache_creation_input_tokens', 0)
         total_output += fields.get('output_tokens', 0)
+        attempts_detail.append({
+            'attempt': attempt_idx,
+            'tokens': fields.get('total_tokens', 0),
+            'tool_uses': fields.get('tool_uses', 0),
+            'duration_ms': fields.get('duration_ms', 0),
+        })
         # Log each call separately so the budgeter sees per-call granularity
         log_stage_cost(stage_name, runner_uuid, usage_xml)
 
@@ -175,6 +184,16 @@ def record_stage_cost(stage_name: str, runner_uuid: str, stdout_text: str, stder
         'cache_create_tokens': total_cache_create,
         'output_tokens': total_output,
         'status': status,
+        # #248: per-attempt list lets the summary call out retry cost
+        # separately from a single expensive run. The total across all
+        # attempts stays in the top-level 'tokens' field for callers
+        # (cumulative_tokens, etc.) that don't care about the breakdown.
+        'attempts': len(attempts_detail),
+        'attempts_detail': attempts_detail,
+        # #249: count of <usage> blocks that couldn't be parsed. The
+        # run summary flags any non-zero value so the operator knows
+        # real cost data was silently discarded.
+        'malformed_count': malformed_count,
     })
 
 
@@ -212,6 +231,10 @@ def print_cost_summary(stage_costs: list) -> None:
         cache_read_t = entry.get('cache_read_tokens', 0)
         cache_create_t = entry.get('cache_create_tokens', 0)
         output_t = entry.get('output_tokens', 0)
+        # #248: mark stages that required retries so a 3x-cost run is
+        # visually distinct from a genuinely expensive single attempt.
+        attempts = entry.get('attempts', 1)
+        retry_tag = f' [{attempts} attempts]' if attempts > 1 else ''
         has_breakdown = (input_t + cache_read_t + cache_create_t + output_t) > 0
         if has_breakdown:
             any_breakdown = True
@@ -222,7 +245,7 @@ def print_cost_summary(stage_costs: list) -> None:
                            + output_t * 5.0)
             fresh_in = input_t + cache_read_t + cache_create_t
             cache_pct = (cache_read_t * 100.0 / fresh_in) if fresh_in > 0 else 0.0
-            print(f'  runner-{stage}: {tokens} tokens '
+            print(f'  runner-{stage}{retry_tag}: {tokens} tokens '
                   f'(weighted ~{weighted}, cache {cache_pct:.0f}%, '
                   f'{tool_uses} tool uses, {duration_ms}ms)')
             total_weighted += weighted
@@ -230,7 +253,7 @@ def print_cost_summary(stage_costs: list) -> None:
             total_input_plus_create += input_t + cache_create_t
             total_output += output_t
         else:
-            print(f'  runner-{stage}: {tokens} tokens ({tool_uses} tool uses, {duration_ms}ms)')
+            print(f'  runner-{stage}{retry_tag}: {tokens} tokens ({tool_uses} tool uses, {duration_ms}ms)')
         total_tokens += tokens
         any_logged = True
     if any_breakdown:
@@ -239,6 +262,18 @@ def print_cost_summary(stage_costs: list) -> None:
         print(f'  TOTAL: {total_tokens} tokens (weighted ~{total_weighted}, cache {cache_pct:.0f}%)')
     else:
         print(f'  TOTAL: {total_tokens} tokens')
+
+    # #249: surface malformed-usage drops at the end of the summary so
+    # the user sees that cost data is incomplete even if the stages
+    # otherwise succeeded. Without this the drops were silent.
+    total_malformed = sum(e.get('malformed_count', 0) for e in stage_costs)
+    if total_malformed:
+        affected = [e['stage'] for e in stage_costs if e.get('malformed_count', 0) > 0]
+        print(
+            f'  WARN: {total_malformed} malformed <usage> block(s) across '
+            f'{len(affected)} stage(s) ({", ".join(affected)}) — cost data '
+            f'is incomplete for those stages.'
+        )
 
 
 def cumulative_tokens(stage_costs: list) -> int:
@@ -491,6 +526,199 @@ def run_stage(name: str, script_path: Path, input_path: Path) -> tuple[bool, str
 
 
 
+def _find_runner_branches_from_refs(refs: list, uuid: str) -> list:
+    """Given a list of short branch names and a runner uuid, return every
+    branch that belongs to this runner run.
+
+    The runner uses two branch naming conventions:
+    - Interactive mode (executor.py main): 'runner/<uuid>'
+    - Detached mode (run_detached): 'runner/<slug>-<uuid>'
+
+    We match both by looking for any branch whose name is exactly
+    'runner/<uuid>' OR ends with '-<uuid>' under the runner/ prefix.
+    Pure function to keep the cleanup path unit-testable.
+    """
+    matches = []
+    exact = f"runner/{uuid}"
+    suffix = f"-{uuid}"
+    for ref in refs:
+        if not isinstance(ref, str):
+            continue
+        ref = ref.strip()
+        if not ref.startswith("runner/"):
+            continue
+        if ref == exact or ref.endswith(suffix):
+            matches.append(ref)
+    return matches
+
+
+def _archive_execution_log(executions_dir: Path, uuid: str) -> Path | None:
+    """Move runner/executions/<uuid>.json to an archive subdir.
+
+    Returns the archived path on success, None if there was no log to
+    archive. Used by run_cleanup (#245) so operators can inspect the
+    last-known state of a killed run without having to grep through
+    live execution logs.
+    """
+    src = executions_dir / f"{uuid}.json"
+    if not src.exists():
+        return None
+    archive_dir = executions_dir / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    dest = archive_dir / f"{uuid}.json"
+    # If an archive file already exists (rare — re-cleanup), append a
+    # timestamp suffix so we never silently clobber history.
+    if dest.exists():
+        ts = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+        dest = archive_dir / f"{uuid}.{ts}.json"
+    shutil.move(str(src), str(dest))
+    return dest
+
+
+_PRUNE_STATUSES = frozenset({"failed", "aborted"})
+
+
+def _should_prune_log(log_data: dict, mtime_epoch: float, cutoff_epoch: float) -> bool:
+    """Pure predicate for --prune-failed (#246).
+
+    A log qualifies for pruning when:
+    - Its top-level 'status' is 'failed' or 'aborted' (completed runs
+      are the operator's decision to keep or merge, not ours).
+    - Its mtime is older than the cutoff epoch (older-than-N-days).
+
+    Split out as a pure function so the prune policy is unit-testable
+    without touching the filesystem or git.
+    """
+    if not isinstance(log_data, dict):
+        return False
+    status = log_data.get("status")
+    if status not in _PRUNE_STATUSES:
+        return False
+    return mtime_epoch < cutoff_epoch
+
+
+def run_prune_failed(days: int, dry_run: bool = False) -> int:
+    """Prune old failed/aborted runner branches (#246).
+
+    Iterates runner/executions/*.json (ignoring the archive/ subdir),
+    and for every log whose status is failed/aborted AND whose mtime
+    is older than `days` days, invokes run_cleanup(uuid) to delete the
+    matching branch(es) and archive the log. With --dry-run, lists the
+    candidates without touching anything.
+
+    Iterating logs rather than branches means we prune cleanly even
+    when the branch was already deleted (log still gets archived) and
+    we skip runs whose log no longer exists (hand-cleaned already).
+    """
+    executions = SCRIPT_DIR / "executions"
+    if not executions.exists():
+        print("No executions directory — nothing to prune.")
+        return 0
+
+    cutoff = time.time() - (days * 86400)
+    candidates = []
+    for log_path in sorted(executions.iterdir()):
+        if log_path.is_dir():
+            continue  # skip archive/
+        if log_path.suffix != ".json":
+            continue
+        try:
+            data = json.loads(log_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        mtime = log_path.stat().st_mtime
+        if _should_prune_log(data, mtime, cutoff):
+            candidates.append((log_path.stem, log_path.stat().st_mtime, data.get("status")))
+
+    if not candidates:
+        print(f"No failed/aborted logs older than {days} day(s) found.")
+        return 0
+
+    for uuid, mtime, status in candidates:
+        age_days = int((time.time() - mtime) / 86400)
+        print(f"  {uuid}  status={status}  age={age_days}d")
+
+    if dry_run:
+        print(f"\n[dry-run] {len(candidates)} log(s) would be pruned.")
+        return 0
+
+    print(f"\nPruning {len(candidates)} stale runner run(s)...")
+    failures = 0
+    for uuid, _, _ in candidates:
+        rc = run_cleanup(uuid)
+        if rc != 0:
+            failures += 1
+    return 1 if failures else 0
+
+
+def run_cleanup(uuid: str) -> int:
+    """Abort/cleanup path for a runner run (#245).
+
+    Finds every runner branch belonging to this uuid (both interactive
+    and detached naming conventions), checks out master if HEAD is
+    currently on one of them, deletes the branches, and archives the
+    execution log. Returns a shell exit code.
+    """
+    # Find matching branches. Use for-each-ref to list runner/ refs.
+    result = subprocess.run(
+        ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/runner/"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"git for-each-ref failed: {result.stderr.strip()}", file=sys.stderr)
+        return 1
+    refs = result.stdout.splitlines()
+    branches = _find_runner_branches_from_refs(refs, uuid)
+    if not branches:
+        print(f"No runner branches found for uuid '{uuid}'.", file=sys.stderr)
+
+    # If current HEAD is on one of these branches, checkout master first.
+    head = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True,
+    )
+    current = head.stdout.strip() if head.returncode == 0 else ""
+    if current in branches:
+        co = subprocess.run(
+            ["git", "checkout", "master"], capture_output=True, text=True,
+        )
+        if co.returncode != 0:
+            print(
+                f"Refusing to delete branches: could not checkout master: "
+                f"{co.stderr.strip()}",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"Checked out master (was on {current})")
+
+    # Delete each matching branch.
+    deleted = []
+    for branch in branches:
+        d = subprocess.run(
+            ["git", "branch", "-D", branch],
+            capture_output=True, text=True,
+        )
+        if d.returncode == 0:
+            deleted.append(branch)
+            print(f"Deleted branch {branch}")
+        else:
+            print(
+                f"Failed to delete {branch}: {d.stderr.strip()}",
+                file=sys.stderr,
+            )
+
+    # Archive the execution log if present.
+    archived = _archive_execution_log(SCRIPT_DIR / "executions", uuid)
+    if archived is not None:
+        print(f"Archived execution log to {archived}")
+    else:
+        print("No execution log found to archive.")
+
+    if not deleted and archived is None:
+        return 1
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Runner orchestrator")
     parser.add_argument("intake", nargs='?', default=None, help="Path to intake JSON file")
@@ -502,7 +730,26 @@ def main():
                         help="Per-run token cap (detached mode); defaults to config detached.token_cap")
     parser.add_argument("--max-unreviewed", dest="max_unreviewed", type=int, default=None,
                         help="Max unmerged runner branches before skipping (detached mode)")
+    parser.add_argument("--cleanup", dest="cleanup", default=None, metavar="UUID",
+                        help="Abort/cleanup: delete runner branch(es) for the given uuid "
+                             "and archive the execution log (#245)")
+    parser.add_argument("--prune-failed", dest="prune_failed", action="store_true",
+                        default=False,
+                        help="Prune old failed/aborted runner branches via --older-than (#246)")
+    parser.add_argument("--older-than", dest="older_than", type=int, default=7,
+                        metavar="DAYS",
+                        help="Age threshold in days for --prune-failed (default: 7)")
+    parser.add_argument("--dry-run", dest="dry_run", action="store_true", default=False,
+                        help="List prune candidates without deleting anything")
     cli_args = parser.parse_args()
+
+    # Cleanup mode: abort path for a killed/interrupted runner run.
+    if cli_args.cleanup is not None:
+        sys.exit(run_cleanup(cli_args.cleanup))
+
+    # Prune mode: delete old failed/aborted runner runs in bulk.
+    if cli_args.prune_failed:
+        sys.exit(run_prune_failed(cli_args.older_than, dry_run=cli_args.dry_run))
 
     # Detached mode: hand off entirely, then exit
     if cli_args.detached:
@@ -619,6 +866,32 @@ def main():
             ok, stdout_text, stderr_text, elapsed = run_stage(name, script_path, input_path)
             record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
             output = stdout_text.strip() if ok else stderr_text.strip()
+
+            # #247: interactive-mode token budget. If --token-cap is set,
+            # abort the run as soon as cumulative tokens exceed it, so a
+            # runaway hardening loop can't keep spawning forever.
+            # Detached mode already has this check (#423 region); this
+            # brings parity to the interactive path.
+            if cli_args.token_cap is not None:
+                used = cumulative_tokens(stage_costs)
+                if used > cli_args.token_cap:
+                    print(
+                        f"\n{'=' * 60}\n"
+                        f"ABORTED: token cap exceeded at stage {i} ({name}): "
+                        f"{used} > {cli_args.token_cap}",
+                        file=sys.stderr,
+                    )
+                    print(f"Stages completed: {stages_completed}/{len(STAGES)}")
+                    try:
+                        print_cost_summary(stage_costs)
+                    except Exception:
+                        pass
+                    print(
+                        f"To resume: python runner/run.py {intake_path_abs} "
+                        f"--resume-from {name}",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
 
             if ok:
                 print(f"  PASSED ({elapsed:.1f}s)")

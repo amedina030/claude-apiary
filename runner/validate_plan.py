@@ -18,6 +18,9 @@ Usage:
 """
 import argparse
 import json
+import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -47,6 +50,18 @@ _BANNED_TOKENS = {
     "from requests": "external dependencies are banned — stdlib only",
 }
 
+# Word-boundary-aware patterns for each banned token (#239). Plain
+# substring match would false-positive on 'from requests_mock' matching
+# the 'from requests' ban, or 'requests_toolbelt' matching 'requests'.
+# The (?<!\w)...(?!\w) guards ensure we only match when the token is
+# bounded by non-word characters (or the start/end of the haystack),
+# which correctly rejects identifier-suffix false positives while still
+# catching 'pytest-asyncio' (hyphen IS a word boundary).
+_BANNED_TOKEN_PATTERNS = {
+    token: re.compile(rf"(?<!\w){re.escape(token)}(?!\w)")
+    for token in _BANNED_TOKENS
+}
+
 # Phrases that, when found in a test-action step's description, indicate the
 # planner is using a test step as a gating audit run rather than a pass/fail
 # verification. The executor treats every test step as a hard gate (non-zero
@@ -73,22 +88,60 @@ _TEST_FAILURE_LANGUAGE = (
 # and we don't want a parallel non-git verification path. Hand-fix any
 # ticket whose work would touch out-of-repo state.
 #
-# Every step.files entry is resolved (relative paths against the runner's
-# cwd, which is always the repo root) and must fall under REPO_ROOT.
+# Every step.files entry is resolved via _resolve_repo_path — relative
+# paths are joined against REPO_ROOT explicitly (NOT cwd), absolute paths
+# against themselves — and the result must fall under REPO_ROOT. Resolving
+# against REPO_ROOT instead of cwd means validate_plan can be invoked from
+# anywhere without path rejection false positives (#232).
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _resolve_repo_path(path: Path) -> Path:
+    """Resolve `path` relative to REPO_ROOT if not already absolute.
+
+    Never uses cwd as the resolution base — the runner orchestrator happens
+    to cd to repo root today, but validate_plan must not rely on that
+    implicit invariant (#232).
+    """
+    if not path.is_absolute():
+        path = _REPO_ROOT / path
+    return path.resolve()
+
+
+def _rel_under_repo(resolved: Path):
+    """Return the repo-relative POSIX path string for `resolved`, or None
+    if it's not under REPO_ROOT.
+
+    Comparison is case-insensitive on Windows (via os.path.normcase) so
+    that a planner-emitted path like 'D:\\professional\\claude-apiary\\..'
+    resolves correctly against an actual repo root of
+    'D:\\Professional\\claude-apiary\\..' (#234). On POSIX normcase is a
+    no-op, preserving the existing case-sensitive behavior.
+    """
+    repo = str(_REPO_ROOT.resolve())
+    r = str(resolved)
+    repo_n = os.path.normcase(repo)
+    r_n = os.path.normcase(r)
+    if r_n == repo_n:
+        return ""
+    sep = os.sep
+    prefix = repo_n if repo_n.endswith(sep) else repo_n + sep
+    if not r_n.startswith(prefix):
+        return None
+    # normcase only changes case (and slash direction on Windows) — never
+    # length — so slicing the original string by len(prefix) safely strips
+    # the root while preserving the on-disk case of the tail.
+    rel = r[len(prefix):]
+    return rel.replace("\\", "/")
+
+
 def _path_under_repo(path: Path) -> bool:
     try:
-        resolved = path.resolve()
+        resolved = _resolve_repo_path(path)
     except (OSError, RuntimeError):
         return False
-    try:
-        resolved.relative_to(_REPO_ROOT.resolve())
-        return True
-    except ValueError:
-        return False
+    return _rel_under_repo(resolved) is not None
 
 
 def _detect_cycles(steps: list[dict]) -> list[str]:
@@ -240,6 +293,88 @@ def _check_path_allowlist(steps: list[dict]) -> list[str]:
     return errors
 
 
+def _check_gitignored_paths(steps: list[dict]) -> list[str]:
+    """Reject plans whose step.files contain gitignored paths (#233).
+
+    A plan targeting e.g. `runner/specs/<uuid>.json` (a gitignored path)
+    passes the path allowlist, then at commit time `git add` silently
+    no-ops, `git diff --cached --quiet` returns 0, and commit_files
+    raises a generic "subprocess made no changes" error. Catching it
+    here surfaces the real cause to the planner on retry.
+
+    Uses `git check-ignore --stdin` to batch-check all file paths at
+    once. Paths are passed as repo-relative strings; out-of-repo paths
+    are skipped (they're already rejected by the allowlist). If git is
+    unavailable or the call fails for any reason, the check is skipped
+    silently — we don't want a missing git binary to break validation.
+    """
+    # Collect (step_index, raw_path, rel_path) for every in-repo file entry.
+    entries: list[tuple[int, str, str]] = []
+    repo_root = _REPO_ROOT.resolve()
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        files = step.get("files", [])
+        if not isinstance(files, list):
+            continue
+        for f in files:
+            if not isinstance(f, str) or not f:
+                continue
+            try:
+                resolved = _resolve_repo_path(Path(f))
+            except (OSError, RuntimeError):
+                continue
+            rel = _rel_under_repo(resolved)
+            if rel is None or rel == "":
+                # Outside repo (handled by allowlist) or is the repo
+                # root itself (nothing to check-ignore).
+                continue
+            entries.append((i, f, rel))
+
+    if not entries:
+        return []
+
+    # Use -z (NUL-separated) mode for both stdin and stdout to avoid
+    # Windows CRLF translation on the stdin pipe, which otherwise
+    # corrupts paths with a trailing \r and breaks parsing.
+    stdin_blob = ("\x00".join(rel for _, _, rel in entries) + "\x00").encode("utf-8")
+    try:
+        result = subprocess.run(
+            # No --no-index: we WANT git to respect the index, so that
+            # a tracked path never shows up as ignored even if it also
+            # matches a .gitignore pattern. Only untracked-and-ignored
+            # paths should be rejected.
+            ["git", "check-ignore", "-z", "--stdin"],
+            input=stdin_blob,
+            cwd=str(repo_root),
+            capture_output=True,
+        )
+    except (FileNotFoundError, OSError):
+        # Git not available — skip the check silently.
+        return []
+
+    # `git check-ignore` exits 0 if any path is ignored, 1 if none, 128 on
+    # error. Anything else = skip.
+    if result.returncode not in (0, 1):
+        return []
+
+    stdout_text = result.stdout.decode("utf-8", errors="replace")
+    ignored = {p for p in stdout_text.split("\x00") if p}
+    if not ignored:
+        return []
+
+    errors: list[str] = []
+    for i, raw, rel in entries:
+        if rel in ignored:
+            errors.append(
+                f"step[{i}]: path '{raw}' is gitignored — git add would "
+                f"silently no-op and commit_files would raise a generic "
+                f"'no changes' error. Either un-ignore the path or "
+                f"target a tracked location."
+            )
+    return errors
+
+
 def _check_banned_tokens(steps: list[dict]) -> list[str]:
     """Reject plans whose code_spec or description references banned tokens.
 
@@ -258,33 +393,166 @@ def _check_banned_tokens(steps: list[dict]) -> list[str]:
             str(step.get("description", "")),
         ]).lower()
         for token, reason in _BANNED_TOKENS.items():
-            if token in haystack:
+            if _BANNED_TOKEN_PATTERNS[token].search(haystack):
                 errors.append(
                     f"step[{i}]: banned token '{token}' found in plan — {reason}"
                 )
     return errors
 
 
+_STOPWORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "by", "can", "do", "does",
+    "for", "from", "has", "have", "in", "is", "it", "its", "of", "on",
+    "or", "the", "this", "that", "to", "was", "with", "will",
+})
+
+# Strip punctuation/symbols for tokenization — re.findall(r"[a-z0-9_]+")
+# catches alphanumeric tokens and discards everything else.
+_WORD_RE = re.compile(r"[a-z0-9_]+")
+
+
+def _criterion_bigrams(criterion: str) -> list:
+    """Extract content bigrams from an acceptance criterion.
+
+    Lowercases, tokenizes on word chars, then emits every adjacent word
+    pair joined by a single space — EXCEPT pairs where both tokens are
+    stopwords (a stopword-only bigram like 'to the' carries no signal
+    and would match almost any step text).
+
+    Returns an empty list if the criterion is too short to produce any
+    usable bigram, in which case _check_criteria_coverage skips the
+    criterion entirely rather than reporting a false-positive error.
+    """
+    tokens = _WORD_RE.findall(criterion.lower())
+    bigrams = []
+    for a, b in zip(tokens, tokens[1:]):
+        if a in _STOPWORDS and b in _STOPWORDS:
+            continue
+        bigrams.append(f"{a} {b}")
+    return bigrams
+
+
+def _transitive_deps(steps: list) -> dict:
+    """Return {step_number: set(of all transitive ancestor step numbers)}.
+
+    Walks the depends_on graph from every node so callers can cheaply
+    ask 'is step A an ancestor of step B?' — used by the file-overlap
+    check (#241) to verify that two steps touching the same file are
+    ordered by an explicit dependency chain.
+    """
+    direct = {}
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        num = s.get("step_number")
+        if not isinstance(num, int):
+            continue
+        deps = s.get("depends_on", [])
+        direct[num] = [d for d in deps if isinstance(d, int)] if isinstance(deps, list) else []
+
+    ancestors = {}
+    for start in direct:
+        seen = set()
+        stack = list(direct.get(start, []))
+        while stack:
+            cur = stack.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            stack.extend(direct.get(cur, []))
+        ancestors[start] = seen
+    return ancestors
+
+
+def _check_file_overlap(steps: list) -> list:
+    """Reject plans where multiple steps write to the same file without
+    a depends_on chain between them (#241).
+
+    Without this, topological sort may pick either order, and the two
+    steps race: step 7's write may land before step 3's, the runner
+    commits both, and the final state is nondeterministic across runs.
+    The fix is an explicit dependency (step 7 depends_on step 3) or
+    merging the two into one step. The error message lists the smaller
+    step number as the suggested dependency target because that's the
+    intuitive "this edit came first" direction.
+    """
+    ancestors = _transitive_deps(steps)
+
+    file_to_steps: dict = {}
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        num = s.get("step_number")
+        if not isinstance(num, int):
+            continue
+        files = s.get("files", [])
+        if not isinstance(files, list):
+            continue
+        for f in files:
+            if isinstance(f, str) and f:
+                key = f.replace("\\", "/").strip()
+                file_to_steps.setdefault(key, []).append(num)
+
+    errors = []
+    reported_pairs = set()
+    for f, nums in file_to_steps.items():
+        if len(nums) < 2:
+            continue
+        unique = sorted(set(nums))
+        for i in range(len(unique)):
+            for j in range(i + 1, len(unique)):
+                a, b = unique[i], unique[j]
+                if a in ancestors.get(b, set()) or b in ancestors.get(a, set()):
+                    continue
+                pair_key = (a, b, f)
+                if pair_key in reported_pairs:
+                    continue
+                reported_pairs.add(pair_key)
+                errors.append(
+                    f"steps {a} and {b} both target '{f}' without a "
+                    f"depends_on chain — execution order is undefined "
+                    f"and the two steps may race. Either merge them or "
+                    f"add depends_on: [{a}] to step {b}."
+                )
+    return errors
+
+
 def _check_criteria_coverage(spec: dict, steps: list[dict]) -> list[str]:
-    """Check that every acceptance criterion is referenced by at least one step."""
+    """Check that every acceptance criterion is referenced by at least one step.
+
+    #240: previously used a per-word 'any keyword >3 chars overlaps'
+    heuristic, which false-positived constantly — a criterion of 'user
+    can log in' was 'covered' by any step mentioning 'user'. We now
+    require at least one bigram from the criterion to appear verbatim
+    in the combined step text, which demands roughly-in-context phrase
+    overlap rather than lone-word overlap.
+
+    Criteria that produce no meaningful bigrams (too short, all
+    stopwords) are skipped rather than always-error'd, because the
+    validator can't check them reliably and a hard error would force
+    the planner to mutilate short criteria just to satisfy the check.
+    """
     criteria = spec.get("acceptance_criteria", [])
     if not isinstance(criteria, list) or not criteria:
         return []
 
     errors = []
-    # Build combined text from all step descriptions and code_specs
     step_text = " ".join(
         f"{s.get('description', '')} {s.get('code_spec', '')}"
         for s in steps if isinstance(s, dict)
     ).lower()
+    # Normalize step text tokens the same way as criterion tokens so the
+    # bigram match is consistent across punctuation noise in code_spec.
+    step_tokens = _WORD_RE.findall(step_text)
+    step_normalized = " ".join(step_tokens)
 
     for i, criterion in enumerate(criteria):
         if not isinstance(criterion, str):
             continue
-        # Extract significant keywords (4+ chars) from criterion
-        keywords = [w for w in criterion.lower().split() if len(w) > 3]
-        # Require at least some keyword overlap
-        if keywords and not any(kw in step_text for kw in keywords):
+        bigrams = _criterion_bigrams(criterion)
+        if not bigrams:
+            continue
+        if not any(bg in step_normalized for bg in bigrams):
             errors.append(
                 f"Acceptance criterion [{i}] not covered by any step: "
                 f"'{criterion[:80]}...'" if len(criterion) > 80 else
@@ -364,12 +632,14 @@ def validate(data: dict) -> list[str]:
                     f"(expected: {', '.join(sorted(VALID_MODELS))})"
                 )
 
-        # File existence for modify/delete actions
+        # File existence for modify/delete actions. Resolve relative paths
+        # against REPO_ROOT, not cwd (#232) — consistent with the path
+        # allowlist check above.
         if action in ("modify", "delete"):
             files = step.get("files", [])
             if isinstance(files, list):
                 for f in files:
-                    if isinstance(f, str) and not Path(f).exists():
+                    if isinstance(f, str) and not _resolve_repo_path(Path(f)).exists():
                         errors.append(f"{label}: file not found: {f}")
 
         # depends_on references valid step numbers
@@ -394,6 +664,14 @@ def validate(data: dict) -> list[str]:
 
     # Path allowlist (#212): reject absolute paths outside repo + state dir.
     errors.extend(_check_path_allowlist(steps))
+
+    # Gitignored-path check (#233): surface the "git add no-ops, commit
+    # raises generic 'no changes'" failure at validation time.
+    errors.extend(_check_gitignored_paths(steps))
+
+    # File-overlap check (#241): reject plans where multiple steps
+    # write the same file without a depends_on chain.
+    errors.extend(_check_file_overlap(steps))
 
     # Acceptance criteria coverage
     if isinstance(spec, dict):
