@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Idempotent bootstrap for a fresh claude-apiary clone.
 
-Creates the per-project state directory under ~/.claude/projects/<key>/,
-seeds empty notes.jsonl / learnings.jsonl / memory/MEMORY.md, sets the
-auto-startup flag if missing, and verifies the runtime environment.
+Creates the in-repo scribe state directory at <repo-root>/.apiary/scribe/
+(decision #269), seeds empty notes.jsonl / learnings.jsonl / memory/MEMORY.md,
+writes the umbrella .apiary/.gitignore so the whole dir self-ignores, sets
+the auto-startup flag if missing, and verifies the runtime environment.
 
 Safe to run repeatedly — never clobbers existing data.
 
@@ -20,8 +21,8 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from core.utils.project import get_project_key, project_key_from_path  # noqa: E402
 
-# Files scribe writes under ~/.claude/projects/<key>/. Used only by the
-# legacy-state guard below to detect "needs migration first" scenarios.
+# Files scribe seeds. Used by both the fresh-seed path and the legacy-state
+# guard below (which detects "needs scribe state migration first" scenarios).
 SCRIBE_OWNED = ("notes.jsonl", "learnings.jsonl", "memory")
 
 MIN_PYTHON = (3, 11)
@@ -29,6 +30,13 @@ CLAUDE_DIR = Path.home() / ".claude"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
 AUTO_STARTUP_FLAG = CLAUDE_DIR / "auto-startup-enabled"
 REQUIREMENTS_FILE = REPO_ROOT / "requirements.txt"
+
+# In-repo umbrella state directory (decision #269, todos #262–#268).
+# Scribe state lives under <repo-root>/.apiary/scribe/; the umbrella
+# self-ignores via .apiary/.gitignore containing '*'.
+APIARY_UMBRELLA_NAME = ".apiary"
+SCRIBE_SUBDIR_NAME = "scribe"
+UMBRELLA_GITIGNORE_BODY = "*\n"
 
 
 class BootstrapResult:
@@ -108,23 +116,29 @@ def _check_requirements(result: BootstrapResult) -> None:
         )
 
 
-def _legacy_state_present(repo_dir: Path, new_key: str) -> Optional[Path]:
-    """Return the legacy project dir iff it holds scribe state and would orphan.
+def _unmigrated_legacy_state(repo_dir: Path, scribe_dir: Path) -> Optional[Path]:
+    """Return the legacy project dir iff it holds scribe state that wasn't
+    migrated into the repo-local .apiary/scribe/ yet.
 
-    Detects the case where an existing machine has scribe state under the old
-    cwd-derived key but no state under the new stable key yet. Bootstrap must
-    refuse to seed empty files in this state — that would mask the real data
-    and block migrate_project_key.py from running.
+    Detects the case where an existing machine has scribe state at
+    ~/.claude/projects/<key>/{notes,learnings,memory} but the in-repo
+    ``<repo>/.apiary/scribe/`` is empty. Bootstrap must refuse to seed in
+    this state — writing empty files under .apiary/scribe/ would mask the
+    legacy data and leave the user's real notes stranded.
+
+    Returns ``None`` when either:
+      - no legacy state exists, OR
+      - the in-repo location already has state (migration is done or in progress).
     """
-    legacy_key = project_key_from_path(repo_dir)
-    if legacy_key == new_key:
+    project_key = get_project_key(repo_dir)
+    candidate_keys = {project_key, project_key_from_path(repo_dir)}
+    scribe_has_state = any((scribe_dir / name).exists() for name in SCRIBE_OWNED)
+    if scribe_has_state:
         return None
-    legacy_dir = PROJECTS_DIR / legacy_key
-    new_dir = PROJECTS_DIR / new_key
-    legacy_has_state = any((legacy_dir / name).exists() for name in SCRIBE_OWNED)
-    new_has_state = any((new_dir / name).exists() for name in SCRIBE_OWNED)
-    if legacy_has_state and not new_has_state:
-        return legacy_dir
+    for key in candidate_keys:
+        legacy_dir = PROJECTS_DIR / key
+        if any((legacy_dir / name).exists() for name in SCRIBE_OWNED):
+            return legacy_dir
     return None
 
 
@@ -132,25 +146,32 @@ def bootstrap(repo_dir: Path) -> BootstrapResult:
     """Run all bootstrap steps for repo_dir. Returns a result tally."""
     result = BootstrapResult()
 
-    project_key = get_project_key(repo_dir)
-    project_dir = PROJECTS_DIR / project_key
+    umbrella_dir = repo_dir / APIARY_UMBRELLA_NAME
+    scribe_dir = umbrella_dir / SCRIBE_SUBDIR_NAME
 
-    legacy_dir = _legacy_state_present(repo_dir, project_key)
+    legacy_dir = _unmigrated_legacy_state(repo_dir, scribe_dir)
     if legacy_dir is not None:
         result.warnings.append(
             f"Legacy scribe state found at {legacy_dir} and no state at "
-            f"{project_dir}. Run `python scripts/migrate_project_key.py` "
-            f"first, then re-run bootstrap. Refusing to seed empty files."
+            f"{scribe_dir}. Run `python scripts/migrate_scribe_state.py "
+            f"--source {legacy_dir}` first, then re-run bootstrap. Refusing "
+            f"to seed empty files."
         )
         return result
 
     _ensure_dir(CLAUDE_DIR, "~/.claude", result)
-    _ensure_dir(PROJECTS_DIR, "~/.claude/projects", result)
-    _ensure_dir(project_dir, f"~/.claude/projects/{project_key}", result)
-    _ensure_empty_file(project_dir / "notes.jsonl", "notes.jsonl", result)
-    _ensure_empty_file(project_dir / "learnings.jsonl", "learnings.jsonl", result)
+    _ensure_dir(umbrella_dir, f"{APIARY_UMBRELLA_NAME}/", result)
+    _ensure_text_file(
+        umbrella_dir / ".gitignore",
+        UMBRELLA_GITIGNORE_BODY,
+        f"{APIARY_UMBRELLA_NAME}/.gitignore",
+        result,
+    )
+    _ensure_dir(scribe_dir, f"{APIARY_UMBRELLA_NAME}/{SCRIBE_SUBDIR_NAME}/", result)
+    _ensure_empty_file(scribe_dir / "notes.jsonl", "notes.jsonl", result)
+    _ensure_empty_file(scribe_dir / "learnings.jsonl", "learnings.jsonl", result)
 
-    memory_dir = project_dir / "memory"
+    memory_dir = scribe_dir / "memory"
     _ensure_dir(memory_dir, "memory/", result)
     _ensure_text_file(memory_dir / "MEMORY.md", "", "memory/MEMORY.md", result)
 
@@ -167,10 +188,11 @@ def bootstrap(repo_dir: Path) -> BootstrapResult:
     return result
 
 
-def _print_summary(result: BootstrapResult, project_key: str, quiet: bool) -> None:
+def _print_summary(result: BootstrapResult, repo_dir: Path, quiet: bool) -> None:
     if quiet and not result.warnings:
         return
-    print(f"project key: {project_key}")
+    print(f"repo: {repo_dir}")
+    print(f"scribe state: {repo_dir / APIARY_UMBRELLA_NAME / SCRIBE_SUBDIR_NAME}")
     if result.created:
         print("created:")
         for item in result.created:
@@ -263,7 +285,7 @@ def main() -> int:
     args = parser.parse_args()
 
     result = bootstrap(REPO_ROOT)
-    _print_summary(result, get_project_key(REPO_ROOT), quiet=args.quiet)
+    _print_summary(result, REPO_ROOT, quiet=args.quiet)
 
     if not args.no_context_rules:
         _prompt_context_rules_install(quiet=args.quiet, assume_yes=args.yes)

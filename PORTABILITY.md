@@ -22,14 +22,15 @@ python scripts/bootstrap.py
 
 `bootstrap.py` is idempotent: safe to run as many times as you want. On first run it:
 
-- Creates `~/.claude/` and `~/.claude/projects/<key>/` (where `<key>` comes from `.claude-project-key` at repo root — currently `claude-apiary`).
-- Seeds empty `notes.jsonl`, `learnings.jsonl`, and `memory/MEMORY.md` so the scribe and memory systems have something to read.
+- Creates `~/.claude/` (for Claude Code's own per-user state — identity files, transcripts, the auto-startup flag).
+- Creates the in-repo umbrella state directory `<repo-root>/.apiary/` and writes `<repo-root>/.apiary/.gitignore` containing `*` so the whole umbrella self-ignores.
+- Creates `<repo-root>/.apiary/scribe/` and seeds empty `notes.jsonl`, `learnings.jsonl`, and `memory/MEMORY.md` so the scribe and memory systems have something to read.
 - Creates `~/.claude/auto-startup-enabled` so the startup hook runs on first session.
 - Verifies your Python version meets the minimum and warns if any package in `requirements.txt` fails to import.
 
 On re-run it reports everything as "already present" and exits 0.
 
-If you run `bootstrap.py` on a machine that already has scribe state under the legacy cwd-derived project key (e.g. `D--Professional-claude-apiary/`), it will refuse to seed and tell you to run `python scripts/migrate_project_key.py` first. That's a one-time migration to the stable key.
+If you run `bootstrap.py` on a machine that already has scribe state under the legacy `~/.claude/projects/<key>/` location and the in-repo `<repo-root>/.apiary/scribe/` is empty, bootstrap refuses to seed and tells you to run `python scripts/migrate_scribe_state.py --source <legacy-dir>` first. That's the one-shot in-repo migration from decision #269.
 
 ## State: what's local, what's in the repo
 
@@ -87,7 +88,7 @@ Run `pip install -r requirements.txt`. If you use a virtualenv, make sure it's a
 Claude Code sets this automatically when invoking hooks. If you're running a hook manually for testing, set it to the repo root: `CLAUDE_PROJECT_DIR=$(pwd) python core/hooks/<hook>.py`.
 
 **Bootstrap refuses to seed and tells me to migrate first.**
-You have scribe state under the legacy cwd-derived key. Run `python scripts/migrate_project_key.py` to move it to the stable key, then re-run bootstrap.
+You have scribe state under a legacy `~/.claude/projects/<key>/` location and the in-repo `<repo-root>/.apiary/scribe/` is empty. Run `python scripts/migrate_scribe_state.py --source <legacy-dir>` (or just `--dry-run` first to preview) to copy it into the umbrella, then re-run bootstrap.
 
 **Hook scripts work on macOS/Linux but fail on Windows.**
 Make sure you're running them through Git Bash (or WSL), not PowerShell or `cmd.exe`. Claude Code on Windows expects bash for hook commands.
