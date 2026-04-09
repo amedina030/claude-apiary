@@ -12,6 +12,8 @@ approval) set ``APIARY_RUNNER_SUBPROCESS=1`` to skip injection — they
 are one-shot workers that don't use any of this context, and the
 injection is tens of KB of input tokens per spawn.
 """
+import datetime
+import json
 import os
 import subprocess
 import sys
@@ -22,7 +24,41 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.session import SessionId
 from core.hook_context import context_block, hook_allow, read_payload
+from core.sanitizer import sanitize_and_report
 from core.startup import run_init, run_summary
+
+# Sanitizer hit log lives in the in-repo umbrella state directory.
+# Pre-stages the umbrella state layout decided in note #269 — the first
+# occupant of <apiary-repo>/.apiary/. The directory self-ignores via a
+# sibling .gitignore containing '*' written on first use.
+_APIARY_STATE_DIR = PROJECT_ROOT / ".apiary"
+_SANITIZER_DEBUG_LOG = _APIARY_STATE_DIR / "hooks" / "sanitizer_debug.jsonl"
+
+
+def _log_sanitizer_hits(site: str, hits: dict[str, int], session_id: str) -> None:
+    """Append one JSONL line when the sanitizer scrubbed at least one pattern.
+
+    Silent no-op when hits is empty. Silent no-op on any write failure —
+    hooks must not crash, and missing observability is better than a broken
+    first-turn context.
+    """
+    if not hits:
+        return
+    try:
+        _SANITIZER_DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
+        gitignore = _APIARY_STATE_DIR / ".gitignore"
+        if not gitignore.exists():
+            gitignore.write_text("*\n", encoding="utf-8")
+        entry = {
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "session_id": session_id,
+            "site": site,
+            "hits": hits,
+        }
+        with _SANITIZER_DEBUG_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
 
 
 def main():
@@ -88,8 +124,10 @@ def _run():
     try:
         summary_text = run_summary(cwd, role, mission)
         if summary_text:
+            scrubbed, hits = sanitize_and_report(summary_text)
+            _log_sanitizer_hits("summary", hits, sid.full)
             parts.append("")
-            parts.append(summary_text)
+            parts.append(scrubbed)
     except Exception:
         parts.append("summary: failed (non-critical)")
 
@@ -102,18 +140,22 @@ def _run():
             cwd=str(PROJECT_ROOT),
         )
         if result.returncode == 0 and result.stdout.strip():
+            scrubbed, hits = sanitize_and_report(result.stdout.strip())
+            _log_sanitizer_hits("learnings", hits, sid.full)
             parts.append("")
             parts.append("--- learnings ---")
-            parts.append(result.stdout.strip())
+            parts.append(scrubbed)
     except Exception:
         pass
 
     # --- 4. CLI index (compact; use cli_lookup.py for full details) ---
     try:
         cli_index = (PROJECT_ROOT / "docs" / "reference" / "cli-index.md").read_text(encoding="utf-8")
+        scrubbed, hits = sanitize_and_report(cli_index.strip())
+        _log_sanitizer_hits("cli_index", hits, sid.full)
         parts.append("")
         parts.append("--- cli-tools index (run `python docs/reference/cli_lookup.py <tool>` for full flags) ---")
-        parts.append(cli_index.strip())
+        parts.append(scrubbed)
     except Exception:
         pass
 
