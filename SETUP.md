@@ -77,18 +77,30 @@ python setup.py --global
 
 ## Uninstalling
 
+**Hook entries (all tools):**
+
+```bash
+python scripts/uninstall_hooks.py --list        # see what's installed
+python scripts/uninstall_hooks.py --dry-run     # preview what would be removed
+python scripts/uninstall_hooks.py --uninstall   # remove apiary entries from ~/.claude/settings.json
+```
+
+The script removes every apiary-owned hook entry — budgeter, core, scribe, docs, refiner, harden, runner — in one pass. It uses `core.hooks_lib.is_apiary_entry` so portable `$CLAUDE_PROJECT_DIR`-form entries and absolute-path entries are both recognized; unrelated third-party entries are never touched. Pass `--settings <path>` to target a project-local settings file.
+
+**Context-rules zone in `~/.claude/CLAUDE.md`:**
+```bash
+python scripts/install_context_rules.py --uninstall
+```
+
 **Budgeter:**
-- Remove the budgeter hook entries from `~/.claude/settings.json` (any entry containing `claude-apiary`)
 - Optionally delete `~/.claude/budgeter-log-enabled` and `~/.claude/budgeter-warn-enabled`
 
 **Scribe:**
 - Delete `~/.claude/commands/note.md`, `~/.claude/commands/notes.md`, `~/.claude/commands/startup.md`
-- Remove the scribe/learnings sections from `~/.claude/CLAUDE.md`
 - Optionally delete the repo-local scribe state at `<repo-root>/.apiary/scribe/` (new canonical location under the umbrella `.apiary/` dir). If the repo still has pre-migration state at `~/.claude/projects/*/notes.jsonl`, `learnings.jsonl`, and `notes_archive.jsonl`, delete those too.
 
 **Docs framework:**
 - Delete `~/.claude/commands/review.md`
-- Remove the docs reminder hook entries from `~/.claude/settings.json` (entries containing `remind_standards`)
 - Delete `.git/hooks/pre-commit` (if it references `docs/check.py`)
 
 **Everything:**

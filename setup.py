@@ -27,7 +27,16 @@ REFINER_DIR = APIS_DIR / "refiner"
 HARDEN_DIR = APIS_DIR / "harden"
 
 sys.path.insert(0, str(APIS_DIR))
-from core.hooks_lib import to_bash_path, hook_cmd, load_settings, save_settings, register_hooks
+from core.hooks_lib import (
+    APIARY_MARKER,
+    APIARY_PATH_SUBSTRINGS,
+    hook_cmd,
+    is_apiary_entry,
+    load_settings,
+    register_hooks,
+    save_settings,
+    to_bash_path,
+)
 from core.utils.apiary_pointer import (
     DEFAULT_POINTER_PATH,
     get_repo_path as read_pointer_repo_path,
@@ -36,37 +45,13 @@ from core.utils.apiary_pointer import (
 )
 
 PYTHON = Path(sys.executable)
-MARKER = "claude-apiary"
 
-# Path-suffix substrings that identify a hook entry as ours even when its
-# command uses a portable $CLAUDE_PROJECT_DIR template (no absolute path
-# containing the literal MARKER). Both forward- and back-slash variants
-# are matched to handle Windows hand-edited entries. (#227)
-_APIARY_PATH_SUBSTRINGS = (
-    "/budgeter/hooks/", "\\budgeter\\hooks\\",
-    "/core/hooks/", "\\core\\hooks\\",
-    "/scribe/", "\\scribe\\",
-    "/docs/hooks/", "\\docs\\hooks\\",
-    "/refiner/", "\\refiner\\",
-    "/harden/", "\\harden\\",
-    "/runner/", "\\runner\\",
-)
-
-
-def _is_apiary_entry(entry) -> bool:
-    """Return True if a settings.json hook entry was installed by apiary.
-
-    Recognizes two formats:
-      1. Absolute-path entries written by `setup.py --global` whose path
-         contains the literal MARKER ("claude-apiary").
-      2. Portable hand-edited entries that use `$CLAUDE_PROJECT_DIR/<sub>/...`
-         and therefore lack the marker. Detected by known apiary subpath
-         substrings (budgeter/hooks/, core/hooks/, scribe/, etc.).
-    """
-    blob = json.dumps(entry)
-    if MARKER in blob:
-        return True
-    return any(sub in blob for sub in _APIARY_PATH_SUBSTRINGS)
+# Historical aliases kept so existing tests (core/test_setup_check.py)
+# and any out-of-tree imports continue to work. The canonical definitions
+# live in core.hooks_lib alongside the install/uninstall helpers.
+MARKER = APIARY_MARKER
+_APIARY_PATH_SUBSTRINGS = APIARY_PATH_SUBSTRINGS
+_is_apiary_entry = is_apiary_entry
 
 
 def _expand_hook_script_path(script_path: str) -> Path:

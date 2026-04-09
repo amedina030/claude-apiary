@@ -248,15 +248,53 @@ def _append_jsonl(path, entry, _locked=False):
                 f.write(json.dumps(entry) + "\n")
 
 
-def _next_id(entries):
+# Regex used by _raw_max_id to scan raw file bytes for id tokens even when
+# a line fails JSON parsing. Matches ``"id": 42`` or ``"id":42``. JSON
+# serializes embedded quotes as ``\"`` so content strings containing
+# literal ``"id":`` text cannot trigger false positives — the escape
+# backslash breaks the pattern. (todo #271.)
+_ID_TOKEN_RE = re.compile(r'(?<!\\)"id"\s*:\s*(\d+)')
+
+
+def _raw_max_id(path) -> int:
+    """Return the highest id value extractable from the raw file text.
+
+    Scans every occurrence of the ``"id":`` token, including ones that
+    live inside malformed/unparseable lines. This is the fallback that
+    keeps next-id allocation correct when a half-written record makes
+    its id invisible to ``json.loads`` — see todo #271 for the failure
+    mode.
+
+    Returns 0 when the file doesn't exist or can't be read.
+    """
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return 0
+    max_id = 0
+    for match in _ID_TOKEN_RE.finditer(content):
+        try:
+            value = int(match.group(1))
+        except ValueError:
+            continue
+        if value > max_id:
+            max_id = value
+    return max_id
+
+
+def _next_id(entries, path=None):
     """Return the next available ID from an in-memory entry list.
+
+    When *path* is provided, also scans the raw file for id tokens via
+    ``_raw_max_id`` so a record whose line failed JSON parsing can't have
+    its id re-used by a subsequent write (todo #271).
 
     Callers MUST hold FileLock on the target file before calling this and
     must pass a freshly read list to avoid ID collisions across processes.
     """
-    if not entries:
-        return 1
-    return max(e.get("id", 0) for e in entries) + 1
+    parsed_max = max((e.get("id", 0) for e in entries), default=0)
+    raw_max = _raw_max_id(path) if path is not None else 0
+    return max(parsed_max, raw_max) + 1
 
 
 def _now_iso():
@@ -394,10 +432,13 @@ def run_auto_archive(project_key: str, *, start: Path | None = None) -> int:
 # ---------------------------------------------------------------------------
 
 def make_note(notes, *, type: str, content: str, session_id: str = "",
-              auto: bool = False, role: str = "", mission: str = "") -> dict:
+              auto: bool = False, role: str = "", mission: str = "",
+              path=None) -> dict:
     """Build a validated note record.
 
-    *notes* is the current list (used for ID generation).
+    *notes* is the current list (used for ID generation). *path*, when
+    provided, is forwarded to ``_next_id`` so a raw-file scan can catch
+    ids that live in malformed lines (todo #271).
     Raises ValueError for invalid type or oversized content.
     """
     if type not in VALID_TYPES:
@@ -405,7 +446,7 @@ def make_note(notes, *, type: str, content: str, session_id: str = "",
     if len(content.encode("utf-8")) > MAX_CONTENT_LENGTH:
         raise ValueError(f"Content exceeds maximum length of {MAX_CONTENT_LENGTH} bytes")
     return {
-        "id": _next_id(notes),
+        "id": _next_id(notes, path=path),
         "timestamp": _now_iso(),
         "session_id": session_id,
         "type": type,
@@ -418,16 +459,18 @@ def make_note(notes, *, type: str, content: str, session_id: str = "",
 
 
 def make_learning(learnings, *, content: str, session_id: str = "",
-                  role: str = "", mission: str = "") -> dict:
+                  role: str = "", mission: str = "", path=None) -> dict:
     """Build a validated learning record.
 
-    *learnings* is the current list (used for ID generation).
+    *learnings* is the current list (used for ID generation). *path*,
+    when provided, is forwarded to ``_next_id`` so a raw-file scan can
+    catch ids that live in malformed lines (todo #271).
     Raises ValueError for oversized content.
     """
     if len(content.encode("utf-8")) > MAX_CONTENT_LENGTH:
         raise ValueError(f"Content exceeds maximum length of {MAX_CONTENT_LENGTH} bytes")
     return {
-        "id": _next_id(learnings),
+        "id": _next_id(learnings, path=path),
         "timestamp": _now_iso(),
         "session_id": session_id,
         "content": content,
@@ -465,6 +508,7 @@ def cmd_add(args):
             auto=args.auto,
             role=getattr(args, "role", "") or "",
             mission=getattr(args, "mission", "") or "",
+            path=args.notes_path,
         )
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -713,7 +757,7 @@ def cmd_migrate(args):
     pattern = re.compile(r'^(\d+)\.\s+\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+UTC)\]\s+\[session:\s*(\S+?)\]\s*(.*)', re.MULTILINE)
 
     existing = read_jsonl(args.notes_path)
-    next_id = _next_id(existing)
+    next_id = _next_id(existing, path=args.notes_path)
 
     # Find all note starts
     matches = list(pattern.finditer(content))
@@ -783,6 +827,7 @@ def cmd_learn(args):
         session_id=args.session_id or "",
         role=getattr(args, "role", "") or "",
         mission=getattr(args, "mission", "") or "",
+        path=args.learnings_path,
     )
     _append_jsonl(args.learnings_path, entry, _locked=True)
     print(f"Learned #L{entry['id']}")
