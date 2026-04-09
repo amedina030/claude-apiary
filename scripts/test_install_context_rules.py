@@ -145,10 +145,20 @@ class TestCheck(InstallerTestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("clean", result.stdout)
 
-    def test_no_zone_is_clean(self):
+    def test_no_zone_reports_missing(self):
+        # A CLAUDE.md with no managed-zone sentinels is distinct from a
+        # clean install. --check returns EXIT_ZONE_MISSING so automation
+        # can tell "nothing installed" apart from "installed and matching".
         self._write("# nothing here\n")
         result = run(*self._common("--check"))
-        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(result.exit_code, ir.EXIT_ZONE_MISSING)
+        self.assertIn("zone missing", result.stdout)
+
+    def test_empty_file_reports_missing(self):
+        self._write("")
+        result = run(*self._common("--check"))
+        self.assertEqual(result.exit_code, ir.EXIT_ZONE_MISSING)
+        self.assertIn("zone missing", result.stdout)
 
 
 class TestTamperEnforcement(InstallerTestCase):

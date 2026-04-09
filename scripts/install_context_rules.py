@@ -58,6 +58,7 @@ STOPGAP_MARKERS = (
 EXIT_OK = 0
 EXIT_DRIFT = 1
 EXIT_TAMPER = 2
+EXIT_ZONE_MISSING = 3
 EXIT_USAGE = 64
 
 
@@ -253,6 +254,18 @@ def cmd_list(args, all_rules, target):
 def cmd_check(args, all_rules, target):
     text = _read_target(target)
     report = cr.compute_drift(text, all_rules)
+    # Distinguish "zone present and clean" from "zone missing entirely".
+    # A wiped or never-installed CLAUDE.md previously reported "clean"
+    # because drift_count was zero in both cases — which hid the fact
+    # that nothing was actually installed. Missing zone gets its own
+    # exit code so automation can catch it. Tamper/stray still takes
+    # precedence and is reported below.
+    if not report.zone_present and not report.stray_text:
+        print(
+            f"context-rules: zone missing "
+            f"({len(all_rules)} source rule(s) available, 0 installed)"
+        )
+        return EXIT_ZONE_MISSING
     # For --check, "not_installed" is informational only. The user picks
     # what to install; not installing isn't drift. Strip it from drift count.
     drift_count = (
@@ -262,7 +275,6 @@ def cmd_check(args, all_rules, target):
         + (1 if report.stray_text else 0)
     )
     if drift_count == 0:
-        installed_ct = sum(1 for r in all_rules if any(True for _ in [r]) and report.zone_present)
         print(f"context-rules: clean ({len(all_rules)} source rule(s) available)")
         return EXIT_OK
     print(f"context-rules: drift detected ({drift_count} issue(s))")
