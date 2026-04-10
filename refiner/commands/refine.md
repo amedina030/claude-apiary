@@ -39,7 +39,7 @@ python ~/.claude/apiary_launch.py refiner/round_counter.py start --session-id <s
 If the user provided a `docs:<path>` prefix:
 1. Resolve the apiary repo path: `apiary_repo = output of python ~/.claude/apiary_launch.py --print-repo-path`
 2. Read `<apiary_repo>/docs/<path>`. If the file does not exist, tell the user and continue without it.
-2. Use the document as architectural context during refinement. Do NOT quote it verbatim in the handoff.
+3. Use the document as architectural context during refinement. Do NOT quote it verbatim in the handoff.
 
 If no `docs:` prefix was given, perform **zero file reads**. Operate from conversation only. **Never read source code files under any circumstance.**
 

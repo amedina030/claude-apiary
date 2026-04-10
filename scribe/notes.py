@@ -923,8 +923,8 @@ def main():
     p_list.add_argument("--role", help="Filter by session role")
     p_list.add_argument("--mission", help="Filter by session mission")
 
-    # get
-    p_get = sub.add_parser("get")
+    # get / show
+    p_get = sub.add_parser("get", aliases=["show"])
     p_get.add_argument("id", type=str, help="Note ID (integer) or learning ID (L-prefix, e.g. L3)")
 
     # done
@@ -998,7 +998,7 @@ def main():
     }
     # Commands that only need the notes lock
     notes_commands = {
-        "add": cmd_add, "get": cmd_get,
+        "add": cmd_add, "get": cmd_get, "show": cmd_get,
         "done": cmd_done, "update": cmd_update,
         "migrate": cmd_migrate, "handoff-sessions": cmd_handoff_sessions,
     }
