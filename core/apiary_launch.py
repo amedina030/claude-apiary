@@ -27,14 +27,8 @@ import sys
 from pathlib import Path
 
 
-def main() -> int:
-    if len(sys.argv) < 2:
-        print("usage: apiary_launch.py <relative-hook-path>", file=sys.stderr)
-        return 1
-
-    hook_rel = sys.argv[1]
-    repo_path = None
-
+def _resolve_repo_path() -> "Path | None":
+    """Locate the apiary repo root from the pointer file or env var."""
     # 1. Try the apiary pointer file (cross-repo case).
     pointer = Path.home() / ".claude" / "apiary.json"
     if pointer.is_file():
@@ -42,15 +36,32 @@ def main() -> int:
             data = json.loads(pointer.read_text(encoding="utf-8"))
             candidate = data.get("repo_path", "")
             if candidate and Path(candidate).is_dir():
-                repo_path = Path(candidate)
+                return Path(candidate)
         except (json.JSONDecodeError, OSError):
             pass
-
     # 2. Fall back to CLAUDE_PROJECT_DIR (works when session IS in apiary).
-    if repo_path is None:
-        cpd = os.environ.get("CLAUDE_PROJECT_DIR", "")
-        if cpd:
-            repo_path = Path(cpd)
+    cpd = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    if cpd:
+        return Path(cpd)
+    return None
+
+
+def main() -> int:
+    # Meta-command: print the repo path and exit.
+    if len(sys.argv) == 2 and sys.argv[1] == "--print-repo-path":
+        repo_path = _resolve_repo_path()
+        if repo_path is None:
+            print("error: cannot locate apiary repo", file=sys.stderr)
+            return 1
+        print(repo_path)
+        return 0
+
+    if len(sys.argv) < 2:
+        print("usage: apiary_launch.py <relative-hook-path>", file=sys.stderr)
+        return 1
+
+    hook_rel = sys.argv[1]
+    repo_path = _resolve_repo_path()
 
     if repo_path is None:
         print("error: cannot locate apiary repo (no pointer file, no CLAUDE_PROJECT_DIR)", file=sys.stderr)

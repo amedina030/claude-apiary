@@ -203,11 +203,12 @@ If the user declines (does not choose Proceed), stop immediately — do not star
 
 ## Step 2: Attack-Defend loop
 
-Read the agent prompt templates once before the loop:
+Resolve the apiary repo path, then read the agent prompt templates once before the loop:
 
 ```
-attacker_template = contents of <repo_dir>/harden/agents/attacker.md
-defender_template = contents of <repo_dir>/harden/agents/defender.md
+apiary_repo = output of `python ~/.claude/apiary_launch.py --print-repo-path`
+attacker_template = contents of <apiary_repo>/harden/agents/attacker.md
+defender_template = contents of <apiary_repo>/harden/agents/defender.md
 ```
 
 Initialize `prev_defender_output` to "None (first round)".

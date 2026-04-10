@@ -35,13 +35,15 @@ Report any issues found.
 
 ### 3. Load relevant standards
 
+Resolve the apiary repo path: `apiary_repo = output of python ~/.claude/apiary_launch.py --print-repo-path`
+
 Based on what files changed, read the applicable standards:
 
 | Files changed | Standard to load |
 |--------------|-----------------|
-| Any `*.py` file | `<repo_dir>/docs/standards/code-style.md` |
-| Any file under `docs/` | `<repo_dir>/docs/standards/doc-style.md` |
-| New directory under repo root | `<repo_dir>/docs/standards/new-tool-checklist.md` |
+| Any `*.py` file | `<apiary_repo>/docs/standards/code-style.md` |
+| Any file under `docs/` | `<apiary_repo>/docs/standards/doc-style.md` |
+| New directory under repo root | `<apiary_repo>/docs/standards/new-tool-checklist.md` |
 
 Read each applicable standard in full using the Read tool.
 

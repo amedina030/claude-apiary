@@ -18,6 +18,12 @@ python ~/.claude/apiary_launch.py <relative-script-path> [args...]
 
 The launcher reads `~/.claude/apiary.json`, sets cwd to the apiary repo, and forwards all arguments. This works from any directory — no `<repo_dir>` substitution needed.
 
+To resolve the apiary repo path for Read tool targets (not CLI invocations), use:
+
+```bash
+python ~/.claude/apiary_launch.py --print-repo-path
+```
+
 Examples:
 ```bash
 python ~/.claude/apiary_launch.py scribe/notes.py list --type todo
