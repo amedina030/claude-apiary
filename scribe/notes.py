@@ -298,39 +298,56 @@ def run_auto_archive(project_key: str, *, start: Path | None = None) -> int:
 # Commands
 # ---------------------------------------------------------------------------
 
+def _run_auto_archive_store(store: ScribeStore) -> None:
+    """Run auto-archive via the store after a note is added.
+
+    Store-based auto-archive is implemented in a later step; this is a
+    forward-compatible hook so cmd_add's call site is already wired up.
+    """
+    pass
+
+
 def cmd_add(args):
-    notes = read_jsonl(args.notes_path)
+    store = args.store
 
     # Duplicate handoff prevention
-    if getattr(args, "if_no_handoff_for", None):
+    if getattr(args, 'if_no_handoff_for', None):
         try:
             target_sid = SessionId(args.if_no_handoff_for)
         except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
+            print(f'Error: {e}', file=sys.stderr)
             return
-        for n in notes:
-            if (n.get("type") == "handoff" and
-                    target_sid.matches(n.get("session_id", ""))):
-                print(f"Handoff for session {target_sid.short} already exists (#{n['id']}). Skipping.")
+        # Search existing handoffs in store
+        handoffs = store.list_notes(note_type='handoff')
+        for h in handoffs:
+            if target_sid.matches(h.get('session', '')):
+                print(f"Handoff for session {target_sid.short} already exists (#{h['id']}). Skipping.")
                 return
 
-    try:
-        note = make_note(
-            notes,
-            type=args.type,
-            content=args.content,
-            session_id=args.session_id or "",
-            auto=args.auto,
-            role=getattr(args, "role", "") or "",
-            mission=getattr(args, "mission", "") or "",
-            path=args.notes_path,
-        )
-    except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
+    content = args.content
+    if len(content.encode('utf-8')) > MAX_CONTENT_LENGTH:
+        print(f'Error: content exceeds {MAX_CONTENT_LENGTH} bytes', file=sys.stderr)
         sys.exit(1)
 
-    _append_jsonl(args.notes_path, note, _locked=True)
-    print(f"Added #{note['id']} ({note['type']})")
+    # Build metadata dict for extra fields
+    metadata = {}
+    if getattr(args, 'auto', False):
+        metadata['auto_generated'] = True
+    if getattr(args, 'role', ''):
+        metadata['role'] = args.role
+    if getattr(args, 'mission', ''):
+        metadata['mission'] = args.mission
+
+    entry = store.add_note(
+        note_type=args.type,
+        content=content,
+        session_id=args.session_id or '',
+        **metadata,
+    )
+    print(f"Added #{entry['id']} ({entry['type']})")
+
+    # Run auto-archive after add
+    _run_auto_archive_store(store)
 
 
 def cmd_list(args):
