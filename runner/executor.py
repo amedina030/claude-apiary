@@ -214,18 +214,34 @@ def _assert_action_matches_staged(action: str, files: list):
 
 
 def commit_files(files: list, message: str, action: str = ""):
-    """Stage specific files and commit.
+    """Stage specific files and commit them on the current branch.
 
-    Before committing, verify the add actually staged a change. If the
-    subprocess claimed to edit a file but didn't (e.g. decided no edit was
-    needed, wrote to the wrong path, or silently failed), `git commit` would
-    fail with "no changes added to commit" — an error that historically
-    looked identical to a real git failure and masked subprocess bugs. Fail
-    fast with a distinct error in that case.
+    This is the runner's single commit path — every file mutation that the
+    executor records in git flows through here.  The function is intentionally
+    strict: it fails fast on no-ops and on action/status mismatches so that
+    upstream subprocess bugs surface immediately rather than producing silent
+    empty commits or misattributed diffs.
 
-    If `action` is provided, also cross-check that the staged changes
-    match the declared action (#237): a 'modify' action must not produce
-    a deletion, a 'delete' action must not produce an addition, etc.
+    Preconditions (caller must ensure):
+        - The working tree is on the correct runner branch.
+        - ``files`` are paths relative to the repo root that the step was
+          expected to create, modify, or delete.
+        - No other staged changes exist outside ``files`` (the function does
+          not reset the index — stale staged state will be included in the
+          commit).
+        - Target files are not dirty from unrelated work; call
+          ``assert_files_clean()`` before the step to guarantee this (#235).
+
+    Postconditions (on successful return):
+        - Exactly one new commit exists on HEAD whose diff touches only
+          ``files``.
+        - The index is clean with respect to ``files``.
+
+    Raises:
+        RuntimeError: if ``git add`` stages no diff for ``files`` (subprocess
+            made no changes), if the staged status codes conflict with
+            ``action`` (see ``_assert_action_matches_staged``), or if
+            ``git commit`` itself fails.
     """
     if not files:
         return

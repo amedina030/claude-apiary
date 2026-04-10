@@ -12,6 +12,7 @@ import json
 import re
 import subprocess
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -97,6 +98,7 @@ def main():
         sys.exit(1)
 
     ticket = {
+        'id': str(uuid.uuid4()),
         'title': args.title,
         'problem': args.problem,
         'description': description,
@@ -109,6 +111,7 @@ def main():
 
     file_path.write_text(json.dumps(ticket, indent=2), encoding='utf-8')
     print(str(file_path))
+    print(ticket['id'])
 
 
 if __name__ == '__main__':

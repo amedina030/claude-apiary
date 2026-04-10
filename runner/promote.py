@@ -48,7 +48,7 @@ def main():
     if missing_keys:
         print(f"Error: backlog ticket is missing required fields: {', '.join(missing_keys)}", file=sys.stderr)
         sys.exit(1)
-    intake_id = str(uuid.uuid4())
+    intake_id = data.get('id') or str(uuid.uuid4())
 
     intake = {
         'id': intake_id,
