@@ -18,11 +18,11 @@ import sys
 import textwrap
 from pathlib import Path
 
-from config_loader import get as cfg
+from .config_loader import get as cfg
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PLANS_DIR = SCRIPT_DIR / "plans"
-VALIDATE_SCRIPT = SCRIPT_DIR / "validate_plan.py"
+REPO_ROOT = SCRIPT_DIR.parent
 
 MAX_RETRIES = cfg("plan", "max_retries", 3)
 
@@ -72,12 +72,9 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "runner/ (e.g. runner/test_<module>.py) that will be run as "
         "'python -m unittest runner.test_<module>', do NOT use bare imports "
         "of sibling runner modules — `import detached_lib` will fail with "
-        "ModuleNotFoundError because the file loads under the 'runner' "
-        "package and sys.path has repo root, not runner/. Use either "
-        "`from runner import detached_lib` OR the sys.path-insert pattern "
-        "shown in runner/test_run_detached.py "
-        "(_RUNNER_DIR = Path(__file__).resolve().parent; "
-        "sys.path.insert(0, str(_RUNNER_DIR)); then bare `import detached_lib  # noqa: E402`). "
+        "ModuleNotFoundError because runner/ is a package with relative imports. "
+        "Use `from runner import detached_lib` or `from runner.detached_lib import ...` "
+        "for test imports. Entry points are `python -m runner.X`, not `python runner/X.py`. "
         "Do the same for any test action whose code_spec runs a runner test module.",
         "2. Read only the specific files mentioned in the spec (e.g. "
         "files_to_modify, related_files, or files referenced in acceptance "
@@ -170,8 +167,8 @@ def extract_plan(raw_output: str) -> dict:
 def validate_plan(plan_path: Path) -> list[str]:
     """Run validate_plan.py and return list of errors (empty = valid)."""
     result = subprocess.run(
-        [sys.executable, str(VALIDATE_SCRIPT), str(plan_path)],
-        capture_output=True, text=True,
+        [sys.executable, "-m", "runner.validate_plan", str(plan_path)],
+        capture_output=True, text=True, cwd=str(REPO_ROOT),
     )
     if result.returncode == 0:
         return []

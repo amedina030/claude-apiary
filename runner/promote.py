@@ -16,7 +16,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 BACKLOG_DIR = SCRIPT_DIR / "backlog"
 INTAKE_DIR = SCRIPT_DIR / "intake"
-VALIDATE_SCRIPT = SCRIPT_DIR / "validate_intake.py"
+REPO_ROOT = SCRIPT_DIR.parent
 
 
 def main():
@@ -67,8 +67,8 @@ def main():
     intake_path.write_text(json.dumps(intake, indent=2), encoding='utf-8')
 
     result = subprocess.run(
-        [sys.executable, str(VALIDATE_SCRIPT), str(intake_path)],
-        capture_output=True, text=True
+        [sys.executable, "-m", "runner.validate_intake", str(intake_path)],
+        capture_output=True, text=True, cwd=str(REPO_ROOT),
     )
     if result.returncode != 0:
         intake_path.unlink(missing_ok=True)

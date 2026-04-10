@@ -30,7 +30,7 @@ NOTES_SCRIPT = REPO_DIR / "scribe" / "notes.py"
 
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
-from git_lib import git
+from .git_lib import git
 
 
 def get_current_branch() -> str:

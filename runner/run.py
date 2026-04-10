@@ -6,7 +6,7 @@ Takes an intake file, extracts the UUID, sequences all stages, passes
 artifact paths between them, stops on any stage failure.
 
 Usage:
-    python runner/run.py runner/intake/<uuid>.json
+    python -m runner.run runner/intake/<uuid>.json
 """
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ import sys
 import time
 from pathlib import Path
 
-from config_loader import get as cfg
-from detached_lib import (
+from .config_loader import get as cfg
+from .detached_lib import (
     slugify, pick_backlog_item, hygiene_precheck,
     all_backlog_items_claimed, append_overnight_log,
     git_create_branch, git_commit_all, git_checkout,
@@ -39,15 +39,15 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 LOG_AGENT_COST_SCRIPT = REPO_ROOT / 'budgeter' / 'log_agent_cost.py'
 
-# Stage definitions: (name, script, input_artifact_key)
+# Stage definitions: (name, module, input_artifact_key)
 # input_artifact_key maps to the artifact path dict
 STAGES = [
-    ("validate_intake", "validate_intake.py", "intake"),
-    ("auto_refine",     "auto_refine.py",     "intake"),
-    ("auto_plan",       "auto_plan.py",       "spec"),
-    ("executor",        "executor.py",        "plan"),
-    ("auto_harden",     "auto_harden.py",     "execution"),
-    ("approval",        "approval.py",        "harden"),
+    ("validate_intake", "validate_intake", "intake"),
+    ("auto_refine",     "auto_refine",     "intake"),
+    ("auto_plan",       "auto_plan",       "spec"),
+    ("executor",        "executor",        "plan"),
+    ("auto_harden",     "auto_harden",     "execution"),
+    ("approval",        "approval",        "harden"),
 ]
 
 _USAGE_RE = re.compile(r'<usage>.*?</usage>', re.DOTALL)
@@ -433,11 +433,10 @@ def run_detached(cli_args) -> int:
     stages_completed = 0
     exit_status = 'ok'
 
-    for name, script_name, input_key in STAGES:
-        script_path = SCRIPT_DIR / script_name
+    for name, module_name, input_key in STAGES:
         input_path = artifacts[input_key]
 
-        ok, stdout_text, stderr_text, _elapsed = run_stage(name, script_path, input_path)
+        ok, stdout_text, stderr_text, _elapsed = run_stage(name, module_name, input_path)
         record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
 
         # ATK-010: in detached mode the cap is the only safety against runaway
@@ -501,18 +500,20 @@ def run_detached(cli_args) -> int:
     return 0 if exit_status == 'ok' else 1
 
 
-def run_stage(name: str, script_path: Path, input_path: Path) -> tuple[bool, str, str, float]:
+def run_stage(name: str, module_name: str, input_path: Path) -> tuple[bool, str, str, float]:
     """Run a stage subprocess. Returns (success, stdout, stderr, elapsed_seconds)."""
-    if not script_path.exists():
-        return False, '', f"Stage script not found: {script_path}", 0.0
+    module_file = SCRIPT_DIR / f"{module_name}.py"
+    if not module_file.exists():
+        return False, '', f"Stage module not found: runner.{module_name}", 0.0
     if not input_path.exists():
         return False, '', f"Stage input file not found: {input_path}", 0.0
 
     start = time.time()
     try:
         result = subprocess.run(
-            [sys.executable, str(script_path), str(input_path)],
+            [sys.executable, "-m", f"runner.{module_name}", str(input_path)],
             capture_output=True, text=True, timeout=cfg("orchestrator", "stage_timeout", 3600),
+            cwd=str(REPO_ROOT),
         )
         elapsed = time.time() - start
         return result.returncode == 0, result.stdout or '', result.stderr or '', elapsed
@@ -847,7 +848,7 @@ def main():
     stage_costs: list[dict] = []  # each entry: {'stage': str, 'tokens': int, 'tool_uses': int, 'status': 'logged'|'no_usage'|'malformed'}
 
     try:
-        for i, (name, script_name, input_key) in enumerate(STAGES, 1):
+        for i, (name, module_name, input_key) in enumerate(STAGES, 1):
             # Skip stages before resume point
             if resume_from is not None and not reached_resume:
                 if name == resume_from:
@@ -858,12 +859,11 @@ def main():
 
             current_stage_name = name
             current_stage_idx = i
-            script_path = SCRIPT_DIR / script_name
             input_path = artifacts[input_key]
 
             print(f"\n[{i}/6] {name}...", flush=True)
 
-            ok, stdout_text, stderr_text, elapsed = run_stage(name, script_path, input_path)
+            ok, stdout_text, stderr_text, elapsed = run_stage(name, module_name, input_path)
             record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
             output = stdout_text.strip() if ok else stderr_text.strip()
 
@@ -887,7 +887,7 @@ def main():
                     except Exception:
                         pass
                     print(
-                        f"To resume: python runner/run.py {intake_path_abs} "
+                        f"To resume: python -m runner.run {intake_path_abs} "
                         f"--resume-from {name}",
                         file=sys.stderr,
                     )
@@ -918,14 +918,14 @@ def main():
                     print_cost_summary(stage_costs)
                 except Exception:
                     pass
-                print(f"To resume: python runner/run.py {intake_path_abs} --resume-from {name}", file=sys.stderr)  # ATK-007
+                print(f"To resume: python -m runner.run {intake_path_abs} --resume-from {name}", file=sys.stderr)  # ATK-007
                 sys.exit(1)
 
     except KeyboardInterrupt:
         print(f"\n\nInterrupted during stage {current_stage_idx}: {current_stage_name}")  # ATK-004
         print(f"Stages completed: {stages_completed}/{len(STAGES)}")
         print_cost_summary(stage_costs)
-        print(f"To resume: python runner/run.py {intake_path_abs} --resume-from {current_stage_name}", file=sys.stderr)  # ATK-007
+        print(f"To resume: python -m runner.run {intake_path_abs} --resume-from {current_stage_name}", file=sys.stderr)  # ATK-007
         sys.exit(1)
 
     # All stages completed

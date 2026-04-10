@@ -74,9 +74,7 @@ Each Python file follows this order:
 - Each test method tests one behavior. Name it `test_<what_it_tests>`.
 - Use `tempfile.TemporaryDirectory()` for tests that write files — never touch real user data.
 - Integration tests that depend on real data should be isolated (see `test_hooks.py` for pattern).
-- **Runner-package import convention.** Tests that live inside a sibling-of-root package (e.g. `runner/test_*.py`) are run as `python -m unittest runner.test_X` from repo root, which loads the file under the `runner` package. A bare `import detached_lib` will then fail with `ModuleNotFoundError` because `sys.path` has the repo root, not `runner/`. Use one of these two patterns instead:
-  - `from runner import detached_lib` (preferred for new files)
-  - `_RUNNER_DIR = Path(__file__).resolve().parent; sys.path.insert(0, str(_RUNNER_DIR))` then bare `import detached_lib  # noqa: E402` (matches existing `runner/test_run_detached.py` and `runner/test_validate_plan.py`)
+- **Runner-package import convention.** `runner/` is a proper Python package. All runner modules use relative imports for siblings (e.g. `from .config_loader import get as cfg`). Tests use absolute package imports (e.g. `from runner import detached_lib` or `from runner.executor import execute_step`). Entry points are invoked as `python -m runner.X` from the repo root, never as `python runner/X.py`. Mock patches must use the full module path (e.g. `mock.patch('runner.run.log_stage_cost')`, not `mock.patch('run.log_stage_cost')`).
 
 ## CLI patterns
 

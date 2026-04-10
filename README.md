@@ -114,10 +114,10 @@ Where the other tools extend an in-session Claude Code loop, Runner *replaces* t
 
 **Ticket lifecycle:**
 ```
-python runner/draft_ticket.py --title "..." --problem "..." --scope "..."   # creates backlog JSON
-python runner/promote.py <slug>                                              # backlog → ready (intake)
-python runner/run.py runner/intake/<uuid>.json                               # runs all 6 stages
-python runner/mark_done.py <slug>                                            # close a ticket hand-fixed outside the runner
+python -m runner.draft_ticket --title "..." --problem "..." --scope "..."   # creates backlog JSON
+python -m runner.promote <slug>                                              # backlog → ready (intake)
+python -m runner.run runner/intake/<uuid>.json                               # runs all 6 stages
+python -m runner.mark_done <slug>                                            # close a ticket hand-fixed outside the runner
 ```
 
 **Cost accounting:** every stage's `<usage>` XML is piped to `budgeter/log_agent_cost.py` with the run UUID as both `session_id` and `request_id`, so `budgeter/report.py --by-request` sums the entire run as one line.

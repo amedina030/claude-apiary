@@ -18,11 +18,11 @@ import sys
 import textwrap
 from pathlib import Path
 
-from config_loader import get as cfg
+from .config_loader import get as cfg
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SPECS_DIR = SCRIPT_DIR / "specs"
-VALIDATE_SCRIPT = SCRIPT_DIR / "validate_spec.py"
+REPO_ROOT = SCRIPT_DIR.parent
 
 MAX_RETRIES = cfg("refine", "max_retries", 3)
 
@@ -183,8 +183,8 @@ def extract_spec(raw_output: str) -> dict:
 def validate_spec(spec_path: Path) -> list[str]:
     """Run validate_spec.py and return list of errors (empty = valid)."""
     result = subprocess.run(
-        [sys.executable, str(VALIDATE_SCRIPT), str(spec_path)],
-        capture_output=True, text=True,
+        [sys.executable, "-m", "runner.validate_spec", str(spec_path)],
+        capture_output=True, text=True, cwd=str(REPO_ROOT),
     )
     if result.returncode == 0:
         return []

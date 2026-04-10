@@ -31,7 +31,7 @@ draft_ticket.py  -->  runner/backlog/<slug>.json   (has UUID from draft time)
 ## The command
 
 ```
-python runner/run.py --detached
+python -m runner.run --detached
 ```
 
 Optional flags:
@@ -64,7 +64,7 @@ Open Claude Code in the repo root and run:
 ```
 
 When prompted, supply:
-- **Command:** `python runner/run.py --detached`
+- **Command:** `python -m runner.run --detached`
 - **Cron:** `0 2 * * *` (daily at 2 AM, or your preferred expression)
 - **Working directory:** repo root (set automatically)
 
@@ -78,7 +78,7 @@ When prompted, supply:
 
 ## Path B: Local cron / Task Scheduler
 
-Run `python runner/run.py --detached` from your OS scheduler. The command
+Run `python -m runner.run --detached` from your OS scheduler. The command
 is identical; it just runs on your machine instead of in the cloud.
 
 ### Linux / macOS (crontab)
@@ -90,7 +90,7 @@ crontab -e
 Add:
 
 ```
-0 2 * * * cd /path/to/claude-apiary && python runner/run.py --detached >> runner/cron.log 2>&1
+0 2 * * * cd /path/to/claude-apiary && python -m runner.run --detached >> runner/cron.log 2>&1
 ```
 
 ### Windows (Task Scheduler)
@@ -99,14 +99,14 @@ Add:
 2. **Trigger:** daily at 2:00 AM.
 3. **Action:** Start a program.
    - Program: `python`
-   - Arguments: `runner/run.py --detached`
+   - Arguments: `-m runner.run --detached`
    - Start in: `D:\path\to\claude-apiary`
 4. Enable "Run whether user is logged on or not" if desired.
 
 ### PowerShell (schtasks)
 
 ```powershell
-schtasks /create /tn "Apiary Runner" /tr "python runner/run.py --detached" ^
+schtasks /create /tn "Apiary Runner" /tr "python -m runner.run --detached" ^
   /sc daily /st 02:00 /sd (Get-Date -Format MM/dd/yyyy)
 ```
 
@@ -124,7 +124,7 @@ Edit `runner/config.json` before scheduling:
 After overnight runs, inspect pending branches:
 
 ```
-python runner/queue.py
+python -m runner.queue
 ```
 
 Lists all `runner/*` branches joined with `overnight.jsonl` entries.
@@ -133,8 +133,8 @@ Lists all `runner/*` branches joined with `overnight.jsonl` entries.
 
 ```bash
 # Abort a specific run (delete branch + archive log)
-python runner/run.py --cleanup <UUID>
+python -m runner.run --cleanup <UUID>
 
 # Prune old failed/aborted runs (default: older than 7 days)
-python runner/run.py --prune-failed [--older-than DAYS] [--dry-run]
+python -m runner.run --prune-failed [--older-than DAYS] [--dry-run]
 ```

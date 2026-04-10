@@ -21,7 +21,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from config_loader import get as cfg
+from .config_loader import get as cfg
 # Eager-import claude_subprocess (and transitively cost_emit) at module top.
 # These modules MUST be resolved while the working tree is still on the
 # parent branch (typically master). If we let run_claude() do a deferred
@@ -30,7 +30,7 @@ from config_loader import get as cfg
 # copies happen to live on the runner branch and shadows every fix we
 # ship on master. Loading them now caches the master versions in
 # sys.modules so all later calls use them regardless of working-tree state.
-from claude_subprocess import run_claude as _spawn_claude
+from .claude_subprocess import run_claude as _spawn_claude
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 EXECUTIONS_DIR = SCRIPT_DIR / "executions"
@@ -40,7 +40,7 @@ MAX_STEP_RETRIES = cfg("executor", "max_retries_per_step", 2)
 
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
-from git_lib import git, format_git_error as _format_git_error
+from .git_lib import git, format_git_error as _format_git_error
 
 
 def branch_exists(branch: str) -> bool:

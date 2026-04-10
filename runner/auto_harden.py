@@ -21,7 +21,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from config_loader import get as cfg
+from .config_loader import get as cfg
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_DIR = SCRIPT_DIR.parent
@@ -37,7 +37,7 @@ MAX_ROUNDS = cfg("harden", "max_rounds", 3)
 
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
-from git_lib import git
+from .git_lib import git
 
 
 def branch_exists(branch: str) -> bool:

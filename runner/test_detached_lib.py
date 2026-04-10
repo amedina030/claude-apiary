@@ -4,13 +4,7 @@ import json, sys, tempfile, unittest
 from pathlib import Path
 from unittest import mock
 
-# Ensure runner dir is on sys.path so detached_lib can be imported when
-# this module is loaded as 'runner.test_detached_lib' via `python -m unittest`.
-_RUNNER_DIR = Path(__file__).resolve().parent
-if str(_RUNNER_DIR) not in sys.path:
-    sys.path.insert(0, str(_RUNNER_DIR))
-
-import detached_lib  # noqa: E402  (path manipulation above is intentional)
+from runner import detached_lib
 
 class TestSlug(unittest.TestCase):
     def test_basic(self):

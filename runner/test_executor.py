@@ -14,9 +14,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import executor
-from executor import (
+from runner import executor
+from runner.executor import (
     execute_step,
     load_previous_log,
     assert_files_clean,
@@ -352,8 +351,7 @@ class TestExecutorEndToEnd(unittest.TestCase):
         self._executions_patch.start()
         # Also patch _REPO_ROOT used by validate_plan's allowlist so the
         # plan's files= resolve under this temp repo, not the real one.
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-        import validate_plan
+        from runner import validate_plan
         self._validate_plan = validate_plan
         self._repo_root_patch = mock.patch.object(
             validate_plan, "_REPO_ROOT", self.repo,

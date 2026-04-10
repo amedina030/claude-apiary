@@ -28,7 +28,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 INTAKE_DIR = SCRIPT_DIR / "intake"
-VALIDATE_SCRIPT = SCRIPT_DIR / "validate_intake.py"
+REPO_ROOT = SCRIPT_DIR.parent
 NOTES_SCRIPT = SCRIPT_DIR.parent / "scribe" / "notes.py"
 
 
@@ -133,8 +133,8 @@ def main():
 
     # Validate
     result = subprocess.run(
-        [sys.executable, str(VALIDATE_SCRIPT), str(file_path)],
-        capture_output=True, text=True
+        [sys.executable, "-m", "runner.validate_intake", str(file_path)],
+        capture_output=True, text=True, cwd=str(REPO_ROOT),
     )
     if result.returncode != 0:
         file_path.unlink(missing_ok=True)

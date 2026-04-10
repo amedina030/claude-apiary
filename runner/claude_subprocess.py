@@ -24,7 +24,7 @@ RUNNER_SUBPROCESS_ENV_VAR : str
 import os
 import subprocess
 
-from cost_emit import emit_usage_xml
+from .cost_emit import emit_usage_xml
 
 RUNNER_SUBPROCESS_ENV_VAR = "APIARY_RUNNER_SUBPROCESS"
 

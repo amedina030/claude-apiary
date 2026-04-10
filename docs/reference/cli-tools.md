@@ -307,7 +307,7 @@ Exit codes: `0` clean, `1` drift detected, `2` tampering detected, `64` usage er
 End-to-end runner orchestrator. Sequences all 6 stages, passes artifact paths via UUID convention, stops on any stage failure.
 
 ```bash
-python runner/run.py runner/intake/<uuid>.json
+python -m runner.run runner/intake/<uuid>.json
 ```
 
 | Argument | Required | Description |
@@ -323,8 +323,8 @@ Stage timeout is configurable via `runner/config.json` under `orchestrator.stage
 Create an intake file for the autonomous runner. Generates a UUID-keyed JSON at `runner/intake/<uuid>.json`.
 
 ```bash
-python runner/create_intake.py --title "Add caching" --problem "Repeated DB queries" --description "Add Redis cache layer" --scope "api/cache.py"
-python runner/create_intake.py --from-todo 42
+python -m runner.create_intake --title "Add caching" --problem "Repeated DB queries" --description "Add Redis cache layer" --scope "api/cache.py"
+python -m runner.create_intake --from-todo 42
 ```
 
 | Flag | Required | Description |
@@ -344,7 +344,7 @@ python runner/create_intake.py --from-todo 42
 Validate an intake JSON file. Checks required fields, types, minimum content thresholds, and ISO date format.
 
 ```bash
-python runner/validate_intake.py runner/intake/<uuid>.json
+python -m runner.validate_intake runner/intake/<uuid>.json
 ```
 
 | Argument | Required | Description |
@@ -358,7 +358,7 @@ Exit 0 on valid. Exit 1 with error details on invalid.
 Autonomous refiner — Stage 2. Reads a validated intake JSON, launches a Claude Code subprocess to explore the codebase and produce a structured spec.
 
 ```bash
-python runner/auto_refine.py runner/intake/<uuid>.json
+python -m runner.auto_refine runner/intake/<uuid>.json
 ```
 
 | Argument | Required | Description |
@@ -372,7 +372,7 @@ Output: `runner/specs/<uuid>.json`. Model and retries configurable via `runner/c
 Validate a spec JSON file against the 8 handoff validation rules.
 
 ```bash
-python runner/validate_spec.py runner/specs/<uuid>.json
+python -m runner.validate_spec runner/specs/<uuid>.json
 ```
 
 | Argument | Required | Description |
@@ -386,7 +386,7 @@ Exit 0 on valid. Exit 1 with error details on invalid.
 Autonomous planner — Stage 3. Reads a validated spec JSON, launches a Claude Code subprocess to produce a step-by-step implementation plan.
 
 ```bash
-python runner/auto_plan.py runner/specs/<uuid>.json
+python -m runner.auto_plan runner/specs/<uuid>.json
 ```
 
 | Argument | Required | Description |
@@ -400,7 +400,7 @@ Output: `runner/plans/<uuid>.json`. Model and retries configurable via `runner/c
 Validate a plan JSON file for the autonomous runner.
 
 ```bash
-python runner/validate_plan.py runner/plans/<uuid>.json
+python -m runner.validate_plan runner/plans/<uuid>.json
 ```
 
 | Argument | Required | Description |
@@ -414,7 +414,7 @@ Exit 0 on valid. Exit 1 with error details on invalid.
 Executor — Stage 4. Reads a validated plan JSON, creates a feature branch (`runner/<uuid>`), and executes each step via Claude Code subprocess.
 
 ```bash
-python runner/executor.py runner/plans/<uuid>.json
+python -m runner.executor runner/plans/<uuid>.json
 ```
 
 | Argument | Required | Description |
@@ -430,7 +430,7 @@ Output: `runner/executions/<uuid>.json`. Creates branch `runner/<uuid>`. Model a
 Autonomous hardener — Stage 5. Runs attack-defend rounds against the executor's code changes using the existing `harden/` infrastructure.
 
 ```bash
-python runner/auto_harden.py runner/executions/<uuid>.json
+python -m runner.auto_harden runner/executions/<uuid>.json
 ```
 
 | Argument | Required | Description |
@@ -444,7 +444,7 @@ Output: `runner/hardens/<uuid>.json`. Rounds, models, and timeout configurable v
 Approval — Stage 6. Reads the harden verdict and either auto-merges (all resolved), flags for review (unresolved findings), or rejects. Includes a deferral review sub-step that uses Claude to evaluate deferred findings.
 
 ```bash
-python runner/approval.py runner/hardens/<uuid>.json
+python -m runner.approval runner/hardens/<uuid>.json
 ```
 
 | Argument | Required | Description |
@@ -458,8 +458,8 @@ Output: `runner/reports/<uuid>.json`. Verdicts: `auto-merged`, `pending-review`,
 Create a backlog draft ticket. Writes a JSON to `runner/backlog/<slug>.json`. Slug is derived from the title.
 
 ```bash
-python runner/draft_ticket.py --title "..." --problem "..." --description "..." --scope "..."
-python runner/draft_ticket.py --from-todo 42 --title "..." --problem "..." --scope "..."
+python -m runner.draft_ticket --title "..." --problem "..." --description "..." --scope "..."
+python -m runner.draft_ticket --from-todo 42 --title "..." --problem "..." --scope "..."
 ```
 
 | Flag | Required | Description |
@@ -480,7 +480,7 @@ python runner/draft_ticket.py --from-todo 42 --title "..." --problem "..." --sco
 Promote a backlog draft to a runner intake file. Validates against the intake schema, assigns a UUID, copies to `runner/intake/<uuid>.json`, and removes the backlog file.
 
 ```bash
-python runner/promote.py <slug>
+python -m runner.promote <slug>
 ```
 
 | Argument | Required | Description |
@@ -494,7 +494,7 @@ python runner/promote.py <slug>
 Mark a backlog ticket as done **without** running it through the runner. For tickets small enough to fix by hand. Deletes `runner/backlog/<slug>.json`.
 
 ```bash
-python runner/mark_done.py <slug> [--note "explanation"]
+python -m runner.mark_done <slug> [--note "explanation"]
 ```
 
 | Argument / Flag | Required | Description |
@@ -535,5 +535,5 @@ python budgeter/test_hooks.py
 python scribe/test_notes.py
 python harden/test_validators.py
 python harden/test_assign_ids.py
-python runner/test_orchestrator.py
+python -m runner.test_orchestrator
 ```

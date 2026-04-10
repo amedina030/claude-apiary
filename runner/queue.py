@@ -3,7 +3,7 @@
 from __future__ import annotations
 import json, sys
 from pathlib import Path
-from detached_lib import list_unmerged_runner_branches, OVERNIGHT_LOG, SCRIPT_DIR
+from .detached_lib import list_unmerged_runner_branches, OVERNIGHT_LOG, SCRIPT_DIR
 
 INTAKE_DIR = SCRIPT_DIR / 'intake'
 BACKLOG_DIR = SCRIPT_DIR / 'backlog'

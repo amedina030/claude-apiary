@@ -25,18 +25,18 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `harden/validate_findings.py` | Validate Attacker output | --check-files, --deep, --sanitize |
 | `harden/validate_response.py` | Validate Defender output | --expected-ids, --check-files |
 | `harden/round_counter.py` | Track harden round counts | start, tick, reset, status, defender |
-| `runner/run.py` | End-to-end runner orchestrator | `<intake_path>` |
-| `runner/create_intake.py` | Create runner intake file | --from-todo, --title, --problem, --description, --scope, --context |
-| `runner/validate_intake.py` | Validate intake JSON | `<file>` |
-| `runner/auto_refine.py` | Autonomous refiner (stage 2) | `<intake>` |
-| `runner/validate_spec.py` | Validate spec JSON | `<file>` |
-| `runner/auto_plan.py` | Autonomous planner (stage 3) | `<spec>` |
-| `runner/validate_plan.py` | Validate plan JSON | `<file>` |
-| `runner/executor.py` | Code executor (stage 4) | `<plan>` |
-| `runner/auto_harden.py` | Autonomous hardener (stage 5) | `<execution_log>` |
-| `runner/approval.py` | Approval gate (stage 6) | `<harden_result>` |
-| `runner/draft_ticket.py` | Create backlog draft ticket | --title, --problem, --description, --scope, --context, --from-todo (only fills description) |
-| `runner/promote.py` | Promote backlog draft to intake | `<slug>` (filename without dir or .json extension) |
+| `python -m runner.run` | End-to-end runner orchestrator | `<intake_path>` |
+| `python -m runner.create_intake` | Create runner intake file | --from-todo, --title, --problem, --description, --scope, --context |
+| `python -m runner.validate_intake` | Validate intake JSON | `<file>` |
+| `python -m runner.auto_refine` | Autonomous refiner (stage 2) | `<intake>` |
+| `python -m runner.validate_spec` | Validate spec JSON | `<file>` |
+| `python -m runner.auto_plan` | Autonomous planner (stage 3) | `<spec>` |
+| `python -m runner.validate_plan` | Validate plan JSON | `<file>` |
+| `python -m runner.executor` | Code executor (stage 4) | `<plan>` |
+| `python -m runner.auto_harden` | Autonomous hardener (stage 5) | `<execution_log>` |
+| `python -m runner.approval` | Approval gate (stage 6) | `<harden_result>` |
+| `python -m runner.draft_ticket` | Create backlog draft ticket | --title, --problem, --description, --scope, --context, --from-todo (only fills description) |
+| `python -m runner.promote` | Promote backlog draft to intake | `<slug>` (filename without dir or .json extension) |
 | `runner/cost_emit.py` | Emit usage XML from Claude envelope | Library — no CLI |
 | `runner/config_loader.py` | Shared runner config loader | Library — no CLI |
 | `setup.py` | Unified installer | --global, --project-path, --check |

@@ -10,9 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-# validate_plan lives next to this file
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from validate_plan import (
+from runner.validate_plan import (
     validate,
     _check_test_code_spec_format,
     _check_banned_tokens,
@@ -23,7 +21,7 @@ from validate_plan import (
     _criterion_bigrams,
     _check_file_overlap,
 )
-import validate_plan
+from runner import validate_plan
 
 
 def _base_plan(steps):
@@ -608,7 +606,7 @@ class TestGitignoredPaths(unittest.TestCase):
         # rather than a hard failure. Simulated by patching subprocess.run
         # to raise FileNotFoundError.
         steps = [_step(1, "create", "x", files=["runner/specs/x.json"])]
-        with mock.patch("validate_plan.subprocess.run",
+        with mock.patch("runner.validate_plan.subprocess.run",
                         side_effect=FileNotFoundError("no git")):
             self.assertEqual(_check_gitignored_paths(steps), [])
 

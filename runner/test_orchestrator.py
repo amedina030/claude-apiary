@@ -10,17 +10,8 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-# runner/run.py uses bare imports of sibling modules (config_loader, etc.) so
-# the runner/ directory must be on sys.path before we import it. We then
-# import via the package path (`runner.run`) so that the @patch decorators
-# below resolve to the same module object the test runs against — importing
-# as bare `run` would create a second module instance and mocks would miss.
-# See docs/standards/code-style.md "Runner-package import convention".
-_RUNNER_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(_RUNNER_DIR))
-
-from runner import run as orchestrator  # noqa: E402
-from runner.run import run_stage, main, STAGES, SCRIPT_DIR  # noqa: E402,F401
+from runner import run as orchestrator
+from runner.run import run_stage, main, STAGES, SCRIPT_DIR
 
 
 # ---------------------------------------------------------------------------
@@ -87,72 +78,63 @@ class _RunnerTestCase(unittest.TestCase):
 
 class TestRunStage(_RunnerTestCase):
 
-    def test_script_not_found(self):
-        script = self.tmp_path / "nonexistent.py"
+    def test_module_not_found(self):
         input_f = self.tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
-        ok, _, msg, elapsed = orchestrator.run_stage("test", script, input_f)
+        ok, _, msg, elapsed = orchestrator.run_stage("test", "nonexistent", input_f)
         self.assertFalse(ok)
-        self.assertIn(f"Stage script not found: {script}", msg)
+        self.assertIn("Stage module not found: runner.nonexistent", msg)
         self.assertEqual(elapsed, 0.0)
 
     def test_input_file_not_found(self):
-        script = self.tmp_path / "script.py"
-        script.write_text("pass", encoding="utf-8")
         input_f = self.tmp_path / "nonexistent.json"
-        ok, _, msg, elapsed = orchestrator.run_stage("test", script, input_f)
+        # Use a real module name so the module-exists check passes
+        ok, _, msg, elapsed = orchestrator.run_stage("test", "validate_intake", input_f)
         self.assertFalse(ok)
         self.assertIn(f"Stage input file not found: {input_f}", msg)
         self.assertEqual(elapsed, 0.0)
 
     @patch("runner.run.subprocess.run")
     def test_success(self, mock_run):
-        script = self.tmp_path / "script.py"
-        script.write_text("pass", encoding="utf-8")
         input_f = self.tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
         mock_run.return_value = make_completed_process(returncode=0, stdout="output here")
-        ok, output, _, elapsed = orchestrator.run_stage("test", script, input_f)
+        ok, output, _, elapsed = orchestrator.run_stage("test", "validate_intake", input_f)
         self.assertTrue(ok)
         self.assertEqual(output, "output here")
         self.assertGreaterEqual(elapsed, 0)
         mock_run.assert_called_once()
         args = mock_run.call_args[0][0]
         self.assertEqual(args[0], sys.executable)
-        self.assertEqual(args[1], str(script))
-        self.assertEqual(args[2], str(input_f))
+        self.assertEqual(args[1], "-m")
+        self.assertEqual(args[2], "runner.validate_intake")
+        self.assertEqual(args[3], str(input_f))
 
     @patch("runner.run.subprocess.run")
     def test_failure_returncode(self, mock_run):
-        script = self.tmp_path / "script.py"
-        script.write_text("pass", encoding="utf-8")
         input_f = self.tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
         mock_run.return_value = make_completed_process(returncode=1, stderr="some error")
-        ok, _, output, elapsed = orchestrator.run_stage("test", script, input_f)
+        ok, _, output, elapsed = orchestrator.run_stage("test", "validate_intake", input_f)
         self.assertFalse(ok)
         self.assertEqual(output, "some error")
         self.assertGreaterEqual(elapsed, 0)
 
     @patch("runner.run.subprocess.run")
     def test_timeout(self, mock_run):
-        script = self.tmp_path / "script.py"
-        script.write_text("pass", encoding="utf-8")
         input_f = self.tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=3600)
-        ok, _, output, _elapsed = orchestrator.run_stage("test", script, input_f)
+        ok, _, output, _elapsed = orchestrator.run_stage("test", "validate_intake", input_f)
         self.assertFalse(ok)
         self.assertIn("Stage timed out", output)
 
     @patch("runner.run.subprocess.run")
     def test_oserror(self, mock_run):
-        script = self.tmp_path / "script.py"
-        script.write_text("pass", encoding="utf-8")
         input_f = self.tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
         mock_run.side_effect = OSError("spawn failed")
-        ok, _, output, _elapsed = orchestrator.run_stage("test", script, input_f)
+        ok, _, output, _elapsed = orchestrator.run_stage("test", "validate_intake", input_f)
         self.assertFalse(ok)
         self.assertIn("Stage failed to launch: spawn failed", output)
 
@@ -294,19 +276,19 @@ class TestMainHappyPath(_RunnerTestCase):
         mock_run_stage.return_value = (True, "ok", "", 0.5)
         code, _, _ = self._run_main_capture(["run.py", str(intake_file)])
         self.assertIn(code, (None, 0))
-        expected_scripts = [
-            "validate_intake.py",
-            "auto_refine.py",
-            "auto_plan.py",
-            "executor.py",
-            "auto_harden.py",
-            "approval.py",
+        expected_modules = [
+            "validate_intake",
+            "auto_refine",
+            "auto_plan",
+            "executor",
+            "auto_harden",
+            "approval",
         ]
         self.assertEqual(mock_run_stage.call_count, 6)
         for i, c in enumerate(mock_run_stage.call_args_list):
             name_arg = c[0][0]
-            script_arg = c[0][1]
-            self.assertEqual(script_arg.name, expected_scripts[i])
+            module_arg = c[0][1]
+            self.assertEqual(module_arg, expected_modules[i])
             self.assertEqual(name_arg, orchestrator.STAGES[i][0])
 
     @patch("runner.run.run_stage")

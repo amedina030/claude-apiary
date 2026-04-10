@@ -1,25 +1,13 @@
 #!/usr/bin/env python3
 """Integration tests for run.py --detached flow. Uses unittest.mock to stub stages."""
-import importlib.util, io, json, os, subprocess, sys, tempfile, unittest
+import io, json, os, subprocess, sys, tempfile, unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-# Ensure runner dir is on sys.path so run and detached_lib can be imported
-_RUNNER_DIR = Path(__file__).resolve().parent
-if str(_RUNNER_DIR) not in sys.path:
-    sys.path.insert(0, str(_RUNNER_DIR))
-
-import run          # noqa: E402  (path manipulation above is intentional)
-import detached_lib  # noqa: E402
-
-
-def _load_runner_queue():
-    """Load runner/queue.py without shadowing the stdlib queue module."""
-    spec = importlib.util.spec_from_file_location('runner_queue', _RUNNER_DIR / 'queue.py')
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from runner import run          # noqa: E402
+from runner import detached_lib  # noqa: E402
+from runner import queue as runner_queue  # noqa: E402
 
 
 def _make_fake_usage(tokens: int = 1000) -> str:
@@ -73,15 +61,15 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('run.INTAKE_DIR', intake_dir),
-                mock.patch('run.SCRIPT_DIR', td),
-                mock.patch('run.hygiene_precheck', return_value=None),
-                mock.patch('run.pick_backlog_item', return_value=intake_file),
-                mock.patch('run.all_backlog_items_claimed', return_value=False),
-                mock.patch('run.git_create_branch', return_value=(True, '')),
-                mock.patch('run.git_commit_all', return_value=(True, '')),
-                mock.patch('run.git_checkout', return_value=(True, '')),
-                mock.patch('run.run_stage', return_value=(True, _make_fake_usage(100), '', 0.1)),
+                mock.patch('runner.run.INTAKE_DIR', intake_dir),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_create_branch', return_value=(True, '')),
+                mock.patch('runner.run.git_commit_all', return_value=(True, '')),
+                mock.patch('runner.run.git_checkout', return_value=(True, '')),
+                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(100), '', 0.1)),
             ):
                 rc = run.run_detached(_make_cli_args())
 
@@ -104,15 +92,15 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('run.INTAKE_DIR', intake_dir),
-                mock.patch('run.SCRIPT_DIR', td),
-                mock.patch('run.hygiene_precheck', return_value=None),
-                mock.patch('run.pick_backlog_item', return_value=intake_file),
-                mock.patch('run.all_backlog_items_claimed', return_value=False),
-                mock.patch('run.git_create_branch', return_value=(True, '')),
-                mock.patch('run.git_commit_all', return_value=(True, '')),
-                mock.patch('run.git_checkout', return_value=(True, '')),
-                mock.patch('run.run_stage', return_value=(True, _make_fake_usage(1000), '', 0.1)),
+                mock.patch('runner.run.INTAKE_DIR', intake_dir),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_create_branch', return_value=(True, '')),
+                mock.patch('runner.run.git_commit_all', return_value=(True, '')),
+                mock.patch('runner.run.git_checkout', return_value=(True, '')),
+                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(1000), '', 0.1)),
             ):
                 rc = run.run_detached(_make_cli_args(token_cap=500))
 
@@ -139,15 +127,15 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('run.INTAKE_DIR', intake_dir),
-                mock.patch('run.SCRIPT_DIR', td),
-                mock.patch('run.hygiene_precheck', return_value=None),
-                mock.patch('run.pick_backlog_item', return_value=intake_file),
-                mock.patch('run.all_backlog_items_claimed', return_value=False),
-                mock.patch('run.git_create_branch', return_value=(True, '')),
-                mock.patch('run.git_commit_all', return_value=(True, '')),
-                mock.patch('run.git_checkout', return_value=(True, '')),
-                mock.patch('run.run_stage', side_effect=lambda *_: next(stage_seq)),
+                mock.patch('runner.run.INTAKE_DIR', intake_dir),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_create_branch', return_value=(True, '')),
+                mock.patch('runner.run.git_commit_all', return_value=(True, '')),
+                mock.patch('runner.run.git_checkout', return_value=(True, '')),
+                mock.patch('runner.run.run_stage', side_effect=lambda *_: next(stage_seq)),
             ):
                 rc = run.run_detached(_make_cli_args())
 
@@ -164,7 +152,7 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('run.hygiene_precheck', return_value='queue full (5/5)'),
+                mock.patch('runner.run.hygiene_precheck', return_value='queue full (5/5)'),
             ):
                 rc = run.run_detached(_make_cli_args())
 
@@ -181,9 +169,9 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('run.hygiene_precheck', return_value=None),
-                mock.patch('run.pick_backlog_item', return_value=None),
-                mock.patch('run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=None),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
             ):
                 rc = run.run_detached(_make_cli_args())
 
@@ -205,12 +193,12 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('run.INTAKE_DIR', intake_dir),
-                mock.patch('run.SCRIPT_DIR', td),
-                mock.patch('run.hygiene_precheck', return_value=None),
-                mock.patch('run.pick_backlog_item', return_value=intake_file),
-                mock.patch('run.all_backlog_items_claimed', return_value=False),
-                mock.patch('run.git_create_branch',
+                mock.patch('runner.run.INTAKE_DIR', intake_dir),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_create_branch',
                            return_value=(False, 'working tree has uncommitted changes')),
             ):
                 rc = run.run_detached(_make_cli_args())
@@ -240,12 +228,12 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('run.INTAKE_DIR', intake_dir),
-                mock.patch('run.SCRIPT_DIR', td),
-                mock.patch('run.hygiene_precheck', return_value=None),
-                mock.patch('run.pick_backlog_item', return_value=evil),
-                mock.patch('run.all_backlog_items_claimed', return_value=False),
-                mock.patch('run.git_create_branch', side_effect=_track_create),
+                mock.patch('runner.run.INTAKE_DIR', intake_dir),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=evil),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_create_branch', side_effect=_track_create),
             ):
                 rc = run.run_detached(_make_cli_args())
 
@@ -275,15 +263,15 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('run.INTAKE_DIR', intake_dir),
-                mock.patch('run.SCRIPT_DIR', td),
-                mock.patch('run.hygiene_precheck', return_value=None),
-                mock.patch('run.pick_backlog_item', return_value=intake_file),
-                mock.patch('run.all_backlog_items_claimed', return_value=False),
-                mock.patch('run.git_create_branch', side_effect=_capture),
-                mock.patch('run.git_commit_all', return_value=(True, '')),
-                mock.patch('run.git_checkout', return_value=(True, '')),
-                mock.patch('run.run_stage', return_value=(True, _make_fake_usage(50), '', 0.1)),
+                mock.patch('runner.run.INTAKE_DIR', intake_dir),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_create_branch', side_effect=_capture),
+                mock.patch('runner.run.git_commit_all', return_value=(True, '')),
+                mock.patch('runner.run.git_checkout', return_value=(True, '')),
+                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(50), '', 0.1)),
             ):
                 run.run_detached(_make_cli_args())
 
@@ -307,15 +295,15 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('run.INTAKE_DIR', intake_dir),
-                mock.patch('run.SCRIPT_DIR', td),
-                mock.patch('run.hygiene_precheck', return_value=None),
-                mock.patch('run.pick_backlog_item', return_value=intake_file),
-                mock.patch('run.all_backlog_items_claimed', return_value=False),
-                mock.patch('run.git_create_branch', return_value=(True, '')),
-                mock.patch('run.git_commit_all', return_value=(True, '')),
-                mock.patch('run.git_checkout', return_value=(True, '')),
-                mock.patch('run.run_stage', side_effect=lambda *_: next(stage_seq)),
+                mock.patch('runner.run.INTAKE_DIR', intake_dir),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_create_branch', return_value=(True, '')),
+                mock.patch('runner.run.git_commit_all', return_value=(True, '')),
+                mock.patch('runner.run.git_checkout', return_value=(True, '')),
+                mock.patch('runner.run.run_stage', side_effect=lambda *_: next(stage_seq)),
             ):
                 rc = run.run_detached(_make_cli_args())
 
@@ -347,15 +335,15 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('run.INTAKE_DIR', intake_dir),
-                mock.patch('run.SCRIPT_DIR', td),
-                mock.patch('run.hygiene_precheck', return_value=None),
-                mock.patch('run.pick_backlog_item', return_value=intake_file),
-                mock.patch('run.all_backlog_items_claimed', return_value=False),
-                mock.patch('run.git_create_branch', return_value=(True, '')),
-                mock.patch('run.git_commit_all', return_value=(True, '')),
-                mock.patch('run.git_checkout', return_value=(True, '')),
-                mock.patch('run.run_stage', side_effect=lambda *_: next(stage_seq)),
+                mock.patch('runner.run.INTAKE_DIR', intake_dir),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_create_branch', return_value=(True, '')),
+                mock.patch('runner.run.git_commit_all', return_value=(True, '')),
+                mock.patch('runner.run.git_checkout', return_value=(True, '')),
+                mock.patch('runner.run.run_stage', side_effect=lambda *_: next(stage_seq)),
             ):
                 rc = run.run_detached(_make_cli_args())
 
@@ -377,15 +365,15 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('run.INTAKE_DIR', intake_dir),
-                mock.patch('run.SCRIPT_DIR', td),
-                mock.patch('run.hygiene_precheck', return_value=None),
-                mock.patch('run.pick_backlog_item', return_value=intake_file),
-                mock.patch('run.all_backlog_items_claimed', return_value=False),
-                mock.patch('run.git_create_branch', return_value=(True, '')),
-                mock.patch('run.git_commit_all', return_value=(True, '')),
-                mock.patch('run.git_checkout', return_value=(False, 'dirty worktree')),
-                mock.patch('run.run_stage', return_value=(True, _make_fake_usage(10), '', 0.1)),
+                mock.patch('runner.run.INTAKE_DIR', intake_dir),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_create_branch', return_value=(True, '')),
+                mock.patch('runner.run.git_commit_all', return_value=(True, '')),
+                mock.patch('runner.run.git_checkout', return_value=(False, 'dirty worktree')),
+                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(10), '', 0.1)),
             ):
                 rc = run.run_detached(_make_cli_args())
 
@@ -406,15 +394,15 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('run.INTAKE_DIR', intake_dir),
-                mock.patch('run.SCRIPT_DIR', td),
-                mock.patch('run.hygiene_precheck', return_value=None),
-                mock.patch('run.pick_backlog_item', return_value=intake_file),
-                mock.patch('run.all_backlog_items_claimed', return_value=False),
-                mock.patch('run.git_create_branch', return_value=(True, '')),
-                mock.patch('run.git_commit_all', return_value=(False, 'index lock')),
-                mock.patch('run.git_checkout', return_value=(True, '')),
-                mock.patch('run.run_stage', return_value=(True, _make_fake_usage(10), '', 0.1)),
+                mock.patch('runner.run.INTAKE_DIR', intake_dir),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_create_branch', return_value=(True, '')),
+                mock.patch('runner.run.git_commit_all', return_value=(False, 'index lock')),
+                mock.patch('runner.run.git_checkout', return_value=(True, '')),
+                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(10), '', 0.1)),
             ):
                 rc = run.run_detached(_make_cli_args())
 
@@ -424,8 +412,6 @@ class TestDetachedRun(unittest.TestCase):
 
     def test_queue_py_handles_missing_log(self):
         """Missing overnight.jsonl + unmerged branch → exit 0, 'unknown' appears in output."""
-        runner_queue = _load_runner_queue()
-
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
 
@@ -522,7 +508,7 @@ class TestRunCleanup(unittest.TestCase):
         # Missing total_tokens value renders the block malformed.
         bad = '<usage><total_tokens></total_tokens><tool_uses>1</tool_uses><duration_ms>10</duration_ms></usage>'
         blended = good + "\n" + bad
-        with mock.patch("run.log_stage_cost"):
+        with mock.patch("runner.run.log_stage_cost"):
             run.record_stage_cost("executor", "uid", blended, "", stage_costs)
         self.assertEqual(stage_costs[0]["malformed_count"], 1)
         self.assertEqual(stage_costs[0]["tokens"], 500)  # good block still counts
@@ -574,7 +560,7 @@ class TestRunCleanup(unittest.TestCase):
         # as separate attempts with the per-attempt list preserved.
         stage_costs = []
         two_attempts = _make_fake_usage(500) + "\n" + _make_fake_usage(750)
-        with mock.patch("run.log_stage_cost"):
+        with mock.patch("runner.run.log_stage_cost"):
             run.record_stage_cost("executor", "uid", two_attempts, "", stage_costs)
         self.assertEqual(len(stage_costs), 1)
         entry = stage_costs[0]
@@ -587,7 +573,7 @@ class TestRunCleanup(unittest.TestCase):
 
     def test_record_stage_cost_single_attempt(self):
         stage_costs = []
-        with mock.patch("run.log_stage_cost"):
+        with mock.patch("runner.run.log_stage_cost"):
             run.record_stage_cost(
                 "executor", "uid", _make_fake_usage(100), "", stage_costs,
             )
@@ -662,10 +648,10 @@ class TestRunCleanup(unittest.TestCase):
             ]
             with (
                 mock.patch.object(sys, "argv", argv),
-                mock.patch("run.SCRIPT_DIR", td),
-                mock.patch("run.run_stage",
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.run_stage",
                            return_value=(True, _make_fake_usage(1000), "", 0.1)),
-                mock.patch("run.print_cost_summary"),
+                mock.patch("runner.run.print_cost_summary"),
             ):
                 with self.assertRaises(SystemExit) as ctx:
                     run.main()
@@ -686,10 +672,10 @@ class TestRunCleanup(unittest.TestCase):
             argv = ["run.py", str(intake_file)]
             with (
                 mock.patch.object(sys, "argv", argv),
-                mock.patch("run.SCRIPT_DIR", td),
-                mock.patch("run.run_stage",
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.run_stage",
                            return_value=(True, _make_fake_usage(1000), "", 0.1)),
-                mock.patch("run.print_cost_summary"),
+                mock.patch("runner.run.print_cost_summary"),
             ):
                 # main() calls sys.exit at the end of a successful run?
                 # Actually no — it returns. But our assertion is just
