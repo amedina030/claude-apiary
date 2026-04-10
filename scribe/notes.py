@@ -433,54 +433,42 @@ def _parse_id_arg(raw: str) -> tuple:
 
 
 def cmd_get(args):
+    store = args.store
     raw_id, force_learning = _parse_id_arg(args.id)
     source_label = None
     is_learning = False
 
     if force_learning:
-        # L-prefix: go straight to learnings
-        learnings = read_jsonl(args.learnings_path)
-        note = next((l for l in learnings if l.get("id") == raw_id), None)
+        note = store.get_learning(raw_id)
         is_learning = True
     else:
-        # Search notes first
-        notes = read_jsonl(args.notes_path)
-        note = next((n for n in notes if n.get("id") == raw_id), None)
-        if not note:
-            # Check archive
-            archive = read_jsonl(args.archive_path)
-            note = next((n for n in archive if n.get("id") == raw_id), None)
-            if note:
-                source_label = "[from archive]"
-        else:
-            # Check if a duplicate also exists in archive and warn
-            archive = read_jsonl(args.archive_path)
-            if any(n.get("id") == raw_id for n in archive):
-                print(f"[WARNING: duplicate ID #{raw_id} exists in archive; showing active note]", file=sys.stderr)
+        note = store.get_note(raw_id)
+        if note and note.get('status') == 'archived':
+            source_label = '[from archive]'
 
     if source_label:
         print(source_label)
 
     if not note:
-        print(f"Note #{args.id} not found.", file=sys.stderr)
+        print(f'Note #{args.id} not found.', file=sys.stderr)
         sys.exit(1)
 
     print(f"ID: {note['id']}")
     if is_learning:
-        print(f"Type: learning")
+        print('Type: learning')
     else:
         print(f"Type: {note.get('type', '?')}")
         print(f"Status: {note.get('status', '?')}")
-    print(f"Session: {note.get('session_id', '?')}")
+    print(f"Session: {note.get('session', '?')}")
     print(f"Time: {note.get('timestamp', '?')} ({format_age(note.get('timestamp', ''))})")
-    if note.get("role"):
+    if note.get('role'):
         print(f"Role: {note['role']}")
-    if note.get("mission"):
+    if note.get('mission'):
         print(f"Mission: {note['mission']}")
     if not is_learning:
         print(f"Auto: {note.get('auto_generated', False)}")
-    print(f"---")
-    print(note.get("content", ""))
+    print('---')
+    print(note.get('content', ''))
 
 
 def cmd_done(args):
