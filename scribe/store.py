@@ -187,3 +187,28 @@ class ScribeStore:
         if not md_path.exists():
             return None
         return md_path.read_text(encoding='utf-8')
+
+    # --- CRUD operations: Notes ---
+
+    def add_note(self, note_type: str, content: str, session_id: str,
+                 summary: str = '', **metadata) -> dict:
+        """Add a new note. Returns the created index entry dict."""
+        type_dir = self._type_dir(note_type)
+        note_id = self._increment_id()
+        timestamp = datetime.now(timezone.utc).isoformat()
+        # If no summary provided, use first 120 chars of content
+        if not summary:
+            summary = content[:120].replace('\n', ' ').strip()
+        entry = {
+            'id': note_id,
+            'type': note_type,
+            'status': 'active',
+            'session': session_id,
+            'timestamp': timestamp,
+            'summary': summary,
+            'has_body': bool(content),
+            **metadata,
+        }
+        self._append_index(type_dir, entry)
+        self._write_note_file(type_dir, note_id, content)
+        return entry
