@@ -50,9 +50,10 @@ DEFAULT_TARGET = Path.home() / ".claude" / "CLAUDE.md"
 # rule). _strip_stopgap_paragraphs() restricts matching to text OUTSIDE
 # any existing managed zone so it never strips zone contents.
 STOPGAP_MARKERS = (
-    ("recover_from_trivial_errors", "fix it and retry in the same turn"),
-    ("keep_chaining_mid_plan", "Over-chunking successful work"),
-    ("no_coauthored_by", "Co-Authored-By: Claude"),
+    # Cleared: the original rules (recover_from_trivial_errors,
+    # keep_chaining_mid_plan, no_coauthored_by) moved out of the managed
+    # zone into standalone global CLAUDE.md sections. The stopgap
+    # mechanism remains available if new migrations are needed.
 )
 
 EXIT_OK = 0

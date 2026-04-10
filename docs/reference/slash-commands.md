@@ -15,6 +15,7 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 
 | Command | Source | Description |
 |---------|--------|-------------|
+| `/apiary-context` | `core/commands/apiary-context.md` | Load apiary toolkit context (scribe, budgeter, runner, portability rules) |
 | `/backfill-handoffs` | `core/commands/backfill-handoffs.md` | Process unseen session transcripts into handoff notes |
 | `/budgeter-log` | `budgeter/commands/budgeter-log.md` | Toggle token logging on/off |
 | `/budgeter-warn` | `budgeter/commands/budgeter-warn.md` | Toggle cost estimation warnings on/off |

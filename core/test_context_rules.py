@@ -30,15 +30,13 @@ from core import context_rules as cr  # noqa: E402
 class TestSourceFiles(unittest.TestCase):
     def test_all_rules_load(self):
         rules = cr.load_all_rules()
-        self.assertGreaterEqual(len(rules), 3, "expected at least 3 rules in repo")
+        self.assertGreaterEqual(len(rules), 1, "expected at least 1 rule in repo")
         ids = [r.id for r in rules]
         self.assertEqual(len(ids), len(set(ids)), "duplicate rule ids")
 
-    def test_required_three_present(self):
+    def test_required_rules_present(self):
         ids = {r.id for r in cr.load_all_rules()}
-        self.assertIn("recover_from_trivial_errors", ids)
-        self.assertIn("keep_chaining_mid_plan", ids)
-        self.assertIn("no_coauthored_by", ids)
+        self.assertIn("load_apiary_context", ids)
 
     def test_render_is_deterministic(self):
         rules = cr.load_all_rules()
