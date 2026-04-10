@@ -68,3 +68,47 @@ class ScribeStore:
         nid_path = self.state_dir / NEXT_ID_FILENAME
         if not nid_path.exists():
             nid_path.write_text('1', encoding='utf-8')
+
+    # --- Index I/O helpers ---
+
+    @staticmethod
+    def _read_index(type_dir: Path) -> list[dict]:
+        """Read all valid entries from a folder's index.jsonl.
+
+        Malformed lines are skipped with a warning to stderr.
+        """
+        idx_path = type_dir / INDEX_FILENAME
+        if not idx_path.exists():
+            return []
+        entries = []
+        for lineno, line in enumerate(idx_path.read_text(encoding='utf-8').splitlines(), 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                print(f"Warning: skipping malformed index entry at {idx_path}:{lineno}", file=sys.stderr)
+        return entries
+
+    @staticmethod
+    def _write_index(type_dir: Path, entries: list[dict]) -> None:
+        """Overwrite a folder's index.jsonl with the given entries.
+
+        Uses FileLock on the index file for concurrent safety.
+        """
+        idx_path = type_dir / INDEX_FILENAME
+        with FileLock(idx_path):
+            lines = [json.dumps(e, separators=(',', ':')) for e in entries]
+            idx_path.write_text('\n'.join(lines) + ('\n' if lines else ''), encoding='utf-8')
+
+    @staticmethod
+    def _append_index(type_dir: Path, entry: dict) -> None:
+        """Append a single entry to a folder's index.jsonl.
+
+        Uses FileLock on the index file for concurrent safety.
+        """
+        idx_path = type_dir / INDEX_FILENAME
+        with FileLock(idx_path):
+            with open(idx_path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(entry, separators=(',', ':')) + '\n')
