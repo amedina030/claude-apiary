@@ -351,70 +351,68 @@ def cmd_add(args):
 
 
 def cmd_list(args):
+    store = args.store
+
+    # Determine status filter
     if args.archive:
-        notes = read_jsonl(args.archive_path)
-        source = "archive"
+        status = 'archived'
+        source = 'archive'
     else:
-        notes = read_jsonl(args.notes_path)
-        # Auto-archive only when listing active notes (not archive/search-only queries)
-        if not args.search and not args.type and not args.session and not args.role and not args.mission:
-            with _notes_and_archive_lock(args.notes_path, args.archive_path):
-                notes = read_jsonl(args.notes_path)
-                notes, archived = _auto_archive(notes, args.notes_path, args.archive_path)
-            if archived:
-                print(f"[auto-archived {len(archived)} notes]", file=sys.stderr)
-        source = "active"
+        status = 'all' if args.all else 'active'
+        source = 'active'
 
-    # Filter by status (default: hide done unless --all)
+    # Run auto-archive before listing active notes (only for unfiltered queries)
+    if not args.archive and not args.search and not args.type and not args.session and not args.role and not args.mission:
+        archived_count = _run_auto_archive_store(store)
+        if archived_count:
+            print(f'[auto-archived {archived_count} notes]', file=sys.stderr)
+
+    # Get notes from store
+    note_type = args.type if args.type else None
+    notes_list = store.list_notes(note_type=note_type, status=status, search=args.search)
+
+    # Filter by status (hide done unless --all or --archive)
     if not args.all and not args.archive:
-        notes = [n for n in notes if n.get("status") != "done"]
-
-    # Filter by type
-    if args.type:
-        notes = [n for n in notes if n.get("type") == args.type]
+        notes_list = [n for n in notes_list if n.get('status') != 'done']
 
     # Filter by session
     if args.session:
         try:
             sid = SessionId(args.session)
         except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
+            print(f'Error: {e}', file=sys.stderr)
             return
-        notes = [n for n in notes if sid.matches(n.get("session_id", ""))]
+        notes_list = [n for n in notes_list if sid.matches(n.get('session', ''))]
 
     # Filter by role
     if args.role:
-        notes = [n for n in notes if n.get("role", "").lower() == args.role.lower()]
+        notes_list = [n for n in notes_list if n.get('role', '').lower() == args.role.lower()]
 
     # Filter by mission
     if args.mission:
-        notes = [n for n in notes if n.get("mission", "").lower() == args.mission.lower()]
+        notes_list = [n for n in notes_list if n.get('mission', '').lower() == args.mission.lower()]
 
-    # Filter by search
-    if args.search:
-        term = args.search.lower()
-        notes = [n for n in notes if term in n.get("content", "").lower()]
-
-    # Limit (cap at MAX_LAST to prevent misleading output)
+    # Limit
     if args.last is not None:
         if args.last <= 0:
-            print("Error: --last must be a positive integer", file=sys.stderr)
+            print('Error: --last must be a positive integer', file=sys.stderr)
             sys.exit(1)
         last = min(args.last, MAX_LAST)
-        notes = notes[-last:]
+        notes_list = notes_list[-last:]
 
-    if not notes:
-        print(f"No {source} notes found.")
+    if not notes_list:
+        print(f'No {source} notes found.')
         return
 
-    for n in notes:
-        nid = n.get("id", "?")
-        ntype = n.get("type", "?")[:8]
-        age = format_age(n.get("timestamp", ""))
-        status = " [DONE]" if n.get("status") == "done" else ""
-        content = n.get("content", "").replace("\n", " ")[:80]
-        line = f"#{nid:<4} {ntype:<10} ({age:<9}) {content}{status}"
-        print(line.encode("ascii", errors="replace").decode("ascii"))
+    for n in notes_list:
+        nid = n.get('id', '?')
+        ntype = n.get('type', '?')[:8]
+        age = format_age(n.get('timestamp', ''))
+        status_label = ' [DONE]' if n.get('status') == 'done' else ''
+        # For store entries, content is in 'summary' field; read full content for display
+        content = n.get('summary', '').replace('\n', ' ')[:80]
+        line = f'#{nid:<4} {ntype:<10} ({age:<9}) {content}{status_label}'
+        print(line.encode('ascii', errors='replace').decode('ascii'))
 
 
 def _parse_id_arg(raw: str) -> tuple:
