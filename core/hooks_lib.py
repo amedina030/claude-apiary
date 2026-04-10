@@ -35,18 +35,22 @@ APIARY_PATH_SUBSTRINGS: tuple[str, ...] = (
 def is_apiary_entry(entry: Any) -> bool:
     """Return True if a settings.json hook entry was installed by apiary.
 
-    Recognizes two formats:
+    Recognizes three formats:
       1. Absolute-path entries written by ``setup.py --global`` whose
          path contains ``APIARY_MARKER`` ("claude-apiary").
       2. Portable hand-edited entries that use ``$CLAUDE_PROJECT_DIR/<sub>/...``
          and therefore lack the marker. Detected by known apiary subpath
          substrings (``/budgeter/hooks/``, ``/core/hooks/``, ``/scribe/``, …).
+      3. Launcher-based entries that use ``apiary_launch.py`` to locate
+         the apiary repo via the pointer file.
 
     Shared with setup.py's drift check and scripts/uninstall_hooks.py so
     the install and uninstall paths agree on which entries are ours.
     """
     blob = json.dumps(entry)
     if APIARY_MARKER in blob:
+        return True
+    if "apiary_launch.py" in blob:
         return True
     return any(sub in blob for sub in APIARY_PATH_SUBSTRINGS)
 
@@ -57,8 +61,18 @@ def to_bash_path(p: Path) -> str:
     return re.sub(r'^([A-Za-z]):', lambda m: '/' + m.group(1).lower(), s)
 
 
-def hook_cmd(script_path: Path, python_exe: Path = None) -> str:
-    """Build a hook command string using bash-compatible paths."""
+def hook_cmd(script_path: Path, python_exe: Path = None, *, repo_root: Path = None) -> str:
+    """Build a hook command string using bash-compatible paths.
+
+    When *repo_root* is given the command uses the launcher script at
+    ``~/.claude/apiary_launch.py`` with a relative path, making it both
+    portable and cross-repo safe.  Without *repo_root* the legacy
+    absolute-path format is used (suitable for ``--project-path`` installs
+    where the session CWD matches the hook repo).
+    """
+    if repo_root is not None:
+        rel = script_path.relative_to(repo_root).as_posix()
+        return f"python ~/.claude/apiary_launch.py {rel}"
     exe = python_exe or Path(sys.executable)
     return f"{to_bash_path(exe)} {to_bash_path(script_path)}"
 
@@ -84,7 +98,8 @@ def save_settings(path: Path, settings: Dict[str, Any]) -> None:
 def register_hooks(settings_path: Path, new_hooks: Dict[str, List], marker: str, also_strip: List[str] = None) -> None:
     """
     Merge new_hooks into settings_path, replacing any entries that contain
-    marker (or any string in also_strip) in their JSON representation.
+    marker (or any string in also_strip) in their JSON representation,
+    or that ``is_apiary_entry()`` recognizes as ours.
 
     new_hooks: {event_name: [hook_entry, ...]}
     marker: string identifying this tool's hooks (e.g. "claude-apiary")
@@ -96,7 +111,11 @@ def register_hooks(settings_path: Path, new_hooks: Dict[str, List], marker: str,
 
     for event, entries in new_hooks.items():
         existing = merged.get(event, [])
-        cleaned = [h for h in existing if not any(m in json.dumps(h) for m in strip)]
+        cleaned = [
+            h for h in existing
+            if not any(m in json.dumps(h) for m in strip)
+            and not is_apiary_entry(h)
+        ]
         merged[event] = cleaned + entries
 
     settings["hooks"] = merged

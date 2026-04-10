@@ -67,7 +67,8 @@ If you have a specific reason to move a single artifact (e.g. one decision note 
 
 If you're writing or editing hooks, skills, scripts, or settings in this repo, you must follow these rules so the codebase stays portable. The full canonical list lives in the user's global `CLAUDE.md`; the load-bearing items are reproduced here.
 
-- **No absolute paths.** Never hard-code `C:\Users\…`, `/Users/…`, `/home/…`, or interpreter paths like `python.exe`. In `settings.json` hook commands, use `$CLAUDE_PROJECT_DIR`. In Python, derive from `pathlib.Path(__file__).resolve().parent`. For user home, use `Path.home()`.
+- **No absolute paths.** Never hard-code `C:\Users\…`, `/Users/…`, `/home/…`, or interpreter paths like `python.exe`. In Python, derive from `pathlib.Path(__file__).resolve().parent`. For user home, use `Path.home()`.
+- **Hook commands use the launcher.** Global hook commands in `settings.json` must use `python ~/.claude/apiary_launch.py <relative-path>` — never `$CLAUDE_PROJECT_DIR` (which resolves to the *session's* repo, not apiary) or absolute paths. The launcher reads `~/.claude/apiary.json` to find the apiary repo, making hooks work from any repo. Source of truth: `core/apiary_launch.py`, copied to `~/.claude/` by `setup.py --global`.
 - **Null device:** use `os.devnull` or `subprocess.DEVNULL`. Never write the OS-specific literal — it differs by platform.
 - **Subprocess:** list-form (`["git", "status"]`), never `shell=True`, never `.exe` suffixes.
 - **Paths:** `pathlib.Path` end-to-end. Never concatenate with `/` or `\` literals.
@@ -86,6 +87,9 @@ Run `pip install -r requirements.txt`. If you use a virtualenv, make sure it's a
 
 **`CLAUDE_PROJECT_DIR` not set in hook commands.**
 Claude Code sets this automatically when invoking hooks. If you're running a hook manually for testing, set it to the repo root: `CLAUDE_PROJECT_DIR=$(pwd) python core/hooks/<hook>.py`.
+
+**Hooks fail with "can't open file" from a different repo.**
+Global hooks use `~/.claude/apiary_launch.py` to locate the apiary repo via `~/.claude/apiary.json`. If either file is missing, re-run `python setup.py --global` from the apiary repo to install them. If you see `$CLAUDE_PROJECT_DIR` in the failing command, your hooks are using the old format — re-running setup will replace them with launcher-based commands.
 
 **Bootstrap refuses to seed and tells me to migrate first.**
 You have scribe state under a legacy `~/.claude/projects/<key>/` location and the in-repo `<repo-root>/.apiary/scribe/` is empty. Run `python scripts/migrate_scribe_state.py --source <legacy-dir>` (or just `--dry-run` first to preview) to copy it into the umbrella, then re-run bootstrap.

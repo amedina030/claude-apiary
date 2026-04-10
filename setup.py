@@ -58,13 +58,20 @@ def _expand_hook_script_path(script_path: str) -> Path:
     """Expand a hook command's script-path string to an actual filesystem
     path that can be checked with `.exists()`.
 
-    Handles three forms in order:
+    Handles four forms in order:
+      - Relative path (from launcher format, e.g. ``core/hooks/foo.py``)
+        → APIS_DIR/core/hooks/foo.py.
       - $CLAUDE_PROJECT_DIR/foo → APIS_DIR/foo (the canonical apiary repo
         root, which is what Claude Code itself sets at hook-fire time).
       - $VAR/foo or %VAR%/foo → standard env-var expansion via os.path.
       - /c/Users/... → C:/Users/... (bash-style absolute paths from
         `setup.py --global` on Windows).
     """
+    # Launcher format: relative path resolved against repo root.
+    if not script_path.startswith(("/", "$", "%")):
+        candidate = APIS_DIR / script_path
+        if candidate.exists():
+            return candidate
     # Apiary-specific: $CLAUDE_PROJECT_DIR resolves to the repo root.
     expanded = script_path.replace("$CLAUDE_PROJECT_DIR", str(APIS_DIR))
     # Then standard env vars and ~.
@@ -79,7 +86,7 @@ def _expand_hook_script_path(script_path: str) -> Path:
     return Path(win)
 
 
-def build_budgeter_hooks():
+def build_budgeter_hooks(*, use_launcher: bool = False):
     """Build PreToolUse, PostToolUse, and Stop hook entries for the budgeter."""
     try:
         with open(BUDGETER_DIR / "config.json", encoding="utf-8") as f:
@@ -87,9 +94,10 @@ def build_budgeter_hooks():
     except (FileNotFoundError, json.JSONDecodeError):
         tools = ["Agent", "Bash"]
 
-    pre_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "pre_tool_use.py", PYTHON)
-    post_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "post_tool_use.py", PYTHON)
-    stop_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "stop_session.py", PYTHON)
+    root = APIS_DIR if use_launcher else None
+    pre_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "pre_tool_use.py", PYTHON, repo_root=root)
+    post_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "post_tool_use.py", PYTHON, repo_root=root)
+    stop_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "stop_session.py", PYTHON, repo_root=root)
 
     return {
         "PreToolUse": [
@@ -114,14 +122,15 @@ def file_hash(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def build_core_hooks():
+def build_core_hooks(*, use_launcher: bool = False):
     """Build UserPromptSubmit, PreToolUse, PostToolUse, and Stop hook entries for core hooks."""
-    prompt_startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_prompt_hook.py", PYTHON)
-    install_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install.py", PYTHON)
-    session_cmd = hook_cmd(CORE_DIR / "hooks" / "inject_session.py", PYTHON)
-    startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_hook.py", PYTHON)
-    stop_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install_stop.py", PYTHON)
-    error_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "context_rule_error_reminder.py", PYTHON)
+    root = APIS_DIR if use_launcher else None
+    prompt_startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_prompt_hook.py", PYTHON, repo_root=root)
+    install_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install.py", PYTHON, repo_root=root)
+    session_cmd = hook_cmd(CORE_DIR / "hooks" / "inject_session.py", PYTHON, repo_root=root)
+    startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_hook.py", PYTHON, repo_root=root)
+    stop_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install_stop.py", PYTHON, repo_root=root)
+    error_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "context_rule_error_reminder.py", PYTHON, repo_root=root)
     return {
         "UserPromptSubmit": [
             {"hooks": [{"type": "command", "command": prompt_startup_cmd}]},
@@ -140,9 +149,10 @@ def build_core_hooks():
     }
 
 
-def build_scribe_hooks():
+def build_scribe_hooks(*, use_launcher: bool = False):
     """Build Stop hook entry for the scribe transcript saver."""
-    save_cmd = hook_cmd(CORE_DIR / "hooks" / "save_transcript.py", PYTHON)
+    root = APIS_DIR if use_launcher else None
+    save_cmd = hook_cmd(CORE_DIR / "hooks" / "save_transcript.py", PYTHON, repo_root=root)
     return {
         "Stop": [
             {"hooks": [{"type": "command", "command": save_cmd}]},
@@ -150,9 +160,10 @@ def build_scribe_hooks():
     }
 
 
-def build_docs_hooks():
+def build_docs_hooks(*, use_launcher: bool = False):
     """Build PreToolUse hook entry for the docs standards reminder."""
-    remind_cmd = hook_cmd(DOCS_DIR / "hooks" / "remind_standards.py", PYTHON)
+    root = APIS_DIR if use_launcher else None
+    remind_cmd = hook_cmd(DOCS_DIR / "hooks" / "remind_standards.py", PYTHON, repo_root=root)
     return {
         "PreToolUse": [
             {"matcher": "", "hooks": [{"type": "command", "command": remind_cmd}]},
@@ -388,7 +399,21 @@ def run_check():
         fail("Manifest: not found (run setup.py --global to create)")
     print()
 
-    # 5. Apiary pointer file (todo #263 — lets hooks locate the repo)
+    # 5. Hook launcher
+    print("[Hook launcher]")
+    launcher_installed = claude_dir / "apiary_launch.py"
+    launcher_source = CORE_DIR / "apiary_launch.py"
+    if not launcher_installed.exists():
+        fail(f"Launcher: {launcher_installed} not found (run setup.py --global)")
+    elif not launcher_source.exists():
+        fail(f"Launcher source: {launcher_source} not found in repo")
+    elif file_hash(launcher_installed) != file_hash(launcher_source):
+        fail(f"Launcher: {launcher_installed} differs from source (re-run setup.py --global)")
+    else:
+        ok(f"Launcher: {launcher_installed}")
+    print()
+
+    # 6. Apiary pointer file (todo #263 — lets hooks locate the repo)
     print("[Apiary pointer]")
     if not DEFAULT_POINTER_PATH.exists():
         fail(f"Pointer file: {DEFAULT_POINTER_PATH} not found (run setup.py --global)")
@@ -412,7 +437,7 @@ def run_check():
                 ok(f"Pointer file: {DEFAULT_POINTER_PATH} -> {repo_path}")
     print()
 
-    # 6. Pre-commit hook
+    # 7. Pre-commit hook
     print("[Pre-commit]")
     git_hooks_dir = APIS_DIR / ".git" / "hooks"
     pre_commit = git_hooks_dir / "pre-commit"
@@ -428,7 +453,7 @@ def run_check():
             fail(f"Pre-commit hook exists but doesn't run docs/check.py")
     print()
 
-    # 6. Python
+    # 8. Python
     print("[Runtime]")
     ok(f"Python: {PYTHON}")
     ok(f"claude-apiary: {APIS_DIR}")
@@ -531,8 +556,15 @@ def main():
     settings_path = claude_dir / "settings.json"
 
     # Merge all hooks into one dict, then register once to avoid stripping each other.
+    # Global installs use the launcher so hooks work from any repo.
+    use_launcher = args.global_install
     all_hooks = {}
-    for hooks_dict in [build_budgeter_hooks(), build_core_hooks(), build_scribe_hooks(), build_docs_hooks()]:
+    for hooks_dict in [
+        build_budgeter_hooks(use_launcher=use_launcher),
+        build_core_hooks(use_launcher=use_launcher),
+        build_scribe_hooks(use_launcher=use_launcher),
+        build_docs_hooks(use_launcher=use_launcher),
+    ]:
         for event, entries in hooks_dict.items():
             all_hooks.setdefault(event, []).extend(entries)
     register_hooks(settings_path, all_hooks, MARKER, also_strip=["claude-budgeter"])
@@ -562,6 +594,13 @@ def main():
         # in-repo scribe state migration (decision #269, todo #263).
         pointer_path = write_apiary_pointer(APIS_DIR)
         print(f"  Apiary pointer   : {pointer_path} -> {APIS_DIR}")
+
+        # Copy the hook launcher so global hooks can locate apiary from
+        # any repo.  Source of truth: core/apiary_launch.py.
+        launcher_src = CORE_DIR / "apiary_launch.py"
+        launcher_dst = claude_dir / "apiary_launch.py"
+        shutil.copy2(launcher_src, launcher_dst)
+        print(f"  Hook launcher    : {launcher_dst}")
 
         install_commands(claude_dir)
         check_claude_md(claude_dir)
