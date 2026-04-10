@@ -212,3 +212,62 @@ class ScribeStore:
         self._append_index(type_dir, entry)
         self._write_note_file(type_dir, note_id, content)
         return entry
+
+    def get_note(self, note_id: int) -> dict | None:
+        """Retrieve a single note by ID. Searches active then archive indexes.
+
+        Returns a dict with index metadata plus 'content' key, or None.
+        """
+        # Search active indexes across all type folders
+        for folder_name in TYPE_FOLDERS.values():
+            type_dir = self.state_dir / folder_name
+            for entry in self._read_index(type_dir):
+                if entry.get('id') == note_id:
+                    content = self._read_note_file(type_dir, note_id)
+                    result = {**entry, 'content': content}
+                    if content is None and entry.get('has_body'):
+                        result['_warning'] = 'body_file_missing'
+                    return result
+            # Check archive
+            archive_dir = type_dir / ARCHIVE_DIRNAME
+            for entry in self._read_index(archive_dir):
+                if entry.get('id') == note_id:
+                    content = self._read_note_file(archive_dir, note_id)
+                    result = {**entry, 'content': content, 'status': 'archived'}
+                    if content is None and entry.get('has_body'):
+                        result['_warning'] = 'body_file_missing'
+                    return result
+        return None
+
+    def list_notes(self, note_type: str | None = None,
+                   status: str = 'active',
+                   search: str | None = None) -> list[dict]:
+        """List notes, optionally filtered by type, status, and search term.
+
+        Returns list of index entry dicts sorted by timestamp descending.
+        """
+        results: list[dict] = []
+        # Determine which folders to scan
+        if note_type is not None:
+            folder_names = [TYPE_FOLDERS[note_type]]  # raises KeyError if invalid
+        else:
+            folder_names = list(TYPE_FOLDERS.values())
+
+        for folder_name in folder_names:
+            type_dir = self.state_dir / folder_name
+            if status == 'active' or status == 'all':
+                results.extend(self._read_index(type_dir))
+            if status == 'archived' or status == 'all':
+                archive_dir = type_dir / ARCHIVE_DIRNAME
+                for entry in self._read_index(archive_dir):
+                    entry_copy = {**entry, 'status': 'archived'}
+                    results.append(entry_copy)
+
+        # Filter by search term (case-insensitive in summary)
+        if search:
+            search_lower = search.lower()
+            results = [e for e in results if search_lower in e.get('summary', '').lower()]
+
+        # Sort by timestamp descending
+        results.sort(key=lambda e: e.get('timestamp', ''), reverse=True)
+        return results
