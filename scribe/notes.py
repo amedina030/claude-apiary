@@ -24,14 +24,13 @@ import os
 import re
 import subprocess
 import sys
-from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from pathlib import Path as _PathImport
 
 # Add project root to path for core.utils import
 sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
-from core.utils.filelock import FileLock
 from core.session import SessionId
+from scribe.store import ScribeStore, TYPE_FOLDERS
 
 from pathlib import Path
 
@@ -48,7 +47,7 @@ STATE_LAYOUT_ENV = "APIARY_STATE_LAYOUT"
 APIARY_STATE_DIRNAME = ".apiary"
 SCRIBE_SUBDIR = "scribe"
 
-VALID_TYPES = ["todo", "handoff", "decision", "wishlist", "reference", "blocker", "context"]
+VALID_TYPES = ["todo", "handoff", "decision", "wishlist", "reference", "blocker", "context", "general"]
 AUTO_ARCHIVE_DAYS = 30
 MAX_CONTENT_LENGTH = 100_000  # bytes; prevents runaway JSONL file growth
 MAX_LAST = 10_000  # upper bound for --last to prevent misleading output
@@ -164,137 +163,6 @@ def scribe_state_dir(start: Path | None = None) -> Path | None:
     if root is None:
         return None
     return root / APIARY_STATE_DIRNAME / SCRIBE_SUBDIR
-
-
-def notes_path(project_key, *, start: Path | None = None):
-    """Return the path to notes.jsonl for *project_key* (legacy) or *start*.
-
-    In repo layout, resolves under ``<git-root(start)>/.apiary/scribe/``.
-    *start* lets callers (e.g. startup_prompt_hook) point resolution at the
-    Claude session's cwd rather than the hook process's own cwd. Ignored in
-    legacy layout.
-    """
-    if _use_repo_layout():
-        return _repo_scribe_dir(start) / "notes.jsonl"
-    return PROJECTS_DIR / project_key / "notes.jsonl"
-
-
-def archive_path(project_key, *, start: Path | None = None):
-    if _use_repo_layout():
-        return _repo_scribe_dir(start) / "notes_archive.jsonl"
-    return PROJECTS_DIR / project_key / "notes_archive.jsonl"
-
-
-def learnings_path(project_key, *, start: Path | None = None):
-    if _use_repo_layout():
-        return _repo_scribe_dir(start) / "learnings.jsonl"
-    return PROJECTS_DIR / project_key / "learnings.jsonl"
-
-
-# ---------------------------------------------------------------------------
-# Locking helpers
-# ---------------------------------------------------------------------------
-
-@contextmanager
-def _notes_and_archive_lock(notes_path, archive_path):
-    """Acquire locks on both notes and archive files in a consistent order
-    (notes first, then archive) to prevent deadlocks and TOCTOU races."""
-    with FileLock(notes_path):
-        with FileLock(archive_path):
-            yield
-
-
-# ---------------------------------------------------------------------------
-# Storage helpers
-# ---------------------------------------------------------------------------
-
-def read_jsonl(path):
-    if not path.exists():
-        return []
-    entries = []
-    with open(path, encoding="utf-8") as f:
-        for lineno, line in enumerate(f, 1):
-            line = line.strip()
-            if line:
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    print(f"[scribe] WARNING: skipped malformed JSON on line {lineno} of {path}", file=sys.stderr)
-    return entries
-
-
-def _write_jsonl(path, entries):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    content = "\n".join(json.dumps(e) for e in entries) + "\n" if entries else ""
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    # fsync the tmp file so data is durable before the rename
-    with open(tmp, "r+b") as fh:
-        fh.flush()
-        os.fsync(fh.fileno())
-    tmp.replace(path)
-
-
-def _append_jsonl(path, entry, _locked=False):
-    """Append a single JSON entry to a JSONL file.
-    If _locked is True, assumes caller already holds FileLock on path."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if _locked:
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
-    else:
-        with FileLock(path):
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry) + "\n")
-
-
-# Regex used by _raw_max_id to scan raw file bytes for id tokens even when
-# a line fails JSON parsing. Matches ``"id": 42`` or ``"id":42``. JSON
-# serializes embedded quotes as ``\"`` so content strings containing
-# literal ``"id":`` text cannot trigger false positives — the escape
-# backslash breaks the pattern. (todo #271.)
-_ID_TOKEN_RE = re.compile(r'(?<!\\)"id"\s*:\s*(\d+)')
-
-
-def _raw_max_id(path) -> int:
-    """Return the highest id value extractable from the raw file text.
-
-    Scans every occurrence of the ``"id":`` token, including ones that
-    live inside malformed/unparseable lines. This is the fallback that
-    keeps next-id allocation correct when a half-written record makes
-    its id invisible to ``json.loads`` — see todo #271 for the failure
-    mode.
-
-    Returns 0 when the file doesn't exist or can't be read.
-    """
-    try:
-        content = path.read_text(encoding="utf-8")
-    except (FileNotFoundError, OSError):
-        return 0
-    max_id = 0
-    for match in _ID_TOKEN_RE.finditer(content):
-        try:
-            value = int(match.group(1))
-        except ValueError:
-            continue
-        if value > max_id:
-            max_id = value
-    return max_id
-
-
-def _next_id(entries, path=None):
-    """Return the next available ID from an in-memory entry list.
-
-    When *path* is provided, also scans the raw file for id tokens via
-    ``_raw_max_id`` so a record whose line failed JSON parsing can't have
-    its id re-used by a subsequent write (todo #271).
-
-    Callers MUST hold FileLock on the target file before calling this and
-    must pass a freshly read list to avoid ID collisions across processes.
-    """
-    parsed_max = max((e.get("id", 0) for e in entries), default=0)
-    raw_max = _raw_max_id(path) if path is not None else 0
-    return max(parsed_max, raw_max) + 1
 
 
 def _now_iso():
@@ -418,65 +286,12 @@ def run_auto_archive(project_key: str, *, start: Path | None = None) -> int:
     *start* threads the session's repo dir through to the repo-layout
     resolver so the hook process's cwd doesn't decide where state lives
     (decision #269, todo #264).
+
+    Rewritten in step 5 to use ScribeStore fully.
     """
-    np = notes_path(project_key, start=start)
-    ap = archive_path(project_key, start=start)
-    with _notes_and_archive_lock(np, ap):
-        notes = read_jsonl(np)
-        _remaining, archived = _auto_archive(notes, np, ap)
-    return len(archived)
-
-
-# ---------------------------------------------------------------------------
-# Record builders — single source of truth for JSONL schemas
-# ---------------------------------------------------------------------------
-
-def make_note(notes, *, type: str, content: str, session_id: str = "",
-              auto: bool = False, role: str = "", mission: str = "",
-              path=None) -> dict:
-    """Build a validated note record.
-
-    *notes* is the current list (used for ID generation). *path*, when
-    provided, is forwarded to ``_next_id`` so a raw-file scan can catch
-    ids that live in malformed lines (todo #271).
-    Raises ValueError for invalid type or oversized content.
-    """
-    if type not in VALID_TYPES:
-        raise ValueError(f"Invalid note type {type!r}, must be one of {VALID_TYPES}")
-    if len(content.encode("utf-8")) > MAX_CONTENT_LENGTH:
-        raise ValueError(f"Content exceeds maximum length of {MAX_CONTENT_LENGTH} bytes")
-    return {
-        "id": _next_id(notes, path=path),
-        "timestamp": _now_iso(),
-        "session_id": session_id,
-        "type": type,
-        "content": content,
-        "status": "active",
-        "auto_generated": auto,
-        "role": role,
-        "mission": mission,
-    }
-
-
-def make_learning(learnings, *, content: str, session_id: str = "",
-                  role: str = "", mission: str = "", path=None) -> dict:
-    """Build a validated learning record.
-
-    *learnings* is the current list (used for ID generation). *path*,
-    when provided, is forwarded to ``_next_id`` so a raw-file scan can
-    catch ids that live in malformed lines (todo #271).
-    Raises ValueError for oversized content.
-    """
-    if len(content.encode("utf-8")) > MAX_CONTENT_LENGTH:
-        raise ValueError(f"Content exceeds maximum length of {MAX_CONTENT_LENGTH} bytes")
-    return {
-        "id": _next_id(learnings, path=path),
-        "timestamp": _now_iso(),
-        "session_id": session_id,
-        "content": content,
-        "role": role,
-        "mission": mission,
-    }
+    state_dir = scribe_state_dir(start) or (PROJECTS_DIR / project_key)
+    store = ScribeStore(state_dir)
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -985,35 +800,21 @@ def main():
             and getattr(args, "type", "") == "handoff"):
         args.session_id = default_sid
 
-    # Resolve project-scoped paths
+    # Initialize ScribeStore
     pk = _project_key(args.project)
-    args.notes_path = notes_path(pk)
-    args.archive_path = archive_path(pk)
-    args.learnings_path = learnings_path(pk)
+    state_dir = scribe_state_dir() or (PROJECTS_DIR / pk)
+    args.store = ScribeStore(state_dir)
 
-    # Commands that manage their own dual-lock (notes + archive) internally
-    dual_lock_commands = {
-        "list": cmd_list,
-        "archive": cmd_archive,
+    commands = {
+        'add': cmd_add, 'list': cmd_list, 'get': cmd_get, 'show': cmd_get,
+        'done': cmd_done, 'update': cmd_update, 'archive': cmd_archive,
+        'learn': cmd_learn, 'learnings': cmd_learnings, 'unlearn': cmd_unlearn,
+        'handoff-sessions': cmd_handoff_sessions,
+        'migrate': cmd_migrate,
     }
-    # Commands that only need the notes lock
-    notes_commands = {
-        "add": cmd_add, "get": cmd_get, "show": cmd_get,
-        "done": cmd_done, "update": cmd_update,
-        "migrate": cmd_migrate, "handoff-sessions": cmd_handoff_sessions,
-    }
-    learnings_commands = {
-        "learn": cmd_learn, "learnings": cmd_learnings, "unlearn": cmd_unlearn,
-    }
-
-    if args.command in dual_lock_commands:
-        dual_lock_commands[args.command](args)
-    elif args.command in notes_commands:
-        with FileLock(args.notes_path):
-            notes_commands[args.command](args)
-    elif args.command in learnings_commands:
-        with FileLock(args.learnings_path):
-            learnings_commands[args.command](args)
+    handler = commands.get(args.command)
+    if handler:
+        handler(args)
     else:
         parser.print_help()
 
