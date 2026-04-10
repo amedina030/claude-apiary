@@ -640,75 +640,72 @@ def cmd_migrate(args):
 # ---------------------------------------------------------------------------
 
 def cmd_learn(args):
-    """Add a new learning."""
-    learnings = read_jsonl(args.learnings_path)
-    entry = make_learning(
-        learnings,
-        content=args.content,
-        session_id=args.session_id or "",
-        role=getattr(args, "role", "") or "",
-        mission=getattr(args, "mission", "") or "",
-        path=args.learnings_path,
+    store = args.store
+    content = args.content
+    if len(content.encode('utf-8')) > MAX_CONTENT_LENGTH:
+        print(f'Error: content exceeds {MAX_CONTENT_LENGTH} bytes', file=sys.stderr)
+        sys.exit(1)
+    metadata = {}
+    if getattr(args, 'role', ''):
+        metadata['role'] = args.role
+    if getattr(args, 'mission', ''):
+        metadata['mission'] = args.mission
+    entry = store.add_learning(
+        content=content,
+        session_id=args.session_id or '',
+        **metadata,
     )
-    _append_jsonl(args.learnings_path, entry, _locked=True)
     print(f"Learned #L{entry['id']}")
 
 
 def cmd_learnings(args):
-    """List all learnings."""
-    learnings = read_jsonl(args.learnings_path)
+    store = args.store
+    learnings = store.list_learnings(search=args.search)
 
     if args.role:
-        learnings = [l for l in learnings if l.get("role", "").lower() == args.role.lower()]
-
+        learnings = [l for l in learnings if l.get('role', '').lower() == args.role.lower()]
     if args.mission:
-        learnings = [l for l in learnings if l.get("mission", "").lower() == args.mission.lower()]
-
-    if args.search:
-        term = args.search.lower()
-        learnings = [l for l in learnings if term in l.get("content", "").lower()]
+        learnings = [l for l in learnings if l.get('mission', '').lower() == args.mission.lower()]
 
     if not learnings:
-        print("No learnings found.")
+        print('No learnings found.')
         return
 
     for l in learnings:
-        lid = l.get("id", "?")
-        age = format_age(l.get("timestamp", ""))
-        content = l.get("content", "")
+        lid = l.get('id', '?')
+        age = format_age(l.get('timestamp', ''))
         if args.full:
-            print(f"#L{lid}: {content}")
+            # Read full content from store
+            full = store.get_learning(lid)
+            content = full.get('content', '') if full else l.get('summary', '')
+            print(f'#L{lid}: {content}')
         else:
-            short = content.replace("\n", " ")[:80]
-            print(f"#L{lid:<3} ({age:<9}) {short}")
+            short = l.get('summary', '').replace('\n', ' ')[:80]
+            print(f'#L{lid:<3} ({age:<9}) {short}')
 
 
 def cmd_handoff_sessions(args):
-    """Print session IDs of existing handoff notes, one per line."""
-    notes = read_jsonl(args.notes_path)
+    store = args.store
+    handoffs = store.list_notes(note_type='handoff')
     seen = set()
-    for n in notes:
-        if n.get("type") == "handoff" and n.get("status") != "done":
-            sid = n.get("session_id", "").strip()
+    for n in handoffs:
+        if n.get('status') != 'done':
+            sid = n.get('session', '').strip()
             if sid and sid not in seen:
                 seen.add(sid)
                 print(sid)
     if not seen:
-        print("(none)")
+        print('(none)')
 
 
 def cmd_unlearn(args):
-    """Remove a learning by ID."""
-    raw_id, _ = _parse_id_arg(args.id)  # Accept both '3' and 'L3'
-    learnings = read_jsonl(args.learnings_path)
-    remaining = [l for l in learnings if l.get("id") != raw_id]
-
-    if len(remaining) == len(learnings):
-        print(f"Learning #L{raw_id} not found.", file=sys.stderr)
+    store = args.store
+    raw_id, _ = _parse_id_arg(args.id)
+    result = store.remove_learning(raw_id)
+    if result is None:
+        print(f'Learning #L{raw_id} not found.', file=sys.stderr)
         sys.exit(1)
-
-    _write_jsonl(args.learnings_path, remaining)
-    print(f"Removed learning #L{raw_id}.")
+    print(f'Removed learning #L{raw_id}.')
 
 
 # ---------------------------------------------------------------------------
