@@ -160,3 +160,30 @@ class ScribeStore:
             current = self._read_next_id()
             nid_path.write_text(str(current + 1), encoding='utf-8')
         return current
+
+    # --- Note file helpers ---
+
+    def _type_dir(self, note_type: str) -> Path:
+        """Return the folder Path for a given note type."""
+        folder_name = TYPE_FOLDERS.get(note_type)
+        if folder_name is None:
+            raise ValueError(f"Unknown note type: {note_type!r}. Valid types: {list(TYPE_FOLDERS.keys())}")
+        return self.state_dir / folder_name
+
+    def _learning_dir(self) -> Path:
+        """Return the folder Path for learnings."""
+        return self.state_dir / LEARNING_FOLDER
+
+    @staticmethod
+    def _write_note_file(type_dir: Path, note_id: int, content: str) -> None:
+        """Write note content to type_dir/<id>.md. Pure content, no frontmatter."""
+        md_path = type_dir / f"{note_id}.md"
+        md_path.write_text(content, encoding='utf-8')
+
+    @staticmethod
+    def _read_note_file(type_dir: Path, note_id: int) -> str | None:
+        """Read note content from type_dir/<id>.md. Returns None if missing."""
+        md_path = type_dir / f"{note_id}.md"
+        if not md_path.exists():
+            return None
+        return md_path.read_text(encoding='utf-8')
