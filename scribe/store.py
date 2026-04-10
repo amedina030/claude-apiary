@@ -326,3 +326,68 @@ class ScribeStore:
                     src_md.unlink()
                 return target_entry
         return None
+
+    # --- CRUD operations: Learnings ---
+
+    def add_learning(self, content: str, session_id: str,
+                     summary: str = '', **metadata) -> dict:
+        """Add a new learning. Returns the created index entry dict."""
+        learn_dir = self._learning_dir()
+        note_id = self._increment_id()
+        timestamp = datetime.now(timezone.utc).isoformat()
+        if not summary:
+            summary = content[:120].replace('\n', ' ').strip()
+        entry = {
+            'id': note_id,
+            'type': 'learning',
+            'status': 'active',
+            'session': session_id,
+            'timestamp': timestamp,
+            'summary': summary,
+            'has_body': bool(content),
+            **metadata,
+        }
+        self._append_index(learn_dir, entry)
+        self._write_note_file(learn_dir, note_id, content)
+        return entry
+
+    def list_learnings(self, search: str | None = None) -> list[dict]:
+        """List all learnings, optionally filtered by search term."""
+        learn_dir = self._learning_dir()
+        entries = self._read_index(learn_dir)
+        if search:
+            search_lower = search.lower()
+            entries = [e for e in entries if search_lower in e.get('summary', '').lower()]
+        entries.sort(key=lambda e: e.get('timestamp', ''), reverse=True)
+        return entries
+
+    def get_learning(self, learning_id: int) -> dict | None:
+        """Retrieve a single learning by ID."""
+        learn_dir = self._learning_dir()
+        for entry in self._read_index(learn_dir):
+            if entry.get('id') == learning_id:
+                content = self._read_note_file(learn_dir, learning_id)
+                result = {**entry, 'content': content}
+                if content is None and entry.get('has_body'):
+                    result['_warning'] = 'body_file_missing'
+                return result
+        return None
+
+    def remove_learning(self, learning_id: int) -> dict | None:
+        """Remove a learning by ID. Returns the removed entry or None."""
+        learn_dir = self._learning_dir()
+        entries = self._read_index(learn_dir)
+        target = None
+        remaining = []
+        for entry in entries:
+            if entry.get('id') == learning_id:
+                target = entry
+            else:
+                remaining.append(entry)
+        if target is not None:
+            self._write_index(learn_dir, remaining)
+            md_path = learn_dir / f"{learning_id}.md"
+            if md_path.exists():
+                md_path.unlink()
+            return target
+        return None
