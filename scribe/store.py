@@ -271,3 +271,58 @@ class ScribeStore:
         # Sort by timestamp descending
         results.sort(key=lambda e: e.get('timestamp', ''), reverse=True)
         return results
+
+    def update_note(self, note_id: int, **kwargs) -> dict | None:
+        """Update fields on an existing note's index entry.
+
+        Supports updating: summary, status, content (rewrites .md file).
+        Returns the updated entry dict, or None if not found.
+        """
+        content_update = kwargs.pop('content', None)
+        for folder_name in TYPE_FOLDERS.values():
+            type_dir = self.state_dir / folder_name
+            entries = self._read_index(type_dir)
+            for i, entry in enumerate(entries):
+                if entry.get('id') == note_id:
+                    entries[i] = {**entry, **kwargs}
+                    self._write_index(type_dir, entries)
+                    if content_update is not None:
+                        self._write_note_file(type_dir, note_id, content_update)
+                        entries[i]['has_body'] = bool(content_update)
+                        self._write_index(type_dir, entries)
+                    return entries[i]
+        return None
+
+    def archive_note(self, note_id: int) -> dict | None:
+        """Move a note to its type folder's archive.
+
+        Moves the index entry from type_dir/index.jsonl to
+        type_dir/archive/index.jsonl, and moves <id>.md to archive/.
+        Returns the archived entry dict, or None if not found.
+        """
+        for folder_name in TYPE_FOLDERS.values():
+            type_dir = self.state_dir / folder_name
+            entries = self._read_index(type_dir)
+            target_entry = None
+            remaining = []
+            for entry in entries:
+                if entry.get('id') == note_id:
+                    target_entry = entry
+                else:
+                    remaining.append(entry)
+            if target_entry is not None:
+                # Remove from active index
+                self._write_index(type_dir, remaining)
+                # Add to archive index
+                archive_dir = type_dir / ARCHIVE_DIRNAME
+                archive_dir.mkdir(parents=True, exist_ok=True)
+                target_entry['status'] = 'archived'
+                self._append_index(archive_dir, target_entry)
+                # Move .md file
+                src_md = type_dir / f"{note_id}.md"
+                dst_md = archive_dir / f"{note_id}.md"
+                if src_md.exists():
+                    dst_md.write_text(src_md.read_text(encoding='utf-8'), encoding='utf-8')
+                    src_md.unlink()
+                return target_entry
+        return None
