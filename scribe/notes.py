@@ -280,31 +280,63 @@ def _auto_archive(notes, notes_path, archive_path):
     return remaining, to_archive
 
 
-def run_auto_archive(project_key: str, *, start: Path | None = None) -> int:
-    """Run auto-archive for a project. Returns count of archived notes.
+def _run_auto_archive_store(store) -> int:
+    """Run auto-archive using ScribeStore. Returns count of archived notes.
 
-    *start* threads the session's repo dir through to the repo-layout
-    resolver so the hook process's cwd doesn't decide where state lives
-    (decision #269, todo #264).
-
-    Rewritten in step 5 to use ScribeStore fully.
+    Retention rules by type:
+      handoff  - keep only the latest per role/mission, archive the rest
+      context  - archive after 3 days
+      done     - archive after 1 day (any type marked done)
+      todo/decision/wishlist/blocker - keep until done
     """
-    state_dir = scribe_state_dir(start) or (PROJECTS_DIR / project_key)
-    store = ScribeStore(state_dir)
-    return 0
+    now = datetime.now(timezone.utc)
+    context_cutoff = now - timedelta(days=3)
+    done_cutoff = now - timedelta(days=1)
+
+    all_notes = store.list_notes(status='active')
+
+    # Find the latest handoff per role/mission
+    latest_handoff = {}  # (role, mission) -> newest timestamp
+    for n in all_notes:
+        if n.get('type') == 'handoff':
+            key = (n.get('role', 'user'), n.get('mission', 'general'))
+            ts = _parse_timestamp(n.get('timestamp', ''))
+            if ts is not None:
+                if key not in latest_handoff or ts > latest_handoff[key]:
+                    latest_handoff[key] = ts
+
+    to_archive_ids = []
+    for n in all_notes:
+        ts = _parse_timestamp(n.get('timestamp', ''))
+        ntype = n.get('type', '')
+        if ts is None:
+            continue
+        if n.get('status') == 'done' and ts < done_cutoff:
+            to_archive_ids.append(n['id'])
+        elif ntype == 'handoff':
+            key = (n.get('role', 'user'), n.get('mission', 'general'))
+            if ts < latest_handoff.get(key, ts):
+                to_archive_ids.append(n['id'])
+        elif ntype == 'context' and ts < context_cutoff:
+            to_archive_ids.append(n['id'])
+
+    for nid in to_archive_ids:
+        store.archive_note(nid)
+    return len(to_archive_ids)
+
+
+def run_auto_archive(project_key: str, *, start: Path | None = None) -> int:
+    """Run auto-archive for a project. Returns count of archived notes."""
+    sd = scribe_state_dir(start)
+    if sd is None:
+        sd = PROJECTS_DIR / project_key
+    store = ScribeStore(sd)
+    return _run_auto_archive_store(store)
 
 
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
-
-def _run_auto_archive_store(store: ScribeStore) -> None:
-    """Run auto-archive via the store after a note is added.
-
-    Store-based auto-archive is implemented in a later step; this is a
-    forward-compatible hook so cmd_add's call site is already wired up.
-    """
-    pass
 
 
 def cmd_add(args):
@@ -472,95 +504,66 @@ def cmd_get(args):
 
 
 def cmd_done(args):
-    notes = read_jsonl(args.notes_path)
-    found = False
-    already_done = False
-    for n in notes:
-        if n.get("id") == args.id:
-            if n.get("status") == "done":
-                already_done = True
-            else:
-                n["status"] = "done"
-            found = True
-            break
-
-    if not found:
-        print(f"Note #{args.id} not found.", file=sys.stderr)
+    store = args.store
+    note = store.get_note(args.id)
+    if not note:
+        print(f'Note #{args.id} not found.', file=sys.stderr)
         sys.exit(1)
-
-    if already_done:
-        print(f"Note #{args.id} is already marked done.")
+    if note.get('status') == 'done':
+        print(f'Note #{args.id} is already marked done.')
         return
-
-    _write_jsonl(args.notes_path, notes)
-    print(f"Marked #{args.id} as done.")
+    store.update_note(args.id, status='done')
+    print(f'Marked #{args.id} as done.')
 
 
 def cmd_update(args):
     if args.content is None and args.session_id is None:
-        print("Error: provide --content and/or --session-id", file=sys.stderr)
+        print('Error: provide --content and/or --session-id', file=sys.stderr)
         sys.exit(1)
-    if args.content is not None and len(args.content.encode("utf-8")) > MAX_CONTENT_LENGTH:
-        print(f"Error: content exceeds {MAX_CONTENT_LENGTH} bytes", file=sys.stderr)
+    if args.content is not None and len(args.content.encode('utf-8')) > MAX_CONTENT_LENGTH:
+        print(f'Error: content exceeds {MAX_CONTENT_LENGTH} bytes', file=sys.stderr)
         sys.exit(1)
-    notes = read_jsonl(args.notes_path)
-    found = False
-    for n in notes:
-        if n.get("id") == args.id:
-            if n.get("status") == "done":
-                print(f"Error: note #{args.id} is already done and cannot be updated.", file=sys.stderr)
-                sys.exit(1)
-            if args.content is not None:
-                n["content"] = args.content
-            if args.session_id is not None:
-                n["session_id"] = args.session_id
-            found = True
-            break
-
-    if not found:
-        print(f"Note #{args.id} not found.", file=sys.stderr)
+    store = args.store
+    note = store.get_note(args.id)
+    if not note:
+        print(f'Note #{args.id} not found.', file=sys.stderr)
         sys.exit(1)
-
-    _write_jsonl(args.notes_path, notes)
-    print(f"Updated #{args.id}.")
+    if note.get('status') == 'done':
+        print(f'Error: note #{args.id} is already done and cannot be updated.', file=sys.stderr)
+        sys.exit(1)
+    kwargs = {}
+    if args.content is not None:
+        kwargs['content'] = args.content
+        kwargs['summary'] = args.content[:120].replace('\n', ' ').strip()
+    if args.session_id is not None:
+        kwargs['session'] = args.session_id
+    store.update_note(args.id, **kwargs)
+    print(f'Updated #{args.id}.')
 
 
 def cmd_archive(args):
+    store = args.store
     if args.before:
         try:
-            cutoff = datetime.strptime(args.before, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            cutoff = datetime.strptime(args.before, '%Y-%m-%d').replace(tzinfo=timezone.utc)
         except ValueError:
             print(f"Error: --before must be in YYYY-MM-DD format, got {args.before!r}", file=sys.stderr)
             sys.exit(1)
     else:
         cutoff = datetime.now(timezone.utc) - timedelta(days=AUTO_ARCHIVE_DAYS)
 
-    # Hold both locks for the entire read-classify-write sequence
-    with _notes_and_archive_lock(args.notes_path, args.archive_path):
-        notes = read_jsonl(args.notes_path)
-        remaining = []
-        to_archive = []
-        for n in notes:
-            ts = _parse_timestamp(n.get("timestamp", ""))
-            # Only archive done notes or handoffs past the cutoff — never silently
-            # drop active todos, blockers, decisions, or other live note types.
-            # Treat unparseable timestamps as recent (keep them).
-            archivable = (n.get("status") == "done") or (n.get("type") == "handoff")
-            if ts is not None and ts < cutoff and archivable:
-                to_archive.append(n)
-            else:
-                remaining.append(n)
-
-        if not to_archive:
-            print("Nothing to archive.")
-            return
-
-        existing_archive = read_jsonl(args.archive_path)
-        existing_archive.extend(to_archive)
-        _write_jsonl(args.archive_path, existing_archive)
-        _write_jsonl(args.notes_path, remaining)
-
-    print(f"Archived {len(to_archive)} notes (before {cutoff.strftime('%Y-%m-%d')}).")
+    all_notes = store.list_notes(status='active')
+    archived_count = 0
+    for n in all_notes:
+        ts = _parse_timestamp(n.get('timestamp', ''))
+        archivable = (n.get('status') == 'done') or (n.get('type') == 'handoff')
+        if ts is not None and ts < cutoff and archivable:
+            store.archive_note(n['id'])
+            archived_count += 1
+    if not archived_count:
+        print('Nothing to archive.')
+        return
+    print(f"Archived {archived_count} notes (before {cutoff.strftime('%Y-%m-%d')}).")
 
 
 def cmd_migrate(args):
