@@ -4,18 +4,15 @@ Sets up claude-apiary budgeter hooks for the current project.
 
 ## Steps
 
-1. Locate the claude-apiary repo:
-   - Search for `setup.py` containing the text `claude-apiary` by looking in common locations: any `claude-apiary` directory under the home directory, or any parent/sibling of the current working directory.
-   - If found, use that path as `<apis-root>`.
-   - If not found, ask the user: "Where is the claude-apiary repo located? Please provide the absolute path."
+1. Use the current working directory as the project path to configure.
 
-2. Use the current working directory as the project path to configure.
-
-3. Run setup:
-   ```
-   python <apis-root>/setup.py --project-path "<current-working-directory>"
+2. Run setup via the launcher:
+   ```bash
+   python ~/.claude/apiary_launch.py setup.py --project-path "<current-working-directory>"
    ```
 
-4. Report what was configured: the settings.json path, the Python executable used, and the claude-apiary location.
+   If the launcher fails (e.g. `~/.claude/apiary_launch.py` does not exist), the global install has not been run yet. Ask the user for the apiary repo path and run `python <path>/setup.py --global` first.
 
-5. Remind the user to start a new Claude Code session for the hooks to activate.
+3. Report what was configured: the settings.json path, the Python executable used, and the claude-apiary location.
+
+4. Remind the user to start a new Claude Code session for the hooks to activate.

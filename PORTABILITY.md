@@ -69,6 +69,7 @@ If you're writing or editing hooks, skills, scripts, or settings in this repo, y
 
 - **No absolute paths.** Never hard-code `C:\Users\…`, `/Users/…`, `/home/…`, or interpreter paths like `python.exe`. In Python, derive from `pathlib.Path(__file__).resolve().parent`. For user home, use `Path.home()`.
 - **Hook commands use the launcher.** Global hook commands in `settings.json` must use `python ~/.claude/apiary_launch.py <relative-path>` — never `$CLAUDE_PROJECT_DIR` (which resolves to the *session's* repo, not apiary) or absolute paths. The launcher reads `~/.claude/apiary.json` to find the apiary repo, making hooks work from any repo. Source of truth: `core/apiary_launch.py`, copied to `~/.claude/` by `setup.py --global`.
+- **Skill CLI invocations use the launcher.** Skill templates (`.md` files in `*/commands/`) must invoke apiary CLI tools via `python ~/.claude/apiary_launch.py <relative-path> [args...]` — never `<repo_dir>` placeholders or bare relative paths. The launcher finds the repo, sets `cwd` and `CLAUDE_PROJECT_DIR`, and forwards all arguments. This eliminates LLM-dependent path resolution and makes skills work from any directory.
 - **Null device:** use `os.devnull` or `subprocess.DEVNULL`. Never write the OS-specific literal — it differs by platform.
 - **Subprocess:** list-form (`["git", "status"]`), never `shell=True`, never `.exe` suffixes.
 - **Paths:** `pathlib.Path` end-to-end. Never concatenate with `/` or `\` literals.

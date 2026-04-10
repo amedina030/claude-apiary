@@ -19,7 +19,7 @@ Push the current branch to the remote. If the branch has no upstream, use `git p
 Review the **entire session** for non-obvious discoveries, workarounds, deferred work, and untracked bugs. Write any missing learnings or TODOs first, then generate a handoff note:
 
 ```bash
-python <repo_dir>/scribe/notes.py add --type handoff --session-id <session_id_8char> --content "<handoff>"
+python ~/.claude/apiary_launch.py scribe/notes.py add --type handoff --session-id <session_id_8char> --content "<handoff>"
 ```
 
 The handoff must follow this structure:

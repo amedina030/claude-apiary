@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
-"""Apiary hook launcher -- locates the apiary repo via ~/.claude/apiary.json
-and runs the specified hook script, regardless of which repo the Claude Code
-session was started in.
+"""Apiary launcher -- locates the apiary repo via ~/.claude/apiary.json
+and runs the specified script with forwarded arguments, regardless of
+which repo the Claude Code session was started in.
 
 Installed to ``~/.claude/apiary_launch.py`` by ``setup.py --global``.
 Source of truth: ``core/apiary_launch.py`` in the apiary repo.
 
-Usage (in settings.json hook commands)::
+Usage (hooks in settings.json)::
 
     python ~/.claude/apiary_launch.py core/hooks/startup_prompt_hook.py
 
+Usage (CLI tools from skill templates)::
+
+    python ~/.claude/apiary_launch.py scribe/notes.py list --type todo
+    python ~/.claude/apiary_launch.py budgeter/report.py --since 7d
+
 The launcher resolves the apiary repo root from the pointer file, constructs
-the full script path, and execs it as a subprocess so that ``__file__`` in the
-hook script resolves correctly.  Falls back to ``$CLAUDE_PROJECT_DIR`` when
-the pointer file is missing (session is inside the apiary repo itself).
+the full script path, sets cwd to the repo root, and runs it as a subprocess
+with all remaining arguments forwarded.  Falls back to ``$CLAUDE_PROJECT_DIR``
+when the pointer file is missing (session is inside the apiary repo itself).
 """
 import json
 import os
@@ -57,7 +62,8 @@ def main() -> int:
         return 0
 
     result = subprocess.run(
-        [sys.executable, str(script)],
+        [sys.executable, str(script)] + sys.argv[2:],
+        cwd=str(repo_path),
         env={**os.environ, "CLAUDE_PROJECT_DIR": str(repo_path)},
     )
     return result.returncode

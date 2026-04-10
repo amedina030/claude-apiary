@@ -28,7 +28,7 @@ Parse the diff to get a list of changed files and their changes.
 
 Run the conformance checker:
 ```bash
-python <repo_dir>/docs/check.py
+python ~/.claude/apiary_launch.py docs/check.py
 ```
 
 Report any issues found.
