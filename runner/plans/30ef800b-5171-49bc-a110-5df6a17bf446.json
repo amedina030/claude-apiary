@@ -1,0 +1,271 @@
+{
+  "uuid": "30ef800b-5171-49bc-a110-5df6a17bf446",
+  "executor_model": "sonnet",
+  "spec": {
+    "goal": {
+      "problem": "Scribe uses a monolithic notes.jsonl for all note storage, which grows unbounded, risks line-level corruption, and forces full-file parsing for every operation.",
+      "solution": "Create a new scribe/store.py storage engine module implementing a folder-per-type layout with per-folder index.jsonl files, individual .md note files, and a global auto-increment counter.",
+      "value": "Provides the foundational storage layer that all subsequent scribe v2 work (CLI rewrite, migration, startup) builds on, with isolation between note types and single-file granularity."
+    },
+    "shape": {
+      "components": [
+        {
+          "name": "ScribeStore class",
+          "description": "Main interface. Initialized with a state_dir (Path). Provides methods for all CRUD operations on notes and learnings. Manages the folder layout, index I/O, and file operations."
+        },
+        {
+          "name": "Index I/O helpers",
+          "description": "read_index(type_dir) -> list[dict], write_index(type_dir, entries), append_index(type_dir, entry). Each reads/writes a per-folder index.jsonl. Uses FileLock for concurrent safety."
+        },
+        {
+          "name": "Global counter",
+          "description": "next_id file at state_dir/next_id holding a single integer. read_next_id() -> int, increment_id() -> int (atomic read-increment-write). Falls back to scanning all indexes for max ID if file is missing."
+        },
+        {
+          "name": "Note file helpers",
+          "description": "write_note_file(type_dir, id, content), read_note_file(type_dir, id) -> str | None. Pure content in .md files, no frontmatter."
+        },
+        {
+          "name": "Type folder constants",
+          "description": "TYPE_FOLDERS mapping: {'todo': 'todos', 'handoff': 'handoffs', 'decision': 'decisions', 'wishlist': 'wishlists', 'blocker': 'blockers', 'context': 'context', 'general': 'general'}. LEARNING_FOLDER = 'learnings'."
+        },
+        {
+          "name": "Layout initialization",
+          "description": "ensure_layout(state_dir) creates all type folders, archive subfolders, and next_id file if they don't exist."
+        }
+      ],
+      "integration_point": "scribe/store.py \u2014 new module, no integration with existing code yet. Phase 2 wires notes.py to use it.",
+      "pattern": "Similar to the existing memory/ file-per-entry pattern but adds index files for fast listing.",
+      "data_flow": "Caller -> ScribeStore method -> read/write index.jsonl + individual .md file -> return result.",
+      "dependencies": "core/utils/filelock.py for index writes. pathlib, json (stdlib).",
+      "files_to_modify": [],
+      "related_files": [
+        "core/utils/filelock.py",
+        "scribe/notes.py"
+      ]
+    },
+    "behavior": {
+      "input": "Method calls with note type, content, session_id, optional metadata.",
+      "processing": "1. ensure_layout() creates folder structure on first use. 2. add_note(type, content, session_id, ...) reads next_id, increments, writes index entry, writes .md file. 3. get_note(id) scans type indexes for matching ID, reads .md file. 4. list_notes(type=None, status='active', search=None) reads index(es), filters, sorts by timestamp. 5. update_note(id, **kwargs) finds and updates index entry. 6. archive_note(id) moves index entry to archive/index.jsonl, moves .md to archive/. 7. Learning methods follow same pattern in learnings/ folder.",
+      "output": "Dicts for single notes, lists of dicts for queries. Each dict has: id, type, status, session, timestamp, summary, has_body.",
+      "error_cases": [
+        {
+          "trigger": "Type folder or index doesn't exist",
+          "behavior": "Create it on the fly via ensure_layout()."
+        },
+        {
+          "trigger": "Note .md file missing but index entry exists",
+          "behavior": "Return the index entry with content=None and a warning flag."
+        },
+        {
+          "trigger": "next_id file missing",
+          "behavior": "Scan all indexes for max ID, recreate counter."
+        },
+        {
+          "trigger": "Malformed index entry (bad JSON line)",
+          "behavior": "Skip the entry, log to stderr."
+        }
+      ],
+      "edge_cases": [
+        {
+          "condition": "get_note(id) when note is archived",
+          "behavior": "Search archive indexes, return with status='archived'."
+        },
+        {
+          "condition": "Concurrent add operations",
+          "behavior": "FileLock on next_id file and on type index file ensures atomicity."
+        },
+        {
+          "condition": "Empty content string",
+          "behavior": "Write empty .md file, summary in index is empty string."
+        }
+      ]
+    },
+    "boundaries": {
+      "in_scope": [
+        "ScribeStore class with full CRUD for notes and learnings",
+        "Folder-per-type layout creation and management",
+        "Per-folder index.jsonl read/write with FileLock",
+        "Global next_id counter with fallback rebuild",
+        "Individual .md file read/write",
+        "Archive-to-subfolder (move index entry + .md file)",
+        "Unit tests in scribe/test_store.py"
+      ],
+      "out_of_scope": [
+        "CLI argument parsing \u2014 that stays in notes.py, rewired in Phase 2",
+        "Migration from old JSONL layout \u2014 Phase 3",
+        "Startup injection changes \u2014 Phase 4",
+        "Backup and repair commands \u2014 Phase 5",
+        "Auto-archive timer logic \u2014 Phase 2 will wire the existing 30-day logic to use store methods"
+      ],
+      "must_not_break": [
+        "No changes to existing scribe/notes.py \u2014 this is a new module only",
+        "No changes to any other existing files",
+        "FileLock compatibility with existing core/utils/filelock.py"
+      ]
+    },
+    "acceptance_criteria": [
+      "Given a fresh state_dir, when ensure_layout() is called, then all type folders (todos, handoffs, decisions, wishlists, blockers, context, general, learnings) exist with empty index.jsonl and archive/ subfolders",
+      "Given an empty store, when add_note(type='todo', content='fix bug', session='abc123') is called, then next_id increments, todos/index.jsonl has one entry with id=1, and todos/1.md contains 'fix bug'",
+      "Given notes of multiple types exist, when list_notes() is called with no type filter, then all notes are returned sorted by timestamp descending",
+      "Given a note with id=5 of type 'todo', when get_note(5) is called, then the index metadata and .md content are both returned",
+      "Given a note with id=5, when archive_note(5) is called, then the index entry moves to todos/archive/index.jsonl and 5.md moves to todos/archive/5.md",
+      "Given two concurrent add_note calls, when both complete, then both entries have unique IDs and both index entries and .md files exist without corruption",
+      "Given next_id file is deleted, when add_note is called, then the counter is rebuilt from max ID across all indexes and the new note gets the correct next ID",
+      "Given a malformed line in an index.jsonl, when list_notes is called, then the bad line is skipped with a warning and all valid entries are returned"
+    ],
+    "id": "30ef800b-5171-49bc-a110-5df6a17bf446",
+    "valid": true,
+    "series": {
+      "name": "scribe-v2",
+      "phase": 1,
+      "total_phases": 5,
+      "parent_spec": "bad6cef8-0700-4fa9-999a-6a768dd00ccf"
+    }
+  },
+  "steps": [
+    {
+      "step_number": 1,
+      "type": "create",
+      "description": "Create scribe/store.py with module docstring, imports, constants, and the ScribeStore class skeleton with __init__ and ensure_layout",
+      "action": "create",
+      "files": [
+        "scribe/store.py"
+      ],
+      "depends_on": [],
+      "code_spec": "Create scribe/store.py with:\n\n```\n\"\"\"Folder-per-type storage engine for scribe v2.\n\nProvides ScribeStore \u2014 a class that manages notes and learnings using\nindividual .md files organized into type folders, each with its own\nindex.jsonl for fast listing.\n\"\"\"\nimport json\nimport sys\nimport time\nfrom datetime import datetime, timezone\nfrom pathlib import Path\n\n# Repo-root import for core.utils\nsys.path.insert(0, str(Path(__file__).resolve().parent.parent))\nfrom core.utils.filelock import FileLock\n\n# --- Constants ---\n\nTYPE_FOLDERS: dict[str, str] = {\n    'todo': 'todos',\n    'handoff': 'handoffs',\n    'decision': 'decisions',\n    'wishlist': 'wishlists',\n    'blocker': 'blockers',\n    'context': 'context',\n    'general': 'general',\n}\n\nLEARNING_FOLDER = 'learnings'\n\n# All managed folder names (type folders + learnings)\n_ALL_FOLDERS: list[str] = list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]\n\nINDEX_FILENAME = 'index.jsonl'\nNEXT_ID_FILENAME = 'next_id'\nARCHIVE_DIRNAME = 'archive'\n\n\nclass ScribeStore:\n    \"\"\"Folder-per-type storage engine for notes and learnings.\n\n    Initialized with a state_dir (Path). Manages folder layout,\n    per-folder index.jsonl files, individual .md note files, and\n    a global auto-increment counter.\n    \"\"\"\n\n    def __init__(self, state_dir: Path) -> None:\n        self.state_dir = state_dir\n        self.ensure_layout()\n\n    def ensure_layout(self) -> None:\n        \"\"\"Create all type folders, archive subfolders, and next_id if missing.\"\"\"\n        self.state_dir.mkdir(parents=True, exist_ok=True)\n        for folder_name in _ALL_FOLDERS:\n            folder = self.state_dir / folder_name\n            folder.mkdir(parents=True, exist_ok=True)\n            # Create empty index.jsonl if it doesn't exist\n            idx = folder / INDEX_FILENAME\n            if not idx.exists():\n                idx.write_text('', encoding='utf-8')\n            # Create archive subfolder with its own empty index\n            archive = folder / ARCHIVE_DIRNAME\n            archive.mkdir(parents=True, exist_ok=True)\n            archive_idx = archive / INDEX_FILENAME\n            if not archive_idx.exists():\n                archive_idx.write_text('', encoding='utf-8')\n        # Create next_id file if missing\n        nid_path = self.state_dir / NEXT_ID_FILENAME\n        if not nid_path.exists():\n            nid_path.write_text('1', encoding='utf-8')\n```"
+    },
+    {
+      "step_number": 2,
+      "type": "modify",
+      "description": "Add index I/O helper methods (read_index, write_index, append_index) to ScribeStore",
+      "action": "modify",
+      "files": [
+        "scribe/store.py"
+      ],
+      "depends_on": [
+        1
+      ],
+      "code_spec": "Add these methods to ScribeStore class, after ensure_layout:\n\n```python\n    # --- Index I/O helpers ---\n\n    @staticmethod\n    def _read_index(type_dir: Path) -> list[dict]:\n        \"\"\"Read all valid entries from a folder's index.jsonl.\n\n        Malformed lines are skipped with a warning to stderr.\n        \"\"\"\n        idx_path = type_dir / INDEX_FILENAME\n        if not idx_path.exists():\n            return []\n        entries = []\n        for lineno, line in enumerate(idx_path.read_text(encoding='utf-8').splitlines(), 1):\n            line = line.strip()\n            if not line:\n                continue\n            try:\n                entries.append(json.loads(line))\n            except json.JSONDecodeError:\n                print(f\"Warning: skipping malformed index entry at {idx_path}:{lineno}\", file=sys.stderr)\n        return entries\n\n    @staticmethod\n    def _write_index(type_dir: Path, entries: list[dict]) -> None:\n        \"\"\"Overwrite a folder's index.jsonl with the given entries.\n\n        Uses FileLock on the index file for concurrent safety.\n        \"\"\"\n        idx_path = type_dir / INDEX_FILENAME\n        with FileLock(idx_path):\n            lines = [json.dumps(e, separators=(',', ':')) for e in entries]\n            idx_path.write_text('\\n'.join(lines) + ('\\n' if lines else ''), encoding='utf-8')\n\n    @staticmethod\n    def _append_index(type_dir: Path, entry: dict) -> None:\n        \"\"\"Append a single entry to a folder's index.jsonl.\n\n        Uses FileLock on the index file for concurrent safety.\n        \"\"\"\n        idx_path = type_dir / INDEX_FILENAME\n        with FileLock(idx_path):\n            with open(idx_path, 'a', encoding='utf-8') as f:\n                f.write(json.dumps(entry, separators=(',', ':')) + '\\n')\n```"
+    },
+    {
+      "step_number": 3,
+      "type": "modify",
+      "description": "Add global counter methods (_read_next_id, _increment_id, _rebuild_next_id) to ScribeStore",
+      "action": "modify",
+      "files": [
+        "scribe/store.py"
+      ],
+      "depends_on": [
+        2
+      ],
+      "code_spec": "Add these methods to ScribeStore class, after the index I/O helpers:\n\n```python\n    # --- Global counter ---\n\n    def _rebuild_next_id(self) -> int:\n        \"\"\"Scan all indexes for max ID and recreate the counter file.\n\n        Returns the next ID to use (max found + 1, or 1 if no entries).\n        \"\"\"\n        max_id = 0\n        for folder_name in _ALL_FOLDERS:\n            folder = self.state_dir / folder_name\n            for entry in self._read_index(folder):\n                eid = entry.get('id', 0)\n                if isinstance(eid, int) and eid > max_id:\n                    max_id = eid\n            # Also scan archive\n            archive = folder / ARCHIVE_DIRNAME\n            for entry in self._read_index(archive):\n                eid = entry.get('id', 0)\n                if isinstance(eid, int) and eid > max_id:\n                    max_id = eid\n        next_id = max_id + 1\n        nid_path = self.state_dir / NEXT_ID_FILENAME\n        nid_path.write_text(str(next_id), encoding='utf-8')\n        return next_id\n\n    def _read_next_id(self) -> int:\n        \"\"\"Return current next_id value. Rebuilds if file is missing.\"\"\"\n        nid_path = self.state_dir / NEXT_ID_FILENAME\n        if not nid_path.exists():\n            return self._rebuild_next_id()\n        text = nid_path.read_text(encoding='utf-8').strip()\n        try:\n            return int(text)\n        except ValueError:\n            return self._rebuild_next_id()\n\n    def _increment_id(self) -> int:\n        \"\"\"Atomically read, increment, and write the next_id counter.\n\n        Returns the ID that was consumed (i.e. the value before incrementing).\n        Uses FileLock on the next_id file for concurrent safety.\n        \"\"\"\n        nid_path = self.state_dir / NEXT_ID_FILENAME\n        with FileLock(nid_path):\n            current = self._read_next_id()\n            nid_path.write_text(str(current + 1), encoding='utf-8')\n        return current\n```"
+    },
+    {
+      "step_number": 4,
+      "type": "modify",
+      "description": "Add note file helper methods (_write_note_file, _read_note_file) and _type_dir helper to ScribeStore",
+      "action": "modify",
+      "files": [
+        "scribe/store.py"
+      ],
+      "depends_on": [
+        3
+      ],
+      "code_spec": "Add these methods to ScribeStore class, after the global counter methods:\n\n```python\n    # --- Note file helpers ---\n\n    def _type_dir(self, note_type: str) -> Path:\n        \"\"\"Return the folder Path for a given note type.\"\"\"\n        folder_name = TYPE_FOLDERS.get(note_type)\n        if folder_name is None:\n            raise ValueError(f\"Unknown note type: {note_type!r}. Valid types: {list(TYPE_FOLDERS.keys())}\")\n        return self.state_dir / folder_name\n\n    def _learning_dir(self) -> Path:\n        \"\"\"Return the folder Path for learnings.\"\"\"\n        return self.state_dir / LEARNING_FOLDER\n\n    @staticmethod\n    def _write_note_file(type_dir: Path, note_id: int, content: str) -> None:\n        \"\"\"Write note content to type_dir/<id>.md. Pure content, no frontmatter.\"\"\"\n        md_path = type_dir / f\"{note_id}.md\"\n        md_path.write_text(content, encoding='utf-8')\n\n    @staticmethod\n    def _read_note_file(type_dir: Path, note_id: int) -> str | None:\n        \"\"\"Read note content from type_dir/<id>.md. Returns None if missing.\"\"\"\n        md_path = type_dir / f\"{note_id}.md\"\n        if not md_path.exists():\n            return None\n        return md_path.read_text(encoding='utf-8')\n```"
+    },
+    {
+      "step_number": 5,
+      "type": "modify",
+      "description": "Add add_note method to ScribeStore",
+      "action": "modify",
+      "files": [
+        "scribe/store.py"
+      ],
+      "depends_on": [
+        4
+      ],
+      "code_spec": "Add after the note file helpers:\n\n```python\n    # --- CRUD operations: Notes ---\n\n    def add_note(self, note_type: str, content: str, session_id: str,\n                 summary: str = '', **metadata) -> dict:\n        \"\"\"Add a new note. Returns the created index entry dict.\"\"\"\n        type_dir = self._type_dir(note_type)\n        note_id = self._increment_id()\n        timestamp = datetime.now(timezone.utc).isoformat()\n        # If no summary provided, use first 120 chars of content\n        if not summary:\n            summary = content[:120].replace('\\n', ' ').strip()\n        entry = {\n            'id': note_id,\n            'type': note_type,\n            'status': 'active',\n            'session': session_id,\n            'timestamp': timestamp,\n            'summary': summary,\n            'has_body': bool(content),\n            **metadata,\n        }\n        self._append_index(type_dir, entry)\n        self._write_note_file(type_dir, note_id, content)\n        return entry\n```"
+    },
+    {
+      "step_number": 6,
+      "type": "modify",
+      "description": "Add get_note and list_notes methods to ScribeStore",
+      "action": "modify",
+      "files": [
+        "scribe/store.py"
+      ],
+      "depends_on": [
+        5
+      ],
+      "code_spec": "Add after add_note:\n\n```python\n    def get_note(self, note_id: int) -> dict | None:\n        \"\"\"Retrieve a single note by ID. Searches active then archive indexes.\n\n        Returns a dict with index metadata plus 'content' key, or None.\n        \"\"\"\n        # Search active indexes across all type folders\n        for folder_name in TYPE_FOLDERS.values():\n            type_dir = self.state_dir / folder_name\n            for entry in self._read_index(type_dir):\n                if entry.get('id') == note_id:\n                    content = self._read_note_file(type_dir, note_id)\n                    result = {**entry, 'content': content}\n                    if content is None and entry.get('has_body'):\n                        result['_warning'] = 'body_file_missing'\n                    return result\n            # Check archive\n            archive_dir = type_dir / ARCHIVE_DIRNAME\n            for entry in self._read_index(archive_dir):\n                if entry.get('id') == note_id:\n                    content = self._read_note_file(archive_dir, note_id)\n                    result = {**entry, 'content': content, 'status': 'archived'}\n                    if content is None and entry.get('has_body'):\n                        result['_warning'] = 'body_file_missing'\n                    return result\n        return None\n\n    def list_notes(self, note_type: str | None = None,\n                   status: str = 'active',\n                   search: str | None = None) -> list[dict]:\n        \"\"\"List notes, optionally filtered by type, status, and search term.\n\n        Returns list of index entry dicts sorted by timestamp descending.\n        \"\"\"\n        results: list[dict] = []\n        # Determine which folders to scan\n        if note_type is not None:\n            folder_names = [TYPE_FOLDERS[note_type]]  # raises KeyError if invalid\n        else:\n            folder_names = list(TYPE_FOLDERS.values())\n\n        for folder_name in folder_names:\n            type_dir = self.state_dir / folder_name\n            if status == 'active' or status == 'all':\n                results.extend(self._read_index(type_dir))\n            if status == 'archived' or status == 'all':\n                archive_dir = type_dir / ARCHIVE_DIRNAME\n                for entry in self._read_index(archive_dir):\n                    entry_copy = {**entry, 'status': 'archived'}\n                    results.append(entry_copy)\n\n        # Filter by search term (case-insensitive in summary)\n        if search:\n            search_lower = search.lower()\n            results = [e for e in results if search_lower in e.get('summary', '').lower()]\n\n        # Sort by timestamp descending\n        results.sort(key=lambda e: e.get('timestamp', ''), reverse=True)\n        return results\n```"
+    },
+    {
+      "step_number": 7,
+      "type": "modify",
+      "description": "Add update_note and archive_note methods to ScribeStore",
+      "action": "modify",
+      "files": [
+        "scribe/store.py"
+      ],
+      "depends_on": [
+        6
+      ],
+      "code_spec": "Add after list_notes:\n\n```python\n    def update_note(self, note_id: int, **kwargs) -> dict | None:\n        \"\"\"Update fields on an existing note's index entry.\n\n        Supports updating: summary, status, content (rewrites .md file).\n        Returns the updated entry dict, or None if not found.\n        \"\"\"\n        content_update = kwargs.pop('content', None)\n        for folder_name in TYPE_FOLDERS.values():\n            type_dir = self.state_dir / folder_name\n            entries = self._read_index(type_dir)\n            for i, entry in enumerate(entries):\n                if entry.get('id') == note_id:\n                    entries[i] = {**entry, **kwargs}\n                    self._write_index(type_dir, entries)\n                    if content_update is not None:\n                        self._write_note_file(type_dir, note_id, content_update)\n                        entries[i]['has_body'] = bool(content_update)\n                        self._write_index(type_dir, entries)\n                    return entries[i]\n        return None\n\n    def archive_note(self, note_id: int) -> dict | None:\n        \"\"\"Move a note to its type folder's archive.\n\n        Moves the index entry from type_dir/index.jsonl to\n        type_dir/archive/index.jsonl, and moves <id>.md to archive/.\n        Returns the archived entry dict, or None if not found.\n        \"\"\"\n        for folder_name in TYPE_FOLDERS.values():\n            type_dir = self.state_dir / folder_name\n            entries = self._read_index(type_dir)\n            target_entry = None\n            remaining = []\n            for entry in entries:\n                if entry.get('id') == note_id:\n                    target_entry = entry\n                else:\n                    remaining.append(entry)\n            if target_entry is not None:\n                # Remove from active index\n                self._write_index(type_dir, remaining)\n                # Add to archive index\n                archive_dir = type_dir / ARCHIVE_DIRNAME\n                archive_dir.mkdir(parents=True, exist_ok=True)\n                target_entry['status'] = 'archived'\n                self._append_index(archive_dir, target_entry)\n                # Move .md file\n                src_md = type_dir / f\"{note_id}.md\"\n                dst_md = archive_dir / f\"{note_id}.md\"\n                if src_md.exists():\n                    dst_md.write_text(src_md.read_text(encoding='utf-8'), encoding='utf-8')\n                    src_md.unlink()\n                return target_entry\n        return None\n```"
+    },
+    {
+      "step_number": 8,
+      "type": "modify",
+      "description": "Add learning CRUD methods (add_learning, list_learnings, get_learning, remove_learning) to ScribeStore",
+      "action": "modify",
+      "files": [
+        "scribe/store.py"
+      ],
+      "depends_on": [
+        7
+      ],
+      "code_spec": "Add after archive_note:\n\n```python\n    # --- CRUD operations: Learnings ---\n\n    def add_learning(self, content: str, session_id: str,\n                     summary: str = '', **metadata) -> dict:\n        \"\"\"Add a new learning. Returns the created index entry dict.\"\"\"\n        learn_dir = self._learning_dir()\n        note_id = self._increment_id()\n        timestamp = datetime.now(timezone.utc).isoformat()\n        if not summary:\n            summary = content[:120].replace('\\n', ' ').strip()\n        entry = {\n            'id': note_id,\n            'type': 'learning',\n            'status': 'active',\n            'session': session_id,\n            'timestamp': timestamp,\n            'summary': summary,\n            'has_body': bool(content),\n            **metadata,\n        }\n        self._append_index(learn_dir, entry)\n        self._write_note_file(learn_dir, note_id, content)\n        return entry\n\n    def list_learnings(self, search: str | None = None) -> list[dict]:\n        \"\"\"List all learnings, optionally filtered by search term.\"\"\"\n        learn_dir = self._learning_dir()\n        entries = self._read_index(learn_dir)\n        if search:\n            search_lower = search.lower()\n            entries = [e for e in entries if search_lower in e.get('summary', '').lower()]\n        entries.sort(key=lambda e: e.get('timestamp', ''), reverse=True)\n        return entries\n\n    def get_learning(self, learning_id: int) -> dict | None:\n        \"\"\"Retrieve a single learning by ID.\"\"\"\n        learn_dir = self._learning_dir()\n        for entry in self._read_index(learn_dir):\n            if entry.get('id') == learning_id:\n                content = self._read_note_file(learn_dir, learning_id)\n                result = {**entry, 'content': content}\n                if content is None and entry.get('has_body'):\n                    result['_warning'] = 'body_file_missing'\n                return result\n        return None\n\n    def remove_learning(self, learning_id: int) -> dict | None:\n        \"\"\"Remove a learning by ID. Returns the removed entry or None.\"\"\"\n        learn_dir = self._learning_dir()\n        entries = self._read_index(learn_dir)\n        target = None\n        remaining = []\n        for entry in entries:\n            if entry.get('id') == learning_id:\n                target = entry\n            else:\n                remaining.append(entry)\n        if target is not None:\n            self._write_index(learn_dir, remaining)\n            md_path = learn_dir / f\"{learning_id}.md\"\n            if md_path.exists():\n                md_path.unlink()\n            return target\n        return None\n```"
+    },
+    {
+      "step_number": 9,
+      "type": "create",
+      "description": "Create scribe/test_store.py with comprehensive unit tests covering all acceptance criteria",
+      "action": "create",
+      "files": [
+        "scribe/test_store.py"
+      ],
+      "depends_on": [
+        8
+      ],
+      "code_spec": "Create scribe/test_store.py:\n\n```python\n#!/usr/bin/env python3\n\"\"\"Unit tests for scribe.store \u2014 folder-per-type storage engine.\"\"\"\nimport json\nimport sys\nimport tempfile\nimport threading\nimport unittest\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parent.parent))\nfrom scribe.store import ScribeStore, TYPE_FOLDERS, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_ID_FILENAME\n\n\nclass TestEnsureLayout(unittest.TestCase):\n    \"\"\"AC: Given a fresh state_dir, ensure_layout creates all folders.\"\"\"\n\n    def test_creates_all_type_folders_with_index_and_archive(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            state_dir = Path(tmp) / 'scribe_state'\n            store = ScribeStore(state_dir)\n            all_folders = list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]\n            for folder_name in all_folders:\n                folder = state_dir / folder_name\n                self.assertTrue(folder.is_dir(), f\"{folder_name} should exist\")\n                idx = folder / INDEX_FILENAME\n                self.assertTrue(idx.exists(), f\"{folder_name}/index.jsonl should exist\")\n                archive = folder / ARCHIVE_DIRNAME\n                self.assertTrue(archive.is_dir(), f\"{folder_name}/archive should exist\")\n                archive_idx = archive / INDEX_FILENAME\n                self.assertTrue(archive_idx.exists())\n            # next_id file\n            nid = state_dir / NEXT_ID_FILENAME\n            self.assertTrue(nid.exists())\n            self.assertEqual(nid.read_text(encoding='utf-8').strip(), '1')\n\n\nclass TestAddNote(unittest.TestCase):\n    \"\"\"AC: add_note increments next_id, writes index entry and .md file.\"\"\"\n\n    def test_add_first_note(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            result = store.add_note('todo', 'fix bug', 'abc123')\n            self.assertEqual(result['id'], 1)\n            self.assertEqual(result['type'], 'todo')\n            self.assertEqual(result['status'], 'active')\n            self.assertEqual(result['session'], 'abc123')\n            self.assertTrue(result['has_body'])\n            # Check index file\n            idx_path = Path(tmp) / 'todos' / INDEX_FILENAME\n            lines = [l for l in idx_path.read_text(encoding='utf-8').splitlines() if l.strip()]\n            self.assertEqual(len(lines), 1)\n            entry = json.loads(lines[0])\n            self.assertEqual(entry['id'], 1)\n            # Check .md file\n            md_path = Path(tmp) / 'todos' / '1.md'\n            self.assertEqual(md_path.read_text(encoding='utf-8'), 'fix bug')\n            # next_id should now be 2\n            nid = Path(tmp) / NEXT_ID_FILENAME\n            self.assertEqual(nid.read_text(encoding='utf-8').strip(), '2')\n\n    def test_add_multiple_types(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            n1 = store.add_note('todo', 'first', 's1')\n            n2 = store.add_note('decision', 'second', 's1')\n            n3 = store.add_note('todo', 'third', 's1')\n            self.assertEqual(n1['id'], 1)\n            self.assertEqual(n2['id'], 2)\n            self.assertEqual(n3['id'], 3)\n\n\nclass TestGetNote(unittest.TestCase):\n    \"\"\"AC: get_note returns index metadata and .md content.\"\"\"\n\n    def test_get_existing_note(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            store.add_note('todo', 'fix bug', 's1')\n            result = store.get_note(1)\n            self.assertIsNotNone(result)\n            self.assertEqual(result['id'], 1)\n            self.assertEqual(result['content'], 'fix bug')\n\n    def test_get_nonexistent_note(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            self.assertIsNone(store.get_note(999))\n\n    def test_get_note_missing_body(self):\n        \"\"\"Index entry exists but .md file is gone -> content=None, warning.\"\"\"\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            store.add_note('todo', 'content here', 's1')\n            # Delete the .md file\n            md = Path(tmp) / 'todos' / '1.md'\n            md.unlink()\n            result = store.get_note(1)\n            self.assertIsNone(result['content'])\n            self.assertEqual(result.get('_warning'), 'body_file_missing')\n\n\nclass TestListNotes(unittest.TestCase):\n    \"\"\"AC: list_notes returns all notes sorted by timestamp descending.\"\"\"\n\n    def test_list_all_types(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            store.add_note('todo', 'a', 's1')\n            store.add_note('decision', 'b', 's1')\n            store.add_note('blocker', 'c', 's1')\n            results = store.list_notes()\n            self.assertEqual(len(results), 3)\n            # Sorted by timestamp desc \u2014 last added is first\n            ids = [r['id'] for r in results]\n            self.assertEqual(ids, [3, 2, 1])\n\n    def test_list_filtered_by_type(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            store.add_note('todo', 'a', 's1')\n            store.add_note('decision', 'b', 's1')\n            results = store.list_notes(note_type='todo')\n            self.assertEqual(len(results), 1)\n            self.assertEqual(results[0]['type'], 'todo')\n\n    def test_list_with_search(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            store.add_note('todo', 'fix the bug', 's1')\n            store.add_note('todo', 'add feature', 's1')\n            results = store.list_notes(search='bug')\n            self.assertEqual(len(results), 1)\n            self.assertIn('bug', results[0]['summary'])\n\n\nclass TestArchiveNote(unittest.TestCase):\n    \"\"\"AC: archive_note moves index entry and .md to archive/.\"\"\"\n\n    def test_archive_moves_entry_and_file(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            store.add_note('todo', 'to archive', 's1')\n            result = store.archive_note(1)\n            self.assertIsNotNone(result)\n            self.assertEqual(result['status'], 'archived')\n            # Active index should be empty\n            active = store._read_index(Path(tmp) / 'todos')\n            self.assertEqual(len(active), 0)\n            # Archive index should have the entry\n            archived = store._read_index(Path(tmp) / 'todos' / ARCHIVE_DIRNAME)\n            self.assertEqual(len(archived), 1)\n            self.assertEqual(archived[0]['id'], 1)\n            # .md moved\n            self.assertFalse((Path(tmp) / 'todos' / '1.md').exists())\n            self.assertTrue((Path(tmp) / 'todos' / 'archive' / '1.md').exists())\n\n    def test_get_archived_note(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            store.add_note('todo', 'archive me', 's1')\n            store.archive_note(1)\n            result = store.get_note(1)\n            self.assertIsNotNone(result)\n            self.assertEqual(result['status'], 'archived')\n            self.assertEqual(result['content'], 'archive me')\n\n\nclass TestConcurrency(unittest.TestCase):\n    \"\"\"AC: concurrent add_note calls get unique IDs without corruption.\"\"\"\n\n    def test_concurrent_adds(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            results = []\n            errors = []\n\n            def add(i):\n                try:\n                    r = store.add_note('todo', f'note {i}', 'concurrent')\n                    results.append(r)\n                except Exception as e:\n                    errors.append(e)\n\n            threads = [threading.Thread(target=add, args=(i,)) for i in range(10)]\n            for t in threads:\n                t.start()\n            for t in threads:\n                t.join()\n\n            self.assertEqual(len(errors), 0, f\"Errors: {errors}\")\n            self.assertEqual(len(results), 10)\n            ids = {r['id'] for r in results}\n            self.assertEqual(len(ids), 10, \"All IDs should be unique\")\n\n\nclass TestNextIdRebuild(unittest.TestCase):\n    \"\"\"AC: next_id file deleted -> rebuild from max ID across indexes.\"\"\"\n\n    def test_rebuild_after_delete(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            store.add_note('todo', 'a', 's1')  # id=1\n            store.add_note('decision', 'b', 's1')  # id=2\n            store.add_note('todo', 'c', 's1')  # id=3\n            # Delete next_id\n            nid_path = Path(tmp) / NEXT_ID_FILENAME\n            nid_path.unlink()\n            # Next add should rebuild and get id=4\n            result = store.add_note('todo', 'd', 's1')\n            self.assertEqual(result['id'], 4)\n\n\nclass TestMalformedIndex(unittest.TestCase):\n    \"\"\"AC: malformed line in index.jsonl is skipped with warning.\"\"\"\n\n    def test_skips_bad_lines(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            store.add_note('todo', 'good note', 's1')\n            # Inject a bad line\n            idx = Path(tmp) / 'todos' / INDEX_FILENAME\n            content = idx.read_text(encoding='utf-8')\n            idx.write_text('NOT VALID JSON\\n' + content, encoding='utf-8')\n            # list_notes should still work, returning only the valid entry\n            results = store.list_notes(note_type='todo')\n            self.assertEqual(len(results), 1)\n            self.assertEqual(results[0]['id'], 1)\n\n\nclass TestUpdateNote(unittest.TestCase):\n    def test_update_summary(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            store.add_note('todo', 'original', 's1')\n            result = store.update_note(1, summary='updated summary')\n            self.assertIsNotNone(result)\n            self.assertEqual(result['summary'], 'updated summary')\n\n    def test_update_content(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            store.add_note('todo', 'original', 's1')\n            store.update_note(1, content='new body')\n            md = Path(tmp) / 'todos' / '1.md'\n            self.assertEqual(md.read_text(encoding='utf-8'), 'new body')\n\n\nclass TestLearnings(unittest.TestCase):\n    def test_add_and_list_learnings(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            l1 = store.add_learning('learned thing 1', 's1')\n            l2 = store.add_learning('learned thing 2', 's1')\n            self.assertEqual(l1['type'], 'learning')\n            results = store.list_learnings()\n            self.assertEqual(len(results), 2)\n\n    def test_get_learning(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            added = store.add_learning('my learning', 's1')\n            result = store.get_learning(added['id'])\n            self.assertEqual(result['content'], 'my learning')\n\n    def test_remove_learning(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            added = store.add_learning('remove me', 's1')\n            removed = store.remove_learning(added['id'])\n            self.assertIsNotNone(removed)\n            self.assertIsNone(store.get_learning(added['id']))\n\n    def test_search_learnings(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            store.add_learning('encoding workaround', 's1')\n            store.add_learning('api quirk', 's1')\n            results = store.list_learnings(search='encoding')\n            self.assertEqual(len(results), 1)\n\n\nclass TestEmptyContent(unittest.TestCase):\n    def test_empty_content_string(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            store = ScribeStore(Path(tmp))\n            result = store.add_note('todo', '', 's1')\n            self.assertFalse(result['has_body'])\n            md = Path(tmp) / 'todos' / '1.md'\n            self.assertEqual(md.read_text(encoding='utf-8'), '')\n\n\nif __name__ == '__main__':\n    unittest.main()\n```"
+    },
+    {
+      "step_number": 10,
+      "type": "test",
+      "description": "Run unit tests for scribe/store.py",
+      "action": "test",
+      "files": [
+        "scribe/test_store.py"
+      ],
+      "depends_on": [
+        9
+      ],
+      "code_spec": "python -m unittest scribe.test_store -v"
+    },
+    {
+      "step_number": 11,
+      "type": "verify",
+      "description": "Verify all acceptance criteria are met and no existing files were modified",
+      "action": "verify",
+      "files": [
+        "scribe/store.py",
+        "scribe/test_store.py"
+      ],
+      "depends_on": [
+        10
+      ],
+      "code_spec": "Verify the following:\n1. scribe/store.py exists as a new file with ScribeStore class, all methods, and constants as specified.\n2. scribe/test_store.py exists with unittest-based tests.\n3. No changes to scribe/notes.py or any other existing file \u2014 run 'git diff --name-only' and confirm only scribe/store.py and scribe/test_store.py are new.\n4. All 8 acceptance criteria are covered by tests:\n   - ensure_layout creates all folders (TestEnsureLayout)\n   - add_note increments ID, writes index + .md (TestAddNote)\n   - list_notes returns all types sorted desc (TestListNotes)\n   - get_note returns metadata + content (TestGetNote)\n   - archive_note moves entry + .md (TestArchiveNote)\n   - concurrent adds get unique IDs (TestConcurrency)\n   - next_id rebuild after deletion (TestNextIdRebuild)\n   - malformed index line skipped (TestMalformedIndex)\n5. All tests pass (step 10 succeeded).\n6. FileLock is imported from core.utils.filelock (not reimplemented).\n7. All file I/O uses encoding='utf-8'.\n8. Only stdlib imports are used (json, sys, tempfile, threading, unittest, pathlib, datetime)."
+    }
+  ],
+  "valid": true
+}

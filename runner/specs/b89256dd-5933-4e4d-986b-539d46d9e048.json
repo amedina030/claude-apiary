@@ -1,0 +1,116 @@
+{
+  "goal": {
+    "problem": "scribe/notes.py uses direct JSONL file I/O for all operations. The new folder-per-type storage engine (scribe/store.py from Phase 1) exists but nothing uses it yet.",
+    "solution": "Rewire all CLI commands in scribe/notes.py to delegate storage operations to ScribeStore, removing the old JSONL read/write code paths.",
+    "value": "Completes the storage switchover so the CLI produces the new folder-per-type layout, enabling migration (Phase 3) and all downstream phases."
+  },
+  "shape": {
+    "components": [
+      {
+        "name": "ScribeStore integration in main()",
+        "description": "Initialize ScribeStore with the resolved state_dir at CLI entry. Pass it to command handlers instead of raw file paths."
+      },
+      {
+        "name": "Rewritten cmd_add",
+        "description": "Calls store.add_note() instead of directly appending to notes.jsonl. Handles --content, --type, --session-id, --role, --mission flags as before."
+      },
+      {
+        "name": "Rewritten cmd_get / cmd_list / cmd_done / cmd_update / cmd_archive",
+        "description": "Each delegates to the corresponding ScribeStore method. Output format stays identical to current behavior."
+      },
+      {
+        "name": "Rewritten cmd_learn / cmd_learnings / cmd_unlearn",
+        "description": "Learning commands delegate to ScribeStore's learning methods. Same CLI surface."
+      },
+      {
+        "name": "Rewritten auto-archive logic",
+        "description": "The existing 30-day auto-archive check now calls store.archive_note() which moves entries to archive subfolders instead of a separate archive JSONL."
+      },
+      {
+        "name": "Removed old JSONL helpers",
+        "description": "Remove read_jsonl, write_jsonl, make_note, and other direct file I/O functions that are superseded by ScribeStore."
+      }
+    ],
+    "integration_point": "scribe/notes.py — full rewrite of storage layer, CLI surface unchanged.",
+    "pattern": "Existing argparse structure and command dispatch preserved. Only internal implementation changes.",
+    "data_flow": "CLI args -> argparse -> command handler -> ScribeStore method -> folder/index/file I/O -> stdout output.",
+    "dependencies": "scribe/store.py (Phase 1 must be complete).",
+    "files_to_modify": [
+      "scribe/notes.py"
+    ],
+    "related_files": [
+      "scribe/store.py",
+      "scribe/test_notes.py"
+    ]
+  },
+  "behavior": {
+    "input": "Same CLI interface as today: notes.py add --type todo --content '...', notes.py get 306, notes.py list, notes.py done 306, etc.",
+    "processing": "1. main() creates ScribeStore(state_dir). 2. Each cmd_* function receives the store instance. 3. cmd_add calls store.add_note(), prints 'Added #N (type)'. 4. cmd_get calls store.get_note(id), prints metadata + content. 5. cmd_list calls store.list_notes() with filters, prints summary table. 6. cmd_done calls store.update_note(id, status='done'). 7. Auto-archive runs on list/add, calling store.archive_note() for notes older than 30 days. 8. Learning commands call store.add_learning/list_learnings/remove_learning.",
+    "output": "Identical CLI output format to current implementation. Same exit codes.",
+    "error_cases": [
+      {
+        "trigger": "Note ID not found",
+        "behavior": "Print error message, exit 1. Same as current behavior."
+      },
+      {
+        "trigger": "Invalid --type value",
+        "behavior": "Argparse rejects it. Add 'general' to the valid choices."
+      }
+    ],
+    "edge_cases": [
+      {
+        "condition": "get <id> finds note in archive",
+        "behavior": "Print with [archived] indicator."
+      },
+      {
+        "condition": "list with no --type",
+        "behavior": "Merge all type indexes via store.list_notes(type=None)."
+      },
+      {
+        "condition": "handoff-sessions subcommand",
+        "behavior": "Rewire to scan handoffs/ index instead of full JSONL."
+      }
+    ]
+  },
+  "boundaries": {
+    "in_scope": [
+      "Rewire all cmd_* functions to use ScribeStore",
+      "Remove old JSONL read/write helpers",
+      "Add 'general' to valid note types",
+      "Update scribe/test_notes.py to work with new storage",
+      "Preserve identical CLI output format"
+    ],
+    "out_of_scope": [
+      "Migration of existing data — Phase 3",
+      "Startup injection changes — Phase 4",
+      "New CLI subcommands (repair, backup) — Phase 5",
+      "Changes to store.py itself — Phase 1"
+    ],
+    "must_not_break": [
+      "All existing CLI commands produce identical output format",
+      "Exit codes unchanged",
+      "FileLock concurrency safety",
+      "Backfill agent's ability to call notes.py add --type handoff",
+      "Wrapup skill's handoff creation flow"
+    ]
+  },
+  "acceptance_criteria": [
+    "Given the new store layout, when 'notes.py add --type todo --content test' is run, then a file appears in todos/ with correct index entry and .md content",
+    "Given a note exists with id=5, when 'notes.py get 5' is run, then output matches the format: ID, Type, Status, Session, Time, content",
+    "Given notes of mixed types, when 'notes.py list' is run, then all are shown sorted by timestamp with type labels",
+    "Given a note with id=5, when 'notes.py done 5' is run, then the index entry status changes to 'done'",
+    "Given a note older than 30 days, when any list or add command runs, then the note is auto-archived to the archive/ subfolder",
+    "Given 'notes.py learn --content test' is run, then a learning entry appears in learnings/ with correct index and .md file",
+    "Given 'notes.py list --type todo --search fix' is run, then only todos with 'fix' in summary are shown",
+    "Given 'notes.py show 5' is run (alias), then output is identical to 'notes.py get 5'",
+    "Given 'notes.py handoff-sessions' is run, then it lists sessions from handoffs/ index"
+  ],
+  "id": "b89256dd-5933-4e4d-986b-539d46d9e048",
+  "valid": true,
+  "series": {
+    "name": "scribe-v2",
+    "phase": 2,
+    "total_phases": 5,
+    "parent_spec": "bad6cef8-0700-4fa9-999a-6a768dd00ccf"
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "goal": {
+    "problem": "Existing scribe data lives in monolithic JSONL files (notes.jsonl, notes_archive.jsonl, learnings.jsonl) but notes.py now expects the new folder-per-type layout from Phases 1-2.",
+    "solution": "Write a one-way migration script that converts all existing JSONL records into the new folder-per-type layout with individual .md files and per-folder indexes.",
+    "value": "Users can transition to the new scribe v2 storage without losing any existing notes, learnings, or history."
+  },
+  "shape": {
+    "components": [
+      {
+        "name": "migrate_scribe_v2.py",
+        "description": "Main migration script at scripts/migrate_scribe_v2.py. Reads old JSONL files, creates folder-per-type layout, writes index entries and .md files. Supports --dry-run and --force flags."
+      },
+      {
+        "name": "JSONL reader",
+        "description": "Reads notes.jsonl, notes_archive.jsonl, and learnings.jsonl with graceful handling of malformed lines (skip + warn)."
+      },
+      {
+        "name": "Record converter",
+        "description": "Maps old record fields to new index entry format. Generates summary from content (first 200 chars for long notes). Sets has_body=true for all records."
+      },
+      {
+        "name": "Backup of old files",
+        "description": "Before migrating, copies old JSONL files to a backup/ subfolder with timestamp prefix. These are kept for manual rollback."
+      }
+    ],
+    "integration_point": "scripts/migrate_scribe_v2.py — standalone script, uses ScribeStore from scribe/store.py for writes.",
+    "pattern": "Mirrors structure of existing scripts/migrate_scribe_state.py.",
+    "data_flow": "Old JSONL files -> read + parse -> convert records -> ScribeStore.add_note() for each -> verify counts match.",
+    "dependencies": "scribe/store.py (Phase 1), notes.py rewrite complete (Phase 2) so the new layout is the active one.",
+    "files_to_modify": [],
+    "related_files": [
+      "scribe/store.py",
+      "scribe/notes.py",
+      "scripts/migrate_scribe_state.py"
+    ]
+  },
+  "behavior": {
+    "input": "Command line: python scripts/migrate_scribe_v2.py [--dry-run] [--force] [--state-dir PATH]",
+    "processing": "1. Locate old JSONL files (notes.jsonl, notes_archive.jsonl, learnings.jsonl) in the legacy state dir. 2. If --dry-run, report what would be migrated and exit. 3. Back up old files to backup/ with timestamp. 4. Read each JSONL file line by line, parse records, skip malformed. 5. For each note record: determine type folder, write .md file, write index entry using ScribeStore. Archived notes go to archive/ subfolder. 6. For each learning: write to learnings/ folder. 7. Set next_id to max observed ID + 1. 8. Print summary: N notes migrated, M learnings migrated, K skipped.",
+    "output": "Stdout: migration progress and summary. Exit 0 on success, exit 1 on error.",
+    "error_cases": [
+      {
+        "trigger": "Old JSONL files not found",
+        "behavior": "Print 'No legacy data found at <path>', exit 0."
+      },
+      {
+        "trigger": "New layout already has data and --force not set",
+        "behavior": "Print warning, refuse to overwrite, exit 1."
+      },
+      {
+        "trigger": "Malformed JSONL line",
+        "behavior": "Skip with warning, continue migration. Report count of skipped at end."
+      }
+    ],
+    "edge_cases": [
+      {
+        "condition": "Note with no 'type' field in old record",
+        "behavior": "Default to 'general' type."
+      },
+      {
+        "condition": "Duplicate IDs across notes.jsonl and notes_archive.jsonl",
+        "behavior": "Archive copy takes precedence (it's the older state). Active copy gets next available ID."
+      },
+      {
+        "condition": "Learning records (different schema than notes)",
+        "behavior": "Map learning fields (id with L-prefix, content, timestamp) to learnings/ folder."
+      }
+    ]
+  },
+  "boundaries": {
+    "in_scope": [
+      "One-way migration from JSONL to folder-per-type",
+      "Backup of old files before migration",
+      "--dry-run mode to preview changes",
+      "--force to overwrite existing v2 data",
+      "Migration of notes, archived notes, and learnings",
+      "Unit tests in scripts/test_migrate_scribe_v2.py"
+    ],
+    "out_of_scope": [
+      "Reverse migration (v2 back to JSONL) — not needed",
+      "Deletion of old JSONL files — user confirms manually later",
+      "Migration of memory/ — already file-per-entry, untouched"
+    ],
+    "must_not_break": [
+      "Old JSONL files are never modified, only read",
+      "If migration fails partway, old data is still intact in backup"
+    ]
+  },
+  "acceptance_criteria": [
+    "Given old notes.jsonl with 50 notes of mixed types, when migrate_scribe_v2.py is run, then each note appears as an .md file in the correct type folder with a matching index entry",
+    "Given old notes_archive.jsonl with archived notes, when migration runs, then archived notes appear in <type>/archive/ subfolders",
+    "Given old learnings.jsonl with 10 learnings, when migration runs, then all appear in learnings/ with L-prefixed .md filenames",
+    "Given --dry-run flag, when migration runs, then no files are created and a summary of what would be migrated is printed",
+    "Given the new layout already has data and --force is not set, when migration runs, then it refuses with a clear error",
+    "Given a malformed line in notes.jsonl, when migration runs, then that line is skipped with a warning and all other records migrate successfully",
+    "Given migration completes, when notes.py list is run, then output matches the pre-migration content",
+    "Given migration completes, then old JSONL files exist in backup/ with timestamp prefix"
+  ],
+  "id": "ef39c7cb-1e37-430f-bd16-6194f0455bf5",
+  "valid": true,
+  "series": {
+    "name": "scribe-v2",
+    "phase": 3,
+    "total_phases": 5,
+    "parent_spec": "bad6cef8-0700-4fa9-999a-6a768dd00ccf"
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "goal": {
+    "problem": "Scribe stores all notes in a single flat JSONL file that grows ~5KB/session, risks line-level corruption on concurrent writes, and forces full-file parsing for every operation -- none of which scales past a few months of active use.",
+    "solution": "Replace the monolithic JSONL with a folder-per-type layout where each note is an individual file, metadata lives in per-folder index files, and archival moves old entries to subfolders.",
+    "value": "Claude sessions start faster (index-only reads), note corruption is isolated to single files, the store is human-browsable, and the architecture supports future scaling (search, multi-user, cloud sync)."
+  },
+  "shape": {
+    "components": [
+      {
+        "name": "Type folders",
+        "description": "One directory per note type (todos/, handoffs/, decisions/, wishlists/, blockers/, context/, general/), each containing an index.jsonl, individual .md note files, and an archive/ subfolder."
+      },
+      {
+        "name": "Learnings folder",
+        "description": "learnings/ directory with same structure (index.jsonl + individual files + archive/) but manual-only archival -- no auto-archive process."
+      },
+      {
+        "name": "General folder",
+        "description": "general/ directory as catch-all for notes without a specific type. Same structure as other type folders."
+      },
+      {
+        "name": "Global counter",
+        "description": "next_id file at .apiary/scribe/next_id holding a single integer, shared across all types. Read-increment-write on each add operation."
+      },
+      {
+        "name": "Index files",
+        "description": "Per-folder index.jsonl containing metadata records: id, status, session, timestamp, summary. Source of truth for all metadata; note .md files hold only content."
+      },
+      {
+        "name": "Backup system",
+        "description": "backups/ directory for daily snapshots of all index files. Script only -- cron scheduling is deferred."
+      },
+      {
+        "name": "Migration script",
+        "description": "scripts/migrate_scribe_v2.py -- one-way migration from current JSONL layout (notes.jsonl, notes_archive.jsonl, learnings.jsonl) to new folder structure. Old files preserved as backup."
+      },
+      {
+        "name": "Repair subcommand",
+        "description": "notes.py repair -- rebuilds indexes from existing .md files, recovers from corruption, regenerates next_id from max observed ID."
+      }
+    ],
+    "integration_point": "scribe/notes.py CLI (all existing commands preserved), core/startup.py (startup injection reads indexes instead of full JSONL).",
+    "pattern": "Follows the existing memory/ pattern (individual files per entry) but adds index files for fast listing.",
+    "data_flow": "CLI command -> resolve type folder -> read/write index.jsonl + individual .md file -> return result. Startup: glob type folders -> read each index.jsonl -> merge + format -> inject into prompt.",
+    "dependencies": "Existing .apiary/scribe/ directory layout, core/utils/filelock.py for index writes.",
+    "files_to_modify": [
+      "scribe/notes.py",
+      "core/startup.py",
+      "scribe/CLAUDE.md"
+    ],
+    "related_files": [
+      "core/utils/filelock.py",
+      "core/commands/backfill-handoffs.md",
+      "skills/wrapup.md"
+    ]
+  },
+  "behavior": {
+    "input": "Same CLI interface as today -- notes.py add --type todo --content \"...\", notes.py get 306, notes.py list, etc.",
+    "processing": "1. On add: read next_id, increment, write new index entry to <type>/index.jsonl, write content to <type>/<id>.md, update next_id. 2. On get: scan all type index.jsonl files for matching ID (or accept type hint for O(1) lookup), read the corresponding .md file, print summary + body. 3. On list: read index.jsonl from specified type folder (or merge all if no --type), sort by timestamp, print summaries. 4. On done: update status in the type's index.jsonl. 5. On archive (auto, 30-day): move index entry from <type>/index.jsonl to <type>/archive/index.jsonl, move .md file to <type>/archive/<id>.md. 6. On search (--search): substring match against summary field in index files only. 7. On startup injection: read all active index files, format summaries, read latest handoff .md file only. 8. On backup (daily cron): copy all index.jsonl files to backups/<date>_<type>.jsonl.",
+    "output": "Same CLI output format as today. list shows summaries, get shows full content, get --full preserved for compatibility.",
+    "error_cases": [
+      {
+        "trigger": "Missing index file for a type folder",
+        "behavior": "Create empty index, log warning."
+      },
+      {
+        "trigger": "Corrupted index entry (malformed JSON line)",
+        "behavior": "Skip entry, log warning, suggest notes.py repair."
+      },
+      {
+        "trigger": "Missing .md file referenced by index",
+        "behavior": "Print [content missing], suggest repair."
+      },
+      {
+        "trigger": "next_id file missing",
+        "behavior": "Scan all indexes for max ID, recreate counter, log warning."
+      }
+    ],
+    "edge_cases": [
+      {
+        "condition": "get <id> when ID exists in archive",
+        "behavior": "Search archive indexes, print with [archived] indicator."
+      },
+      {
+        "condition": "list with no --type",
+        "behavior": "Merge all type indexes, sort by timestamp."
+      },
+      {
+        "condition": "Very long content on add",
+        "behavior": "No limit enforced, file handles any size."
+      },
+      {
+        "condition": "Concurrent writes to same type index",
+        "behavior": "FileLock on the index file ensures atomicity."
+      }
+    ]
+  },
+  "boundaries": {
+    "in_scope": [
+      "Folder-per-type layout with individual note files",
+      "Per-folder index.jsonl with metadata + summary",
+      "Global auto-increment ID counter",
+      "Archive-to-subfolder for all note types (auto for notes, manual for learnings)",
+      "Index-only search",
+      "Startup injection rewrite to use indexes",
+      "One-way migration script from current JSONL layout",
+      "Daily index backup mechanism (script only, cron setup deferred)",
+      "New general type for untyped notes",
+      "repair subcommand to rebuild indexes from files + recover from corruption"
+    ],
+    "out_of_scope": [
+      "Cron job setup for backups -- script exists, scheduling is separate",
+      "Full-text search across note bodies -- index summary search is sufficient for now",
+      "Multi-user collaboration (#167) -- depends on this layout but is a separate effort",
+      "Cloud sync (#168) -- same, separate effort",
+      "Scribe cleaner/consolidation agent (#9) -- operates on top of this layout, separate effort",
+      "Learnings auto-archive process -- folder exists, process deferred",
+      "Changes to memory/ layout -- already works, untouched"
+    ],
+    "must_not_break": [
+      "All existing CLI commands (add, get, list, done, update, archive, learn, learnings, unlearn, show, handoff-sessions)",
+      "Startup injection in core/startup.py (must produce equivalent output)",
+      "Backfill agent ability to write handoff notes",
+      "Wrapup skill handoff creation flow",
+      "Budgeter hooks that read session IDs from notes",
+      "FileLock-based concurrency safety"
+    ]
+  },
+  "acceptance_criteria": [
+    "Given an empty .apiary/scribe/ dir, when notes.py add --type todo --content 'test' is run, then a todos/ folder exists with index.jsonl containing one entry and 1.md containing 'test'",
+    "Given notes of multiple types exist, when notes.py list is run without --type, then all types are shown merged and sorted by timestamp",
+    "Given a note with ID 306, when notes.py get 306 is run, then the summary from the index and the body from <type>/306.md are printed",
+    "Given a note older than 30 days, when the archive process runs, then the index entry moves to <type>/archive/index.jsonl and the .md file moves to <type>/archive/",
+    "Given a corrupted index (malformed JSON line), when notes.py list is run, then the corrupted entry is skipped with a warning and all other entries are shown",
+    "Given a missing .md file referenced by an index entry, when notes.py get <id> is run, then [content missing] is printed with a repair suggestion",
+    "Given the old JSONL layout exists, when migrate_scribe_v2.py is run, then all notes are split into type folders with correct index entries and individual files, and old files are preserved as backup",
+    "Given the migration has run, when notes.py list --type todo is run against the new layout, then output matches the pre-migration output",
+    "Given next_id is missing, when notes.py add is run, then the counter is rebuilt from existing indexes and the new note gets the correct next ID",
+    "Given a note is archived, when notes.py get <id> is run, then the archived note is found and displayed with an [archived] indicator",
+    "Given startup injection runs, when a session starts, then only index summaries are injected (not full note bodies) and only the latest handoff file is read",
+    "Given the backup script runs, when backups/ is checked, then it contains dated copies of all current index files",
+    "Given two concurrent add operations to the same type, when both complete, then both entries exist in the index with unique IDs and no corruption"
+  ],
+  "id": "bad6cef8-0700-4fa9-999a-6a768dd00ccf",
+  "valid": true
+}
