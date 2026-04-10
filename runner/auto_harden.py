@@ -69,7 +69,7 @@ def get_current_branch() -> str:
 # -- Claude Code helpers --
 
 def run_claude(prompt: str, model: str | None = None) -> tuple[int, str, str]:
-    from claude_subprocess import run_claude as _spawn
+    from .claude_subprocess import run_claude as _spawn
     return _spawn(prompt, timeout=cfg("harden", "timeout", 300), model=model)
 
 

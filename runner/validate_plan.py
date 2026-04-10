@@ -590,6 +590,7 @@ def validate(data: dict) -> list[str]:
 
     # Per-step validation
     seen_numbers = set()
+    created_files = set()  # files that create steps will produce
     for i, step in enumerate(steps):
         label = f"step[{i}]"
 
@@ -632,14 +633,23 @@ def validate(data: dict) -> list[str]:
                     f"(expected: {', '.join(sorted(VALID_MODELS))})"
                 )
 
+        # Track files that create steps will produce, so modify/delete
+        # steps can reference them without a "file not found" error.
+        if action == "create":
+            step_files = step.get("files", [])
+            if isinstance(step_files, list):
+                for f in step_files:
+                    if isinstance(f, str):
+                        created_files.add(f)
+
         # File existence for modify/delete actions. Resolve relative paths
         # against REPO_ROOT, not cwd (#232) — consistent with the path
-        # allowlist check above.
+        # allowlist check above. Skip files that a prior create step produces.
         if action in ("modify", "delete"):
             files = step.get("files", [])
             if isinstance(files, list):
                 for f in files:
-                    if isinstance(f, str) and not _resolve_repo_path(Path(f)).exists():
+                    if isinstance(f, str) and f not in created_files and not _resolve_repo_path(Path(f)).exists():
                         errors.append(f"{label}: file not found: {f}")
 
         # depends_on references valid step numbers

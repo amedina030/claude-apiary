@@ -139,7 +139,7 @@ def build_prompt(intake: dict, previous_errors: list[str] | None = None) -> str:
 
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
-    from claude_subprocess import run_claude as _spawn
+    from .claude_subprocess import run_claude as _spawn
     return _spawn(prompt, timeout=cfg("refine", "timeout", 300))
 
 
@@ -166,18 +166,40 @@ def extract_spec(raw_output: str) -> dict:
     except json.JSONDecodeError:
         text = raw_output
 
-    # Strip markdown code fences if present
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        # Remove first line (```json) and last line (```)
-        if lines[-1].strip() == "```":
-            lines = lines[1:-1]
-        else:
-            lines = lines[1:]
-        text = "\n".join(lines)
+    # Extract JSON from markdown code fences (may appear after prose)
+    import re
+    fence_match = re.search(r"```(?:json)?\s*\n([\s\S]*?)```", text)
+    if fence_match:
+        text = fence_match.group(1).strip()
+    else:
+        text = text.strip()
 
-    return json.loads(text)
+    # Try direct parse first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Sanitize unescaped newlines in strings and retry
+    from .auto_plan import _sanitize_json_newlines
+    sanitized = _sanitize_json_newlines(text)
+    try:
+        return json.loads(sanitized)
+    except json.JSONDecodeError:
+        pass
+
+    # Fall back to raw_decode: scan for first valid JSON object
+    decoder = json.JSONDecoder()
+    for candidate in [sanitized, text]:
+        for i, ch in enumerate(candidate):
+            if ch == '{':
+                try:
+                    obj, _ = decoder.raw_decode(candidate, i)
+                    return obj
+                except json.JSONDecodeError:
+                    continue
+
+    raise json.JSONDecodeError("No valid JSON found in output", text, 0)
 
 
 def validate_spec(spec_path: Path) -> list[str]:

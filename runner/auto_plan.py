@@ -133,13 +133,55 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
 
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
-    from claude_subprocess import run_claude as _spawn
+    from .claude_subprocess import run_claude as _spawn
     return _spawn(prompt, timeout=cfg("plan", "timeout", 300))
 
 
+def _sanitize_json_newlines(text: str) -> str:
+    """Escape literal newlines inside JSON string values.
+
+    LLMs often produce JSON with unescaped newlines in string fields
+    (especially multi-line code_spec values). This walks the text
+    character-by-character, tracking whether we're inside a JSON string,
+    and replaces literal newlines inside strings with \\n.
+    """
+    result = []
+    in_string = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == '\\' and in_string:
+            # Escaped character — pass through both chars
+            result.append(ch)
+            if i + 1 < len(text):
+                i += 1
+                result.append(text[i])
+            i += 1
+            continue
+        if ch == '"':
+            in_string = not in_string
+        if ch == '\n' and in_string:
+            result.append('\\n')
+        elif ch == '\r' and in_string:
+            pass  # drop \r, the \n that follows will be escaped
+        elif ch == '\t' and in_string:
+            result.append('\\t')
+        else:
+            result.append(ch)
+        i += 1
+    return ''.join(result)
+
+
 def extract_plan(raw_output: str) -> dict:
-    """Parse Claude Code output and extract the plan JSON."""
-    # Try parsing as Claude JSON envelope
+    """Parse Claude Code output and extract the plan JSON.
+
+    Handles multiple failure modes from LLM-generated JSON:
+    - Response wrapped in Claude JSON envelope (--output-format json)
+    - Prose before/after JSON block
+    - Markdown code fences (possibly nested inside code_spec strings)
+    - Unescaped newlines/tabs inside JSON string values
+    """
+    # Step 1: unwrap Claude JSON envelope
     try:
         envelope = json.loads(raw_output)
         if isinstance(envelope, dict) and "result" in envelope:
@@ -151,17 +193,33 @@ def extract_plan(raw_output: str) -> dict:
     except json.JSONDecodeError:
         text = raw_output
 
-    # Strip markdown code fences if present
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines[-1].strip() == "```":
-            lines = lines[1:-1]
-        else:
-            lines = lines[1:]
-        text = "\n".join(lines)
+    # Step 2: try raw_decode on sanitized text (skips fence issues entirely)
+    # This is the most reliable path: sanitize newlines, then find the first
+    # valid JSON object by scanning for '{'. Works even with prose and nested
+    # fences because raw_decode uses the JSON parser's own bracket matching.
+    decoder = json.JSONDecoder()
+    for candidate in [_sanitize_json_newlines(text), text]:
+        for i, ch in enumerate(candidate):
+            if ch == '{':
+                try:
+                    obj, _ = decoder.raw_decode(candidate, i)
+                    if isinstance(obj, dict) and "steps" in obj:
+                        return obj
+                except json.JSONDecodeError:
+                    continue
 
-    return json.loads(text)
+    # Step 3: if raw_decode didn't find a {"steps":...}, try any JSON object
+    for candidate in [_sanitize_json_newlines(text), text]:
+        for i, ch in enumerate(candidate):
+            if ch == '{':
+                try:
+                    obj, _ = decoder.raw_decode(candidate, i)
+                    if isinstance(obj, dict):
+                        return obj
+                except json.JSONDecodeError:
+                    continue
+
+    raise json.JSONDecodeError("No valid JSON found in output", text, 0)
 
 
 def validate_plan(plan_path: Path) -> list[str]:

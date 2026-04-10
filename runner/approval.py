@@ -92,7 +92,7 @@ def write_scribe_note(note_type: str, content: str):
 
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
-    from claude_subprocess import run_claude as _spawn
+    from .claude_subprocess import run_claude as _spawn
     return _spawn(prompt, timeout=120)
 
 
