@@ -567,72 +567,9 @@ def cmd_archive(args):
 
 
 def cmd_migrate(args):
-    """Migrate from old notes.md format to JSONL."""
-    md_path = Path(args.path)
-    if not md_path.exists():
-        print(f"File not found: {md_path}", file=sys.stderr)
-        sys.exit(1)
-
-    content = md_path.read_text(encoding="utf-8")
-    # Split on note boundaries: lines starting with "N. ["
-    pattern = re.compile(r'^(\d+)\.\s+\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+UTC)\]\s+\[session:\s*(\S+?)\]\s*(.*)', re.MULTILINE)
-
-    existing = read_jsonl(args.notes_path)
-    next_id = _next_id(existing, path=args.notes_path)
-
-    # Find all note starts
-    matches = list(pattern.finditer(content))
-    migrated = 0
-
-    for i, m in enumerate(matches):
-        ts_str = m.group(2)
-        raw_session_id = m.group(3)
-        # Validate: max 128 chars, alphanumeric/hyphen/underscore only
-        if len(raw_session_id) > 128 or not re.match(r'^[A-Za-z0-9_\-]+$', raw_session_id):
-            raw_session_id = ""
-        session_id = raw_session_id
-
-        # Content is from after the header to the next note start (or end of file)
-        start = m.start(4)
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
-        note_content = content[start:end].strip()
-
-        # Byte-safe truncation: encode, slice at byte boundary, decode back
-        encoded = note_content.encode("utf-8")
-        if len(encoded) > MAX_CONTENT_LENGTH:
-            encoded = encoded[:MAX_CONTENT_LENGTH]
-            note_content = encoded.decode("utf-8", errors="ignore")
-
-        # Detect type from content prefix
-        note_type = "context"
-        lower = note_content.lower()
-        for t in VALID_TYPES:
-            if lower.startswith(t + ":") or lower.startswith(t + " "):
-                note_type = t
-                break
-        if lower.startswith("handoff"):
-            note_type = "handoff"
-
-        try:
-            ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M UTC").replace(tzinfo=timezone.utc)
-            ts_iso = ts.strftime("%Y-%m-%dT%H:%M:%SZ")
-        except ValueError:
-            ts_iso = _now_iso()
-
-        note = {
-            "id": next_id,
-            "timestamp": ts_iso,
-            "session_id": session_id,
-            "type": note_type,
-            "content": note_content,
-            "status": "active",
-            "auto_generated": False,
-        }
-        _append_jsonl(args.notes_path, note, _locked=True)
-        next_id += 1
-        migrated += 1
-
-    print(f"Migrated {migrated} notes from {md_path} to {args.notes_path}")
+    """Migration from old format — deferred to Phase 3."""
+    print('Error: migrate command is not yet available (planned for Phase 3).', file=sys.stderr)
+    sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
