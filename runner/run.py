@@ -26,6 +26,7 @@ from .detached_lib import (
     slugify, pick_backlog_item, hygiene_precheck,
     all_backlog_items_claimed, append_overnight_log,
     git_worktree_create, git_commit_all_in, git_worktree_remove,
+    prune_stale_worktrees,
     OVERNIGHT_LOG, BACKLOG_DIR, INTAKE_DIR,
 )
 
@@ -427,6 +428,13 @@ def _run_detached_impl(cli_args) -> int:
 
     def _now() -> str:
         return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
+
+    # Clean up any worktrees left behind by a previous hard-killed run
+    # (Stop-ScheduledTask / taskkill /F). Worktrees with unmerged commits
+    # are preserved so partial work isn't silently dropped.
+    pruned = prune_stale_worktrees()
+    for p, action in pruned:
+        print(f'prune_stale_worktrees: {action} {p}', file=sys.stderr)
 
     # Hygiene precheck
     reason = hygiene_precheck(max_unreviewed)

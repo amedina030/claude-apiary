@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Helpers for the detached cron-driven runner mode."""
 from __future__ import annotations
-import json, os, re, subprocess, sys, uuid as uuid_mod
+import json, os, re, shutil, subprocess, sys, uuid as uuid_mod
 from pathlib import Path
 from typing import Optional
 
@@ -143,3 +143,86 @@ def git_worktree_remove(path: Path) -> tuple:
         return True, ''
     r = _git(['worktree', 'remove', '--force', str(path)])
     return (r.returncode == 0, r.stderr)
+
+def _list_detached_worktrees() -> list:
+    """Parse `git worktree list --porcelain` and return [(path, branch), ...]
+    for worktrees whose path is under WORKTREES_DIR. Branch is the short
+    ref name (no refs/heads/) or '' if detached."""
+    r = _git(['worktree', 'list', '--porcelain'])
+    if r.returncode != 0:
+        return []
+    out = []
+    cur_path = None
+    cur_branch = ''
+    try:
+        wt_root = WORKTREES_DIR.resolve()
+    except OSError:
+        return []
+    wt_root_str = str(wt_root)
+    for line in r.stdout.splitlines() + ['']:
+        if line.startswith('worktree '):
+            cur_path = line[len('worktree '):].strip()
+        elif line.startswith('branch '):
+            br = line[len('branch '):].strip()
+            if br.startswith('refs/heads/'):
+                br = br[len('refs/heads/'):]
+            cur_branch = br
+        elif line == '':
+            if cur_path:
+                try:
+                    p = Path(cur_path).resolve()
+                    if str(p).startswith(wt_root_str):
+                        out.append((p, cur_branch))
+                except OSError:
+                    pass
+            cur_path = None
+            cur_branch = ''
+    return out
+
+def _branch_has_commits_beyond(branch: str, base: str = 'master') -> bool:
+    """True if `branch` has at least one commit missing from `base`."""
+    if not branch:
+        return False
+    r = _git(['rev-list', '--count', f'{base}..{branch}'])
+    if r.returncode != 0:
+        return False
+    try:
+        return int(r.stdout.strip()) > 0
+    except ValueError:
+        return False
+
+def prune_stale_worktrees() -> list:
+    """Remove detached-runner worktrees orphaned by a previous hard kill
+    (e.g. `Stop-ScheduledTask`, `taskkill /F`). Worktrees whose branch has
+    commits beyond master are preserved — they may contain partial work
+    awaiting review. Returns a list of (path, action) tuples for logging.
+
+    Called at the start of every detached run so a single hard-kill does
+    not permanently block the scheduled retry path.
+    """
+    results = []
+    for wt, branch in _list_detached_worktrees():
+        if _branch_has_commits_beyond(branch):
+            results.append((wt, 'preserved'))
+            continue
+        r = _git(['worktree', 'remove', '--force', str(wt)])
+        if r.returncode == 0:
+            if branch:
+                _git(['branch', '-D', branch])
+            results.append((wt, 'removed'))
+        else:
+            results.append((wt, 'failed'))
+    # Clean up directories git no longer tracks (registration was pruned but
+    # the files on disk survived, or the dir was never registered at all).
+    if WORKTREES_DIR.exists():
+        known = {p for p, _ in _list_detached_worktrees()}
+        for entry in WORKTREES_DIR.iterdir():
+            try:
+                resolved = entry.resolve()
+            except OSError:
+                continue
+            if entry.is_dir() and resolved not in known:
+                shutil.rmtree(entry, ignore_errors=True)
+                results.append((resolved, 'rmtree'))
+    _git(['worktree', 'prune'])
+    return results

@@ -37,6 +37,13 @@ def _init_git_repo(root: Path) -> None:
 
 class TestDetachedRun(unittest.TestCase):
 
+    def setUp(self):
+        # prune_stale_worktrees runs inside the real apiary repo by default
+        # and would mutate disk state — mock it out for every detached test.
+        self._prune_patcher = mock.patch('runner.run.prune_stale_worktrees', return_value=[])
+        self._prune_patcher.start()
+        self.addCleanup(self._prune_patcher.stop)
+
     def _make_intake_file(self, directory: Path, uid: str = 'test-uuid-1234',
                           title: str = 'Test Item') -> Path:
         p = directory / f'{uid}.json'
