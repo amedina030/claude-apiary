@@ -163,18 +163,33 @@ def get_unseen_sessions(session_id, wants_role, wants_mission, project_key, *, s
         and s.get("mission", "general") == wants_mission
     ]
 
-    # Get existing handoff session IDs from active notes AND archived notes
-    # (handoffs get archived along with regular notes; without checking the
-    # archive, archived sessions reappear as "unseen" forever).
-    notes = (
+    # Get existing handoff session IDs from the v2 scribe store (active AND
+    # archived). The auto-archive rule "keep only the latest handoff per
+    # role/mission" means prior handoffs land in the archive almost
+    # immediately — without scanning archived, they'd reappear as "unseen".
+    # Also union in legacy flat-jsonl reads so pre-v2 layouts still resolve.
+    state_dir = scribe_state_dir(start) if _use_repo_layout() else None
+    if state_dir is None:
+        state_dir = PROJECTS_DIR / project_key
+    handoff_sids: set[str] = set()
+    try:
+        store = ScribeStore(state_dir)
+        for h in store.list_notes(note_type="handoff", status="all"):
+            sid_val = (h.get("session") or h.get("session_id") or "").strip()
+            if sid_val:
+                handoff_sids.add(sid_val[:8].lower())
+    except (OSError, KeyError):
+        pass
+    # Legacy-layout fallback: pre-v2 sessions stored handoffs in flat JSONL.
+    legacy_notes = (
         read_jsonl(notes_path(project_key, start=start))
         + read_jsonl(archive_path(project_key, start=start))
     )
-    handoff_sids = {
-        n.get("session_id", "").strip()[:8].lower()
-        for n in notes
-        if n.get("type") == "handoff" and n.get("status") != "done"
-    }
+    for n in legacy_notes:
+        if n.get("type") == "handoff" and n.get("status") != "done":
+            sid_val = n.get("session_id", "").strip()
+            if sid_val:
+                handoff_sids.add(sid_val[:8].lower())
     handoff_sids |= load_skip_prefixes(start=start)
 
     # Filter to unseen

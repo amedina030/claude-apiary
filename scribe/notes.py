@@ -391,8 +391,11 @@ def cmd_add(args):
         except ValueError as e:
             print(f'Error: {e}', file=sys.stderr)
             return
-        # Search existing handoffs in store
-        handoffs = store.list_notes(note_type='handoff')
+        # Search existing handoffs in store — include archived, because the
+        # auto-archive rule "keep only the latest handoff per role/mission"
+        # moves prior handoffs to the archive almost immediately. Without
+        # scanning archived, the idempotency guard misses them.
+        handoffs = store.list_notes(note_type='handoff', status='all')
         for h in handoffs:
             if target_sid.matches(h.get('session', '')):
                 print(f"Handoff for session {target_sid.short} already exists (#{h['id']}). Skipping.")
