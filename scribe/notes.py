@@ -886,12 +886,16 @@ def main():
 
     # Auto-fill role/mission/session_id from session identity if not provided.
     # Only called after confirming a command is present so --help works without
-    # a valid session identity file.
+    # a valid session identity file. Only write commands inherit the identity —
+    # read commands treat an absent --role/--mission as "no filter" so legacy
+    # entries without role/mission stay visible.
     default_role, default_mission, default_sid = _load_session_identity()
-    if hasattr(args, "role") and not getattr(args, "role", ""):
-        args.role = default_role
-    if hasattr(args, "mission") and not getattr(args, "mission", ""):
-        args.mission = default_mission
+    _WRITE_COMMANDS = {"add", "learn", "update"}
+    if args.command in _WRITE_COMMANDS:
+        if hasattr(args, "role") and not getattr(args, "role", ""):
+            args.role = default_role
+        if hasattr(args, "mission") and not getattr(args, "mission", ""):
+            args.mission = default_mission
     # Auto-fill session_id for handoffs so manual handoffs get tagged correctly
     if (hasattr(args, "session_id") and not getattr(args, "session_id", "")
             and getattr(args, "type", "") == "handoff"):
