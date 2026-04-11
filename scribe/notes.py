@@ -17,6 +17,7 @@ Usage:
     notes.py update <id> --content "..."
     notes.py archive [--before YYYY-MM-DD]
     notes.py migrate <notes.md path>
+    notes.py repair [--dry-run]
 """
 import argparse
 import json
@@ -30,7 +31,7 @@ from pathlib import Path as _PathImport
 # Add project root to path for core.utils import
 sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
 from core.session import SessionId
-from scribe.store import ScribeStore, TYPE_FOLDERS
+from scribe.store import ScribeStore, TYPE_FOLDERS, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_ID_FILENAME
 
 from pathlib import Path
 
@@ -687,6 +688,118 @@ def cmd_unlearn(args):
 
 
 # ---------------------------------------------------------------------------
+# Repair
+# ---------------------------------------------------------------------------
+
+def _folder_to_note_type(folder_name: str) -> str:
+    """Invert TYPE_FOLDERS to look up note type by folder name."""
+    inverse = {v: k for k, v in TYPE_FOLDERS.items()}
+    return inverse.get(folder_name, 'general')
+
+
+def cmd_repair(args):
+    store = args.store
+    state_dir = store.state_dir
+
+    all_folder_names = list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]
+    if not state_dir.exists() or not any((state_dir / name).exists() for name in all_folder_names):
+        print('No scribe data found')
+        return 0
+
+    dry_run = bool(getattr(args, 'dry_run', False))
+    rebuilt = 0
+    orphans = 0
+    max_id_seen = 0
+    report_lines = []
+
+    folders_to_scan = []
+    for name in all_folder_names:
+        folders_to_scan.append((state_dir / name, name, False))
+        folders_to_scan.append((state_dir / name / ARCHIVE_DIRNAME, name, True))
+
+    for folder, type_name, is_archive in folders_to_scan:
+        if not folder.exists():
+            continue
+
+        entries = ScribeStore._read_index(folder)
+        index_ids = {e.get('id'): e for e in entries if isinstance(e.get('id'), int)}
+
+        md_files = list(folder.glob('*.md'))
+        md_ids = set()
+        for md_path in md_files:
+            try:
+                mid = int(md_path.stem)
+            except ValueError:
+                print(f'Warning: skipping non-integer filename {md_path.name} in {folder}', file=sys.stderr)
+                continue
+            md_ids.add(mid)
+            if mid > max_id_seen:
+                max_id_seen = mid
+
+        for eid in index_ids:
+            if isinstance(eid, int) and eid > max_id_seen:
+                max_id_seen = eid
+
+        new_entries = list(entries)
+
+        for mid in sorted(md_ids - set(index_ids.keys())):
+            md_path = folder / f'{mid}.md'
+            content = md_path.read_text(encoding='utf-8')
+            st_mtime = md_path.stat().st_mtime
+            ts = datetime.fromtimestamp(st_mtime, tz=timezone.utc).isoformat()
+            summary = content[:200].replace('\n', ' ').strip()
+            note_type = 'learning' if type_name == LEARNING_FOLDER else _folder_to_note_type(type_name)
+            entry = {
+                'id': mid,
+                'type': note_type,
+                'status': 'archived' if is_archive else 'active',
+                'session': '',
+                'timestamp': ts,
+                'summary': summary,
+                'has_body': bool(content),
+            }
+            new_entries.append(entry)
+            rebuilt += 1
+            report_lines.append(f'  + rebuilt entry #{mid} in {folder.relative_to(state_dir)}')
+
+        filtered_entries = []
+        for entry in new_entries:
+            eid = entry.get('id')
+            if isinstance(eid, int) and eid not in md_ids:
+                orphans += 1
+                report_lines.append(f'  - orphan entry #{eid} in {folder.relative_to(state_dir)}')
+            else:
+                filtered_entries.append(entry)
+
+        changed = rebuilt > 0 or orphans > 0
+        if not dry_run and changed:
+            ScribeStore._write_index(folder, filtered_entries)
+
+    nid_path = state_dir / NEXT_ID_FILENAME
+    if nid_path.exists():
+        try:
+            current = int(nid_path.read_text(encoding='utf-8').strip())
+        except ValueError:
+            current = 1
+    else:
+        current = 1
+    new_next = max_id_seen + 1
+    if new_next != current:
+        if not dry_run:
+            nid_path.write_text(str(new_next), encoding='utf-8')
+        report_lines.append(f'  * next_id: {current} -> {new_next}')
+
+    print(
+        f'Repair {"(dry-run) " if dry_run else ""}complete: '
+        f'{rebuilt} entries rebuilt, '
+        f'{orphans} orphans {"detected" if dry_run else "removed"}, '
+        f'next_id = {new_next}'
+    )
+    for line in report_lines:
+        print(line)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -762,6 +875,9 @@ def main():
     p_unlearn = sub.add_parser("unlearn")
     p_unlearn.add_argument("id", type=str, help="Learning ID (integer or L-prefix, e.g. L3 or 3)")
 
+    p_repair = sub.add_parser("repair")
+    p_repair.add_argument("--dry-run", action="store_true", help="Report what would be fixed without modifying files")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -792,6 +908,7 @@ def main():
         'learn': cmd_learn, 'learnings': cmd_learnings, 'unlearn': cmd_unlearn,
         'handoff-sessions': cmd_handoff_sessions,
         'migrate': cmd_migrate,
+        'repair': cmd_repair,
     }
     handler = commands.get(args.command)
     if handler:
