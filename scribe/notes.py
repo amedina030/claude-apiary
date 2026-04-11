@@ -176,6 +176,47 @@ def _parse_timestamp(ts):
         return None
 
 
+# ---------------------------------------------------------------------------
+# Legacy JSONL helpers (kept for backwards-compat fallback in core/startup.py)
+# ---------------------------------------------------------------------------
+
+def notes_path(project_key, *, start: Path | None = None):
+    """Return legacy notes.jsonl path for pre-v2 fallback reads."""
+    if _use_repo_layout():
+        return _repo_scribe_dir(start) / "notes.jsonl"
+    return PROJECTS_DIR / project_key / "notes.jsonl"
+
+
+def archive_path(project_key, *, start: Path | None = None):
+    """Return legacy notes_archive.jsonl path for pre-v2 fallback reads."""
+    if _use_repo_layout():
+        return _repo_scribe_dir(start) / "notes_archive.jsonl"
+    return PROJECTS_DIR / project_key / "notes_archive.jsonl"
+
+
+def learnings_path(project_key, *, start: Path | None = None):
+    """Return legacy learnings.jsonl path for pre-v2 fallback reads."""
+    if _use_repo_layout():
+        return _repo_scribe_dir(start) / "learnings.jsonl"
+    return PROJECTS_DIR / project_key / "learnings.jsonl"
+
+
+def read_jsonl(path):
+    """Read a legacy JSONL file, skipping malformed lines. Returns [] if missing."""
+    if not path.exists():
+        return []
+    entries = []
+    with open(path, encoding="utf-8") as f:
+        for lineno, line in enumerate(f, 1):
+            line = line.strip()
+            if line:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    print(f"[scribe] WARNING: skipped malformed JSON on line {lineno} of {path}", file=sys.stderr)
+    return entries
+
+
 def format_age(ts):
     """Return human-readable relative age string from an ISO timestamp."""
     dt = _parse_timestamp(ts)

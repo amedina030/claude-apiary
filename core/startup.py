@@ -21,7 +21,9 @@ from core.utils.project import get_project_key
 from scribe.notes import (
     read_jsonl, notes_path, archive_path, learnings_path,
     format_age, run_auto_archive, scribe_state_dir, _use_repo_layout,
+    PROJECTS_DIR,
 )
+from scribe.store import ScribeStore, TYPE_FOLDERS, INDEX_FILENAME
 
 HISTORY_PATH = CLAUDE_DIR / ".session-history.json"
 REGISTRY_PATH = PROJECT_ROOT / "core" / "config" / "session-registry.json"
@@ -247,10 +249,25 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
     """Run summary logic and return the text output."""
     repo_dir = repo_dir or str(PROJECT_ROOT)
     project_key = get_project_key(repo_dir)
-    # Repo-layout callers (decision #269, todo #264) resolve scribe state
-    # from repo_dir's git root. Legacy callers ignore *start* and use
-    # project_key. Passing start always is safe: legacy helpers accept it.
     start = Path(repo_dir)
+
+    # Compute state_dir: repo layout uses git-root-relative path; legacy uses PROJECTS_DIR.
+    sd = scribe_state_dir(start) if _use_repo_layout() else None
+    if sd is None:
+        sd = PROJECTS_DIR / project_key
+
+    # Detect v2 folder-per-type layout: any type folder has a non-empty index.
+    # Also treat as v2 if state dir exists but legacy notes.jsonl does not.
+    try:
+        use_v2 = any(
+            (sd / folder / INDEX_FILENAME).exists()
+            and (sd / folder / INDEX_FILENAME).stat().st_size > 0
+            for folder in TYPE_FOLDERS.values()
+        )
+        if not use_v2 and sd.exists() and not (sd / "notes.jsonl").exists():
+            use_v2 = True
+    except OSError:
+        use_v2 = False
 
     # Prune stale notes before loading
     archived_count = run_auto_archive(project_key, start=start)
@@ -259,65 +276,125 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
     if archived_count:
         lines.append(f"[auto-archived {archived_count} notes]")
 
-    notes = read_jsonl(notes_path(project_key, start=start))
-    learnings = read_jsonl(learnings_path(project_key, start=start))
+    if use_v2:
+        store = ScribeStore(sd)
 
-    # Active, unresolved notes matching role/mission
-    active = [
-        n for n in notes
-        if n.get("status") not in ("done", "resolved")
-        and _matches_role_mission(n, role, mission)
-    ]
+        # Collect all active entries across type folders, filter by role/mission
+        active_entries = store.list_notes(status="active")
+        filtered_active = [n for n in active_entries if _matches_role_mission(n, role, mission)]
 
-    # Format active items list
-    items = []
-    for n in active:
-        if n.get("type") == "handoff":
-            continue
-        nid = n.get("id", "?")
-        ntype = n.get("type", "?")
-        content = n.get("content", "").replace("\n", " ")[:40]
-        items.append(f"#{nid} {ntype} ({content})")
+        # Format active items list (skip handoffs)
+        items = []
+        for n in filtered_active:
+            if n.get("type") == "handoff":
+                continue
+            nid = n.get("id", "?")
+            ntype = n.get("type", "?")
+            age = format_age(n.get("timestamp", ""))
+            summary = n.get("summary", "")[:40]
+            items.append(f"#{nid} {ntype} ({age}) {summary}")
 
-    # Count learnings (filtered by role/mission)
-    learning_count = sum(1 for l in learnings if _matches_role_mission(l, role, mission))
+        # Count learnings filtered by role/mission
+        learn_entries = store.list_learnings()
+        learning_count = sum(1 for l in learn_entries if _matches_role_mission(l, role, mission))
 
-    # Find latest handoff matching role/mission, sorted by session end time
-    handoffs = [
-        n for n in active
-        if n.get("type") == "handoff"
-    ]
-    latest_handoff = None
-    if handoffs:
-        session_times = {}
-        if HISTORY_PATH.exists():
-            try:
-                history = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
-                for s in history:
-                    sid_short = s.get("session_id", "")[:8].lower()
-                    if sid_short and s.get("ended_at"):
-                        session_times[sid_short] = s["ended_at"]
-            except (OSError, json.JSONDecodeError):
-                pass
+        # Find latest handoff sorted by session end time
+        handoffs = [n for n in filtered_active if n.get("type") == "handoff"]
+        latest_handoff = None
+        if handoffs:
+            session_times = {}
+            if HISTORY_PATH.exists():
+                try:
+                    history = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+                    for s in history:
+                        sid_short = s.get("session_id", "")[:8].lower()
+                        if sid_short and s.get("ended_at"):
+                            session_times[sid_short] = s["ended_at"]
+                except (OSError, json.JSONDecodeError):
+                    pass
 
-        def handoff_sort_key(n):
-            sid = n.get("session_id", "")[:8].lower()
-            return session_times.get(sid, n.get("timestamp", ""))
+            def handoff_sort_key_v2(n):
+                sid = n.get("session", n.get("session_id", ""))[:8].lower()
+                return session_times.get(sid, n.get("timestamp", ""))
 
-        latest_handoff = max(handoffs, key=handoff_sort_key)
+            latest_handoff = max(handoffs, key=handoff_sort_key_v2)
 
+        if latest_handoff:
+            hid = latest_handoff.get("id", "?")
+            hsid = latest_handoff.get("session", latest_handoff.get("session_id", "?"))
+            summary_line = latest_handoff.get("summary", "")
+            full_note = store.get_note(hid)
+            body = full_note.get("content", "") if full_note else ""  # noqa: F841 fetched, not injected
+            handoff_md_path = sd / TYPE_FOLDERS["handoff"] / f"{hid}.md"
+            handoff_lines = [
+                f"**Last session (#{hid}, {hsid}):** {summary_line}",
+                f"  → {handoff_md_path}",
+            ]
+        else:
+            handoff_lines = ["**Last session:** No handoff notes found."]
+
+    else:
+        # Legacy fallback: JSONL-based implementation
+        notes = read_jsonl(notes_path(project_key, start=start))
+        learnings = read_jsonl(learnings_path(project_key, start=start))
+
+        # Active, unresolved notes matching role/mission
+        active = [
+            n for n in notes
+            if n.get("status") not in ("done", "resolved")
+            and _matches_role_mission(n, role, mission)
+        ]
+
+        # Format active items list
+        items = []
+        for n in active:
+            if n.get("type") == "handoff":
+                continue
+            nid = n.get("id", "?")
+            ntype = n.get("type", "?")
+            content = n.get("content", "").replace("\n", " ")[:40]
+            items.append(f"#{nid} {ntype} ({content})")
+
+        # Count learnings (filtered by role/mission)
+        learning_count = sum(1 for l in learnings if _matches_role_mission(l, role, mission))
+
+        # Find latest handoff matching role/mission, sorted by session end time
+        handoffs = [n for n in active if n.get("type") == "handoff"]
+        latest_handoff = None
+        if handoffs:
+            session_times = {}
+            if HISTORY_PATH.exists():
+                try:
+                    history = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+                    for s in history:
+                        sid_short = s.get("session_id", "")[:8].lower()
+                        if sid_short and s.get("ended_at"):
+                            session_times[sid_short] = s["ended_at"]
+                except (OSError, json.JSONDecodeError):
+                    pass
+
+            def handoff_sort_key(n):
+                sid = n.get("session_id", "")[:8].lower()
+                return session_times.get(sid, n.get("timestamp", ""))
+
+            latest_handoff = max(handoffs, key=handoff_sort_key)
+
+        if latest_handoff:
+            hid = latest_handoff.get("id", "?")
+            hsid = latest_handoff.get("session_id", "?")
+            handoff_lines = [
+                f"**Last session (#{hid}, {hsid}):**",
+                latest_handoff.get("content", ""),
+            ]
+        else:
+            handoff_lines = ["**Last session:** No handoff notes found."]
+
+    # Assemble output (shared structure for both paths)
     lines.append(f"**Active items:** {len(items)} notes — {', '.join(items) if items else 'None'}")
     lines.append("")
     lines.append(f"**Learnings:** {learning_count} (loaded separately via --full)")
     lines.append("")
-
-    if latest_handoff:
-        hid = latest_handoff.get("id", "?")
-        hsid = latest_handoff.get("session_id", "?")
-        lines.append(f"**Last session (#{hid}, {hsid}):**")
-        lines.append(latest_handoff.get("content", ""))
-    else:
-        lines.append("**Last session:** No handoff notes found.")
+    lines.extend(handoff_lines)
 
     # Run docs conformance check
     check_script = PROJECT_ROOT / "docs" / "check.py"

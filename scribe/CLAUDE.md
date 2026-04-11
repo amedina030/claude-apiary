@@ -13,10 +13,10 @@ Three separate stores. Pick the right one up front — moving entries between th
 | Store | Location | Lifespan | Good for |
 |---|---|---|---|
 | **Memory** | `<repo-root>/.apiary/scribe/memory/*.md` (indexed via `MEMORY.md`) | Permanent — still true in 3 months | User preferences, project facts, reference patterns, cross-session conventions |
-| **Notes** | `<repo-root>/.apiary/scribe/notes.jsonl` via `scribe/notes.py` | Decays; auto-archived after 30 days | Operational state — TODOs, handoffs, decisions, blockers, wishlists, current-work context |
-| **Learnings** | `<repo-root>/.apiary/scribe/learnings.jsonl` via `scribe/notes.py learn` | Permanent (no auto-archive) | Project-specific error workarounds, non-obvious patterns, tool quirks you figured out |
+| **Notes** | `<repo-root>/.apiary/scribe/<type>/` (folder-per-type, indexed via `index.jsonl`) | Decays; auto-archived after 30 days | Operational state — TODOs, handoffs, decisions, blockers, wishlists, current-work context |
+| **Learnings** | `<repo-root>/.apiary/scribe/learnings/` (folder-per-type, indexed via `index.jsonl`) | Permanent (no auto-archive) | Project-specific error workarounds, non-obvious patterns, tool quirks you figured out |
 
-> **Transition status.** The canonical paths above are selected when `APIARY_STATE_LAYOUT=repo` is set. Until todo #268 flips the default, the legacy location is `~/.claude/projects/claude-apiary/{notes,notes_archive,learnings}.jsonl` and `~/.claude/projects/claude-apiary/memory/`. The data was mirrored into the new layout in step #266; writes currently still land in the legacy store. Decision #269 tracks the migration.
+**Scribe v2 storage.** Notes use a folder-per-type layout under `<repo-root>/.apiary/scribe/`. Each note type has its own folder (`todos/`, `handoffs/`, `decisions/`, `wishlists/`, `blockers/`, `context/`, `general/`) containing individual `<id>.md` files and an `index.jsonl` for fast listing. Learnings live in `learnings/` with the same structure. Archived notes move into `<type>/archive/` subfolders. The legacy `~/.claude/projects/claude-apiary/notes.jsonl` layout was migrated in scribe-v2 Phase 3 and is no longer the primary store.
 
 **Quick decision:** Is it still true in 3 months → memory. Is it a workaround or a non-obvious thing I learned → learning. Is it about current work that will decay → note.
 
@@ -34,6 +34,7 @@ Notes are primarily for Claude's own use — to maintain continuity across sessi
 | Design choice resolved, alternatives rejected | `decision` | Record what was decided AND what was rejected (and why) |
 | Something blocks progress | `blocker` | Record what's blocked and why |
 | User says "note this" / "write that down" | as specified, or `context` | Follow the user's lead on type |
+| User note that does not fit a specific type / miscellaneous capture | `general` | Default bucket when no other type applies |
 | Wishlist idea ("would be nice", "eventually", "we should") | `wishlist` | Record the idea |
 | Work that matches an active TODO is completed | — | Run `notes.py done <id>` |
 
@@ -75,6 +76,8 @@ Learnings are project-specific things you discover during task execution. They p
 - It duplicates an existing learning — update the existing one instead
 
 ### Learning commands
+
+Learnings are stored as individual `.md` files under `.apiary/scribe/learnings/`, with a single shared `index.jsonl` for fast listing.
 
 ```bash
 # Add a learning
@@ -140,4 +143,4 @@ If a note the user references isn't found in active notes, search the archive:
 python scribe/notes.py list --archive --search "<keyword>"
 ```
 
-Active notes age into the archive after 30 days; the archive is keyword-searchable but not loaded into startup context.
+Active notes age into the archive after 30 days; the archive is keyword-searchable but not loaded into startup context. Each note type folder has its own archive subfolder (e.g. `.apiary/scribe/todos/archive/`); the `notes.py list --archive` command scans all of them.

@@ -42,7 +42,7 @@ For each unseen session from the `[startup]` context:
    ### Where it stopped
    ```
    Be concise but specific — file names, function names, concrete details.
-5. Save the handoff using a Python one-liner with list-form subprocess (see Path portability above) to avoid shell quoting issues with the handoff content.
+5. Save the handoff using a Python one-liner with list-form subprocess (see Path portability above) to avoid shell quoting issues with the handoff content. The note is written as an individual `.md` file under `.apiary/scribe/handoffs/` and indexed in `handoffs/index.jsonl`. To inspect saved handoffs, use `python ~/.claude/apiary_launch.py scribe/notes.py list --type handoff` or `python ~/.claude/apiary_launch.py scribe/notes.py get <id>`.
 6. **Extract missed learnings and TODOs.** While reading the transcript, look for:
    - Non-obvious workarounds or fixes that were discovered but not saved as learnings
    - Work that was deferred or left incomplete that wasn't captured as a TODO

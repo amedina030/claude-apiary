@@ -22,6 +22,8 @@ Review the **entire session** for non-obvious discoveries, workarounds, deferred
 python ~/.claude/apiary_launch.py scribe/notes.py add --type handoff --session-id <session_id_8char> --content "<handoff>"
 ```
 
+The handoff is written as an individual .md file under `.apiary/scribe/handoffs/` and indexed in `handoffs/index.jsonl`.
+
 The handoff must follow this structure:
 
 ```
