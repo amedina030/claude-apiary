@@ -15,6 +15,7 @@ import datetime
 import json
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -24,7 +25,7 @@ from .config_loader import get as cfg
 from .detached_lib import (
     slugify, pick_backlog_item, hygiene_precheck,
     all_backlog_items_claimed, append_overnight_log,
-    git_create_branch, git_commit_all, git_checkout,
+    git_worktree_create, git_commit_all_in, git_worktree_remove,
     OVERNIGHT_LOG, BACKLOG_DIR, INTAKE_DIR,
 )
 
@@ -51,6 +52,129 @@ STAGES = [
 ]
 
 _USAGE_RE = re.compile(r'<usage>.*?</usage>', re.DOTALL)
+
+# Cleanup-handler state. Used by run_detached and run_stage to gracefully
+# tear down a run when the operator (or Task Scheduler / cron) interrupts it.
+# - _active_stage_proc: the currently-running stage Popen, or None.
+# - _interrupt_requested: set by the signal handler; checked by run_detached.
+# - _kill_on_close_job: handle to a Windows Job Object, kept alive for the
+#   process lifetime so that even a TerminateProcess on the parent (e.g.
+#   Stop-ScheduledTask) takes every child stage subprocess down with it.
+# - _prev_signal_handlers: previous handlers to restore after run_detached.
+_active_stage_proc: subprocess.Popen | None = None
+_interrupt_requested: bool = False
+_kill_on_close_job = None
+_prev_signal_handlers: dict = {}
+
+
+def _install_kill_on_job_close():
+    """Attach the current process to a Windows Job Object with the
+    KILL_ON_JOB_CLOSE limit so that when this process dies — even via
+    TerminateProcess from `Stop-ScheduledTask` or `taskkill /F` — every
+    child process belonging to the job is killed too. No-op on non-Windows
+    or if the OS rejects nesting (e.g. Task Scheduler already placed us
+    in a job that disallows breakaway). Returns the job handle (caller
+    must keep alive) or None.
+    """
+    if sys.platform != 'win32':
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError:
+        return None
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+    JobObjectExtendedLimitInformation = 9
+
+    class IO_COUNTERS(ctypes.Structure):
+        _fields_ = [(n, ctypes.c_ulonglong) for n in (
+            'ReadOperationCount', 'WriteOperationCount', 'OtherOperationCount',
+            'ReadTransferCount', 'WriteTransferCount', 'OtherTransferCount')]
+
+    class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ('PerProcessUserTimeLimit', ctypes.c_int64),
+            ('PerJobUserTimeLimit', ctypes.c_int64),
+            ('LimitFlags', wintypes.DWORD),
+            ('MinimumWorkingSetSize', ctypes.c_size_t),
+            ('MaximumWorkingSetSize', ctypes.c_size_t),
+            ('ActiveProcessLimit', wintypes.DWORD),
+            ('Affinity', ctypes.c_void_p),
+            ('PriorityClass', wintypes.DWORD),
+            ('SchedulingClass', wintypes.DWORD),
+        ]
+
+    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ('BasicLimitInformation', JOBOBJECT_BASIC_LIMIT_INFORMATION),
+            ('IoInfo', IO_COUNTERS),
+            ('ProcessMemoryLimit', ctypes.c_size_t),
+            ('JobMemoryLimit', ctypes.c_size_t),
+            ('PeakProcessMemoryUsed', ctypes.c_size_t),
+            ('PeakJobMemoryUsed', ctypes.c_size_t),
+        ]
+    try:
+        kernel32 = ctypes.windll.kernel32
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(
+            job, JobObjectExtendedLimitInformation,
+            ctypes.byref(info), ctypes.sizeof(info),
+        ):
+            kernel32.CloseHandle(job)
+            return None
+        if not kernel32.AssignProcessToJobObject(job, kernel32.GetCurrentProcess()):
+            kernel32.CloseHandle(job)
+            return None
+        return job
+    except OSError:
+        return None
+
+
+def _signal_handler(signum, _frame):
+    """Mark interrupt and kill the active stage subprocess (if any).
+
+    The main loop in run_detached checks _interrupt_requested between stages
+    and bails out via the worktree-cleanup finally block. Killing the active
+    stage immediately turns a long Claude call into an instant exit instead
+    of waiting for the per-stage timeout.
+    """
+    global _interrupt_requested
+    _interrupt_requested = True
+    proc = _active_stage_proc
+    if proc is not None and proc.poll() is None:
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+
+
+def _install_signal_handlers() -> None:
+    """Install graceful-shutdown handlers on the main thread. Idempotent."""
+    sigs = [signal.SIGINT, signal.SIGTERM]
+    if sys.platform == 'win32' and hasattr(signal, 'SIGBREAK'):
+        sigs.append(signal.SIGBREAK)
+    for s in sigs:
+        try:
+            if s not in _prev_signal_handlers:
+                _prev_signal_handlers[s] = signal.signal(s, _signal_handler)
+        except (ValueError, OSError):
+            pass
+
+
+def _restore_signal_handlers() -> None:
+    for s, prev in list(_prev_signal_handlers.items()):
+        try:
+            signal.signal(s, prev)
+        except (ValueError, OSError):
+            pass
+    _prev_signal_handlers.clear()
 
 
 def log_stage_cost(stage_name: str, runner_uuid: str, usage_xml: str) -> None:
@@ -283,6 +407,20 @@ def cumulative_tokens(stage_costs: list) -> int:
 
 def run_detached(cli_args) -> int:
     """Run runner in detached (cron) mode. Returns exit code 0 or 1."""
+    global _kill_on_close_job, _interrupt_requested
+    _interrupt_requested = False
+    if _kill_on_close_job is None:
+        _kill_on_close_job = _install_kill_on_job_close()
+    _install_signal_handlers()
+    try:
+        return _run_detached_impl(cli_args)
+    finally:
+        _restore_signal_handlers()
+
+
+def _run_detached_impl(cli_args) -> int:
+    """Body of run_detached. Split out so the wrapper can manage signal-handler
+    install/restore symmetrically around the actual work."""
     token_cap = cli_args.token_cap if cli_args.token_cap is not None else cfg('detached', 'token_cap', 2000000)
     max_unreviewed = cli_args.max_unreviewed if cli_args.max_unreviewed is not None else cfg('detached', 'max_unreviewed', 5)
     start_ts = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
@@ -392,10 +530,13 @@ def run_detached(cli_args) -> int:
     # item is already claimed by an in-flight branch.
     branch = f'runner/{slug}-{uuid}'
 
-    # Create branch
-    ok, err = git_create_branch(branch)
+    # Create isolated worktree at .runner-worktrees/<safe-branch>/. The runner
+    # operates entirely inside this directory so the operator's main checkout
+    # is never disturbed (no rogue branch checkout, no untracked artifact files
+    # bleeding across runs, no collision with an active interactive session).
+    ok, wt_path, err = git_worktree_create(branch)
     if not ok:
-        print(f'ERROR: git branch setup failed: {err}', file=sys.stderr)
+        print(f'ERROR: git worktree setup failed: {err}', file=sys.stderr)
         append_overnight_log({
             'start_ts': start_ts,
             'end_ts': _now(),
@@ -409,80 +550,106 @@ def run_detached(cli_args) -> int:
         })
         return 1
 
-    # Move backlog item to intake dir
-    INTAKE_DIR.mkdir(parents=True, exist_ok=True)
-    intake_dest = INTAKE_DIR / f'{uuid}.json'
-    if from_backlog and picked_path.resolve() != intake_dest.resolve():
-        shutil.copy2(str(picked_path), str(intake_dest))
-        try:
-            picked_path.unlink()
-        except OSError as e:
-            print(f'WARN: could not remove backlog file {picked_path}: {e}', file=sys.stderr)
-
-    # Build artifacts dict
-    artifacts = {
-        'intake':    SCRIPT_DIR / 'intake'     / f'{uuid}.json',
-        'spec':      SCRIPT_DIR / 'specs'      / f'{uuid}.json',
-        'plan':      SCRIPT_DIR / 'plans'      / f'{uuid}.json',
-        'execution': SCRIPT_DIR / 'executions' / f'{uuid}.json',
-        'harden':    SCRIPT_DIR / 'hardens'    / f'{uuid}.json',
-        'report':    SCRIPT_DIR / 'reports'    / f'{uuid}.json',
-    }
-
     stage_costs: list[dict] = []
     stages_completed = 0
     exit_status = 'ok'
 
-    for name, module_name, input_key in STAGES:
-        input_path = artifacts[input_key]
-
-        ok, stdout_text, stderr_text, _elapsed = run_stage(name, module_name, input_path)
-        record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
-
-        # ATK-010: in detached mode the cap is the only safety against runaway
-        # cost. A stage that emits zero <usage> blocks would leave cumulative
-        # tokens at 0 forever, defeating the cap. Stages in NO_USAGE_STAGES are
-        # known to make no Claude calls; for any other stage, no_usage means
-        # token accounting is broken and we must abort fail-closed.
-        last = stage_costs[-1] if stage_costs else None
-        if (
-            ok
-            and last is not None
-            and last.get('status') == 'no_usage'
-            and name not in NO_USAGE_STAGES
-        ):
-            exit_status = f'no_usage_in_stage:{name}'
-            break
-
-        if cumulative_tokens(stage_costs) > token_cap:
-            exit_status = 'token_cap_exceeded'
-            break
-
-        if not ok:
-            exit_status = f'stage_failed:{name}'
-            break
-
-        stages_completed += 1
-
-    # Commit work. ATK-001: capture commit failure into exit_status so the log
-    # entry does not falsely report 'ok' when no artifacts were committed.
-    commit_msg = f'runner/{uuid}: {title}'
-    commit_ok, commit_err = git_commit_all(commit_msg)
-    if not commit_ok:
-        print(f'WARN: git commit failed: {commit_err}', file=sys.stderr)
-        if exit_status == 'ok':
-            exit_status = 'commit_failed'
-
-    # ATK-002: must_not_break requires that cron always restore master on exit.
-    # If the checkout fails, capture it in the entry's exit_status (so morning
-    # review surfaces it) and return non-zero so cron sees the failure.
-    checkout_ok, checkout_err = git_checkout('master')
-    if not checkout_ok:
-        print(f'ERROR: git checkout master failed: {checkout_err}', file=sys.stderr)
-        if exit_status == 'ok':
-            exit_status = 'checkout_master_failed'
+    try:
+        # Promote backlog item -> intake inside the worktree. The worktree
+        # starts from `master`, so it has its own copy of runner/backlog/ and
+        # runner/intake/. Mutations here become part of the runner branch's
+        # commit; the operator's main checkout is untouched.
+        wt_intake_dir = wt_path / 'runner' / 'intake'
+        wt_intake_dir.mkdir(parents=True, exist_ok=True)
+        wt_intake_dest = wt_intake_dir / f'{uuid}.json'
+        if from_backlog:
+            wt_backlog_file = wt_path / 'runner' / 'backlog' / picked_path.name
+            if wt_backlog_file.exists():
+                shutil.copy2(str(wt_backlog_file), str(wt_intake_dest))
+                try:
+                    wt_backlog_file.unlink()
+                except OSError as e:
+                    print(f'WARN: could not remove backlog file {wt_backlog_file}: {e}', file=sys.stderr)
+            else:
+                # Worktree didn't have it (e.g. picked path resolved from
+                # outside the tracked backlog dir) — fall back to copying the
+                # source file directly into the worktree intake dir.
+                shutil.copy2(str(picked_path), str(wt_intake_dest))
         else:
-            exit_status = f'{exit_status}+checkout_master_failed'
+            # --intake explicit path: just stage it under the worktree.
+            shutil.copy2(str(picked_path), str(wt_intake_dest))
+
+        # Build artifact paths rooted at the worktree, not SCRIPT_DIR.
+        artifacts = {
+            'intake':    wt_path / 'runner' / 'intake'     / f'{uuid}.json',
+            'spec':      wt_path / 'runner' / 'specs'      / f'{uuid}.json',
+            'plan':      wt_path / 'runner' / 'plans'      / f'{uuid}.json',
+            'execution': wt_path / 'runner' / 'executions' / f'{uuid}.json',
+            'harden':    wt_path / 'runner' / 'hardens'    / f'{uuid}.json',
+            'report':    wt_path / 'runner' / 'reports'    / f'{uuid}.json',
+        }
+
+        for name, module_name, input_key in STAGES:
+            if _interrupt_requested:
+                exit_status = 'interrupted'
+                break
+            input_path = artifacts[input_key]
+
+            ok, stdout_text, stderr_text, _elapsed = run_stage(name, module_name, input_path, cwd=wt_path)
+            record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
+
+            # If the cleanup-handler killed this stage mid-flight, surface
+            # 'interrupted' rather than the downstream stage_failed/no_usage
+            # codes that would otherwise mask the real cause.
+            if _interrupt_requested:
+                exit_status = 'interrupted'
+                break
+
+            # ATK-010: in detached mode the cap is the only safety against runaway
+            # cost. A stage that emits zero <usage> blocks would leave cumulative
+            # tokens at 0 forever, defeating the cap. Stages in NO_USAGE_STAGES are
+            # known to make no Claude calls; for any other stage, no_usage means
+            # token accounting is broken and we must abort fail-closed.
+            last = stage_costs[-1] if stage_costs else None
+            if (
+                ok
+                and last is not None
+                and last.get('status') == 'no_usage'
+                and name not in NO_USAGE_STAGES
+            ):
+                exit_status = f'no_usage_in_stage:{name}'
+                break
+
+            if cumulative_tokens(stage_costs) > token_cap:
+                exit_status = 'token_cap_exceeded'
+                break
+
+            if not ok:
+                exit_status = f'stage_failed:{name}'
+                break
+
+            stages_completed += 1
+
+        # Commit work into the worktree (= the runner branch). ATK-001:
+        # capture commit failure into exit_status so the log entry does not
+        # falsely report 'ok' when no artifacts were committed.
+        commit_msg = f'runner/{uuid}: {title}'
+        commit_ok, commit_err = git_commit_all_in(wt_path, commit_msg)
+        if not commit_ok:
+            print(f'WARN: git commit failed: {commit_err}', file=sys.stderr)
+            if exit_status == 'ok':
+                exit_status = 'commit_failed'
+    finally:
+        # ATK-002: always tear the worktree down on exit so a crashed run
+        # doesn't leave orphaned worktree state behind. The branch survives —
+        # only the on-disk worktree directory is removed.
+        rm_ok, rm_err = git_worktree_remove(wt_path)
+        if not rm_ok:
+            print(f'ERROR: git worktree remove failed: {rm_err}', file=sys.stderr)
+            if exit_status == 'ok':
+                exit_status = 'worktree_remove_failed'
+            else:
+                exit_status = f'{exit_status}+worktree_remove_failed'
 
     end_ts = _now()
     entry = {
@@ -500,30 +667,48 @@ def run_detached(cli_args) -> int:
     return 0 if exit_status == 'ok' else 1
 
 
-def run_stage(name: str, module_name: str, input_path: Path) -> tuple[bool, str, str, float]:
-    """Run a stage subprocess. Returns (success, stdout, stderr, elapsed_seconds)."""
+def run_stage(name: str, module_name: str, input_path: Path, cwd: Path | None = None) -> tuple[bool, str, str, float]:
+    """Run a stage subprocess. Returns (success, stdout, stderr, elapsed_seconds).
+
+    `cwd` defaults to the main repo root (interactive mode). Detached mode
+    passes its isolated worktree path so stages mutate worktree state, never
+    the operator's main checkout.
+    """
     module_file = SCRIPT_DIR / f"{module_name}.py"
     if not module_file.exists():
         return False, '', f"Stage module not found: runner.{module_name}", 0.0
     if not input_path.exists():
         return False, '', f"Stage input file not found: {input_path}", 0.0
 
+    global _active_stage_proc
+    cwd_str = str(cwd) if cwd is not None else str(REPO_ROOT)
+    timeout_val = cfg("orchestrator", "stage_timeout", 3600)
     start = time.time()
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             [sys.executable, "-m", f"runner.{module_name}", str(input_path)],
-            capture_output=True, text=True, timeout=cfg("orchestrator", "stage_timeout", 3600),
-            cwd=str(REPO_ROOT),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            cwd=cwd_str,
         )
-        elapsed = time.time() - start
-        return result.returncode == 0, result.stdout or '', result.stderr or '', elapsed
-    except subprocess.TimeoutExpired:
-        elapsed = time.time() - start
-        timeout_val = cfg("orchestrator", "stage_timeout", 3600)
-        return False, '', f'Stage timed out ({timeout_val}s limit)', elapsed
     except OSError as e:
         elapsed = time.time() - start
         return False, '', f'Stage failed to launch: {e}', elapsed
+    _active_stage_proc = proc
+    try:
+        try:
+            stdout_text, stderr_text = proc.communicate(timeout=timeout_val)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            elapsed = time.time() - start
+            return False, '', f'Stage timed out ({timeout_val}s limit)', elapsed
+    finally:
+        _active_stage_proc = None
+    elapsed = time.time() - start
+    return proc.returncode == 0, stdout_text or '', stderr_text or '', elapsed
 
 
 

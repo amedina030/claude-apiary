@@ -26,6 +26,25 @@ def make_completed_process(returncode=0, stdout="ok", stderr=""):
     return proc
 
 
+def make_popen(returncode=0, stdout="ok", stderr="", timeout_after_calls=0):
+    """Build a Popen-shaped mock for run_stage's new Popen+communicate path.
+
+    `timeout_after_calls`: if >0, communicate raises TimeoutExpired the first
+    time and returns normally on the second call (the kill-and-drain path).
+    """
+    proc = MagicMock()
+    proc.returncode = returncode
+    state = {"calls": 0}
+    def _comm(timeout=None):
+        state["calls"] += 1
+        if timeout_after_calls and state["calls"] <= timeout_after_calls:
+            raise subprocess.TimeoutExpired(cmd="test", timeout=timeout or 0)
+        return (stdout, stderr)
+    proc.communicate.side_effect = _comm
+    proc.poll.return_value = returncode
+    return proc
+
+
 class _RunnerTestCase(unittest.TestCase):
     """Base TestCase that supplies a tmp dir, intake fixtures, and stdout/stderr capture."""
 
@@ -94,46 +113,47 @@ class TestRunStage(_RunnerTestCase):
         self.assertIn(f"Stage input file not found: {input_f}", msg)
         self.assertEqual(elapsed, 0.0)
 
-    @patch("runner.run.subprocess.run")
-    def test_success(self, mock_run):
+    @patch("runner.run.subprocess.Popen")
+    def test_success(self, mock_popen):
         input_f = self.tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
-        mock_run.return_value = make_completed_process(returncode=0, stdout="output here")
+        mock_popen.return_value = make_popen(returncode=0, stdout="output here")
         ok, output, _, elapsed = orchestrator.run_stage("test", "validate_intake", input_f)
         self.assertTrue(ok)
         self.assertEqual(output, "output here")
         self.assertGreaterEqual(elapsed, 0)
-        mock_run.assert_called_once()
-        args = mock_run.call_args[0][0]
+        mock_popen.assert_called_once()
+        args = mock_popen.call_args[0][0]
         self.assertEqual(args[0], sys.executable)
         self.assertEqual(args[1], "-m")
         self.assertEqual(args[2], "runner.validate_intake")
         self.assertEqual(args[3], str(input_f))
 
-    @patch("runner.run.subprocess.run")
-    def test_failure_returncode(self, mock_run):
+    @patch("runner.run.subprocess.Popen")
+    def test_failure_returncode(self, mock_popen):
         input_f = self.tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
-        mock_run.return_value = make_completed_process(returncode=1, stderr="some error")
+        mock_popen.return_value = make_popen(returncode=1, stderr="some error")
         ok, _, output, elapsed = orchestrator.run_stage("test", "validate_intake", input_f)
         self.assertFalse(ok)
         self.assertEqual(output, "some error")
         self.assertGreaterEqual(elapsed, 0)
 
-    @patch("runner.run.subprocess.run")
-    def test_timeout(self, mock_run):
+    @patch("runner.run.subprocess.Popen")
+    def test_timeout(self, mock_popen):
         input_f = self.tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=3600)
+        # First communicate() raises TimeoutExpired, second (after kill) returns.
+        mock_popen.return_value = make_popen(timeout_after_calls=1)
         ok, _, output, _elapsed = orchestrator.run_stage("test", "validate_intake", input_f)
         self.assertFalse(ok)
         self.assertIn("Stage timed out", output)
 
-    @patch("runner.run.subprocess.run")
-    def test_oserror(self, mock_run):
+    @patch("runner.run.subprocess.Popen")
+    def test_oserror(self, mock_popen):
         input_f = self.tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
-        mock_run.side_effect = OSError("spawn failed")
+        mock_popen.side_effect = OSError("spawn failed")
         ok, _, output, _elapsed = orchestrator.run_stage("test", "validate_intake", input_f)
         self.assertFalse(ok)
         self.assertIn("Stage failed to launch: spawn failed", output)

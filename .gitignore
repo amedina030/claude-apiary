@@ -29,6 +29,9 @@ runner/reports/*
 !runner/reports/.gitkeep
 !runner/reports/.gitkeep
 
+# Detached runner worktrees (one per in-flight run)
+.runner-worktrees/
+
 # Session runtime artifacts
 .claude-session-identity.json
 session_*.txt

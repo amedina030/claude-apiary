@@ -10,6 +10,7 @@ REPO_ROOT = SCRIPT_DIR.parent
 BACKLOG_DIR = SCRIPT_DIR / 'backlog'
 INTAKE_DIR = SCRIPT_DIR / 'intake'
 OVERNIGHT_LOG = SCRIPT_DIR / 'overnight.jsonl'
+WORKTREES_DIR = REPO_ROOT / '.runner-worktrees'
 
 _SLUG_RE = re.compile(r'[^a-z0-9]+')
 
@@ -106,32 +107,39 @@ def append_overnight_log(entry: dict) -> bool:
         print(f'WARN: overnight log write failed: {e}', file=sys.stderr)
         return False
 
-def git_create_branch(branch: str, base: str = 'master') -> tuple:
-    """Create and checkout branch from base. Returns (ok: bool, stderr: str)."""
-    # Check working tree is clean
-    r = _git(['status', '--porcelain'])
+def git_worktree_create(branch: str, base: str = 'master') -> tuple:
+    """Create an isolated git worktree at WORKTREES_DIR/<safe-branch>/ on a new branch from base.
+
+    Returns (ok, worktree_path_or_None, stderr). The worktree is checked out from
+    `base`; the branch is created fresh. Caller is responsible for git_worktree_remove.
+    Detached mode uses this so a runner pass cannot disturb the operator's main checkout.
+    """
+    try:
+        WORKTREES_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return False, None, f'could not create worktrees dir: {e}'
+    safe = branch.replace('/', '_').replace('\\', '_')
+    wt_path = WORKTREES_DIR / safe
+    if wt_path.exists():
+        return False, None, f'worktree path already exists: {wt_path}'
+    r = _git(['worktree', 'add', '-b', branch, str(wt_path), base])
+    if r.returncode != 0:
+        return False, None, r.stderr
+    return True, wt_path, ''
+
+def git_commit_all_in(cwd: Path, message: str) -> tuple:
+    """git add -A and git commit -m message inside `cwd` (a worktree). Allows empty."""
+    r = _git(['add', '-A'], cwd=cwd)
     if r.returncode != 0:
         return False, r.stderr
-    if r.stdout.strip():
-        return False, 'working tree has uncommitted changes'
-    r = _git(['checkout', base])
-    if r.returncode != 0:
-        return False, r.stderr
-    r = _git(['checkout', '-b', branch])
+    r = _git(['commit', '-m', message, '--allow-empty'], cwd=cwd)
     if r.returncode != 0:
         return False, r.stderr
     return True, ''
 
-def git_commit_all(message: str) -> tuple:
-    """git add -A and git commit -m message. Returns (ok, stderr). Allows empty if nothing changed."""
-    r = _git(['add', '-A'])
-    if r.returncode != 0:
-        return False, r.stderr
-    r = _git(['commit', '-m', message, '--allow-empty'])
-    if r.returncode != 0:
-        return False, r.stderr
-    return True, ''
-
-def git_checkout(ref: str) -> tuple:
-    r = _git(['checkout', ref])
+def git_worktree_remove(path: Path) -> tuple:
+    """git worktree remove --force <path>. Idempotent — returns ok if path is gone."""
+    if not path.exists():
+        return True, ''
+    r = _git(['worktree', 'remove', '--force', str(path)])
     return (r.returncode == 0, r.stderr)
