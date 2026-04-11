@@ -281,7 +281,11 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
 
         # Collect all active entries across type folders, filter by role/mission
         active_entries = store.list_notes(status="active")
-        filtered_active = [n for n in active_entries if _matches_role_mission(n, role, mission)]
+        filtered_active = [
+            n for n in active_entries
+            if n.get("status") not in ("done", "resolved")
+            and _matches_role_mission(n, role, mission)
+        ]
 
         # Format active items list (skip handoffs)
         items = []
