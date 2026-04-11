@@ -50,6 +50,23 @@ Core note and learning management.
 | `--mission MISSION` | add, list, learn | Session mission filter |
 | `--before DATE` | archive | Archive notes before this date |
 
+## scribe/backup_indexes.py
+
+Snapshot the scribe v2 indexes (all type folders plus learnings, active and archive) to a dated backup directory under `<state-dir>/backups/<YYYY-MM-DD>/`. Runs a retention prune after each backup so only the N most recent snapshots remain.
+
+```bash
+python scribe/backup_indexes.py
+python scribe/backup_indexes.py --retain 14
+python scribe/backup_indexes.py --project other-project
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--retain N` | no | Number of dated backups to keep (default 30; `0` keeps only the newest) |
+| `--project KEY` | no | Project key override (defaults to the current repo's scribe state dir) |
+
+Copies `index.jsonl` files and the global `next_id` counter — the `.md` bodies are not backed up, since they are append-only and tracked separately. Intended to run on a daily cron; exits 0 even when no state dir exists (the first `/apiary-context` call will create one).
+
 ## core/startup.py
 
 Session initialization and summary loading.
@@ -338,6 +355,25 @@ python -m runner.create_intake --from-todo 42
 | `--from-todo ID` | no | Scribe TODO ID to seed from (replaces manual fields) |
 
 \* Required unless `--from-todo` is used.
+
+## runner/refine_to_intake.py
+
+Bridge a refiner handoff scribe note into a runner intake (or backlog draft) file. The `/refine` skill saves approved handoffs as scribe notes of type `context` with a fixed section layout (`## Goal`, `## Shape`, `## Behavior`, `## Boundaries`, `## Acceptance criteria`); this script parses those sections and maps them onto the intake schema.
+
+```bash
+python -m runner.refine_to_intake --note 42 --title "Add caching"
+python -m runner.refine_to_intake --note 42 --title "Add caching" --backlog
+python -m runner.refine_to_intake --note 42 --title "Add caching" --explore-hints "api/cache.py,api/db.py"
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--note ID` | yes | Scribe note ID containing the refiner handoff |
+| `--title TEXT` | yes | Short title (refiner handoffs have no title field) |
+| `--backlog` | no | Write to `runner/backlog/<slug>.json` instead of `runner/intake/<uuid>.json` |
+| `--explore-hints CSV` | no | Comma-separated repo-relative paths for the auto-refiner |
+
+Mapping: `Goal > **Problem:**` → `problem`; `Shape` + `Behavior` → `description`; `Boundaries` → `scope`; `Acceptance criteria` → `context`. On intake mode the file is validated via `validate_intake` and deleted on failure. The written record sets `source` to `scribe-note:<id>`.
 
 ## runner/validate_intake.py
 

@@ -14,6 +14,7 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | Tool | Purpose | Subcommands / Key Flags |
 |------|---------|------------------------|
 | `scribe/notes.py` | Note and learning management | add, list, get, done, update, archive, learn, learnings, unlearn |
+| `scribe/backup_indexes.py` | Snapshot scribe indexes with retention pruning | --retain, --project |
 | `core/startup.py` | Session initialization and summary | init, summary |
 | `budgeter/report.py` | Usage reporting | --date, --since, --flat, --grouped, --by-turn, --by-agent, --weighted, --feedback |
 | `budgeter/tune.py` | Suggest rule weight adjustments | --min, --percentile, --yes |
@@ -27,6 +28,7 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `harden/round_counter.py` | Track harden round counts | start, tick, reset, status, defender |
 | `python -m runner.run` | End-to-end runner orchestrator | `<intake_path>` |
 | `python -m runner.create_intake` | Create runner intake file | --from-todo, --title, --problem, --description, --scope, --context |
+| `python -m runner.refine_to_intake` | Bridge refiner scribe note into runner intake/backlog | --note, --title, --backlog, --explore-hints |
 | `python -m runner.validate_intake` | Validate intake JSON | `<file>` |
 | `python -m runner.auto_refine` | Autonomous refiner (stage 2) | `<intake>` |
 | `python -m runner.validate_spec` | Validate spec JSON | `<file>` |
