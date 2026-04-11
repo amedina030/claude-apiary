@@ -405,10 +405,11 @@ class TestDetachedRun(unittest.TestCase):
             entries = self._read_log(log_path)
             self.assertEqual(entries[0]['exit_status'], 'worktree_remove_failed')
 
-    def test_interrupt_during_stage_records_interrupted_and_removes_worktree(self):
+    def test_interrupt_during_stage_preserves_worktree(self):
         """Cleanup handler: a SIGTERM/SIGBREAK during a stage sets
         _interrupt_requested; the loop must bail with exit_status='interrupted'
-        and the finally block must still tear down the worktree."""
+        and the finally block must PRESERVE the worktree so the operator
+        can inspect the partial state (spec/plan/stage stderr etc.)."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
             backlog = td / 'backlog'
@@ -454,8 +455,52 @@ class TestDetachedRun(unittest.TestCase):
             entries = self._read_log(log_path)
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0]['exit_status'], 'interrupted')
-            # Worktree must be torn down even on the interrupted path.
-            self.assertEqual(len(remove_calls), 1)
+            # Worktree must be preserved on failure so the operator can
+            # inspect partial artifacts.
+            self.assertEqual(len(remove_calls), 0)
+
+    def test_stage_failure_preserves_worktree(self):
+        """A graceful stage failure (exit_status='stage_failed:...') must
+        preserve the worktree directory so the operator can read the
+        spec, plan, and stage stderr that would otherwise be wiped."""
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            backlog = td / 'backlog'
+            backlog.mkdir()
+            intake_dir = td / 'intake'
+            intake_dir.mkdir()
+            intake_file = self._make_intake_file(backlog)
+            wt_path = self._make_fake_worktree(td, intake_file)
+            log_path = td / 'overnight.jsonl'
+
+            stage_seq = iter([
+                (True, _make_fake_usage(100), '', 0.1),    # stage 1 ok
+                (False, '', 'simulated error', 0.2),       # stage 2 fails
+            ])
+            remove_calls = []
+            def _track_remove(*args, **kwargs):
+                remove_calls.append(args)
+                return (True, '')
+
+            with (
+                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
+                mock.patch('runner.run.INTAKE_DIR', intake_dir),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
+                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
+                mock.patch('runner.run.git_worktree_remove', side_effect=_track_remove),
+                mock.patch('runner.run.run_stage', side_effect=lambda *a, **kw: next(stage_seq)),
+            ):
+                rc = run.run_detached(_make_cli_args())
+
+            self.assertEqual(rc, 1)
+            entries = self._read_log(log_path)
+            self.assertTrue(entries[0]['exit_status'].startswith('stage_failed:'))
+            # Worktree must NOT be removed on stage failure.
+            self.assertEqual(len(remove_calls), 0)
 
     def test_commit_failure_recorded(self):
         """ATK-001: silent commit failure must be reflected in exit_status, not 'ok'."""

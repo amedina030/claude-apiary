@@ -648,16 +648,21 @@ def _run_detached_impl(cli_args) -> int:
             if exit_status == 'ok':
                 exit_status = 'commit_failed'
     finally:
-        # ATK-002: always tear the worktree down on exit so a crashed run
-        # doesn't leave orphaned worktree state behind. The branch survives —
-        # only the on-disk worktree directory is removed.
-        rm_ok, rm_err = git_worktree_remove(wt_path)
-        if not rm_ok:
-            print(f'ERROR: git worktree remove failed: {rm_err}', file=sys.stderr)
-            if exit_status == 'ok':
+        # Only tear the worktree down on a clean, successful run. On any
+        # failure (including 'interrupted') we keep the worktree on disk
+        # so the operator can inspect specs/plans/executions/reports and
+        # the stage stderr left in them. The runner branch has at least
+        # one commit beyond master (the backlog->intake rename), so
+        # prune_stale_worktrees will preserve it on subsequent runs.
+        # Use `python -m runner.run --cleanup <uuid>` to remove it
+        # manually once the failure has been diagnosed.
+        if exit_status == 'ok':
+            rm_ok, rm_err = git_worktree_remove(wt_path)
+            if not rm_ok:
+                print(f'ERROR: git worktree remove failed: {rm_err}', file=sys.stderr)
                 exit_status = 'worktree_remove_failed'
-            else:
-                exit_status = f'{exit_status}+worktree_remove_failed'
+        else:
+            print(f'Worktree preserved for inspection: {wt_path}', file=sys.stderr)
 
     end_ts = _now()
     entry = {
@@ -884,6 +889,43 @@ def run_cleanup(uuid: str) -> int:
             )
             return 1
         print(f"Checked out master (was on {current})")
+
+    # Remove any detached worktrees tied to these branches. Required
+    # because `git branch -D` refuses to delete a branch that a worktree
+    # has checked out. Preserved-on-failure worktrees from run_detached
+    # live under .runner-worktrees/ and must be torn down here.
+    wt_removed = []
+    for branch in branches:
+        wt_list = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            capture_output=True, text=True,
+        )
+        if wt_list.returncode != 0:
+            break
+        cur_path = None
+        for line in wt_list.stdout.splitlines() + [""]:
+            if line.startswith("worktree "):
+                cur_path = line[len("worktree "):].strip()
+            elif line.startswith("branch "):
+                br = line[len("branch "):].strip()
+                if br.startswith("refs/heads/"):
+                    br = br[len("refs/heads/"):]
+                if br == branch and cur_path:
+                    r = subprocess.run(
+                        ["git", "worktree", "remove", "--force", cur_path],
+                        capture_output=True, text=True,
+                    )
+                    if r.returncode == 0:
+                        wt_removed.append(cur_path)
+                        print(f"Removed worktree {cur_path}")
+                    else:
+                        print(
+                            f"Failed to remove worktree {cur_path}: "
+                            f"{r.stderr.strip()}",
+                            file=sys.stderr,
+                        )
+            elif line == "":
+                cur_path = None
 
     # Delete each matching branch.
     deleted = []
