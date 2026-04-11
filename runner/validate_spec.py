@@ -46,9 +46,14 @@ VAGUE_PATTERNS = re.compile(
 )
 
 PLACEHOLDER_PATTERNS = re.compile(
-    r"(?<![/-])\b(TODO|TBD|FIXME)\b(?![-]|\s*#)"   # standalone markers, not --from-todo / TODO-123 / TODO #205 (scribe note ref)
+    # TODO/TBD/FIXME must be ALL-CAPS to match. The scoped (?-i:...) disables
+    # IGNORECASE for just this alternation so lowercase domain words like
+    # "todo" (scribe note type) don't false-positive. The remaining patterns
+    # (placeholder / fill in / to be determined) stay case-insensitive because
+    # those are natural-language phrases.
+    r"(?-i:(?<![/-])\b(TODO|TBD|FIXME)\b(?![-]|\s*#))"
     r"|\bplaceholder\b"
-    r"|(?<!\w)fill\s+in(?=\s+(this|here|later|above|below|the\s+blank))"  # "fill in" only when clearly a placeholder instruction
+    r"|(?<!\w)fill\s+in(?=\s+(this|here|later|above|below|the\s+blank))"
     r"|\bto\s+be\s+determined\b",
     re.IGNORECASE,
 )
