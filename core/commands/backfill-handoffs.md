@@ -23,8 +23,10 @@ Transcript paths and other file paths may contain Windows backslashes (e.g. `C:\
 For `--content` arguments with multi-line or long text, use a Python one-liner with list-form subprocess to avoid shell quoting issues:
 
 ```bash
-python -c "import subprocess,os; subprocess.run(['python', os.path.expanduser('~/.claude/apiary_launch.py'), 'scribe/notes.py', 'add', '--type', 'handoff', '--session-id', '<prev-id>', '--auto', '--if-no-handoff-for', '<prev-id>', '--content', '''<handoff text>'''])"
+python -c "import subprocess,os; subprocess.run(['python', os.path.expanduser('~/.claude/apiary_launch.py'), 'scribe/notes.py', 'add', '--type', 'handoff', '--session-id', '<prev-id>', '--auto', '--if-no-handoff-for', '<prev-id>', '--summary', '<one-line abstract>', '--content', '''<handoff text>'''])"
 ```
+
+`--summary` is **required** for handoffs and must be a single concrete sentence (≤300 chars) summarizing the session — name the area touched and the outcome (e.g. `"Session abc12345: refactored runner/executor.py, added detached-run guard, 3 tests added"`). Do not restate "Session X handoff" — that adds no information beyond what's already in the index.
 
 ### Step 1: Process unseen sessions
 

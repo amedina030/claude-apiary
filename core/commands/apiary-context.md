@@ -86,6 +86,7 @@ When invoking a CLI tool with a text argument longer than ~3 lines or containing
 ```python
 subprocess.run(["python", os.path.expanduser("~/.claude/apiary_launch.py"),
                  "scribe/notes.py", "add", "--type", "handoff",
+                 "--summary", short_summary_var,
                  "--content", long_text_var], ...)
 ```
 

@@ -141,6 +141,47 @@ class TestScribeNotes(unittest.TestCase):
         sessions = {h.get('session', '') for h in handoffs if h.get('status') != 'done'}
         self.assertEqual(len(sessions), 2)
 
+    def test_cmd_add_handoff_requires_summary(self):
+        args = self._make_args(
+            type='handoff', content='body text', summary='',
+            session_id='sess1', auto=False, role='', mission='',
+            if_no_handoff_for=None,
+        )
+        with self.assertRaises(SystemExit):
+            notes.cmd_add(args)
+
+    def test_cmd_add_handoff_with_summary_succeeds(self):
+        args = self._make_args(
+            type='handoff', content='body text',
+            summary='Session sess1: did the thing',
+            session_id='sess1', auto=False, role='', mission='',
+            if_no_handoff_for=None,
+        )
+        notes.cmd_add(args)
+        handoffs = self.store.list_notes(note_type='handoff')
+        self.assertEqual(len(handoffs), 1)
+        self.assertEqual(handoffs[0]['summary'], 'Session sess1: did the thing')
+
+    def test_cmd_add_summary_length_cap(self):
+        args = self._make_args(
+            type='handoff', content='body',
+            summary='x' * (notes.MAX_SUMMARY_LENGTH + 1),
+            session_id='sess1', auto=False, role='', mission='',
+            if_no_handoff_for=None,
+        )
+        with self.assertRaises(SystemExit):
+            notes.cmd_add(args)
+
+    def test_cmd_add_todo_summary_optional(self):
+        args = self._make_args(
+            type='todo', content='fix the bug', summary='',
+            session_id='sess1', auto=False, role='', mission='',
+            if_no_handoff_for=None,
+        )
+        notes.cmd_add(args)
+        todos = self.store.list_notes(note_type='todo')
+        self.assertEqual(len(todos), 1)
+
     def test_show_alias_same_as_get(self):
         # Verify 'show' is registered as alias in argparse (covered by 'aliases=["show"]')
         # Both should call cmd_get — just verify cmd_get works

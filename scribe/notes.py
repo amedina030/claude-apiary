@@ -51,6 +51,7 @@ SCRIBE_SUBDIR = "scribe"
 VALID_TYPES = ["todo", "handoff", "decision", "wishlist", "reference", "blocker", "context", "general"]
 AUTO_ARCHIVE_DAYS = 30
 MAX_CONTENT_LENGTH = 100_000  # bytes; prevents runaway JSONL file growth
+MAX_SUMMARY_LENGTH = 300  # chars; keeps index.jsonl lines small and startup injection cheap
 MAX_LAST = 10_000  # upper bound for --last to prevent misleading output
 
 
@@ -406,6 +407,22 @@ def cmd_add(args):
         print(f'Error: content exceeds {MAX_CONTENT_LENGTH} bytes', file=sys.stderr)
         sys.exit(1)
 
+    summary = (getattr(args, 'summary', '') or '').strip()
+    if args.type == 'handoff' and not summary:
+        print(
+            'Error: --summary is required for --type handoff. '
+            'Provide a one-line abstract (e.g. "Session abc12345: fixed X, decided Y").',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if len(summary) > MAX_SUMMARY_LENGTH:
+        print(
+            f'Error: --summary exceeds {MAX_SUMMARY_LENGTH} chars ({len(summary)}). '
+            'Keep it to a one-line abstract.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # Build metadata dict for extra fields
     metadata = {}
     if getattr(args, 'auto', False):
@@ -419,6 +436,7 @@ def cmd_add(args):
         note_type=args.type,
         content=content,
         session_id=args.session_id or '',
+        summary=summary,
         **metadata,
     )
     print(f"Added #{entry['id']} ({entry['type']})")
@@ -816,6 +834,8 @@ def main():
     p_add = sub.add_parser("add")
     p_add.add_argument("--type", required=True, choices=VALID_TYPES)
     p_add.add_argument("--content", required=True)
+    p_add.add_argument("--summary", default="",
+                        help="One-line abstract shown in lists and startup. Required for --type handoff.")
     p_add.add_argument("--session-id", default="")
     p_add.add_argument("--auto", action="store_true", help="Mark as auto-generated")
     p_add.add_argument("--if-no-handoff-for", default=None,
