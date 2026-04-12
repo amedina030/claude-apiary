@@ -1,0 +1,15 @@
+{
+  "id": "c9b9338b-b802-4f1a-ba05-9352061b87c5",
+  "title": "Usher CLI tool + runner gate",
+  "problem": "No mechanism to detect oversized runner tickets before execution. The scribe ID overhaul ticket burned 11M tokens across 5 failed overnight attempts because nothing assessed ticket complexity upfront.",
+  "description": "Build runner/usher.py -- a pure-Python CLI tool that reads an intake JSON, extracts the scope field, counts distinct files and top-level directories (subsystems), measures description length, and compares against configurable thresholds in runner/config.json. Produces a pass/warn/fail verdict with per-metric breakdown. Exit 0 on pass/warn, exit 1 on fail. --warn-only flag overrides to always exit 0. Integrate as a gate at the start of runner/run.py -- call usher before any tokens are spent, refuse to run on fail. Thresholds: max_files (5 pass, 8 warn), max_subsystems (2 pass, 3 warn), max_description_chars (2000 pass, 4000 warn). All configurable under usher key in config.json. Error case: missing scope field -> fail with descriptive message. Edge case: empty scope -> pass (assume trivial). Include tests for all verdict levels, --warn-only, missing scope, and empty scope.",
+  "scope": "New: runner/usher.py, runner/test_usher.py. Modified: runner/config.json, runner/run.py.",
+  "context": "",
+  "created_at": "2026-04-12T15:31:20.208322+00:00",
+  "explore_hints": [
+    "runner/run.py",
+    "runner/config.json",
+    "runner/config_loader.py",
+    "runner/validate_intake.py"
+  ]
+}

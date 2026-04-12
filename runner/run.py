@@ -22,6 +22,12 @@ import time
 from pathlib import Path
 
 from .config_loader import get as cfg
+from .usher import assess as usher_assess
+from .usher_order import (
+    load_order, next_eligible, update_status as order_update_status,
+    cascade_failure, detect_stale_running,
+)
+from .run_history import append_entry as history_append
 from .detached_lib import (
     slugify, pick_backlog_item, hygiene_precheck,
     all_backlog_items_claimed, append_overnight_log,
@@ -439,7 +445,7 @@ def _run_detached_impl(cli_args) -> int:
     # Hygiene precheck
     reason = hygiene_precheck(max_unreviewed)
     if reason:
-        append_overnight_log({
+        history_append({
             'start_ts': start_ts,
             'end_ts': _now(),
             'exit_status': f'skipped: {reason}',
@@ -451,16 +457,44 @@ def _run_detached_impl(cli_args) -> int:
         })
         return 0
 
-    # Resolve intake path
+    # Reset any stale 'running' tickets from a previous interrupted run
+    for stale in detect_stale_running():
+        print(f'usher_order: resetting stale running ticket {stale["uuid"]} to pending', file=sys.stderr)
+        order_update_status(stale["uuid"], "pending")
+
+    # Resolve intake path — try usher_order.json first, fall back to backlog
+    order_ticket = None  # set if this run is driven by usher_order
     if cli_args.intake is not None:
         picked_path = Path(cli_args.intake)
         from_backlog = False
     else:
-        picked_path = pick_backlog_item()
-        from_backlog = True
-        if picked_path is None:
+        # Check usher_order for an eligible ticket
+        order = load_order()
+        if order.get("groups") or order.get("standalone"):
+            order_ticket = next_eligible()
+
+        if order_ticket is not None:
+            ticket_uuid = order_ticket["uuid"]
+            # Resolve the intake file from backlog/ or intake/ by uuid
+            candidate = BACKLOG_DIR / f"{ticket_uuid}.json"
+            if not candidate.exists():
+                candidate = INTAKE_DIR / f"{ticket_uuid}.json"
+            if candidate.exists():
+                picked_path = candidate
+                from_backlog = picked_path.parent == BACKLOG_DIR
+            else:
+                print(f'usher_order: ticket {ticket_uuid} has no intake file, marking failed',
+                      file=sys.stderr)
+                order_update_status(ticket_uuid, "failed")
+                order_ticket = None
+
+        if order_ticket is None:
+            picked_path = pick_backlog_item()
+            from_backlog = True
+
+        if order_ticket is None and picked_path is None:
             reason = 'all in progress' if all_backlog_items_claimed() else 'backlog empty'
-            append_overnight_log({
+            _log_and_return = {
                 'start_ts': start_ts,
                 'end_ts': _now(),
                 'exit_status': f'skipped: {reason}',
@@ -469,7 +503,8 @@ def _run_detached_impl(cli_args) -> int:
                 'uuid': None,
                 'slug': None,
                 'branch': None,
-            })
+            }
+            history_append(_log_and_return)
             return 0
 
     # Load intake JSON
@@ -477,7 +512,7 @@ def _run_detached_impl(cli_args) -> int:
         intake = json.loads(picked_path.read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError) as e:
         print(f'ERROR: could not read intake file {picked_path}: {e}', file=sys.stderr)
-        append_overnight_log({
+        history_append({
             'start_ts': start_ts,
             'end_ts': _now(),
             'exit_status': 'intake_read_failed',
@@ -496,7 +531,7 @@ def _run_detached_impl(cli_args) -> int:
         uuid = uuid.strip()
     if not uuid:
         print('ERROR: intake file missing id field', file=sys.stderr)
-        append_overnight_log({
+        history_append({
             'start_ts': start_ts,
             'end_ts': _now(),
             'exit_status': 'intake_invalid_id',
@@ -518,7 +553,7 @@ def _run_detached_impl(cli_args) -> int:
         or not Path(uuid).name
     ):
         print('ERROR: intake id field contains invalid characters (path separators not allowed)', file=sys.stderr)
-        append_overnight_log({
+        history_append({
             'start_ts': start_ts,
             'end_ts': _now(),
             'exit_status': 'intake_invalid_id_path',
@@ -529,6 +564,28 @@ def _run_detached_impl(cli_args) -> int:
             'branch': None,
         })
         return 1
+
+    # Usher sizing gate: reject oversized tickets before committing resources
+    usher_verdict, usher_metrics = usher_assess(intake)
+    if usher_verdict == 'fail':
+        print(f'Usher: ticket rejected — files={usher_metrics["file_count"]}, '
+              f'subsystems={usher_metrics["subsystem_count"]}, '
+              f'desc_chars={usher_metrics["description_chars"]}', file=sys.stderr)
+        history_append({
+            'start_ts': start_ts,
+            'end_ts': _now(),
+            'exit_status': 'usher_rejected',
+            'stages_completed': 0,
+            'total_tokens': 0,
+            'uuid': uuid,
+            'slug': None,
+            'branch': None,
+        })
+        return 0
+    elif usher_verdict == 'warn':
+        print(f'Usher: warn — files={usher_metrics["file_count"]}, '
+              f'subsystems={usher_metrics["subsystem_count"]}, '
+              f'desc_chars={usher_metrics["description_chars"]}', file=sys.stderr)
 
     title = intake.get('title', 'Untitled')
     slug = slugify(title)
@@ -545,7 +602,7 @@ def _run_detached_impl(cli_args) -> int:
     ok, wt_path, err = git_worktree_create(branch)
     if not ok:
         print(f'ERROR: git worktree setup failed: {err}', file=sys.stderr)
-        append_overnight_log({
+        history_append({
             'start_ts': start_ts,
             'end_ts': _now(),
             'exit_status': 'git_setup_failed',
@@ -557,6 +614,16 @@ def _run_detached_impl(cli_args) -> int:
             'total_tokens': 0,
         })
         return 1
+
+    # Mark order ticket as running
+    if order_ticket is not None:
+        order_update_status(order_ticket["uuid"], "running")
+
+    # Open per-run debug log
+    logs_dir = SCRIPT_DIR / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    run_log_name = f'runner_log_{datetime.datetime.now(datetime.timezone.utc).strftime("%Y_%m_%d_%H%M%S")}.log'
+    run_log_path = logs_dir / run_log_name
 
     stage_costs: list[dict] = []
     stages_completed = 0
@@ -605,6 +672,17 @@ def _run_detached_impl(cli_args) -> int:
 
             ok, stdout_text, stderr_text, _elapsed = run_stage(name, module_name, input_path, cwd=wt_path)
             record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
+
+            # Append stage output to per-run debug log
+            try:
+                with open(run_log_path, 'a', encoding='utf-8') as _lf:
+                    _lf.write(f'\n===== stage: {name} (elapsed={_elapsed:.1f}s, ok={ok}) =====\n')
+                    if stdout_text:
+                        _lf.write(f'--- stdout ---\n{stdout_text}\n')
+                    if stderr_text:
+                        _lf.write(f'--- stderr ---\n{stderr_text}\n')
+            except OSError:
+                pass
 
             # If the cleanup-handler killed this stage mid-flight, surface
             # 'interrupted' rather than the downstream stage_failed/no_usage
@@ -674,8 +752,25 @@ def _run_detached_impl(cli_args) -> int:
         'stages_completed': stages_completed,
         'total_tokens': cumulative_tokens(stage_costs),
         'exit_status': exit_status,
+        'log_file': str(run_log_path),
     }
-    append_overnight_log(entry)
+    history_append(entry)
+
+    # Update usher_order status if this was an order-driven run
+    if order_ticket is not None:
+        if exit_status == 'ok':
+            order_update_status(order_ticket["uuid"], "completed")
+        else:
+            order_update_status(order_ticket["uuid"], "failed")
+            blocked = cascade_failure(order_ticket["uuid"])
+            if blocked:
+                print(f'usher_order: blocked {len(blocked)} dependent ticket(s): {blocked}',
+                      file=sys.stderr)
+        # Check if more tickets are available for next cron invocation
+        _next = next_eligible()
+        if _next is not None:
+            print(f'usher_order: next eligible ticket available: {_next["slug"]}',
+                  file=sys.stderr)
 
     return 0 if exit_status == 'ok' else 1
 
@@ -1037,6 +1132,13 @@ def main():
     ):
         print("Intake id field contains invalid characters (path separators not allowed)", file=sys.stderr)
         sys.exit(1)
+
+    # Usher sizing advisory (interactive mode: warn only, never block)
+    usher_verdict, usher_metrics = usher_assess(intake)
+    if usher_verdict in ('warn', 'fail'):
+        print(f'Usher advisory ({usher_verdict}): files={usher_metrics["file_count"]}, '
+              f'subsystems={usher_metrics["subsystem_count"]}, '
+              f'desc_chars={usher_metrics["description_chars"]}')
 
     # Derive artifact paths
     artifacts = {

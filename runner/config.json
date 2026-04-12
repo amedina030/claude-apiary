@@ -26,5 +26,10 @@
   "detached": {
     "token_cap": 10000000,
     "max_unreviewed": 5
+  },
+  "usher": {
+    "max_files": {"pass": 5, "warn": 8},
+    "max_subsystems": {"pass": 2, "warn": 3},
+    "max_description_chars": {"pass": 2000, "warn": 4000}
   }
 }
