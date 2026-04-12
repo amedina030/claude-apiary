@@ -572,7 +572,7 @@ def _check_removal_coverage(steps: list[dict]) -> list[str]:
                 result = subprocess.run(
                     ["git", "grep", "-l", "--", symbol],
                     capture_output=True, text=True, timeout=10,
-                    cwd=str(REPO_ROOT),
+                    cwd=str(_REPO_ROOT),
                 )
                 if result.returncode != 0:
                     continue
