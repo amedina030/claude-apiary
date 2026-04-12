@@ -104,7 +104,12 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "7. Ensure every acceptance criterion from the spec is covered by at "
         "least one step's description or code_spec.",
         "8. Set depends_on to reference step_numbers that must complete before "
-        "this step can start. No circular dependencies.",
+        "this step can start. No circular dependencies. IMPORTANT: if two or "
+        "more steps target the same file, they MUST be linked by a depends_on "
+        "chain (the later step must list the earlier step's step_number in its "
+        "depends_on). Without this, the executor may run them in either order "
+        "and one step's edits will clobber the other's. The validator rejects "
+        "plans with unlinked file overlaps.",
         "",
         "## Output format",
         "",
