@@ -523,15 +523,34 @@ _REMOVAL_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
+# Match symbols that look like Python identifiers: UPPER_CASE, snake_case with
+# underscores, or CamelCase. Plain lowercase words like 'learning' are too
+# common and produce false positives when grepped across the codebase.
 _SYMBOL_IN_QUOTES = re.compile(r"['\"`]([A-Za-z_][A-Za-z0-9_]*)['\"`]")
 
 
-def _check_removal_coverage(steps: list[dict]) -> list[str]:
-    """Warn when a step removes a symbol but not all files referencing it are in the plan.
+def _is_python_symbol(name: str) -> bool:
+    """Return True if name looks like a Python symbol, not a plain English word."""
+    if len(name) < 6:
+        return False
+    # UPPER_CASE constants (e.g. LEARNING_FOLDER, TYPE_FOLDERS)
+    if name.isupper() and '_' in name:
+        return True
+    # snake_case with underscore (e.g. add_learning, list_learnings)
+    if name.islower() and '_' in name:
+        return True
+    # CamelCase classes (e.g. ScribeStore)
+    if name[0].isupper() and any(c.islower() for c in name) and any(c.isupper() for c in name[1:]):
+        return True
+    return False
 
-    Greps the repo for each extracted symbol name. If files outside the plan's
-    coverage reference the symbol, the planner likely missed updating them and
-    the test suite will break with NameError/ImportError.
+
+def _check_removal_coverage(steps: list[dict]) -> list[str]:
+    """Warn when a step removes a Python symbol but not all files importing it are in the plan.
+
+    Only checks symbols that look like Python identifiers (UPPER_CASE constants,
+    snake_case functions, CamelCase classes). Uses git grep with word-boundary
+    patterns to find actual code references, not prose mentions.
     """
     errors = []
 
@@ -545,6 +564,7 @@ def _check_removal_coverage(steps: list[dict]) -> list[str]:
                 plan_files.add(f.replace("\\", "/").strip())
 
     # Find steps that remove symbols
+    seen_symbols: set[str] = set()  # dedup across steps
     for i, step in enumerate(steps):
         if not isinstance(step, dict):
             continue
@@ -564,13 +584,16 @@ def _check_removal_coverage(steps: list[dict]) -> list[str]:
             continue
 
         for symbol in symbols:
-            # Skip very short or common names that would produce noisy grep results
-            if len(symbol) < 4:
+            if not _is_python_symbol(symbol):
                 continue
+            if symbol in seen_symbols:
+                continue
+            seen_symbols.add(symbol)
 
+            # Use word-boundary grep to match actual Python references
             try:
                 result = subprocess.run(
-                    ["git", "grep", "-l", "--", symbol],
+                    ["git", "grep", "-l", "-w", "--", symbol],
                     capture_output=True, text=True, timeout=10,
                     cwd=str(_REPO_ROOT),
                 )
@@ -584,17 +607,10 @@ def _check_removal_coverage(steps: list[dict]) -> list[str]:
             except (OSError, subprocess.TimeoutExpired):
                 continue
 
-            # Filter to Python/test files only (where import/usage errors matter)
+            # Filter to Python files only (where import/usage errors matter)
             py_files = {f for f in referencing_files if f.endswith(".py")}
 
-            # Exclude the file being modified (it's already in the plan)
-            step_files = {
-                f.replace("\\", "/").strip()
-                for f in step.get("files", [])
-                if isinstance(f, str)
-            }
-
-            uncovered = py_files - plan_files - step_files
+            uncovered = py_files - plan_files
             if uncovered:
                 errors.append(
                     f"step[{i}] removes symbol '{symbol}' but {len(uncovered)} "
