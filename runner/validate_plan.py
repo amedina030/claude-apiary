@@ -517,6 +517,95 @@ def _check_file_overlap(steps: list) -> list:
     return errors
 
 
+_REMOVAL_KEYWORDS = re.compile(
+    r'\b(remove|delete|drop|rip out|eliminate|strip)\b.*\b(function|method|class|constant|import|variable|attr)\b'
+    r'|\b(function|method|class|constant|import|variable|attr)\b.*\b(remove|delete|drop|rip out|eliminate|strip)\b',
+    re.IGNORECASE,
+)
+
+_SYMBOL_IN_QUOTES = re.compile(r"['\"`]([A-Za-z_][A-Za-z0-9_]*)['\"`]")
+
+
+def _check_removal_coverage(steps: list[dict]) -> list[str]:
+    """Warn when a step removes a symbol but not all files referencing it are in the plan.
+
+    Greps the repo for each extracted symbol name. If files outside the plan's
+    coverage reference the symbol, the planner likely missed updating them and
+    the test suite will break with NameError/ImportError.
+    """
+    errors = []
+
+    # Collect all files covered by any step in the plan
+    plan_files: set[str] = set()
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        for f in s.get("files", []):
+            if isinstance(f, str) and f:
+                plan_files.add(f.replace("\\", "/").strip())
+
+    # Find steps that remove symbols
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        action = step.get("action", "")
+        desc = step.get("description", "")
+        code_spec = step.get("code_spec", "")
+        combined = f"{desc} {code_spec}"
+
+        if action not in ("modify", "delete"):
+            continue
+        if not _REMOVAL_KEYWORDS.search(combined):
+            continue
+
+        # Extract symbol names from quoted references in the description/code_spec
+        symbols = _SYMBOL_IN_QUOTES.findall(combined)
+        if not symbols:
+            continue
+
+        for symbol in symbols:
+            # Skip very short or common names that would produce noisy grep results
+            if len(symbol) < 4:
+                continue
+
+            try:
+                result = subprocess.run(
+                    ["git", "grep", "-l", "--", symbol],
+                    capture_output=True, text=True, timeout=10,
+                    cwd=str(REPO_ROOT),
+                )
+                if result.returncode != 0:
+                    continue
+                referencing_files = {
+                    f.strip().replace("\\", "/")
+                    for f in result.stdout.splitlines()
+                    if f.strip()
+                }
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+
+            # Filter to Python/test files only (where import/usage errors matter)
+            py_files = {f for f in referencing_files if f.endswith(".py")}
+
+            # Exclude the file being modified (it's already in the plan)
+            step_files = {
+                f.replace("\\", "/").strip()
+                for f in step.get("files", [])
+                if isinstance(f, str)
+            }
+
+            uncovered = py_files - plan_files - step_files
+            if uncovered:
+                errors.append(
+                    f"step[{i}] removes symbol '{symbol}' but {len(uncovered)} "
+                    f"file(s) referencing it are not in the plan: "
+                    f"{', '.join(sorted(uncovered)[:5])}"
+                    + (f" (and {len(uncovered) - 5} more)" if len(uncovered) > 5 else "")
+                )
+
+    return errors
+
+
 def _check_criteria_coverage(spec: dict, steps: list[dict]) -> list[str]:
     """Check that every acceptance criterion is referenced by at least one step.
 
@@ -682,6 +771,10 @@ def validate(data: dict) -> list[str]:
     # File-overlap check (#241): reject plans where multiple steps
     # write the same file without a depends_on chain.
     errors.extend(_check_file_overlap(steps))
+
+    # Symbol removal coverage: reject plans that remove a symbol without
+    # covering all files that reference it.
+    errors.extend(_check_removal_coverage(steps))
 
     # Acceptance criteria coverage
     if isinstance(spec, dict):

@@ -99,6 +99,15 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "confirm and how). The executor passes it to a Claude verify call.",
         "5. For 'modify' and 'delete' actions, the files listed MUST exist in the "
         "codebase. For 'create' actions, the files are new.",
+        "5a. SYMBOL REMOVAL RULE: When a step removes, renames, or deletes a "
+        "function, class, constant, or import from a file, you MUST grep the "
+        "repo for ALL references to that symbol (imports AND usage sites) and "
+        "include update steps for EVERY file that references it. Do not rely "
+        "on the spec's file list — it may be incomplete. Use "
+        "'Grep(pattern=\"SYMBOL_NAME\")' to find all references. Missing even "
+        "one file will cause NameError/ImportError in the test suite. The "
+        "validator will reject plans that remove a symbol without covering "
+        "all files that reference it.",
         "6. Always include at least one 'verify' step at the end that describes "
         "how to confirm the implementation works.",
         "7. Ensure every acceptance criterion from the spec is covered by at "
