@@ -43,6 +43,18 @@ def checkout(branch: str):
         raise RuntimeError(f"Git checkout failed: {result.stderr.strip()}")
 
 
+def is_worktree() -> bool:
+    """True if we're running inside a secondary git worktree."""
+    result = git("rev-parse", "--git-common-dir")
+    if result.returncode != 0:
+        return False
+    result2 = git("rev-parse", "--git-dir")
+    if result2.returncode != 0:
+        return False
+    # In a worktree, --git-dir != --git-common-dir
+    return result.stdout.strip() != result2.stdout.strip()
+
+
 def is_branch_merged(branch: str, into: str = "master") -> bool:
     """Check if branch is already merged into target."""
     result = git("branch", "--merged", into)
@@ -267,6 +279,11 @@ def main():
         if is_branch_merged(branch):
             path_taken = "already-merged"
             print(f"Branch {branch} already merged — skipping merge", file=sys.stderr)
+        elif is_worktree():
+            # Running inside a secondary worktree — cannot checkout master.
+            # Defer merge to manual review or next cron cycle on the main tree.
+            path_taken = "worktree-deferred"
+            print(f"Worktree mode: deferring merge of {branch} to master (manual merge required)", file=sys.stderr)
         else:
             # Checkout master and squash merge
             original_branch = get_current_branch()
@@ -338,6 +355,9 @@ def main():
             if is_branch_merged(branch):
                 path_taken = "already-merged"
                 print(f"Branch {branch} already merged — skipping merge", file=sys.stderr)
+            elif is_worktree():
+                path_taken = "worktree-deferred"
+                print(f"Worktree mode: deferring merge of {branch} to master (manual merge required)", file=sys.stderr)
             else:
                 original_branch = get_current_branch()
                 try:
