@@ -17,11 +17,13 @@ Query notes using the scribe tool.
 - `/notes blocker` → `notes.py list --type blocker`
 - `/notes reference` → `notes.py list --type reference`
 - `/notes context` → `notes.py list --type context`
+- `/notes general` → `notes.py list --type general`
+- `/notes learning` → `notes.py list --type learning`
 - `/notes search <keyword>` → `notes.py list --search "<keyword>"`
 - `/notes session <id>` → `notes.py list --session "<id>"`
 - `/notes last <N>` → `notes.py list --last <N>`
 - `/notes archive` → `notes.py list --archive`
-- `/notes <N>` (where N is a number) → `notes.py get <N>`
+- `/notes <ID>` (where `<ID>` is a TYPE-YEAR-seq ID like `T-2026-1`, or a legacy bare integer) → `notes.py get <ID>`
 
 ## Steps
 

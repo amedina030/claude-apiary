@@ -16,9 +16,31 @@ Three separate stores. Pick the right one up front — moving entries between th
 | **Notes** | `<repo-root>/.apiary/scribe/<type>/` (folder-per-type, indexed via `index.jsonl`) | Decays; auto-archived after 30 days | Operational state — TODOs, handoffs, decisions, blockers, wishlists, current-work context |
 | **Learnings** | `<repo-root>/.apiary/scribe/learnings/` (folder-per-type, indexed via `index.jsonl`) | Permanent (no auto-archive) | Project-specific error workarounds, non-obvious patterns, tool quirks you figured out |
 
-**Scribe v2 storage.** Notes use a folder-per-type layout under `<repo-root>/.apiary/scribe/`. Each note type has its own folder (`todos/`, `handoffs/`, `decisions/`, `wishlists/`, `blockers/`, `context/`, `general/`) containing individual `<id>.md` files and an `index.jsonl` for fast listing. Learnings live in `learnings/` with the same structure. Archived notes move into `<type>/archive/` subfolders. The legacy `~/.claude/projects/claude-apiary/notes.jsonl` layout was migrated in scribe-v2 Phase 3 and is no longer the primary store.
+**Scribe v2 storage.** Notes use a folder-per-type layout under `<repo-root>/.apiary/scribe/`. Each note type has its own folder (`todos/`, `handoffs/`, `decisions/`, `wishlists/`, `blockers/`, `references/`, `context/`, `general/`) containing individual `<id>.md` files and an `index.jsonl` for fast listing. Learnings live in `learnings/` with the same structure. Archived notes move into `<type>/archive/` subfolders. The legacy `~/.claude/projects/claude-apiary/notes.jsonl` layout was migrated in scribe-v2 Phase 3 and is no longer the primary store.
 
 **Quick decision:** Is it still true in 3 months → memory. Is it a workaround or a non-obvious thing I learned → learning. Is it about current work that will decay → note.
+
+---
+
+## Note ID format
+
+Every note and learning has a **TYPE-YEAR-seq** display ID (e.g. `T-2026-1`, `L-2026-3`). The three components:
+
+| Prefix | Type |
+|--------|----------|
+| `T` | todo |
+| `H` | handoff |
+| `D` | decision |
+| `W` | wishlist |
+| `R` | reference |
+| `B` | blocker |
+| `C` | context |
+| `G` | general |
+| `L` | learning |
+
+Each **(type, year)** pair has its own independent sequence counter, stored at `<type>/<year>/next_seq` inside the scribe state directory. For example, the first todo created in 2026 is `T-2026-1`, and the first learning in 2026 is `L-2026-1` — their counters are independent.
+
+Legacy bare-integer IDs (e.g. `42`) are still accepted by the CLI via `migration_id_map.json` lookups, but all new notes use TYPE-YEAR-seq format.
 
 ---
 
@@ -36,7 +58,7 @@ Notes are primarily for Claude's own use — to maintain continuity across sessi
 | User says "note this" / "write that down" | as specified, or `context` | Follow the user's lead on type |
 | User note that does not fit a specific type / miscellaneous capture | `general` | Default bucket when no other type applies |
 | Wishlist idea ("would be nice", "eventually", "we should") | `wishlist` | Record the idea |
-| Work that matches an active TODO is completed | — | Run `notes.py done <id>` |
+| Work that matches an active TODO is completed | — | Run `notes.py done <ID>` (where `<ID>` is a TYPE-YEAR-seq ID like `T-2026-1`) |
 
 ### Self-triggered (Claude writes without prompting)
 
@@ -87,7 +109,7 @@ python scribe/notes.py learn --content "description of what was learned" --sessi
 python scribe/notes.py learnings [--full] [--search TEXT]
 
 # Remove a stale learning
-python scribe/notes.py unlearn <id>
+python scribe/notes.py unlearn <ID>  # e.g. L-2026-3
 ```
 
 ---
