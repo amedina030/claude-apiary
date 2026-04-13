@@ -31,7 +31,7 @@ from pathlib import Path as _PathImport
 # Add project root to path for core.utils import
 sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
 from core.session import SessionId
-from scribe.store import ScribeStore, TYPE_FOLDERS, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_ID_FILENAME
+from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_ID_FILENAME, NEXT_SEQ_FILENAME
 
 from pathlib import Path
 
@@ -49,6 +49,12 @@ APIARY_STATE_DIRNAME = ".apiary"
 SCRIBE_SUBDIR = "scribe"
 
 VALID_TYPES = ["todo", "handoff", "decision", "wishlist", "reference", "blocker", "context", "general"]
+
+_PREFIX_TO_TYPE: dict[str, str] = {
+    'T': 'todo', 'H': 'handoff', 'D': 'decision', 'W': 'wishlist',
+    'R': 'reference', 'B': 'blocker', 'C': 'context', 'G': 'general', 'L': 'learning',
+}
+
 AUTO_ARCHIVE_DAYS = 30
 MAX_CONTENT_LENGTH = 100_000  # bytes; prevents runaway JSONL file growth
 MAX_SUMMARY_LENGTH = 300  # chars; keeps index.jsonl lines small and startup injection cheap
@@ -355,16 +361,16 @@ def _run_auto_archive_store(store) -> int:
         if ts is None:
             continue
         if n.get('status') == 'done' and ts < done_cutoff:
-            to_archive_ids.append(n['id'])
+            to_archive_ids.append((n['type'], n['year'], n['seq']))
         elif ntype == 'handoff':
             key = (n.get('role', 'user'), n.get('mission', 'general'))
             if ts < latest_handoff.get(key, ts):
-                to_archive_ids.append(n['id'])
+                to_archive_ids.append((n['type'], n['year'], n['seq']))
         elif ntype == 'context' and ts < context_cutoff:
-            to_archive_ids.append(n['id'])
+            to_archive_ids.append((n['type'], n['year'], n['seq']))
 
-    for nid in to_archive_ids:
-        store.archive_note(nid)
+    for ntype, nyear, nseq in to_archive_ids:
+        store.archive_note(ntype, nyear, nseq)
     return len(to_archive_ids)
 
 
@@ -439,7 +445,7 @@ def cmd_add(args):
         summary=summary,
         **metadata,
     )
-    print(f"Added #{entry['id']} ({entry['type']})")
+    print(f"Added {_format_id(entry)} ({entry['type']})")
 
     # Run auto-archive after add
     _run_auto_archive_store(store)
@@ -500,44 +506,94 @@ def cmd_list(args):
         return
 
     for n in notes_list:
-        nid = n.get('id', '?')
         ntype = n.get('type', '?')[:8]
         age = format_age(n.get('timestamp', ''))
         status_label = ' [DONE]' if n.get('status') == 'done' else ''
         # For store entries, content is in 'summary' field; read full content for display
         content = n.get('summary', '').replace('\n', ' ')[:80]
-        line = f'#{nid:<4} {ntype:<10} ({age:<9}) {content}{status_label}'
+        line = f'{_format_id(n):<12} {ntype:<10} ({age:<9}) {content}{status_label}'
         print(line.encode('ascii', errors='replace').decode('ascii'))
 
 
-def _parse_id_arg(raw: str) -> tuple:
-    """Parse an ID argument. Returns (int_id, is_learning).
-    'L3' or 'l3' -> (3, True). '42' -> (42, False)."""
-    raw = raw.strip()
-    if raw.upper().startswith("L"):
-        try:
-            return int(raw[1:]), True
-        except ValueError:
-            print(f"Error: invalid learning ID: {raw!r}", file=sys.stderr)
-            sys.exit(1)
+def _format_id(entry: dict) -> str:
+    """Return the display ID string for a note/learning entry."""
+    prefix = TYPE_PREFIXES.get(entry.get('type', ''), '?')
+    return f"{prefix}-{entry.get('year', '?')}-{entry.get('seq', '?')}"
+
+
+def _parse_display_id(display_id: str) -> tuple:
+    """Parse a display ID string like 'T-2026-1' into (note_type, year, seq)."""
+    m = re.match(r'^([A-Z])-([0-9]{4})-([0-9]+)$', display_id.upper())
+    if not m:
+        raise ValueError(f'Bad display_id: {display_id}')
+    return (_PREFIX_TO_TYPE[m.group(1)], int(m.group(2)), int(m.group(3)))
+
+
+def _load_migration_map(store) -> dict:
+    """Load the migration ID map (old int ID -> display ID string). Returns {} if missing."""
+    path = store.state_dir / 'migration_id_map.json'
+    if not path.exists():
+        return {}
     try:
-        return int(raw), False
-    except ValueError:
-        print(f"Error: invalid ID: {raw!r}", file=sys.stderr)
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _parse_id_arg(raw: str, store) -> tuple:
+    """Parse an ID argument. Returns (note_type, year, seq).
+
+    Accepts:
+      - TYPE-YEAR-seq format: e.g. T-2026-1, L-2026-3
+      - Legacy bare integer: e.g. 42 (looked up in migration_id_map.json)
+      - Legacy L-prefix integer: e.g. L3 (looked up in migration_id_map.json)
+    """
+    raw = raw.strip()
+    # Try TYPE-YEAR-seq format: e.g. T-2026-1
+    m = re.match(r'^([A-Z])-([0-9]{4})-([0-9]+)$', raw.upper())
+    if m:
+        prefix, year_str, seq_str = m.group(1), m.group(2), m.group(3)
+        if prefix not in _PREFIX_TO_TYPE:
+            print(f"Error: invalid ID: {raw}", file=sys.stderr)
+            sys.exit(1)
+        return (_PREFIX_TO_TYPE[prefix], int(year_str), int(seq_str))
+
+    # Legacy: try bare integer or L<n> via migration_id_map.json
+    migration_map = _load_migration_map(store)
+    if raw.upper().startswith('L'):
+        try:
+            old_int = str(int(raw[1:]))
+        except ValueError:
+            print(f"Error: invalid ID: {raw}", file=sys.stderr)
+            sys.exit(1)
+        mapped = migration_map.get(old_int)
+        if mapped:
+            return _parse_display_id(mapped)
+        print(f"Error: invalid ID: {raw}", file=sys.stderr)
         sys.exit(1)
+    try:
+        old_int = str(int(raw))
+    except ValueError:
+        print(f"Error: invalid ID: {raw}", file=sys.stderr)
+        sys.exit(1)
+    mapped = migration_map.get(old_int)
+    if mapped:
+        return _parse_display_id(mapped)
+    print(f"Error: invalid ID: {raw}", file=sys.stderr)
+    sys.exit(1)
 
 
 def cmd_get(args):
     store = args.store
-    raw_id, force_learning = _parse_id_arg(args.id)
+    note_type, year, seq = _parse_id_arg(args.id, store)
     source_label = None
     is_learning = False
 
-    if force_learning:
-        note = store.get_learning(raw_id)
+    if note_type == 'learning':
+        note = store.get_learning(year, seq)
         is_learning = True
     else:
-        note = store.get_note(raw_id)
+        note = store.get_note(note_type, year, seq)
         if note and note.get('status') == 'archived':
             source_label = '[from archive]'
 
@@ -545,10 +601,10 @@ def cmd_get(args):
         print(source_label)
 
     if not note:
-        print(f'Note #{args.id} not found.', file=sys.stderr)
+        print(f'Note {args.id} not found.', file=sys.stderr)
         sys.exit(1)
 
-    print(f"ID: {note['id']}")
+    print(f"ID: {_format_id(note)}")
     if is_learning:
         print('Type: learning')
     else:
@@ -568,15 +624,16 @@ def cmd_get(args):
 
 def cmd_done(args):
     store = args.store
-    note = store.get_note(args.id)
+    note_type, year, seq = _parse_id_arg(str(args.id), store)
+    note = store.get_note(note_type, year, seq)
     if not note:
-        print(f'Note #{args.id} not found.', file=sys.stderr)
+        print(f'Note {args.id} not found.', file=sys.stderr)
         sys.exit(1)
     if note.get('status') == 'done':
-        print(f'Note #{args.id} is already marked done.')
+        print(f'Note {args.id} is already marked done.')
         return
-    store.update_note(args.id, status='done')
-    print(f'Marked #{args.id} as done.')
+    store.update_note(note_type, year, seq, status='done')
+    print(f'Marked {args.id} as done.')
 
 
 def cmd_update(args):
@@ -587,12 +644,13 @@ def cmd_update(args):
         print(f'Error: content exceeds {MAX_CONTENT_LENGTH} bytes', file=sys.stderr)
         sys.exit(1)
     store = args.store
-    note = store.get_note(args.id)
+    note_type, year, seq = _parse_id_arg(str(args.id), store)
+    note = store.get_note(note_type, year, seq)
     if not note:
-        print(f'Note #{args.id} not found.', file=sys.stderr)
+        print(f'Note {args.id} not found.', file=sys.stderr)
         sys.exit(1)
     if note.get('status') == 'done':
-        print(f'Error: note #{args.id} is already done and cannot be updated.', file=sys.stderr)
+        print(f'Error: note {args.id} is already done and cannot be updated.', file=sys.stderr)
         sys.exit(1)
     kwargs = {}
     if args.content is not None:
@@ -600,8 +658,8 @@ def cmd_update(args):
         kwargs['summary'] = args.content[:120].replace('\n', ' ').strip()
     if args.session_id is not None:
         kwargs['session'] = args.session_id
-    store.update_note(args.id, **kwargs)
-    print(f'Updated #{args.id}.')
+    store.update_note(note_type, year, seq, **kwargs)
+    print(f'Updated {args.id}.')
 
 
 def cmd_archive(args):
@@ -621,7 +679,7 @@ def cmd_archive(args):
         ts = _parse_timestamp(n.get('timestamp', ''))
         archivable = (n.get('status') == 'done') or (n.get('type') == 'handoff')
         if ts is not None and ts < cutoff and archivable:
-            store.archive_note(n['id'])
+            store.archive_note(n['type'], n['year'], n['seq'])
             archived_count += 1
     if not archived_count:
         print('Nothing to archive.')
@@ -655,7 +713,7 @@ def cmd_learn(args):
         session_id=args.session_id or '',
         **metadata,
     )
-    print(f"Learned #L{entry['id']}")
+    print(f"Learned {_format_id(entry)}")
 
 
 def cmd_learnings(args):
@@ -672,16 +730,15 @@ def cmd_learnings(args):
         return
 
     for l in learnings:
-        lid = l.get('id', '?')
         age = format_age(l.get('timestamp', ''))
         if args.full:
             # Read full content from store
-            full = store.get_learning(lid)
+            full = store.get_learning(l['year'], l['seq'])
             content = full.get('content', '') if full else l.get('summary', '')
-            print(f'#L{lid}: {content}')
+            print(f'{_format_id(l)}: {content}')
         else:
             short = l.get('summary', '').replace('\n', ' ')[:80]
-            print(f'#L{lid:<3} ({age:<9}) {short}')
+            print(f'{_format_id(l):<12} ({age:<9}) {short}')
 
 
 def cmd_handoff_sessions(args):
@@ -700,12 +757,12 @@ def cmd_handoff_sessions(args):
 
 def cmd_unlearn(args):
     store = args.store
-    raw_id, _ = _parse_id_arg(args.id)
-    result = store.remove_learning(raw_id)
+    note_type, year, seq = _parse_id_arg(args.id, store)
+    result = store.remove_learning(year, seq)
     if result is None:
-        print(f'Learning #L{raw_id} not found.', file=sys.stderr)
+        print(f'Learning {args.id} not found.', file=sys.stderr)
         sys.exit(1)
-    print(f'Removed learning #L{raw_id}.')
+    print(f'Removed learning {args.id}.')
 
 
 # ---------------------------------------------------------------------------
@@ -733,69 +790,103 @@ def cmd_repair(args):
     max_id_seen = 0
     report_lines = []
 
-    folders_to_scan = []
-    for name in all_folder_names:
-        folders_to_scan.append((state_dir / name, name, False))
-        folders_to_scan.append((state_dir / name / ARCHIVE_DIRNAME, name, True))
-
-    for folder, type_name, is_archive in folders_to_scan:
-        if not folder.exists():
+    for type_folder_name in all_folder_names:
+        type_dir = state_dir / type_folder_name
+        if not type_dir.exists():
             continue
+        note_type = 'learning' if type_folder_name == LEARNING_FOLDER else _folder_to_note_type(type_folder_name)
 
-        entries = ScribeStore._read_index(folder)
-        index_ids = {e.get('id'): e for e in entries if isinstance(e.get('id'), int)}
-
-        md_files = list(folder.glob('*.md'))
-        md_ids = set()
-        for md_path in md_files:
-            try:
-                mid = int(md_path.stem)
-            except ValueError:
-                print(f'Warning: skipping non-integer filename {md_path.name} in {folder}', file=sys.stderr)
+        # Scan year subfolders (dirs whose name is all digits)
+        for child in type_dir.iterdir():
+            if not child.is_dir() or not child.name.isdigit():
                 continue
-            md_ids.add(mid)
-            if mid > max_id_seen:
-                max_id_seen = mid
+            year = int(child.name)
+            year_dir = child
 
-        for eid in index_ids:
-            if isinstance(eid, int) and eid > max_id_seen:
-                max_id_seen = eid
+            for is_archive in (False, True):
+                folder = year_dir / ARCHIVE_DIRNAME if is_archive else year_dir
+                if not folder.exists():
+                    continue
 
-        new_entries = list(entries)
+                entries = ScribeStore._read_index(folder)
+                index_seqs = {e.get('seq'): e for e in entries if isinstance(e.get('seq'), int)}
 
-        for mid in sorted(md_ids - set(index_ids.keys())):
-            md_path = folder / f'{mid}.md'
-            content = md_path.read_text(encoding='utf-8')
-            st_mtime = md_path.stat().st_mtime
-            ts = datetime.fromtimestamp(st_mtime, tz=timezone.utc).isoformat()
-            summary = content[:200].replace('\n', ' ').strip()
-            note_type = 'learning' if type_name == LEARNING_FOLDER else _folder_to_note_type(type_name)
-            entry = {
-                'id': mid,
-                'type': note_type,
-                'status': 'archived' if is_archive else 'active',
-                'session': '',
-                'timestamp': ts,
-                'summary': summary,
-                'has_body': bool(content),
-            }
-            new_entries.append(entry)
-            rebuilt += 1
-            report_lines.append(f'  + rebuilt entry #{mid} in {folder.relative_to(state_dir)}')
+                md_files = list(folder.glob('*.md'))
+                md_seqs = set()
+                for md_path in md_files:
+                    try:
+                        seq = int(md_path.stem)
+                    except ValueError:
+                        print(f'Warning: skipping non-integer filename {md_path.name} in {folder}', file=sys.stderr)
+                        continue
+                    md_seqs.add(seq)
 
-        filtered_entries = []
-        for entry in new_entries:
-            eid = entry.get('id')
-            if isinstance(eid, int) and eid not in md_ids:
-                orphans += 1
-                report_lines.append(f'  - orphan entry #{eid} in {folder.relative_to(state_dir)}')
-            else:
-                filtered_entries.append(entry)
+                new_entries = list(entries)
 
-        changed = rebuilt > 0 or orphans > 0
-        if not dry_run and changed:
-            ScribeStore._write_index(folder, filtered_entries)
+                for seq in sorted(md_seqs - set(index_seqs.keys())):
+                    md_path = folder / f'{seq}.md'
+                    content = md_path.read_text(encoding='utf-8')
+                    st_mtime = md_path.stat().st_mtime
+                    ts = datetime.fromtimestamp(st_mtime, tz=timezone.utc).isoformat()
+                    summary = content[:200].replace('\n', ' ').strip()
+                    prefix = TYPE_PREFIXES.get(note_type, 'G')
+                    display_id = f"{prefix}-{year}-{seq}"
+                    entry = {
+                        'display_id': display_id,
+                        'type': note_type,
+                        'year': year,
+                        'seq': seq,
+                        'status': 'archived' if is_archive else 'active',
+                        'session': '',
+                        'timestamp': ts,
+                        'summary': summary,
+                        'has_body': bool(content),
+                    }
+                    new_entries.append(entry)
+                    rebuilt += 1
+                    report_lines.append(f'  + rebuilt entry {display_id} in {folder.relative_to(state_dir)}')
 
+                filtered_entries = []
+                for entry in new_entries:
+                    eseq = entry.get('seq')
+                    if isinstance(eseq, int) and eseq not in md_seqs:
+                        orphans += 1
+                        report_lines.append(f'  - orphan entry seq={eseq} in {folder.relative_to(state_dir)}')
+                    else:
+                        filtered_entries.append(entry)
+
+                changed = rebuilt > 0 or orphans > 0
+                if not dry_run and changed:
+                    ScribeStore._write_index(folder, filtered_entries)
+
+                # Rebuild next_seq for active year_dir (not archive)
+                if not is_archive:
+                    max_seq = max(
+                        (e.get('seq', 0) for e in filtered_entries if isinstance(e.get('seq'), int)),
+                        default=0,
+                    )
+                    arc_dir = year_dir / ARCHIVE_DIRNAME
+                    if arc_dir.exists():
+                        for ae in ScribeStore._read_index(arc_dir):
+                            s = ae.get('seq', 0)
+                            if isinstance(s, int) and s > max_seq:
+                                max_seq = s
+                    new_next_seq = max_seq + 1
+                    seq_path = year_dir / NEXT_SEQ_FILENAME
+                    current_seq = 1
+                    if seq_path.exists():
+                        try:
+                            current_seq = int(seq_path.read_text(encoding='utf-8').strip())
+                        except ValueError:
+                            current_seq = 1
+                    if new_next_seq != current_seq:
+                        if not dry_run:
+                            seq_path.write_text(str(new_next_seq), encoding='utf-8')
+                        report_lines.append(
+                            f'  * next_seq for {year_dir.relative_to(state_dir)}: {current_seq} -> {new_next_seq}'
+                        )
+
+    # Rebuild global next_id for legacy compat
     nid_path = state_dir / NEXT_ID_FILENAME
     if nid_path.exists():
         try:
@@ -813,8 +904,7 @@ def cmd_repair(args):
     print(
         f'Repair {"(dry-run) " if dry_run else ""}complete: '
         f'{rebuilt} entries rebuilt, '
-        f'{orphans} orphans {"detected" if dry_run else "removed"}, '
-        f'next_id = {new_next}'
+        f'{orphans} orphans {"detected" if dry_run else "removed"}'
     )
     for line in report_lines:
         print(line)
@@ -861,11 +951,11 @@ def main():
 
     # done
     p_done = sub.add_parser("done")
-    p_done.add_argument("id", type=int)
+    p_done.add_argument("id", type=str)
 
     # update
     p_update = sub.add_parser("update")
-    p_update.add_argument("id", type=int)
+    p_update.add_argument("id", type=str)
     p_update.add_argument("--content", default=None)
     p_update.add_argument("--session-id", default=None)
 
