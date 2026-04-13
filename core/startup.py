@@ -21,7 +21,7 @@ from core.utils.project import get_project_key
 from scribe.notes import (
     read_jsonl, notes_path, archive_path, learnings_path,
     format_age, run_auto_archive, scribe_state_dir, _use_repo_layout,
-    PROJECTS_DIR,
+    PROJECTS_DIR, _format_id,
 )
 from scribe.store import ScribeStore, TYPE_FOLDERS, INDEX_FILENAME
 
@@ -307,11 +307,11 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
         for n in filtered_active:
             if n.get("type") == "handoff":
                 continue
-            nid = n.get("id", "?")
+            did = _format_id(n)
             ntype = n.get("type", "?")
             age = format_age(n.get("timestamp", ""))
             summary = n.get("summary", "")[:40]
-            items.append(f"#{nid} {ntype} ({age}) {summary}")
+            items.append(f"#{did} {ntype} ({age}) {summary}")
 
         # Count learnings filtered by role/mission
         learn_entries = store.list_learnings()
@@ -339,12 +339,12 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
             latest_handoff = max(handoffs, key=handoff_sort_key_v2)
 
         if latest_handoff:
-            hid = latest_handoff.get("id", "?")
+            hid = _format_id(latest_handoff)
             hsid = latest_handoff.get("session", latest_handoff.get("session_id", "?"))
             summary_line = latest_handoff.get("summary", "")
-            full_note = store.get_note(hid)
+            full_note = store.get_note(latest_handoff["type"], latest_handoff["year"], latest_handoff["seq"])
             body = full_note.get("content", "") if full_note else ""  # noqa: F841 fetched, not injected
-            handoff_md_path = sd / TYPE_FOLDERS["handoff"] / f"{hid}.md"
+            handoff_md_path = sd / TYPE_FOLDERS["handoff"] / str(latest_handoff["year"]) / f"{latest_handoff['seq']}.md"
             handoff_lines = [
                 f"**Last session (#{hid}, {hsid}):** {summary_line}",
                 f"  → {handoff_md_path}",
