@@ -88,9 +88,23 @@ def _parse_year(timestamp_str: str | None) -> int:
         return datetime.now(timezone.utc).year
 
 
+def _timestamp_is_parseable(timestamp_str: str) -> bool:
+    """Return True if timestamp_str can be parsed as ISO 8601."""
+    try:
+        datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 def _backup_state(state_dir: Path) -> Path:
     """Back up entire scribe state directory into state_dir/backup/<timestamp>_typed_year/.
-    Returns the backup directory path."""
+    Returns the backup directory path.
+
+    Note: on --force re-runs after a completed first migration, top-level v2 indexes and
+    integer-ID body files will have been cleaned up already.  The backup therefore reflects
+    the post-first-migration state, not the original pre-migration snapshot.
+    """
     ts = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     backup_dir = state_dir / 'backup' / f'{ts}_typed_year'
     backup_dir.mkdir(parents=True, exist_ok=True)
@@ -117,7 +131,7 @@ def _year_subfolder_has_data(state_dir: Path) -> bool:
         if not type_dir.exists():
             continue
         for child in type_dir.iterdir():
-            if not child.is_dir() or not child.name.isdigit():
+            if not child.is_dir() or not child.name.isdigit() or len(child.name) != 4:
                 continue
             idx = child / INDEX_FILENAME
             if idx.exists() and idx.read_text(encoding='utf-8').strip():
@@ -171,7 +185,7 @@ def _collect_entries(state_dir: Path) -> dict:
             # Check timestamp
             ts = entry.get('timestamp')
             year = _parse_year(ts)
-            if not ts or year == datetime.now(timezone.utc).year and not ts:
+            if not ts or not _timestamp_is_parseable(ts):
                 timestamp_fallback_count += 1
             entry['_year'] = year
         result[(type_key, 'active')] = active_entries
@@ -191,7 +205,7 @@ def _collect_entries(state_dir: Path) -> dict:
                     missing_body_count += 1
             ts = entry.get('timestamp')
             year = _parse_year(ts)
-            if not ts:
+            if not ts or not _timestamp_is_parseable(ts):
                 timestamp_fallback_count += 1
             entry['_year'] = year
         result[(type_key, 'archived')] = archived_entries
@@ -221,10 +235,39 @@ def _collect_entries(state_dir: Path) -> dict:
                 missing_body_count += 1
         ts = entry.get('timestamp')
         year = _parse_year(ts)
-        if not ts:
+        if not ts or not _timestamp_is_parseable(ts):
             timestamp_fallback_count += 1
         entry['_year'] = year
     result[(_LEARNING_TYPE, 'active')] = learn_entries
+
+    # Archived learnings from learnings/archive/index.jsonl
+    learn_archive_dir = learn_dir / ARCHIVE_DIRNAME
+    learn_archived_entries = _read_jsonl(learn_archive_dir / INDEX_FILENAME)
+    for entry in learn_archived_entries:
+        entry['_type_key'] = _LEARNING_TYPE
+        raw_id = entry.get('id')
+        if isinstance(raw_id, str) and raw_id[:1].upper() == 'L':
+            numeric_id = raw_id[1:]
+            body_path = learn_archive_dir / f'L{numeric_id}.md'
+            if not body_path.exists():
+                body_path = learn_archive_dir / f'{numeric_id}.md'
+        else:
+            numeric_id = str(raw_id) if raw_id is not None else '0'
+            body_path = learn_archive_dir / f'{numeric_id}.md'
+            if not body_path.exists():
+                body_path = learn_archive_dir / f'L{numeric_id}.md'
+        if body_path.exists():
+            entry['_body_content'] = body_path.read_text(encoding='utf-8')
+        else:
+            entry['_body_content'] = ''
+            if entry.get('has_body', False):
+                missing_body_count += 1
+        ts = entry.get('timestamp')
+        year = _parse_year(ts)
+        if not ts or not _timestamp_is_parseable(ts):
+            timestamp_fallback_count += 1
+        entry['_year'] = year
+    result[(_LEARNING_TYPE, 'archived')] = learn_archived_entries
 
     return {
         'entries': result,
@@ -369,15 +412,15 @@ def _write_migrated_data(state_dir: Path, bucketed: dict) -> None:
         index_entries: list[dict] = []
         for entry in entries:
             seq = entry['seq']
-            body = entry.pop('_body_content', '')
-            old_id = entry.pop('_old_id', None)
-            entry.pop('_type_key', None)
+            body = entry.get('_body_content', '')
+            # Build clean index entry — exclude private _ keys so bucketed dicts are not mutated
+            index_entry = {k: v for k, v in entry.items() if not k.startswith('_')}
 
             # Write body .md file
             body_path = target_dir / f'{seq}.md'
             body_path.write_text(body, encoding='utf-8')
 
-            index_entries.append(entry)
+            index_entries.append(index_entry)
 
             # Track max seq
             key = (type_key, year)
@@ -427,8 +470,8 @@ def _rewrite_references(state_dir: Path, id_map: dict[str, str]) -> dict:
     for glob_pattern in _REF_SCAN_GLOBS:
         files_to_scan.extend(repo_root.glob(glob_pattern))
 
-    # Also scan new-layout handoff and learning body .md files
-    for folder_name in [TYPE_FOLDERS.get('handoff', 'handoffs'), LEARNING_FOLDER]:
+    # Also scan new-layout body .md files across all type folders and learnings
+    for folder_name in list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]:
         folder = state_dir / folder_name
         if folder.exists():
             for year_dir in folder.iterdir():
@@ -439,8 +482,9 @@ def _rewrite_references(state_dir: Path, id_map: dict[str, str]) -> dict:
                         files_to_scan.extend(arch.glob('*.md'))
 
     # Regex patterns
-    # #L<digits> or #<digits> (not preceded by another word char to avoid false matches on hex colors etc.)
-    ref_pattern = re.compile(r'(?<!\w)#(L?)(\d+)(?!\d)')
+    # #L<digits> or #<digits> — not preceded by a word char, not followed by any word char.
+    # (?!\w) (not just (?!\d)) prevents partial matches like '#42nd' -> 'T-2026-3nd'.
+    ref_pattern = re.compile(r'(?<!\w)#(L?)(\d+)(?!\w)')
     # notes.py get <digits>
     get_pattern = re.compile(r'(notes\.py\s+get\s+)(\d+)')
 
@@ -463,6 +507,8 @@ def _rewrite_references(state_dir: Path, id_map: dict[str, str]) -> dict:
             lookup_key = f'{prefix}{digits}' if prefix else digits
             if lookup_key in id_map:
                 local_rewrites += 1
+                # '#' prefix is intentionally dropped: display_ids (e.g. 'T-2026-1') do not
+                # use '#' as a sigil, so '#42' becomes 'T-2026-1' (no hash) after rewriting.
                 return id_map[lookup_key]
             else:
                 local_unresolved += 1
@@ -553,9 +599,18 @@ def migrate(state_dir: Path, *, dry_run: bool = False, force: bool = False) -> d
         'migration_map_path': None,
     }
 
-    # Check for v2 data
+    # Check for v2 source data.
+    # After a completed first migration, _cleanup_old_files removes top-level indexes, so
+    # _has_v2_data() returns False on a subsequent --force run.  Give a clear, actionable error
+    # rather than silently migrating nothing.
     if not _has_v2_data(state_dir):
-        report['error'] = f'No v2 data found at {state_dir}'
+        if force and _year_subfolder_has_data(state_dir):
+            report['error'] = (
+                'No v2 source data to re-migrate: top-level indexes were removed by the first '
+                'migration. Restore them from the backup directory, then re-run with --force.'
+            )
+        else:
+            report['error'] = f'No v2 data found at {state_dir}'
         return report
 
     # Check if year subfolders already have data
@@ -603,7 +658,7 @@ def migrate(state_dir: Path, *, dry_run: bool = False, force: bool = False) -> d
             if not type_dir.exists():
                 continue
             for child in list(type_dir.iterdir()):
-                if child.is_dir() and child.name.isdigit():
+                if child.is_dir() and child.name.isdigit() and len(child.name) == 4:
                     shutil.rmtree(child)
 
     # Write migrated data

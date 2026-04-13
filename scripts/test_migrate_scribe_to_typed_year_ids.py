@@ -435,6 +435,78 @@ class MigrateTypedYearIdsTest(unittest.TestCase):
         self.assertFalse((self.state_dir / 'todos' / '1.md').exists())
         self.assertFalse((self.state_dir / 'next_id').exists())
 
+    # --- AC: unparseable timestamp counted as fallback ---
+    def test_unparseable_timestamp_counted_as_fallback(self):
+        """ATK-001: a present-but-unparseable timestamp also increments timestamp_fallback_count."""
+        from datetime import datetime, timezone
+        current_year = datetime.now(timezone.utc).year
+        records = [
+            {'id': 1, 'type': 'todo', 'status': 'active', 'session': 's1',
+             'timestamp': 'garbage', 'summary': 'bad ts', 'has_body': True},
+        ]
+        self._write_jsonl(self.state_dir / 'todos' / INDEX_FILENAME, records)
+        (self.state_dir / 'todos' / '1.md').write_text('body', encoding='utf-8')
+
+        report = mig.migrate(self.state_dir)
+        self.assertIsNone(report['error'])
+        self.assertGreaterEqual(report['timestamp_fallback_count'], 1)
+        # Falls back to current year
+        idx = self._read_jsonl(self.state_dir / 'todos' / str(current_year) / INDEX_FILENAME)
+        self.assertEqual(len(idx), 1)
+
+    # --- AC: archived learnings migrated ---
+    def test_archived_learnings_are_migrated(self):
+        """ATK-008: learnings/archive/index.jsonl entries are collected and migrated."""
+        active_records = [
+            {'id': 'L1', 'type': 'learning', 'status': 'active', 'session': 's1',
+             'timestamp': '2026-01-01T00:00:00Z', 'summary': 'active learn', 'has_body': True},
+        ]
+        archived_records = [
+            {'id': 'L2', 'type': 'learning', 'status': 'archived', 'session': 's1',
+             'timestamp': '2026-02-01T00:00:00Z', 'summary': 'archived learn', 'has_body': True},
+        ]
+        learn_dir = self.state_dir / 'learnings'
+        self._write_jsonl(learn_dir / INDEX_FILENAME, active_records)
+        (learn_dir / 'L1.md').write_text('active body', encoding='utf-8')
+        archive_dir = learn_dir / ARCHIVE_DIRNAME
+        self._write_jsonl(archive_dir / INDEX_FILENAME, archived_records)
+        (archive_dir / 'L2.md').write_text('archived body', encoding='utf-8')
+
+        report = mig.migrate(self.state_dir)
+        self.assertIsNone(report['error'])
+        # Both active and archived learnings counted
+        self.assertEqual(report['learnings_migrated'], 2)
+
+        # Active learning body written
+        active_idx = self._read_jsonl(self.state_dir / 'learnings' / '2026' / INDEX_FILENAME)
+        self.assertTrue(any(e.get('summary') == 'active learn' for e in active_idx))
+
+        # Archived learning body written to archive subfolder
+        arch_idx = self._read_jsonl(
+            self.state_dir / 'learnings' / '2026' / ARCHIVE_DIRNAME / INDEX_FILENAME
+        )
+        self.assertTrue(any(e.get('summary') == 'archived learn' for e in arch_idx))
+
+    # --- AC: force without re-seeding gives clear error ---
+    def test_force_without_reseeding_gives_clear_error(self):
+        """ATK-002: --force after a completed migration (top-level indexes removed) gives a
+        clear error instead of silently migrating nothing."""
+        records = [
+            {'id': 1, 'type': 'todo', 'status': 'active', 'session': 's1',
+             'timestamp': '2026-01-01T00:00:00Z', 'summary': 'x', 'has_body': True},
+        ]
+        self._write_jsonl(self.state_dir / 'todos' / INDEX_FILENAME, records)
+        (self.state_dir / 'todos' / '1.md').write_text('body', encoding='utf-8')
+
+        # First migration removes top-level indexes
+        report1 = mig.migrate(self.state_dir)
+        self.assertIsNone(report1['error'])
+
+        # --force without re-seeding top-level indexes should error clearly, not silently migrate nothing
+        report2 = mig.migrate(self.state_dir, force=True)
+        self.assertIsNotNone(report2['error'])
+        self.assertIn('backup', report2['error'])
+
     # --- AC: harden commands reference rewriting ---
     def test_reference_rewriting_in_harden_commands(self):
         """AC6: references in harden/commands/*.md are rewritten."""
