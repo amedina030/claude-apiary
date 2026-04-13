@@ -120,6 +120,15 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "and one step's edits will clobber the other's. The validator rejects "
         "plans with unlinked file overlaps.",
         "",
+        "## BANNED TOKENS — the validator auto-rejects plans containing these:",
+        "",
+        "- 'pytest' → use 'python -m unittest <module>' instead",
+        "- 'shell=true' → use list-form subprocess args instead",
+        "- 'import requests' / 'from requests' → stdlib only (use urllib)",
+        "",
+        "These apply to ALL fields: description, code_spec, and file names.",
+        "Even one occurrence anywhere in the plan causes automatic rejection.",
+        "",
         "## Output format",
         "",
         "Output ONLY valid JSON matching this schema (no markdown, no explanation):",
@@ -148,7 +157,7 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
     from .claude_subprocess import run_claude as _spawn
-    return _spawn(prompt, timeout=cfg("plan", "timeout", 300))
+    return _spawn(prompt, timeout=cfg("plan", "timeout", 300), model=cfg("plan", "model", None))
 
 
 def _sanitize_json_newlines(text: str) -> str:

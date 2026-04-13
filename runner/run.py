@@ -41,7 +41,7 @@ from .detached_lib import (
 # any other stage producing no_usage in detached mode is treated as a
 # token-accounting failure and aborts the run, since cumulative tokens
 # would otherwise stay 0 forever and bypass the cap.
-NO_USAGE_STAGES = frozenset({'validate_intake'})
+NO_USAGE_STAGES = frozenset({'validate_intake', 'approval'})
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent

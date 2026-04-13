@@ -528,6 +528,12 @@ _REMOVAL_KEYWORDS = re.compile(
 # common and produce false positives when grepped across the codebase.
 _SYMBOL_IN_QUOTES = re.compile(r"['\"`]([A-Za-z_][A-Za-z0-9_]*)['\"`]")
 
+# Match bare (unquoted) Python-style identifiers. Planner output often
+# mentions symbols like LEARNING_FOLDER or add_learning without quoting
+# them. We extract all word-shaped tokens and let _is_python_symbol()
+# filter down to real identifiers.
+_BARE_IDENTIFIER = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\b")
+
 
 def _is_python_symbol(name: str) -> bool:
     """Return True if name looks like a Python symbol, not a plain English word."""
@@ -578,8 +584,11 @@ def _check_removal_coverage(steps: list[dict]) -> list[str]:
         if not _REMOVAL_KEYWORDS.search(combined):
             continue
 
-        # Extract symbol names from quoted references in the description/code_spec
-        symbols = _SYMBOL_IN_QUOTES.findall(combined)
+        # Extract symbol names from quoted and bare references in the
+        # description/code_spec. Quoted symbols are preferred but planners
+        # often mention symbols like LEARNING_FOLDER unquoted.
+        symbols = set(_SYMBOL_IN_QUOTES.findall(combined))
+        symbols.update(_BARE_IDENTIFIER.findall(combined))
         if not symbols:
             continue
 
@@ -607,8 +616,14 @@ def _check_removal_coverage(steps: list[dict]) -> list[str]:
             except (OSError, subprocess.TimeoutExpired):
                 continue
 
-            # Filter to Python files only (where import/usage errors matter)
-            py_files = {f for f in referencing_files if f.endswith(".py")}
+            # Filter to Python files only (where import/usage errors matter).
+            # Exclude this validator's own file — it references symbols as
+            # part of grep patterns and test fixtures, not real usage.
+            _SELF = "runner/validate_plan.py"
+            py_files = {
+                f for f in referencing_files
+                if f.endswith(".py") and f != _SELF
+            }
 
             uncovered = py_files - plan_files
             if uncovered:

@@ -635,6 +635,7 @@ def execute_step(step: dict, spec: dict, model: str) -> dict:
             elif action == "verify":
                 prompt = build_verify_prompt(step, spec)
                 rc, stdout, stderr = run_claude(prompt, model)
+                result["transcript"] = {"stdout": stdout, "stderr": stderr, "rc": rc}
                 if rc != 0:
                     result["error"] = f"Claude Code error (attempt {attempt}): {stderr.strip()[:500]}"
                     # -1 = subprocess timeout, -2 = binary not found / permission denied.
@@ -659,6 +660,7 @@ def execute_step(step: dict, spec: dict, model: str) -> dict:
                 # create/modify/delete
                 prompt = build_step_prompt(step, spec)
                 rc, stdout, stderr = run_claude(prompt, model)
+                result["transcript"] = {"stdout": stdout, "stderr": stderr, "rc": rc}
                 if rc != 0:
                     result["error"] = f"Claude Code error (attempt {attempt}): {stderr.strip()[:500]}"
                     # -1 = subprocess timeout, -2 = binary not found / permission denied.

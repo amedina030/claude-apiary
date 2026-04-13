@@ -117,10 +117,12 @@ def next_eligible(path: Optional[Path] = None) -> Optional[dict]:
         if t["status"] == "pending":
             return dict(t)
 
-    # Group tickets: find first pending with all deps completed
+    # Group tickets: find first pending/blocked with all deps completed.
+    # "blocked" tickets auto-unblock when their dependencies complete —
+    # no separate cascade_success step needed.
     for g in order["groups"]:
         for t in g["tickets"]:
-            if t["status"] != "pending":
+            if t["status"] not in ("pending", "blocked"):
                 continue
             deps_met = all(
                 _status_of(dep_uuid, order) == "completed"

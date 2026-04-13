@@ -29,6 +29,12 @@ runner/reports/*
 !runner/reports/.gitkeep
 !runner/reports/.gitkeep
 
+# Runner runtime logs and history
+runner/logs/
+runner/overnight.jsonl
+runner/run_history.jsonl
+runner/usher_order.json.lock
+
 # Detached runner worktrees (one per in-flight run)
 .runner-worktrees/
 
