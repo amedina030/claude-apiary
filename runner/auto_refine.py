@@ -54,6 +54,9 @@ SPEC_SCHEMA = textwrap.dedent("""\
   },
   "acceptance_criteria": [
     "Given [precondition], when [action], then [observable result]"
+  ],
+  "files_examined": [
+    {"path": "relative/path/to/file.py", "sha": "hex-sha-or-null", "summary": "One-line description of what was learned from this file"}
   ]
 }
 """)
