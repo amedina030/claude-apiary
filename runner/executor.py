@@ -584,6 +584,14 @@ def run_test_command(code_spec: str) -> tuple[bool, str]:
     command = code_spec.strip()
     if not command:
         return False, 'No test command in code_spec'
+    # Handle 'cd <dir> && <real_command>' — planners emit this for worktree
+    # paths, but we can't use shell=True. Extract cwd and run the rest.
+    cwd = None
+    import re as _re
+    cd_match = _re.match(r'^cd\s+(\S+)\s*&&\s*(.+)$', command)
+    if cd_match:
+        cwd = cd_match.group(1)
+        command = cd_match.group(2).strip()
     try:
         argv = shlex.split(command)
     except ValueError as e:
@@ -596,8 +604,9 @@ def run_test_command(code_spec: str) -> tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=120,
+            cwd=cwd,
         )
-    except FileNotFoundError as e:
+    except (FileNotFoundError, NotADirectoryError, OSError) as e:
         return False, f'test command not found: {argv[0]} — code_spec must be a single command starting with an executable on PATH ({e})'
     output = (result.stdout or '') + (result.stderr or '')
     return result.returncode == 0, output.strip()

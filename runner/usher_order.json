@@ -8,7 +8,7 @@
           "uuid": "436bd64d-2295-48b7-9dae-065cbf8c359b",
           "slug": "scribe-merge-learnings",
           "depends_on": [],
-          "status": "pending"
+          "status": "completed"
         },
         {
           "uuid": "bb6bc2d0-f742-4343-8528-2f3878fdf159",
@@ -16,7 +16,7 @@
           "depends_on": [
             "436bd64d-2295-48b7-9dae-065cbf8c359b"
           ],
-          "status": "pending"
+          "status": "completed"
         },
         {
           "uuid": "91cab709-07f3-4fad-a09f-b3b7bbdc4e28",
@@ -24,7 +24,7 @@
           "depends_on": [
             "bb6bc2d0-f742-4343-8528-2f3878fdf159"
           ],
-          "status": "pending"
+          "status": "running"
         },
         {
           "uuid": "314fae23-096f-48fa-b45a-ebba9034811c",
@@ -32,7 +32,7 @@
           "depends_on": [
             "bb6bc2d0-f742-4343-8528-2f3878fdf159"
           ],
-          "status": "pending"
+          "status": "blocked"
         }
       ]
     }

@@ -18,6 +18,7 @@ from runner import executor
 from runner.executor import (
     execute_step,
     load_previous_log,
+    run_test_command,
     assert_files_clean,
     assert_no_unexpected_writes,
     _assert_action_matches_staged,
@@ -136,6 +137,30 @@ class TestExecuteStepTestAction(unittest.TestCase):
 
         self.assertIn(long_output, result["error"])
         self.assertGreater(len(result["error"]), 1500)
+
+
+class TestRunTestCommand(unittest.TestCase):
+    """run_test_command must handle 'cd <dir> && <cmd>' by extracting cwd."""
+
+    def test_cd_prefix_extracts_cwd(self):
+        # Use a real command that works cross-platform
+        with tempfile.TemporaryDirectory() as td:
+            passed, output = run_test_command(f'cd {td} && python -c "import os; print(os.getcwd())"')
+            self.assertTrue(passed, output)
+            self.assertIn(Path(td).name, output)
+
+    def test_plain_command_no_cd(self):
+        passed, output = run_test_command('python -c "print(42)"')
+        self.assertTrue(passed, output)
+        self.assertIn('42', output)
+
+    def test_empty_command(self):
+        passed, output = run_test_command('')
+        self.assertFalse(passed)
+
+    def test_bad_cwd_returns_error(self):
+        passed, output = run_test_command('cd /nonexistent/path && python -c "1"')
+        self.assertFalse(passed)
 
 
 class TestParseVerifyOutput(unittest.TestCase):

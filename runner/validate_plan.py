@@ -388,6 +388,11 @@ def _check_banned_tokens(steps: list[dict]) -> list[str]:
     for i, step in enumerate(steps):
         if not isinstance(step, dict):
             continue
+        # Verify steps are natural-language checklists, not executable code.
+        # They legitimately name banned tokens in negation ("no pytest",
+        # "no shell=True") to describe what to check for absence of.
+        if step.get("type") == "verify":
+            continue
         haystack = " ".join([
             str(step.get("code_spec", "")),
             str(step.get("description", "")),

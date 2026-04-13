@@ -233,6 +233,17 @@ class TestBannedTokens(unittest.TestCase):
         steps = [_step(1, "create", "Run pytest to check the suite")]
         self.assertEqual(len(_check_banned_tokens(steps)), 1)
 
+    def test_verify_step_skips_banned_token_check(self):
+        # Verify steps are natural-language checklists that legitimately name
+        # banned tokens in negation ("no pytest", "no shell=True").
+        steps = [_step(1, "verify", "No pytest. No shell=True. Stdlib only.")]
+        self.assertEqual(_check_banned_tokens(steps), [])
+
+    def test_create_step_with_same_text_still_rejected(self):
+        # Same text in a create step SHOULD still be caught.
+        steps = [_step(1, "create", "No pytest. No shell=True. Stdlib only.")]
+        self.assertEqual(len(_check_banned_tokens(steps)), 2)
+
     def test_full_validate_surfaces_banned_token_errors(self):
         # Confirm the new check is wired into validate()
         plan = _base_plan([
