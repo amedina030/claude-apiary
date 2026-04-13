@@ -203,6 +203,9 @@ class ScribeStore:
         idx = year_dir / INDEX_FILENAME
         if not idx.exists():
             idx.write_text('', encoding='utf-8')
+        seq_path = year_dir / NEXT_SEQ_FILENAME
+        if not seq_path.exists():
+            seq_path.write_text('1', encoding='utf-8')
         archive = year_dir / ARCHIVE_DIRNAME
         archive.mkdir(parents=True, exist_ok=True)
         archive_idx = archive / INDEX_FILENAME
@@ -279,10 +282,11 @@ class ScribeStore:
                  summary: str = '', **metadata) -> dict:
         """Add a new note. Returns the created index entry dict."""
         type_dir = self._type_dir(note_type)
-        year = datetime.now(timezone.utc).year
+        now = datetime.now(timezone.utc)
+        year = now.year
         year_dir = self._ensure_year_dir(type_dir, year)
         seq = self._increment_seq(year_dir)
-        timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = now.isoformat()
         # If no summary provided, use first 120 chars of content
         if not summary:
             summary = content[:120].replace('\n', ' ').strip()
@@ -388,11 +392,10 @@ class ScribeStore:
         for i, entry in enumerate(entries):
             if entry.get('seq') == seq:
                 entries[i] = {**entry, **kwargs}
-                self._write_index(year_dir, entries)
                 if content_update is not None:
                     self._write_note_file(year_dir, seq, content_update)
                     entries[i]['has_body'] = bool(content_update)
-                    self._write_index(year_dir, entries)
+                self._write_index(year_dir, entries)
                 return entries[i]
         return None
 
@@ -438,10 +441,11 @@ class ScribeStore:
                      summary: str = '', **metadata) -> dict:
         """Add a new learning. Returns the created index entry dict."""
         learn_dir = self._learning_dir()
-        year = datetime.now(timezone.utc).year
+        now = datetime.now(timezone.utc)
+        year = now.year
         year_dir = self._ensure_year_dir(learn_dir, year)
         seq = self._increment_seq(year_dir)
-        timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = now.isoformat()
         if not summary:
             summary = content[:120].replace('\n', ' ').strip()
         display_id = f"L-{year}-{seq}"

@@ -405,7 +405,7 @@ def cmd_add(args):
         handoffs = store.list_notes(note_type='handoff', status='all')
         for h in handoffs:
             if target_sid.matches(h.get('session', '')):
-                print(f"Handoff for session {target_sid.short} already exists (#{h['id']}). Skipping.")
+                print(f"Handoff for session {target_sid.short} already exists ({h.get('display_id', _format_id(h))}). Skipping.")
                 return
 
     content = args.content
@@ -526,7 +526,11 @@ def _parse_display_id(display_id: str) -> tuple:
     m = re.match(r'^([A-Z])-([0-9]{4})-([0-9]+)$', display_id.upper())
     if not m:
         raise ValueError(f'Bad display_id: {display_id}')
-    return (_PREFIX_TO_TYPE[m.group(1)], int(m.group(2)), int(m.group(3)))
+    prefix = m.group(1)
+    note_type = _PREFIX_TO_TYPE.get(prefix)
+    if note_type is None:
+        raise ValueError(f'Unknown prefix {prefix!r} in display_id: {display_id}')
+    return (note_type, int(m.group(2)), int(m.group(3)))
 
 
 def _load_migration_map(store) -> dict:
@@ -562,10 +566,14 @@ def _parse_id_arg(raw: str, store) -> tuple:
     migration_map = _load_migration_map(store)
     if raw.upper().startswith('L'):
         try:
-            old_int = str(int(raw[1:]))
+            old_int_val = int(raw[1:])
         except ValueError:
             print(f"Error: invalid ID: {raw}", file=sys.stderr)
             sys.exit(1)
+        if old_int_val <= 0:
+            print(f"Error: invalid ID: {raw}", file=sys.stderr)
+            sys.exit(1)
+        old_int = str(old_int_val)
         mapped = migration_map.get(old_int)
         if mapped:
             return _parse_display_id(mapped)
@@ -625,6 +633,9 @@ def cmd_get(args):
 def cmd_done(args):
     store = args.store
     note_type, year, seq = _parse_id_arg(str(args.id), store)
+    if note_type == 'learning':
+        print(f'Error: {args.id} is a learning — use "unlearn" to remove it.', file=sys.stderr)
+        sys.exit(1)
     note = store.get_note(note_type, year, seq)
     if not note:
         print(f'Note {args.id} not found.', file=sys.stderr)
@@ -645,6 +656,9 @@ def cmd_update(args):
         sys.exit(1)
     store = args.store
     note_type, year, seq = _parse_id_arg(str(args.id), store)
+    if note_type == 'learning':
+        print(f'Error: {args.id} is a learning — use "unlearn" to remove it.', file=sys.stderr)
+        sys.exit(1)
     note = store.get_note(note_type, year, seq)
     if not note:
         print(f'Note {args.id} not found.', file=sys.stderr)
@@ -758,6 +772,9 @@ def cmd_handoff_sessions(args):
 def cmd_unlearn(args):
     store = args.store
     note_type, year, seq = _parse_id_arg(args.id, store)
+    if note_type != 'learning':
+        print(f'Error: {args.id} is a {note_type}, not a learning.', file=sys.stderr)
+        sys.exit(1)
     result = store.remove_learning(year, seq)
     if result is None:
         print(f'Learning {args.id} not found.', file=sys.stderr)
@@ -821,6 +838,12 @@ def cmd_repair(args):
                         continue
                     md_seqs.add(seq)
 
+                # Track legacy int IDs for next_id rebuild (ATK-003)
+                for entry in entries:
+                    eid = entry.get('id', 0)
+                    if isinstance(eid, int) and eid > max_id_seen:
+                        max_id_seen = eid
+
                 new_entries = list(entries)
 
                 for seq in sorted(md_seqs - set(index_seqs.keys())):
@@ -855,8 +878,8 @@ def cmd_repair(args):
                     else:
                         filtered_entries.append(entry)
 
-                changed = rebuilt > 0 or orphans > 0
-                if not dry_run and changed:
+                folder_changed = (len(new_entries) != len(filtered_entries)) or (len(new_entries) != len(entries))
+                if not dry_run and folder_changed:
                     ScribeStore._write_index(folder, filtered_entries)
 
                 # Rebuild next_seq for active year_dir (not archive)
@@ -895,7 +918,7 @@ def cmd_repair(args):
             current = 1
     else:
         current = 1
-    new_next = max_id_seen + 1
+    new_next = max(max_id_seen + 1, current)
     if new_next != current:
         if not dry_run:
             nid_path.write_text(str(new_next), encoding='utf-8')
