@@ -22,6 +22,28 @@ Three separate stores. Pick the right one up front — moving entries between th
 
 ---
 
+## Note ID format
+
+Every note and learning has a **TYPE-YEAR-seq** display ID (e.g. `T-2026-1`, `L-2026-3`). The three components:
+
+| Prefix | Type |
+|--------|----------|
+| `T` | todo |
+| `H` | handoff |
+| `D` | decision |
+| `W` | wishlist |
+| `R` | reference |
+| `B` | blocker |
+| `C` | context |
+| `G` | general |
+| `L` | learning |
+
+Each **(type, year)** pair has its own independent sequence counter, stored at `<type>/<year>/next_seq` inside the scribe state directory. For example, the first todo created in 2026 is `T-2026-1`, and the first learning in 2026 is `L-2026-1` — their counters are independent.
+
+Legacy bare-integer IDs (e.g. `42`) are still accepted by the CLI via `migration_id_map.json` lookups, but all new notes use TYPE-YEAR-seq format.
+
+---
+
 ## When to write a note
 
 Notes are primarily for Claude's own use — to maintain continuity across sessions. The user does not usually read them.
@@ -36,7 +58,7 @@ Notes are primarily for Claude's own use — to maintain continuity across sessi
 | User says "note this" / "write that down" | as specified, or `context` | Follow the user's lead on type |
 | User note that does not fit a specific type / miscellaneous capture | `general` | Default bucket when no other type applies |
 | Wishlist idea ("would be nice", "eventually", "we should") | `wishlist` | Record the idea |
-| Work that matches an active TODO is completed | — | Run `notes.py done <id>` |
+| Work that matches an active TODO is completed | — | Run `notes.py done <ID>` (where `<ID>` is a TYPE-YEAR-seq ID like `T-2026-1`) |
 
 ### Self-triggered (Claude writes without prompting)
 
@@ -87,7 +109,7 @@ python scribe/notes.py learn --content "description of what was learned" --sessi
 python scribe/notes.py learnings [--full] [--search TEXT]
 
 # Remove a stale learning
-python scribe/notes.py unlearn <id>
+python scribe/notes.py unlearn <ID>  # e.g. L-2026-3
 ```
 
 ---
