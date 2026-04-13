@@ -54,6 +54,9 @@ SPEC_SCHEMA = textwrap.dedent("""\
   },
   "acceptance_criteria": [
     "Given [precondition], when [action], then [observable result]"
+  ],
+  "files_examined": [
+    {"path": "relative/path/to/file.py", "sha": "hex-sha-or-null", "summary": "One-line description of what was learned from this file"}
   ]
 }
 """)
@@ -114,7 +117,15 @@ def build_prompt(intake: dict, previous_errors: list[str] | None = None) -> str:
     parts.extend([
         "2. Based on your exploration and the task description, produce a spec "
         "that covers all aspects needed for implementation.",
-        "3. Output ONLY valid JSON matching this schema (no markdown, no explanation):",
+        "3. As you explore the codebase, keep track of every file you read. "
+        "For each file, record an entry in the files_examined array with: "
+        "'path' (relative to repo root), 'sha' (the git SHA of the file if "
+        "available, or null), and 'summary' (a one-line description of what "
+        "you learned from this file that is relevant to the spec). Include "
+        "ALL files you read during exploration, not just the ones directly "
+        "mentioned in the spec. This field is optional but strongly "
+        "encouraged — it helps downstream stages avoid redundant file reads.",
+        "4. Output ONLY valid JSON matching this schema (no markdown, no explanation):",
         "",
         "```json",
         SPEC_SCHEMA,
