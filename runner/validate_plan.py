@@ -78,6 +78,8 @@ _TEST_FAILURE_LANGUAGE = (
     "this run is expected to",
 )
 
+_SHELL_METACHARACTERS = [';', '&', '|', '>', '<', '`', '$(', '${']
+
 
 # --- Path allowlist (#212, revised) ---
 #
@@ -224,6 +226,33 @@ def _check_test_code_spec_format(steps: list[dict]) -> list[str]:
                 f"'{first_word}' — must begin with the actual shell command "
                 f"itself (e.g. 'python -m unittest ...')."
             )
+    return errors
+
+
+def _check_test_shell_metacharacters(steps: list[dict]) -> list[str]:
+    """Reject test-action steps whose code_spec contains shell metacharacters.
+
+    Defense-in-depth against shell injection in planner-generated test commands.
+    """
+    errors = []
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        if step.get('action') != 'test':
+            continue
+        code_spec = step.get('code_spec', '')
+        if not isinstance(code_spec, str):
+            continue
+        if not code_spec.strip():
+            continue  # empty caught by required-field check
+        for char in _SHELL_METACHARACTERS:
+            if char in code_spec:
+                errors.append(
+                    f"step[{i}] (action='test'): code_spec contains shell "
+                    f"metacharacter '{char}' — test commands must not use "
+                    f"command chaining, redirection, or substitution."
+                )
+                break  # one error per step, not per metacharacter
     return errors
 
 
@@ -790,6 +819,9 @@ def validate(data: dict) -> list[str]:
 
     # Test-action code_spec format check (must be a shell command, not prose)
     errors.extend(_check_test_code_spec_format(steps))
+
+    # Test-action code_spec must not contain shell metacharacters
+    errors.extend(_check_test_shell_metacharacters(steps))
 
     # Test-action description must not signal expected failure (#211)
     errors.extend(_check_test_failure_language(steps))

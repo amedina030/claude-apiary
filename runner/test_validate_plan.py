@@ -13,6 +13,7 @@ from unittest import mock
 from runner.validate_plan import (
     validate,
     _check_test_code_spec_format,
+    _check_test_shell_metacharacters,
     _check_banned_tokens,
     _check_test_failure_language,
     _check_path_allowlist,
@@ -253,6 +254,70 @@ class TestBannedTokens(unittest.TestCase):
         errors = validate(plan)
         self.assertTrue(any("banned token" in e for e in errors),
                         f"expected banned-token error in {errors}")
+
+
+class TestShellMetacharacters(unittest.TestCase):
+    """Reject shell metacharacters in test-action code_spec."""
+
+    def test_semicolon_rejected(self):
+        steps = [_step(1, "test", "python -m unittest; rm -rf /")]
+        errors = _check_test_shell_metacharacters(steps)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("';'", errors[0])
+
+    def test_pipe_rejected(self):
+        steps = [_step(1, "test", "python -m unittest | tee out.txt")]
+        errors = _check_test_shell_metacharacters(steps)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("'|'", errors[0])
+
+    def test_ampersand_rejected(self):
+        steps = [_step(1, "test", "python test.py && echo done")]
+        errors = _check_test_shell_metacharacters(steps)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("'&'", errors[0])
+
+    def test_backtick_rejected(self):
+        steps = [_step(1, "test", "python `which python` -m unittest")]
+        errors = _check_test_shell_metacharacters(steps)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("'`'", errors[0])
+
+    def test_dollar_paren_rejected(self):
+        steps = [_step(1, "test", "python $(echo test.py)")]
+        errors = _check_test_shell_metacharacters(steps)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("'$('", errors[0])
+
+    def test_redirect_rejected(self):
+        steps = [_step(1, "test", "python -m unittest > /dev/null")]
+        errors = _check_test_shell_metacharacters(steps)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("'>'", errors[0])
+
+    def test_clean_code_spec_passes(self):
+        steps = [_step(1, "test", "python -m unittest discover -s runner -p test_validate_plan.py")]
+        errors = _check_test_shell_metacharacters(steps)
+        self.assertEqual(len(errors), 0)
+
+    def test_non_test_action_ignored(self):
+        steps = [_step(1, "create", "echo foo > bar.txt")]
+        errors = _check_test_shell_metacharacters(steps)
+        self.assertEqual(len(errors), 0)
+
+    def test_one_error_per_step(self):
+        steps = [_step(1, "test", "python test.py; echo done | cat")]
+        errors = _check_test_shell_metacharacters(steps)
+        self.assertEqual(len(errors), 1)
+
+    def test_integration_with_validate(self):
+        plan = _base_plan([
+            _step(1, "test", "python -m unittest; rm -rf /",
+                  files=["runner/test_validate_plan.py"]),
+        ])
+        errors = validate(plan)
+        self.assertTrue(any("metacharacter" in e for e in errors),
+                        f"expected metacharacter error in {errors}")
 
 
 class TestPathAllowlist(unittest.TestCase):
