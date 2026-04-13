@@ -125,6 +125,16 @@ def build_prompt(intake: dict, previous_errors: list[str] | None = None) -> str:
         "",
         VALIDATION_RULES,
     ])
+    parts.extend([
+        "4. As you explore the codebase, keep track of every file you read. "
+        "For each file, record an entry in the files_examined array with: "
+        "'path' (relative to repo root), 'sha' (the git SHA of the file if "
+        "available, or null), and 'summary' (a one-line description of what "
+        "you learned from this file that is relevant to the spec). Include "
+        "ALL files you read during exploration, not just the ones directly "
+        "mentioned in the spec. This field is optional but strongly "
+        "encouraged — it helps downstream stages avoid redundant file reads.",
+    ])
 
     if previous_errors:
         parts.extend([
