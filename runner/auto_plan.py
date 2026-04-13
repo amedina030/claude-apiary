@@ -140,6 +140,35 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "Valid step types and actions: create, modify, delete, test, verify.",
     ]
 
+    # Inject file-trust context if spec has files_examined
+    files_examined = spec.get("files_examined") or []
+    if files_examined:
+        # Deduplicate by path, keeping first occurrence
+        seen_paths = set()
+        unique_entries = []
+        for entry in files_examined:
+            p = entry.get("path", "")
+            if p and p not in seen_paths:
+                seen_paths.add(p)
+                unique_entries.append(entry)
+
+        parts.extend([
+            "",
+            "## Files already examined by the refiner",
+            "",
+            "The following files were read during the spec-writing stage. "
+            "Treat them as already-read context — do NOT re-read these files "
+            "unless you need to verify behavior that may have changed. "
+            "This list replaces instruction 2's bounded-exploration guidance "
+            "for the listed files.",
+            "",
+        ])
+        for entry in unique_entries:
+            sha = entry.get("sha")
+            sha_note = f" (sha: {sha})" if sha else " (sha: unknown)"
+            parts.append(f"- `{entry['path']}`{sha_note}: {entry.get('summary', '')}")
+        parts.append("")
+
     if previous_errors:
         parts.extend([
             "",
