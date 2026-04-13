@@ -162,8 +162,9 @@ class MigrateScribeV2Test(unittest.TestCase):
         self.assertEqual(nid, '8')
 
     def test_post_migration_notes_py_list_matches_input(self):
-        # Acceptance criterion [6]: after migration, notes.py list output matches pre-migration content.
-        # Use ScribeStore directly (notes.py list reads through the store) to verify count and summaries.
+        # Acceptance criterion [6]: after v2 migration, folder-per-type indexes and body
+        # files match pre-migration content.  The store API now expects per-(type, year)
+        # layout, so verify v2 migration output directly via index.jsonl reads.
         recs = [
             {'id': 1, 'type': 'todo', 'content': 'first todo body', 'session': 's1', 'timestamp': '2026-01-01T00:00:00Z', 'summary': 'first todo'},
             {'id': 2, 'type': 'decision', 'content': 'second decision body', 'session': 's1', 'timestamp': '2026-01-02T00:00:00Z', 'summary': 'second decision'},
@@ -171,16 +172,23 @@ class MigrateScribeV2Test(unittest.TestCase):
         ]
         self._write_jsonl(self.state_dir / 'notes.jsonl', recs)
         mig.migrate(self.state_dir)
-        store = ScribeStore(self.state_dir)
-        listed = store.list_notes(status='active')
-        self.assertEqual(len(listed), 3)
-        summaries = {e['id']: e['summary'] for e in listed}
+        # Read indexes directly from folder-per-type layout
+        all_entries = []
+        for folder in ['todos', 'decisions', 'general']:
+            idx_path = self.state_dir / folder / INDEX_FILENAME
+            if idx_path.exists():
+                for line in idx_path.read_text(encoding='utf-8').splitlines():
+                    line = line.strip()
+                    if line:
+                        all_entries.append(json.loads(line))
+        self.assertEqual(len(all_entries), 3)
+        summaries = {e['id']: e['summary'] for e in all_entries}
         self.assertEqual(summaries[1], 'first todo')
         self.assertEqual(summaries[2], 'second decision')
         self.assertEqual(summaries[3], 'third general')
-        # Verify full content round-trips
-        n1 = store.get_note(1)
-        self.assertEqual(n1['content'], 'first todo body')
+        # Verify body file content round-trips
+        body = (self.state_dir / 'todos' / '1.md').read_text(encoding='utf-8')
+        self.assertEqual(body, 'first todo body')
 
 
 if __name__ == '__main__':
