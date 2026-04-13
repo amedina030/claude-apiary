@@ -21,22 +21,24 @@ Core note and learning management.
 |------------|-------|-------------|
 | `add` | `notes.py add --type <type> --content "<text>"` | Add a note |
 | `list` | `notes.py list [filters]` | List active notes |
-| `get` | `notes.py get <id>` | Show a single note by ID |
-| `done` | `notes.py done <id>` | Mark a note as done |
-| `update` | `notes.py update <id> --content "<text>"` | Update note content |
+| `get` | `notes.py get <ID>` | Show a single note by ID (e.g. `T-2026-1`) |
+| `done` | `notes.py done <ID>` | Mark a note as done (e.g. `T-2026-1`) |
+| `update` | `notes.py update <ID> --content "<text>"` | Update note content (e.g. `T-2026-1`) |
 | `archive` | `notes.py archive [--before YYYY-MM-DD]` | Archive old notes |
 | `learn` | `notes.py learn --content "<text>"` | Add a learning |
 | `learnings` | `notes.py learnings` | List all learnings |
-| `unlearn` | `notes.py unlearn <id>` | Remove a learning |
+| `unlearn` | `notes.py unlearn <ID>` | Remove a learning (e.g. `L-2026-3`) |
 | `handoff-sessions` | `notes.py handoff-sessions` | List sessions with handoffs |
 | `migrate` | `notes.py migrate` | Run data migrations |
+
+> **Note IDs** use TYPE-YEAR-seq format (e.g. `T-2026-1`, `L-2026-3`). Legacy bare integers are accepted via migration lookup. See `scribe/CLAUDE.md` for the full prefix table.
 
 ### Common flags
 
 | Flag | Applies to | Description |
 |------|-----------|-------------|
 | `--project PROJECT` | all | Project key override (default: derived from cwd) |
-| `--type TYPE` | add, list | Note type: `todo`, `handoff`, `decision`, `wishlist`, `reference`, `blocker`, `context` |
+| `--type TYPE` | add, list | Note type: `todo`, `handoff`, `decision`, `wishlist`, `reference`, `blocker`, `context`, `general`, `learning` |
 | `--content TEXT` | add, update, learn | Note/learning content |
 | `--session-id ID` | add, update, learn | Associate with a session |
 | `--auto` | add | Mark as auto-generated |
@@ -341,7 +343,7 @@ Create an intake file for the autonomous runner. Generates a UUID-keyed JSON at 
 
 ```bash
 python -m runner.create_intake --title "Add caching" --problem "Repeated DB queries" --description "Add Redis cache layer" --scope "api/cache.py"
-python -m runner.create_intake --from-todo 42
+python -m runner.create_intake --from-todo T-2026-42
 ```
 
 | Flag | Required | Description |
@@ -361,9 +363,9 @@ python -m runner.create_intake --from-todo 42
 Bridge a refiner handoff scribe note into a runner intake (or backlog draft) file. The `/refine` skill saves approved handoffs as scribe notes of type `context` with a fixed section layout (`## Goal`, `## Shape`, `## Behavior`, `## Boundaries`, `## Acceptance criteria`); this script parses those sections and maps them onto the intake schema.
 
 ```bash
-python -m runner.refine_to_intake --note 42 --title "Add caching"
-python -m runner.refine_to_intake --note 42 --title "Add caching" --backlog
-python -m runner.refine_to_intake --note 42 --title "Add caching" --explore-hints "api/cache.py,api/db.py"
+python -m runner.refine_to_intake --note C-2026-5 --title "Add caching"
+python -m runner.refine_to_intake --note C-2026-5 --title "Add caching" --backlog
+python -m runner.refine_to_intake --note C-2026-5 --title "Add caching" --explore-hints "api/cache.py,api/db.py"
 ```
 
 | Flag | Required | Description |
@@ -495,7 +497,7 @@ Create a backlog draft ticket. Writes a JSON to `runner/backlog/<slug>.json`. Sl
 
 ```bash
 python -m runner.draft_ticket --title "..." --problem "..." --description "..." --scope "..."
-python -m runner.draft_ticket --from-todo 42 --title "..." --problem "..." --scope "..."
+python -m runner.draft_ticket --from-todo T-2026-42 --title "..." --problem "..." --scope "..."
 ```
 
 | Flag | Required | Description |
