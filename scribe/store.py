@@ -205,7 +205,7 @@ class ScribeStore:
             idx.write_text('', encoding='utf-8')
         seq_path = year_dir / NEXT_SEQ_FILENAME
         if not seq_path.exists():
-            seq_path.write_text('1', encoding='utf-8')
+            self._rebuild_next_seq(year_dir)
         archive = year_dir / ARCHIVE_DIRNAME
         archive.mkdir(parents=True, exist_ok=True)
         archive_idx = archive / INDEX_FILENAME

@@ -256,6 +256,7 @@ class TestDetachedRun(unittest.TestCase):
                 mock.patch('runner.run.INTAKE_DIR', intake_dir),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=evil),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', side_effect=_track_create),

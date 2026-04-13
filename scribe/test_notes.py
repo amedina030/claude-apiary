@@ -31,9 +31,9 @@ class TestScribeNotes(unittest.TestCase):
     def test_add_creates_file_and_index(self):
         entry = self.store.add_note('todo', 'test content', 'sess1')
         self.assertEqual(entry['type'], 'todo')
-        self.assertIn('id', entry)
-        # Verify file exists in todos/
-        md_path = self.tmp_dir / 'todos' / f"{entry['id']}.md"
+        self.assertIn('display_id', entry)
+        # Verify file exists in todos/<year>/<seq>.md
+        md_path = self.tmp_dir / 'todos' / str(entry['year']) / f"{entry['seq']}.md"
         self.assertTrue(md_path.exists())
         self.assertEqual(md_path.read_text(encoding='utf-8'), 'test content')
 
@@ -45,15 +45,15 @@ class TestScribeNotes(unittest.TestCase):
 
     def test_get_note(self):
         entry = self.store.add_note('todo', 'get me', 'sess1')
-        result = self.store.get_note(entry['id'])
+        result = self.store.get_note('todo', entry['year'], entry['seq'])
         self.assertIsNotNone(result)
         self.assertEqual(result['content'], 'get me')
         self.assertEqual(result['type'], 'todo')
 
     def test_get_note_from_archive(self):
         entry = self.store.add_note('todo', 'archive me', 'sess1')
-        self.store.archive_note(entry['id'])
-        result = self.store.get_note(entry['id'])
+        self.store.archive_note('todo', entry['year'], entry['seq'])
+        result = self.store.get_note('todo', entry['year'], entry['seq'])
         self.assertIsNotNone(result)
         self.assertEqual(result['status'], 'archived')
 
@@ -79,13 +79,13 @@ class TestScribeNotes(unittest.TestCase):
 
     def test_done_updates_status(self):
         entry = self.store.add_note('todo', 'do this', 'sess1')
-        self.store.update_note(entry['id'], status='done')
-        result = self.store.get_note(entry['id'])
+        self.store.update_note('todo', entry['year'], entry['seq'], status='done')
+        result = self.store.get_note('todo', entry['year'], entry['seq'])
         self.assertEqual(result['status'], 'done')
 
     def test_archive_note(self):
         entry = self.store.add_note('todo', 'archive target', 'sess1')
-        archived = self.store.archive_note(entry['id'])
+        archived = self.store.archive_note('todo', entry['year'], entry['seq'])
         self.assertIsNotNone(archived)
         self.assertEqual(archived['status'], 'archived')
         # Should not appear in active list
@@ -99,14 +99,14 @@ class TestScribeNotes(unittest.TestCase):
         # Add note and manually backdate its index entry
         entry = self.store.add_note('todo', 'old done note', 'sess1')
         old_ts = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
-        self.store.update_note(entry['id'], status='done', timestamp=old_ts)
+        self.store.update_note('todo', entry['year'], entry['seq'], status='done', timestamp=old_ts)
         count = notes._run_auto_archive_store(self.store)
         self.assertGreaterEqual(count, 1)
 
     def test_learn_creates_entry(self):
         entry = self.store.add_learning('discovered a trick', 'sess1')
-        self.assertIn('id', entry)
-        md_path = self.tmp_dir / 'learnings' / f"{entry['id']}.md"
+        self.assertIn('display_id', entry)
+        md_path = self.tmp_dir / 'learnings' / str(entry['year']) / f"{entry['seq']}.md"
         self.assertTrue(md_path.exists())
 
     def test_list_learnings(self):
@@ -123,7 +123,7 @@ class TestScribeNotes(unittest.TestCase):
 
     def test_unlearn_removes_entry(self):
         entry = self.store.add_learning('remove me', 'sess1')
-        removed = self.store.remove_learning(entry['id'])
+        removed = self.store.remove_learning(entry['year'], entry['seq'])
         self.assertIsNotNone(removed)
         result = self.store.list_learnings()
         self.assertEqual(len(result), 0)
@@ -186,7 +186,7 @@ class TestScribeNotes(unittest.TestCase):
         # Verify 'show' is registered as alias in argparse (covered by 'aliases=["show"]')
         # Both should call cmd_get — just verify cmd_get works
         entry = self.store.add_note('todo', 'show me', 'sess1')
-        result = self.store.get_note(entry['id'])
+        result = self.store.get_note('todo', entry['year'], entry['seq'])
         self.assertIsNotNone(result)
         self.assertEqual(result['content'], 'show me')
 

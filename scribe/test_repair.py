@@ -11,7 +11,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scribe.store import ScribeStore, TYPE_FOLDERS, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME
+from scribe.store import (
+    ScribeStore, TYPE_FOLDERS, LEARNING_FOLDER, INDEX_FILENAME,
+    ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME,
+)
 import scribe.notes as notes_mod
 
 
@@ -37,63 +40,70 @@ class RepairTests(unittest.TestCase):
 
     def test_rebuilds_missing_index_entry(self):
         entry = self.store.add_note('todo', 'rebuild me please', 'sess1')
-        note_id = entry['id']
+        year, seq = entry['year'], entry['seq']
 
         # Wipe the index but keep the .md file
-        todos_dir = self.state_dir / 'todos'
-        (todos_dir / INDEX_FILENAME).write_text('', encoding='utf-8')
+        year_dir = self.state_dir / 'todos' / str(year)
+        (year_dir / INDEX_FILENAME).write_text('', encoding='utf-8')
 
         self._run_repair()
 
-        entries = ScribeStore._read_index(todos_dir)
-        ids = [e['id'] for e in entries]
-        self.assertIn(note_id, ids)
-        rebuilt = next(e for e in entries if e['id'] == note_id)
+        entries = ScribeStore._read_index(year_dir)
+        seqs = [e['seq'] for e in entries]
+        self.assertIn(seq, seqs)
+        rebuilt = next(e for e in entries if e['seq'] == seq)
         self.assertIn('rebuild me please', rebuilt['summary'])
 
     def test_detects_orphan_entry(self):
         entry = self.store.add_note('todo', 'orphan me', 'sess1')
-        note_id = entry['id']
+        year, seq = entry['year'], entry['seq']
 
         # Delete the .md file but leave the index entry intact
-        todos_dir = self.state_dir / 'todos'
-        (todos_dir / f'{note_id}.md').unlink()
+        year_dir = self.state_dir / 'todos' / str(year)
+        (year_dir / f'{seq}.md').unlink()
 
         self._run_repair()
 
-        entries = ScribeStore._read_index(todos_dir)
-        ids = [e['id'] for e in entries]
-        self.assertNotIn(note_id, ids)
+        entries = ScribeStore._read_index(year_dir)
+        seqs = [e['seq'] for e in entries]
+        self.assertNotIn(seq, seqs)
 
-    def test_resets_next_id(self):
-        todos_dir = self.state_dir / 'todos'
+    def test_resets_next_seq(self):
+        year_dir = self.state_dir / 'todos' / '2026'
+        year_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write an .md file with id=99 and a matching index entry
-        (todos_dir / '99.md').write_text('high id note', encoding='utf-8')
-        ScribeStore._append_index(todos_dir, {
-            'id': 99,
+        # Write an .md file with seq=99 and a matching index entry
+        (year_dir / '99.md').write_text('high seq note', encoding='utf-8')
+        ScribeStore._append_index(year_dir, {
+            'display_id': 'T-2026-99',
             'type': 'todo',
+            'year': 2026,
+            'seq': 99,
             'status': 'active',
             'session': '',
             'timestamp': '2026-01-01T00:00:00+00:00',
-            'summary': 'high id note',
+            'summary': 'high seq note',
             'has_body': True,
         })
 
-        # Manually corrupt next_id to 1
-        (self.state_dir / 'next_id').write_text('1', encoding='utf-8')
+        # Manually corrupt next_seq to 1
+        (year_dir / NEXT_SEQ_FILENAME).write_text('1', encoding='utf-8')
+        # Ensure archive subdir exists for repair scan
+        archive = year_dir / ARCHIVE_DIRNAME
+        archive.mkdir(exist_ok=True)
+        (archive / INDEX_FILENAME).write_text('', encoding='utf-8')
 
         self._run_repair()
 
-        next_id = int((self.state_dir / 'next_id').read_text(encoding='utf-8').strip())
-        self.assertEqual(next_id, 100)
+        next_seq = int((year_dir / NEXT_SEQ_FILENAME).read_text(encoding='utf-8').strip())
+        self.assertEqual(next_seq, 100)
 
     def test_dry_run_makes_no_changes(self):
         entry = self.store.add_note('todo', 'dry run test', 'sess1')
-        note_id = entry['id']
+        year, seq = entry['year'], entry['seq']
 
-        todos_dir = self.state_dir / 'todos'
-        idx_path = todos_dir / INDEX_FILENAME
+        year_dir = self.state_dir / 'todos' / str(year)
+        idx_path = year_dir / INDEX_FILENAME
 
         # Delete index entry, keep .md
         idx_path.write_text('', encoding='utf-8')
@@ -112,17 +122,17 @@ class RepairTests(unittest.TestCase):
 
     def test_repair_archive_subfolder(self):
         entry = self.store.add_note('todo', 'archive repair test', 'sess1')
-        note_id = entry['id']
-        self.store.archive_note(note_id)
+        year, seq = entry['year'], entry['seq']
+        self.store.archive_note('todo', year, seq)
 
-        archive_dir = self.state_dir / 'todos' / ARCHIVE_DIRNAME
+        archive_dir = self.state_dir / 'todos' / str(year) / ARCHIVE_DIRNAME
         (archive_dir / INDEX_FILENAME).write_text('', encoding='utf-8')
 
         self._run_repair()
 
         entries = ScribeStore._read_index(archive_dir)
-        ids = [e['id'] for e in entries]
-        self.assertIn(note_id, ids)
+        seqs = [e['seq'] for e in entries]
+        self.assertIn(seq, seqs)
 
     def test_empty_state_dir(self):
         # Create ScribeStore pointing at an empty dir, then delete all subfolders
@@ -139,8 +149,9 @@ class RepairTests(unittest.TestCase):
         self.assertIn('No scribe data found', out.getvalue())
 
     def test_non_integer_md_filename_skipped(self):
-        todos_dir = self.state_dir / 'todos'
-        (todos_dir / 'notes.md').write_text('stray file', encoding='utf-8')
+        entry = self.store.add_note('todo', 'ensure year dir exists', 'sess1')
+        year_dir = self.state_dir / 'todos' / str(entry['year'])
+        (year_dir / 'notes.md').write_text('stray file', encoding='utf-8')
 
         err = io.StringIO()
         out = io.StringIO()
