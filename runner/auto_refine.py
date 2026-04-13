@@ -117,16 +117,7 @@ def build_prompt(intake: dict, previous_errors: list[str] | None = None) -> str:
     parts.extend([
         "2. Based on your exploration and the task description, produce a spec "
         "that covers all aspects needed for implementation.",
-        "3. Output ONLY valid JSON matching this schema (no markdown, no explanation):",
-        "",
-        "```json",
-        SPEC_SCHEMA,
-        "```",
-        "",
-        VALIDATION_RULES,
-    ])
-    parts.extend([
-        "4. As you explore the codebase, keep track of every file you read. "
+        "3. As you explore the codebase, keep track of every file you read. "
         "For each file, record an entry in the files_examined array with: "
         "'path' (relative to repo root), 'sha' (the git SHA of the file if "
         "available, or null), and 'summary' (a one-line description of what "
@@ -134,6 +125,13 @@ def build_prompt(intake: dict, previous_errors: list[str] | None = None) -> str:
         "ALL files you read during exploration, not just the ones directly "
         "mentioned in the spec. This field is optional but strongly "
         "encouraged — it helps downstream stages avoid redundant file reads.",
+        "4. Output ONLY valid JSON matching this schema (no markdown, no explanation):",
+        "",
+        "```json",
+        SPEC_SCHEMA,
+        "```",
+        "",
+        VALIDATION_RULES,
     ])
 
     if previous_errors:

@@ -87,6 +87,13 @@ class TestValidateFilesExamined(unittest.TestCase):
         data = {"files_examined": [{"path": "a.py", "summary": "desc"}]}
         self.assertEqual(validate_files_examined(data), [])
 
+    def test_non_array_rejected(self):
+        for bad_value in ("not_an_array", 42, True, {"path": "a.py"}):
+            with self.subTest(value=bad_value):
+                errors = validate_files_examined({"files_examined": bad_value})
+                self.assertEqual(len(errors), 1)
+                self.assertIn("array", errors[0])
+
 
 class TestValidateSpecCLIFilesExamined(unittest.TestCase):
     """Integration tests: run validate_spec.py as subprocess with files_examined."""

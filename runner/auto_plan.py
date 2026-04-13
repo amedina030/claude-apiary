@@ -13,6 +13,7 @@ Usage:
 """
 import argparse
 import json
+import re
 import subprocess
 import sys
 import textwrap
@@ -25,6 +26,15 @@ PLANS_DIR = SCRIPT_DIR / "plans"
 REPO_ROOT = SCRIPT_DIR.parent
 
 MAX_RETRIES = cfg("plan", "max_retries", 3)
+
+_CTRL_RE = re.compile(r'[\x00-\x1f\x7f]+')
+
+
+def _sanitize_prompt_value(value: str, max_length: int = 300) -> str:
+    """Strip control characters and truncate to prevent prompt injection from LLM-generated values."""
+    sanitized = _CTRL_RE.sub(' ', value).strip()
+    return sanitized[:max_length]
+
 
 PLAN_SCHEMA = textwrap.dedent("""\
 {
@@ -46,6 +56,16 @@ PLAN_SCHEMA = textwrap.dedent("""\
 def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
     """Construct the prompt for the Claude Code subprocess."""
     spec_text = json.dumps(spec, indent=2)
+
+    # Pre-compute files_examined so instruction 2 can reference pre-read files (ATK-002)
+    files_examined_raw = spec.get("files_examined") or []
+    seen_paths: set[str] = set()
+    unique_entries: list[dict] = []
+    for _entry in files_examined_raw:
+        _p = _entry.get("path", "")
+        if _p and _p not in seen_paths:
+            seen_paths.add(_p)
+            unique_entries.append(_entry)
 
     parts = [
         "You are an autonomous implementation planner. Your task is to decompose "
@@ -76,13 +96,22 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "Use `from runner import detached_lib` or `from runner.detached_lib import ...` "
         "for test imports. Entry points are `python -m runner.X`, not `python runner/X.py`. "
         "Do the same for any test action whose code_spec runs a runner test module.",
-        "2. Read only the specific files mentioned in the spec (e.g. "
-        "files_to_modify, related_files, or files referenced in acceptance "
-        "criteria). If you must locate something the spec does not name, use "
-        "Grep/Glob sparingly — at most 3 search queries total, and prefer "
-        "narrow glob patterns over broad content searches. Do not do "
-        "exploratory reading of unrelated parts of the codebase: every extra "
-        "file you open is charged against this stage's token budget.",
+        (
+            "2. The files listed under 'Files already examined' below were read "
+            "during spec-writing and do NOT count against the search budget — skip "
+            "re-reading them unless you need to verify behavior that may have changed. "
+            "For any other files the spec requires, use Grep/Glob sparingly — at most "
+            "3 search queries total, and prefer narrow glob patterns over broad content "
+            "searches. Do not do exploratory reading of unrelated parts of the codebase."
+            if unique_entries else
+            "2. Read only the specific files mentioned in the spec (e.g. "
+            "files_to_modify, related_files, or files referenced in acceptance "
+            "criteria). If you must locate something the spec does not name, use "
+            "Grep/Glob sparingly — at most 3 search queries total, and prefer "
+            "narrow glob patterns over broad content searches. Do not do "
+            "exploratory reading of unrelated parts of the codebase: every extra "
+            "file you open is charged against this stage's token budget."
+        ),
         "3. Decompose the spec into ordered implementation steps. Each step should be "
         "granular enough that a coding model (Sonnet) can implement it without "
         "making design decisions.",
@@ -141,32 +170,23 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
     ]
 
     # Inject file-trust context if spec has files_examined
-    files_examined = spec.get("files_examined") or []
-    if files_examined:
-        # Deduplicate by path, keeping first occurrence
-        seen_paths = set()
-        unique_entries = []
-        for entry in files_examined:
-            p = entry.get("path", "")
-            if p and p not in seen_paths:
-                seen_paths.add(p)
-                unique_entries.append(entry)
-
+    if unique_entries:
         parts.extend([
             "",
             "## Files already examined by the refiner",
             "",
             "The following files were read during the spec-writing stage. "
             "Treat them as already-read context — do NOT re-read these files "
-            "unless you need to verify behavior that may have changed. "
-            "This list replaces instruction 2's bounded-exploration guidance "
-            "for the listed files.",
+            "unless you need to verify behavior that may have changed.",
             "",
         ])
         for entry in unique_entries:
+            # Sanitize LLM-generated values to prevent prompt injection (ATK-001)
+            path = _sanitize_prompt_value(entry.get("path", ""))
+            summary = _sanitize_prompt_value(entry.get("summary", ""))
             sha = entry.get("sha")
-            sha_note = f" (sha: {sha})" if sha else " (sha: unknown)"
-            parts.append(f"- `{entry['path']}`{sha_note}: {entry.get('summary', '')}")
+            sha_note = f" (sha: {sha})" if sha else " (sha: unknown — content may have changed)"
+            parts.append(f"- `{path}`{sha_note}: {summary}")
         parts.append("")
 
     if previous_errors:

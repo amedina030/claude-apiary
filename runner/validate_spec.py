@@ -220,10 +220,17 @@ def validate_files_examined(data: dict) -> list[str]:
         return []  # field is optional
     if not isinstance(fe, list):
         return ["files_examined must be an array"]
+    _ALLOWED_ENTRY_KEYS = {"path", "summary", "sha"}
+
     for i, entry in enumerate(fe):
         if not isinstance(entry, dict):
             errors.append(f"files_examined[{i}] must be an object")
             continue
+        extra_keys = set(entry.keys()) - _ALLOWED_ENTRY_KEYS
+        if extra_keys:
+            errors.append(
+                f"files_examined[{i}] has unexpected keys: {sorted(extra_keys)}"
+            )
         path = entry.get("path")
         if not isinstance(path, str) or not path.strip():
             errors.append(f"files_examined[{i}].path must be a non-empty string")
@@ -234,6 +241,10 @@ def validate_files_examined(data: dict) -> list[str]:
         if sha is not None:
             if not isinstance(sha, str):
                 errors.append(f"files_examined[{i}].sha must be a string or null")
+            elif len(sha) > 64:
+                errors.append(
+                    f"files_examined[{i}].sha exceeds maximum length of 64 characters"
+                )
             elif not re.fullmatch(r'[0-9a-fA-F]+', sha):
                 errors.append(f"files_examined[{i}].sha must be a hex string, got '{sha}'")
     return errors
@@ -258,17 +269,14 @@ def main():
         sys.exit(1)
 
     fe_errors = validate_files_examined(data)
-    if fe_errors:
-        for err in fe_errors:
-            print(err, file=sys.stderr)
-        sys.exit(1)
 
     # Strip top-level metadata fields before validation
     spec_data = {k: v for k, v in data.items() if k not in ("valid", "id", "intake_id", "files_examined")}
 
     errors = validate(spec_data)
-    if errors:
-        for err in errors:
+    all_errors = fe_errors + errors
+    if all_errors:
+        for err in all_errors:
             print(err, file=sys.stderr)
         sys.exit(1)
 
