@@ -118,8 +118,12 @@ CORE_DIR = APIS_DIR / "core"
 
 
 def file_hash(path):
-    """Return SHA-256 hex digest of a file's contents."""
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    """Return SHA-256 hex digest of a file's contents, read in 64 KiB chunks."""
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(65536), b''):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def build_core_hooks(*, use_launcher: bool = False):
@@ -278,6 +282,45 @@ def install_commands(claude_dir: Path):
         shutil.copy2(cmd_file, commands_dir / cmd_file.name)
 
     print(f"  Commands         : {commands_dir}")
+
+
+def _enumerate_installed_files(claude_dir):
+    """Return list of (source_path: Path, installed_path: Path, label: str)
+    tuples for every file that setup.py installs into claude_dir.
+
+    Scope: command files only.
+
+    Exclusions (each has a dedicated check section in run_check()):
+      - Hook launcher  → [Hook launcher] section already does hash comparison.
+      - Git hooks      → [Pre-commit] section handles them; their installed
+                         paths live under APIS_DIR/.git/, not under claude_dir,
+                         making them environment-sensitive in tests.
+
+    Deduplication: when multiple command dirs ship a file with the same name
+    the last writer wins during install (matching install_commands copy order).
+    We mirror that here by tracking by filename and letting later dirs overwrite
+    earlier entries.
+    """
+    commands_dir = claude_dir / 'commands'
+    # Use a dict keyed by filename so duplicate names collapse to the last
+    # (winning) source, mirroring the overwrite behaviour in install_commands.
+    seen: dict[str, tuple] = {}
+    for cmd_dir in [
+        BUDGETER_DIR / 'commands',
+        SCRIBE_DIR / 'commands',
+        CORE_DIR / 'commands',
+        DOCS_DIR / 'commands',
+        REFINER_DIR / 'commands',
+        HARDEN_DIR / 'commands',
+    ]:
+        if cmd_dir.is_dir():
+            for cmd_file in cmd_dir.glob('*.md'):
+                seen[cmd_file.name] = (
+                    cmd_file,
+                    commands_dir / cmd_file.name,
+                    f'command: /{cmd_file.stem}',
+                )
+    return list(seen.values())
 
 
 def run_check():
@@ -477,6 +520,27 @@ def run_check():
             ok(f"Pre-commit hook: {pre_commit}")
         else:
             fail(f"Pre-commit hook exists but doesn't run docs/check.py")
+    print()
+
+    # 7b. Drift detection: compare installed files byte-for-byte against sources.
+    print("[Drift]")
+    for source, installed, label in _enumerate_installed_files(claude_dir):
+        if not installed.exists():
+            # Presence is reported in other sections; skip silently here.
+            continue
+        if not source.exists():
+            fail(f"{label}: source missing at {source}")
+            continue
+        try:
+            installed_hash = file_hash(installed)
+            source_hash = file_hash(source)
+        except OSError as e:
+            fail(f"{label}: read error {e}")
+            continue
+        if installed_hash == source_hash:
+            ok(f"{label}: {installed}")
+        else:
+            fail(f"{label}: drift between {installed} and {source}")
     print()
 
     # 8. Python
