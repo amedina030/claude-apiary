@@ -36,6 +36,15 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 EXECUTIONS_DIR = SCRIPT_DIR / "executions"
 
 MAX_STEP_RETRIES = cfg("executor", "max_retries_per_step", 2)
+MAX_NO_CHANGE_RETRIES = cfg("executor", "max_no_change_retries", 2)
+
+
+class NoChangesError(RuntimeError):
+    """Raised by commit_files when git add staged no diff for the expected files.
+
+    Distinct from other commit failures so the caller can decide to retry
+    the step with an augmented prompt (T-2026-119).
+    """
 
 
 # -- Git helpers (#253: shared via runner/git_lib.py) --
@@ -250,7 +259,7 @@ def commit_files(files: list, message: str, action: str = ""):
     if staged.returncode == 0:
         # `git diff --cached --quiet` exits 0 when there is no diff, meaning
         # nothing was actually staged for these files.
-        raise RuntimeError(
+        raise NoChangesError(
             f"Subprocess made no changes to expected files ({', '.join(files)}). "
             f"The step's implementation subprocess either decided no edit was needed, "
             f"edited a different path, or silently failed. Check the subprocess transcript."
@@ -456,8 +465,13 @@ def topo_sort(steps: list[dict]) -> list[dict]:
 
 # -- Step execution --
 
-def build_step_prompt(step: dict, spec: dict) -> str:
-    """Build the prompt for a create/modify/delete step."""
+def build_step_prompt(step: dict, spec: dict, retry_hint: str = "") -> str:
+    """Build the prompt for a create/modify/delete step.
+
+    ``retry_hint``, when non-empty, is appended after the standard
+    instructions. The executor uses this to nudge a retry attempt after
+    a previous attempt produced no file changes (T-2026-119).
+    """
     parts = [
         f"You are implementing step {step['step_number']} of a plan.",
         "",
@@ -487,6 +501,9 @@ def build_step_prompt(step: dict, spec: dict) -> str:
         "Write the actual code — not pseudocode, not explanations. Just implement it.",
         "Use the existing codebase patterns and conventions.",
     ])
+
+    if retry_hint:
+        parts.extend(["", retry_hint])
 
     return "\n".join(parts)
 
@@ -612,8 +629,12 @@ def run_test_command(code_spec: str) -> tuple[bool, str]:
     return result.returncode == 0, output.strip()
 
 
-def execute_step(step: dict, spec: dict, model: str) -> dict:
-    """Execute a single step. Returns a step result dict."""
+def execute_step(step: dict, spec: dict, model: str, retry_hint: str = "") -> dict:
+    """Execute a single step. Returns a step result dict.
+
+    ``retry_hint`` is forwarded to build_step_prompt for create/modify/delete
+    actions, used by the runner to nudge a no-changes retry (T-2026-119).
+    """
     step_num = step["step_number"]
     action = step.get("action", "")
     result = {
@@ -667,7 +688,7 @@ def execute_step(step: dict, spec: dict, model: str) -> dict:
 
             else:
                 # create/modify/delete
-                prompt = build_step_prompt(step, spec)
+                prompt = build_step_prompt(step, spec, retry_hint=retry_hint)
                 rc, stdout, stderr = run_claude(prompt, model)
                 result["transcript"] = {"stdout": stdout, "stderr": stderr, "rc": rc}
                 if rc != 0:
@@ -885,63 +906,99 @@ def main():
         }
         execution_log["steps"].append(started_stub)
         persist_execution_log(log_path, execution_log)
-        # #236: snapshot worktree state before the step so we can detect
-        # writes to paths the step didn't declare in step.files.
-        pre_state = snapshot_worktree_state()
-        step_result = execute_step(step, spec, resolved_model)
-        # Check for unexpected writes on any non-test/verify step that
-        # succeeded — test/verify steps shell out and shouldn't write
-        # files at all, but they're also not subject to the step.files
-        # contract, so we skip the check for them.
-        if (step_result["status"] == "passed"
-                and step.get("action") not in ("test", "verify")):
-            try:
-                assert_no_unexpected_writes(
-                    pre_state, snapshot_worktree_state(),
-                    step.get("files", []),
-                )
-            except RuntimeError as e:
-                step_result["status"] = "failed"
-                step_result["error"] = str(e)
-        # #244: overwrite the 'started' stub with the real step result
-        # now that execute_step has returned. We know the stub is the
-        # last appended entry because no other append happens between
-        # the started-stub write and here.
-        execution_log["steps"][-1] = step_result
-        # #243: persist the step result BEFORE the commit attempt, so a
-        # crash during commit_files leaves the log honest about what
-        # execute_step produced. Combined with validate_resume_state,
-        # this closes the drift window between git state and log state.
-        persist_execution_log(log_path, execution_log)
-
-        if step_result["status"] == "passed":
-            # Commit if there are files
-            files = step.get("files", [])
-            if files and step.get("action") not in ("test", "verify"):
+        # Execute-then-commit loop. T-2026-119: when commit_files finds no
+        # diff (subprocess succeeded but made no file edits), retry the step
+        # with an augmented prompt up to MAX_NO_CHANGE_RETRIES times before
+        # aborting. The retry re-runs execute_step because the subprocess is
+        # the only thing that can actually write the files.
+        retry_hint = ""
+        no_change_attempts = 0
+        commit_error = None  # non-None means abort after this iteration
+        while True:
+            # #236: snapshot worktree state before the step so we can detect
+            # writes to paths the step didn't declare in step.files.
+            pre_state = snapshot_worktree_state()
+            step_result = execute_step(step, spec, resolved_model, retry_hint=retry_hint)
+            # Check for unexpected writes on any non-test/verify step that
+            # succeeded — test/verify steps shell out and shouldn't write
+            # files at all, but they're also not subject to the step.files
+            # contract, so we skip the check for them.
+            if (step_result["status"] == "passed"
+                    and step.get("action") not in ("test", "verify")):
                 try:
-                    commit_files(
-                        files,
-                        f"runner/{uuid} step {step_num}: {step.get('description', '')}",
-                        action=step.get("action", ""),
+                    assert_no_unexpected_writes(
+                        pre_state, snapshot_worktree_state(),
+                        step.get("files", []),
                     )
                 except RuntimeError as e:
-                    print(f"Git error: {e}", file=sys.stderr)
                     step_result["status"] = "failed"
                     step_result["error"] = str(e)
-                    failed_steps.add(step_num)
-                    aborted = True
-                    # Mark remaining as skipped
-                    remaining = [s for s in sorted_steps if s["step_number"] > step_num]
-                    for r in remaining:
-                        execution_log["steps"].append({
-                            "step_number": r["step_number"],
-                            "status": "skipped",
-                            "files_changed": r.get("files", []),
-                            "error": "Runner aborted",
-                        })
-                    persist_execution_log(log_path, execution_log)  # #243
+            # #244: overwrite the 'started' stub with the real step result
+            # now that execute_step has returned. We know the stub is the
+            # last appended entry because no other append happens between
+            # the started-stub write and here.
+            execution_log["steps"][-1] = step_result
+            # #243: persist the step result BEFORE the commit attempt, so a
+            # crash during commit_files leaves the log honest about what
+            # execute_step produced. Combined with validate_resume_state,
+            # this closes the drift window between git state and log state.
+            persist_execution_log(log_path, execution_log)
+
+            if step_result["status"] != "passed":
+                break
+
+            files = step.get("files", [])
+            if not files or step.get("action") in ("test", "verify"):
+                break
+
+            try:
+                commit_files(
+                    files,
+                    f"runner/{uuid} step {step_num}: {step.get('description', '')}",
+                    action=step.get("action", ""),
+                )
+                break  # success — leave the retry loop
+            except NoChangesError as e:
+                no_change_attempts += 1
+                if no_change_attempts > MAX_NO_CHANGE_RETRIES:
+                    commit_error = str(e)
                     break
-        else:
+                print(
+                    f"Step {step_num}: subprocess produced no changes — "
+                    f"retrying ({no_change_attempts}/{MAX_NO_CHANGE_RETRIES}) "
+                    f"with Edit-tool nudge",
+                    file=sys.stderr,
+                )
+                retry_hint = (
+                    "IMPORTANT: A previous attempt made no file changes. "
+                    "You MUST use the Edit or Write tool to actually modify "
+                    f"the files listed above ({', '.join(files)}). Do not "
+                    "just describe or plan the change — execute the tool call."
+                )
+                continue
+            except RuntimeError as e:
+                commit_error = str(e)
+                break
+
+        if commit_error is not None:
+            print(f"Git error: {commit_error}", file=sys.stderr)
+            step_result["status"] = "failed"
+            step_result["error"] = commit_error
+            execution_log["steps"][-1] = step_result
+            failed_steps.add(step_num)
+            aborted = True
+            # Mark remaining as skipped
+            remaining = [s for s in sorted_steps if s["step_number"] > step_num]
+            for r in remaining:
+                execution_log["steps"].append({
+                    "step_number": r["step_number"],
+                    "status": "skipped",
+                    "files_changed": r.get("files", []),
+                    "error": "Runner aborted",
+                })
+            persist_execution_log(log_path, execution_log)  # #243
+            break
+        elif step_result["status"] != "passed":
             failed_steps.add(step_num)
             aborted = True
             # Mark remaining as skipped

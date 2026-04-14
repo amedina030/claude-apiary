@@ -435,7 +435,7 @@ class TestExecutorEndToEnd(unittest.TestCase):
         # return passed. This is the fidelity-vs-isolation tradeoff:
         # we can't spawn Claude in a unit test, but we can make sure
         # every other part of main() runs for real.
-        def fake_execute(step, spec, model):
+        def fake_execute(step, spec, model, retry_hint=""):
             for f in step.get("files", []):
                 (self.repo / f).write_text("print('hello world')\n",
                                            encoding="utf-8")
@@ -484,6 +484,92 @@ class TestExecutorEndToEnd(unittest.TestCase):
         self.assertEqual(len(data["steps"]), 1)
         self.assertEqual(data["steps"][0]["status"], "passed")
         self.assertEqual(data["steps"][0]["step_number"], 1)
+
+
+class TestRetryOnNoChanges(TestExecutorEndToEnd):
+    """T-2026-119: when the subprocess produces no file changes, the executor
+    must retry execute_step with an augmented prompt (up to
+    MAX_NO_CHANGE_RETRIES times) before aborting the run.
+    """
+
+    def test_retry_recovers_when_second_attempt_writes_file(self):
+        plan_path, plan = self._write_plan("retry-recovers")
+        errors = self._validate_plan.validate(plan)
+        self.assertEqual(errors, [], f"plan should validate: {errors}")
+
+        calls = {"n": 0, "hints": []}
+
+        def fake_execute(step, spec, model, retry_hint=""):
+            calls["n"] += 1
+            calls["hints"].append(retry_hint)
+            # First attempt: succeed in the subprocess but write nothing,
+            # so commit_files raises NoChangesError. Second attempt: write
+            # the target file.
+            if calls["n"] >= 2:
+                for f in step.get("files", []):
+                    (self.repo / f).write_text("print('hello world')\n",
+                                               encoding="utf-8")
+            return {
+                "step_number": step["step_number"],
+                "status": "passed",
+                "files_changed": step.get("files", []),
+                "error": None,
+            }
+
+        argv = ["executor.py", str(plan_path)]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(executor, "execute_step", side_effect=fake_execute),
+        ):
+            try:
+                executor.main()
+            except SystemExit as e:
+                self.assertEqual(e.code, 0, f"executor aborted: code={e.code}")
+
+        self.assertEqual(calls["n"], 2, "expected exactly one retry")
+        self.assertEqual(calls["hints"][0], "", "first attempt must have no hint")
+        self.assertIn("Edit", calls["hints"][1])
+        self.assertIn("hello.py", calls["hints"][1])
+
+        log_path = self._executions / "retry-recovers.json"
+        data = json.loads(log_path.read_text(encoding="utf-8"))
+        self.assertEqual(data["status"], "completed")
+        self.assertEqual(data["steps"][0]["status"], "passed")
+
+    def test_aborts_after_exceeding_retry_cap(self):
+        plan_path, plan = self._write_plan("retry-exhausted")
+        errors = self._validate_plan.validate(plan)
+        self.assertEqual(errors, [], f"plan should validate: {errors}")
+
+        calls = {"n": 0}
+
+        def fake_execute(step, spec, model, retry_hint=""):
+            calls["n"] += 1
+            # Never write the file — every commit_files will raise NoChangesError.
+            return {
+                "step_number": step["step_number"],
+                "status": "passed",
+                "files_changed": step.get("files", []),
+                "error": None,
+            }
+
+        argv = ["executor.py", str(plan_path)]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(executor, "execute_step", side_effect=fake_execute),
+        ):
+            with self.assertRaises(SystemExit) as ctx:
+                executor.main()
+            self.assertEqual(ctx.exception.code, 1)
+
+        # 1 initial attempt + MAX_NO_CHANGE_RETRIES retries
+        self.assertEqual(calls["n"], 1 + executor.MAX_NO_CHANGE_RETRIES)
+
+        log_path = self._executions / "retry-exhausted.json"
+        data = json.loads(log_path.read_text(encoding="utf-8"))
+        self.assertEqual(data["status"], "aborted")
+        self.assertEqual(data["steps"][0]["status"], "failed")
+        self.assertIn("no changes", data["steps"][0]["error"].lower())
 
 
 class TestAssertFilesClean(unittest.TestCase):
