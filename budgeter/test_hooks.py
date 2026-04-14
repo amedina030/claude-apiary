@@ -44,14 +44,14 @@ def make_session_id():
     return str(u)
 
 
-def make_test_project(tmp_dir):
+def make_test_project(tmp_path):
     """Create a fake project directory with .claude/budgeter.json so hooks
-    redirect all data paths to tmp_dir instead of real budgeter/data/."""
-    claude_dir = tmp_dir / ".claude"
+    redirect all data paths to tmp_path instead of real budgeter/data/."""
+    claude_dir = tmp_path / ".claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
     config = {"monitored_tools": ["Agent", "Bash", "Read", "Write"]}
     (claude_dir / "budgeter.json").write_text(json.dumps(config), encoding="utf-8")
-    return tmp_dir
+    return tmp_path
 
 
 def run_hook(script, payload):
@@ -75,7 +75,7 @@ def log_entry_count(log_path):
 # Unit tests: logger
 # ---------------------------------------------------------------------------
 
-def test_isolation_guard_blocks_default_paths(tmp_dir):
+def test_isolation_guard_blocks_default_paths(tmp_path):
     """With APIARY_BUDGETER_TEST_ISOLATION=1, writing to the default production
     LOG_PATH / FEEDBACK_PATH / TMP_DIR must raise. Protects the suite from
     tests that forget configure_for_project or direct-patching."""
@@ -108,11 +108,11 @@ def test_isolation_guard_blocks_default_paths(tmp_dir):
         lg.TMP_DIR = orig_tmp
 
 
-def test_append_entry_skips_zero_delta(tmp_dir):
+def test_append_entry_skips_zero_delta(tmp_path):
     """append_entry must not write entries with tokens_delta == 0."""
     import budgeter.lib.logger as lg
     orig_log = lg.LOG_PATH
-    lg.LOG_PATH = tmp_dir / "log.jsonl"
+    lg.LOG_PATH = tmp_path / "log.jsonl"
     try:
         lg.append_entry({"tokens_delta": 0, "tool_name": "Bash"})
         assert not lg.LOG_PATH.exists(), "Zero-delta entry should not be written"
@@ -124,11 +124,11 @@ def test_append_entry_skips_zero_delta(tmp_dir):
         lg.LOG_PATH = orig_log
 
 
-def test_count_tasks(tmp_dir):
+def test_count_tasks(tmp_path):
     """count_tasks must count unique (session_id, task_turn) pairs, not raw entries."""
     import budgeter.lib.logger as lg
     orig_log = lg.LOG_PATH
-    lg.LOG_PATH = tmp_dir / "count_tasks_log.jsonl"
+    lg.LOG_PATH = tmp_path / "count_tasks_log.jsonl"
     try:
         # Two entries in the same task — should count as 1 task
         lg.append_entry({"tokens_delta": 100, "session_id": "s1", "task_turn": 1, "turn_number": 1})
@@ -146,11 +146,11 @@ def test_count_tasks(tmp_dir):
         lg.LOG_PATH = orig_log
 
 
-def test_baseline_save_load_delete(tmp_dir):
+def test_baseline_save_load_delete(tmp_path):
     """Baseline round-trip: save -> load -> verify tokens and task_turn -> cleanup removes it."""
     import budgeter.lib.logger as lg
     orig_tmp = lg.TMP_DIR
-    lg.TMP_DIR = tmp_dir
+    lg.TMP_DIR = tmp_path
     session_id = make_session_id()
     try:
         assert lg.load_baseline(session_id) is None
@@ -165,11 +165,11 @@ def test_baseline_save_load_delete(tmp_dir):
         lg.TMP_DIR = orig_tmp
 
 
-def test_snapshot_save_load_delete(tmp_dir):
+def test_snapshot_save_load_delete(tmp_path):
     """Snapshot round-trip: save -> load -> delete."""
     import budgeter.lib.logger as lg
     orig_tmp = lg.TMP_DIR
-    lg.TMP_DIR = tmp_dir
+    lg.TMP_DIR = tmp_path
     session_id = make_session_id()
     try:
         assert lg.load_snapshot(session_id) is None
@@ -186,9 +186,9 @@ def test_snapshot_save_load_delete(tmp_dir):
 # Integration tests: hook sequence
 # ---------------------------------------------------------------------------
 
-def test_pre_post_stop_sequence(tmp_dir):
+def test_pre_post_stop_sequence(tmp_path):
     """PRE -> POST -> STOP with empty transcript. Verifies plumbing end-to-end."""
-    project_dir = make_test_project(tmp_dir / "project")
+    project_dir = make_test_project(tmp_path / "project")
     log_path = project_dir / ".claude" / "budgeter-log.jsonl"
     tmp_path = project_dir / ".claude" / "budgeter-tmp"
     cwd = str(project_dir)
@@ -214,10 +214,10 @@ def test_pre_post_stop_sequence(tmp_dir):
     assert not leftover, f"STOP left tmp files: {[f.name for f in leftover]}"
 
 
-def test_pre_to_pre_baseline(tmp_dir):
+def test_pre_to_pre_baseline(tmp_path):
     """PRE saves prev_tool_name in baseline so the next PRE can attribute costs correctly."""
     import budgeter.lib.logger as lg
-    project_dir = make_test_project(tmp_dir / "project_pre2pre")
+    project_dir = make_test_project(tmp_path / "project_pre2pre")
     cwd = str(project_dir)
     session_id = make_session_id()
     payload = {"tool_name": "Write", "session_id": session_id, "transcript_path": "", "cwd": cwd}
@@ -240,14 +240,14 @@ def test_pre_to_pre_baseline(tmp_dir):
         lg.cleanup_session(session_id)
 
 
-def test_cont_continuation_inherits_task_turn(tmp_dir):
+def test_cont_continuation_inherits_task_turn(tmp_path):
     """A turn whose assistant message starts with [CONT] must inherit task_turn from the prior baseline."""
     import budgeter.lib.logger as lg
     session_id = make_session_id()
 
     # Simulate an existing baseline from turn 1, task_turn=1
     orig_tmp = lg.TMP_DIR
-    lg.TMP_DIR = tmp_dir
+    lg.TMP_DIR = tmp_path
     try:
         lg.save_baseline(
             session_id, tokens=1000,
@@ -291,10 +291,10 @@ def test_cont_continuation_inherits_task_turn(tmp_dir):
 # Agent PostToolUse tests
 # ---------------------------------------------------------------------------
 
-def test_post_agent_logs_total_tokens(tmp_dir):
+def test_post_agent_logs_total_tokens(tmp_path):
     """PostToolUse hook must log an Agent entry with tokens_delta == totalTokens."""
     import budgeter.lib.logger as lg
-    project_dir = make_test_project(tmp_dir / "project_agent")
+    project_dir = make_test_project(tmp_path / "project_agent")
     cwd = str(project_dir)
     log_path = project_dir / ".claude" / "budgeter-log.jsonl"
     session_id = make_session_id()
@@ -336,9 +336,9 @@ def test_post_agent_logs_total_tokens(tmp_dir):
         lg.cleanup_session(session_id)
 
 
-def test_post_agent_zero_tokens_not_logged(tmp_dir):
+def test_post_agent_zero_tokens_not_logged(tmp_path):
     """PostToolUse hook must not log an Agent entry when totalTokens == 0."""
-    project_dir = make_test_project(tmp_dir / "project_agent_zero")
+    project_dir = make_test_project(tmp_path / "project_agent_zero")
     cwd = str(project_dir)
     log_path = project_dir / ".claude" / "budgeter-log.jsonl"
     session_id = make_session_id()
@@ -354,10 +354,10 @@ def test_post_agent_zero_tokens_not_logged(tmp_dir):
     assert log_entry_count(log_path) == before, "Zero-token Agent entry must not be written"
 
 
-def test_pre_skips_logging_after_agent(tmp_dir):
+def test_pre_skips_logging_after_agent(tmp_path):
     """PRE hook must not log a duplicate entry when prev_tool_name == 'Agent'."""
     import budgeter.lib.logger as lg
-    project_dir = make_test_project(tmp_dir / "project_skip_agent")
+    project_dir = make_test_project(tmp_path / "project_skip_agent")
     cwd = str(project_dir)
     log_path = project_dir / ".claude" / "budgeter-log.jsonl"
     session_id = make_session_id()
@@ -390,7 +390,7 @@ def test_pre_skips_logging_after_agent(tmp_dir):
 # Unit tests: estimator
 # ---------------------------------------------------------------------------
 
-def test_detect_scope_flags_scope_keyword(tmp_dir):
+def test_detect_scope_flags_scope_keyword(tmp_path):
     """detect_scope_flags fires 'scope_keywords' on refactor/rewrite/etc."""
     from budgeter.lib.estimator import detect_scope_flags
     config = {}
@@ -399,7 +399,7 @@ def test_detect_scope_flags_scope_keyword(tmp_dir):
     assert "scope_keywords" not in detect_scope_flags("I'll read the file.", config)
 
 
-def test_detect_scope_flags_breadth_keyword(tmp_dir):
+def test_detect_scope_flags_breadth_keyword(tmp_path):
     """detect_scope_flags fires 'breadth_keywords' on entire/codebase/throughout/etc."""
     from budgeter.lib.estimator import detect_scope_flags
     config = {}
@@ -410,7 +410,7 @@ def test_detect_scope_flags_breadth_keyword(tmp_dir):
     assert "breadth_keywords" not in detect_scope_flags("Update all the tests.", config)
 
 
-def test_detect_scope_flags_file_count(tmp_dir):
+def test_detect_scope_flags_file_count(tmp_path):
     """detect_scope_flags fires 'file_count' when 3+ distinct files are mentioned."""
     from budgeter.lib.estimator import detect_scope_flags
     config = {}
@@ -420,7 +420,7 @@ def test_detect_scope_flags_file_count(tmp_dir):
     assert "file_count" not in detect_scope_flags(msg_two, config)
 
 
-def test_detect_scope_flags_step_count(tmp_dir):
+def test_detect_scope_flags_step_count(tmp_path):
     """detect_scope_flags fires 'step_count' when 4+ step connectives are present."""
     from budgeter.lib.estimator import detect_scope_flags
     config = {}
@@ -430,7 +430,7 @@ def test_detect_scope_flags_step_count(tmp_dir):
     assert "step_count" not in detect_scope_flags(msg_short, config)
 
 
-def test_detect_scope_flags_empty(tmp_dir):
+def test_detect_scope_flags_empty(tmp_path):
     """detect_scope_flags returns [] for empty or plain messages."""
     from budgeter.lib.estimator import detect_scope_flags
     config = {}
@@ -438,7 +438,7 @@ def test_detect_scope_flags_empty(tmp_dir):
     assert detect_scope_flags("Let me read the file.", config) == []
 
 
-def test_detect_scope_flags_investigative_keywords(tmp_dir):
+def test_detect_scope_flags_investigative_keywords(tmp_path):
     """detect_scope_flags fires 'investigative_keywords' on user_text, not assistant text."""
     from budgeter.lib.estimator import detect_scope_flags
     config = {}
@@ -452,7 +452,7 @@ def test_detect_scope_flags_investigative_keywords(tmp_dir):
     assert "investigative_keywords" not in detect_scope_flags("", config, user_text="Fix the bug in foo.py.")
 
 
-def test_estimate_magnitude_matching_tasks(tmp_dir):
+def test_estimate_magnitude_matching_tasks(tmp_path):
     """estimate_magnitude returns median of tasks sharing at least one rule."""
     from budgeter.lib.estimator import estimate_magnitude
     config = {"min_flagged_tasks": 2}
@@ -470,7 +470,7 @@ def test_estimate_magnitude_matching_tasks(tmp_dir):
     assert not fallback
 
 
-def test_estimate_magnitude_fallback(tmp_dir):
+def test_estimate_magnitude_fallback(tmp_path):
     """estimate_magnitude falls back to all flagged tasks when overlap is too small."""
     from budgeter.lib.estimator import estimate_magnitude
     config = {"min_flagged_tasks": 3}
@@ -491,11 +491,11 @@ def test_estimate_magnitude_fallback(tmp_dir):
     assert size == 4  # all 4 tasks are flagged
 
 
-def test_feedback_append_read(tmp_dir):
+def test_feedback_append_read(tmp_path):
     """append_feedback / read_feedback roundtrip."""
     import budgeter.lib.logger as lg
     orig_feedback = lg.FEEDBACK_PATH
-    lg.FEEDBACK_PATH = tmp_dir / "feedback.jsonl"
+    lg.FEEDBACK_PATH = tmp_path / "feedback.jsonl"
     try:
         assert lg.read_feedback() == []
         entry = {
@@ -512,11 +512,11 @@ def test_feedback_append_read(tmp_dir):
         lg.FEEDBACK_PATH = orig_feedback
 
 
-def test_baseline_stores_predicted_cost_and_warning_fired(tmp_dir):
+def test_baseline_stores_predicted_cost_and_warning_fired(tmp_path):
     """save_baseline stores predicted_cost and warning_fired; load_baseline retrieves them."""
     import budgeter.lib.logger as lg
     orig_tmp = lg.TMP_DIR
-    lg.TMP_DIR = tmp_dir
+    lg.TMP_DIR = tmp_path
     session_id = make_session_id()
     try:
         lg.save_baseline(session_id, 1000, predicted_cost=50000, warning_fired=True)
@@ -528,10 +528,10 @@ def test_baseline_stores_predicted_cost_and_warning_fired(tmp_dir):
         lg.cleanup_session(session_id)
 
 
-def test_feedback_written_at_session_end(tmp_dir):
+def test_feedback_written_at_session_end(tmp_path):
     """Stop hook writes a feedback record for the last task."""
     import budgeter.lib.logger as lg
-    project_dir = make_test_project(tmp_dir / "project_feedback")
+    project_dir = make_test_project(tmp_path / "project_feedback")
     cwd = str(project_dir)
     session_id = make_session_id()
 
@@ -569,7 +569,7 @@ def test_feedback_written_at_session_end(tmp_dir):
         lg.FEEDBACK_PATH = orig_feedback
 
 
-def test_is_approval_message(tmp_dir):
+def test_is_approval_message(tmp_path):
     """is_approval_message matches short confirmations and rejects non-approvals."""
     from budgeter.lib.estimator import is_approval_message
     # Approvals
@@ -596,7 +596,7 @@ def test_is_approval_message(tmp_dir):
     assert not is_approval_message("run the report")
 
 
-def test_score_flags_equal_weights(tmp_dir):
+def test_score_flags_equal_weights(tmp_path):
     """score_flags sums weights; defaults to 1.0 per rule when rule_weights absent."""
     from budgeter.lib.estimator import score_flags
     assert score_flags(["scope_keywords", "file_count"], {}) == 2.0
@@ -604,7 +604,7 @@ def test_score_flags_equal_weights(tmp_dir):
     assert score_flags(["scope_keywords"], {"rule_weights": {"scope_keywords": 2.0}}) == 2.0
 
 
-def test_score_flags_weighted(tmp_dir):
+def test_score_flags_weighted(tmp_path):
     """score_flags uses per-rule weights from config."""
     from budgeter.lib.estimator import score_flags
     config = {"rule_weights": {"scope_keywords": 2.0, "step_count": 0.5}}
@@ -614,7 +614,7 @@ def test_score_flags_weighted(tmp_dir):
     assert score_flags(["unknown_rule"], config) == 1.0
 
 
-def test_estimate_magnitude_no_history(tmp_dir):
+def test_estimate_magnitude_no_history(tmp_path):
     """estimate_magnitude returns (0, 0, False) when there is not enough history."""
     from budgeter.lib.estimator import estimate_magnitude
     config = {"min_flagged_tasks": 10}
@@ -638,7 +638,7 @@ def _make_records(tasks):
     ]
 
 
-def test_tune_compute_actual_costs(tmp_dir):
+def test_tune_compute_actual_costs(tmp_path):
     """compute_actual_costs sums net_tokens_delta per (session_id, task_turn)."""
     sys.path.insert(0, str(BUDGETER_DIR))
     from tune import compute_actual_costs
@@ -654,7 +654,7 @@ def test_tune_compute_actual_costs(tmp_dir):
     assert costs[("s2", 1)] == 8000
 
 
-def test_tune_enrich_feedback_deduplicates(tmp_dir):
+def test_tune_enrich_feedback_deduplicates(tmp_path):
     """enrich_feedback deduplicates duplicate (session_id, task_turn) records."""
     sys.path.insert(0, str(BUDGETER_DIR))
     from tune import enrich_feedback
@@ -671,7 +671,7 @@ def test_tune_enrich_feedback_deduplicates(tmp_dir):
     assert records[0]["actual_cost"] == 50000
 
 
-def test_tune_analyze_rules_precision(tmp_dir):
+def test_tune_analyze_rules_precision(tmp_path):
     """analyze_rules computes per-rule fires, expensive, and precision correctly."""
     sys.path.insert(0, str(BUDGETER_DIR))
     from tune import analyze_rules
@@ -695,7 +695,7 @@ def test_tune_analyze_rules_precision(tmp_dir):
     assert bk["sufficient"] is False  # below min_samples=3
 
 
-def test_tune_propose_weights_scales_proportionally(tmp_dir):
+def test_tune_propose_weights_scales_proportionally(tmp_path):
     """propose_weights scales rules above mean up and below mean down."""
     sys.path.insert(0, str(BUDGETER_DIR))
     from tune import propose_weights
@@ -717,7 +717,7 @@ def test_tune_propose_weights_scales_proportionally(tmp_dir):
     assert proposed["breadth_keywords"] < 1.0, "Low-precision rule should get lower weight"
 
 
-def test_tune_propose_weights_no_eligible_rules(tmp_dir):
+def test_tune_propose_weights_no_eligible_rules(tmp_path):
     """propose_weights returns empty dict when no rules have sufficient data."""
     sys.path.insert(0, str(BUDGETER_DIR))
     from tune import propose_weights
@@ -729,7 +729,7 @@ def test_tune_propose_weights_no_eligible_rules(tmp_dir):
     assert mean_prec == 0.0
 
 
-def test_tune_propose_weights_clamps_extremes(tmp_dir):
+def test_tune_propose_weights_clamps_extremes(tmp_path):
     """propose_weights clamps output to [WEIGHT_MIN, WEIGHT_MAX]."""
     sys.path.insert(0, str(BUDGETER_DIR))
     from tune import propose_weights, WEIGHT_MIN, WEIGHT_MAX
@@ -755,134 +755,134 @@ def main():
         print("Note: budgeter-log-enabled not set — integration tests will skip logging checks.")
 
     with tempfile.TemporaryDirectory() as td:
-        tmp_dir = Path(td)
+        tmp_path = Path(td)
 
         print("Unit: isolation guard blocks default paths ", end="")
-        test_isolation_guard_blocks_default_paths(tmp_dir)
+        test_isolation_guard_blocks_default_paths(tmp_path)
         print("OK")
 
         print("Unit: append_entry skips zero-delta ... ", end="")
-        test_append_entry_skips_zero_delta(tmp_dir)
+        test_append_entry_skips_zero_delta(tmp_path)
         print("OK")
 
         print("Unit: count_tasks deduplicates ......... ", end="")
-        test_count_tasks(tmp_dir)
+        test_count_tasks(tmp_path)
         print("OK")
 
         print("Unit: baseline save/load/delete ....... ", end="")
-        test_baseline_save_load_delete(tmp_dir)
+        test_baseline_save_load_delete(tmp_path)
         print("OK")
 
         print("Unit: snapshot save/load/delete ....... ", end="")
-        test_snapshot_save_load_delete(tmp_dir)
+        test_snapshot_save_load_delete(tmp_path)
         print("OK")
 
         print("Integration: PRE -> POST -> STOP ........ ", end="")
-        test_pre_post_stop_sequence(tmp_dir)
+        test_pre_post_stop_sequence(tmp_path)
         print("OK")
 
         print("Integration: PRE-to-PRE baseline ....... ", end="")
-        test_pre_to_pre_baseline(tmp_dir)
+        test_pre_to_pre_baseline(tmp_path)
         print("OK")
 
         print("Unit: [CONT] continuation inherits task_turn  ", end="")
-        test_cont_continuation_inherits_task_turn(tmp_dir)
+        test_cont_continuation_inherits_task_turn(tmp_path)
         print("OK")
 
         print("Integration: POST Agent logs totalTokens ....... ", end="")
-        test_post_agent_logs_total_tokens(tmp_dir)
+        test_post_agent_logs_total_tokens(tmp_path)
         print("OK")
 
         print("Integration: POST Agent skips zero tokens ...... ", end="")
-        test_post_agent_zero_tokens_not_logged(tmp_dir)
+        test_post_agent_zero_tokens_not_logged(tmp_path)
         print("OK")
 
         print("Integration: PRE skips log after Agent ......... ", end="")
-        test_pre_skips_logging_after_agent(tmp_dir)
+        test_pre_skips_logging_after_agent(tmp_path)
         print("OK")
 
         print("Unit: feedback append/read roundtrip ............ ", end="")
-        test_feedback_append_read(tmp_dir)
+        test_feedback_append_read(tmp_path)
         print("OK")
 
         print("Unit: baseline stores predicted_cost/warning .... ", end="")
-        test_baseline_stores_predicted_cost_and_warning_fired(tmp_dir)
+        test_baseline_stores_predicted_cost_and_warning_fired(tmp_path)
         print("OK")
 
         print("Integration: feedback written at session end ..... ", end="")
-        test_feedback_written_at_session_end(tmp_dir)
+        test_feedback_written_at_session_end(tmp_path)
         print("OK")
 
         print("Unit: detect_scope_flags scope_keyword ......... ", end="")
-        test_detect_scope_flags_scope_keyword(tmp_dir)
+        test_detect_scope_flags_scope_keyword(tmp_path)
         print("OK")
 
         print("Unit: detect_scope_flags breadth_keyword ........ ", end="")
-        test_detect_scope_flags_breadth_keyword(tmp_dir)
+        test_detect_scope_flags_breadth_keyword(tmp_path)
         print("OK")
 
         print("Unit: detect_scope_flags file_count ............. ", end="")
-        test_detect_scope_flags_file_count(tmp_dir)
+        test_detect_scope_flags_file_count(tmp_path)
         print("OK")
 
         print("Unit: detect_scope_flags step_count ............. ", end="")
-        test_detect_scope_flags_step_count(tmp_dir)
+        test_detect_scope_flags_step_count(tmp_path)
         print("OK")
 
         print("Unit: detect_scope_flags empty .................. ", end="")
-        test_detect_scope_flags_empty(tmp_dir)
+        test_detect_scope_flags_empty(tmp_path)
         print("OK")
 
         print("Unit: detect_scope_flags investigative .......... ", end="")
-        test_detect_scope_flags_investigative_keywords(tmp_dir)
+        test_detect_scope_flags_investigative_keywords(tmp_path)
         print("OK")
 
         print("Unit: is_approval_message ...................... ", end="")
-        test_is_approval_message(tmp_dir)
+        test_is_approval_message(tmp_path)
         print("OK")
 
         print("Unit: score_flags equal weights ................. ", end="")
-        test_score_flags_equal_weights(tmp_dir)
+        test_score_flags_equal_weights(tmp_path)
         print("OK")
 
         print("Unit: score_flags weighted ...................... ", end="")
-        test_score_flags_weighted(tmp_dir)
+        test_score_flags_weighted(tmp_path)
         print("OK")
 
         print("Unit: estimate_magnitude matching tasks ......... ", end="")
-        test_estimate_magnitude_matching_tasks(tmp_dir)
+        test_estimate_magnitude_matching_tasks(tmp_path)
         print("OK")
 
         print("Unit: estimate_magnitude fallback ............... ", end="")
-        test_estimate_magnitude_fallback(tmp_dir)
+        test_estimate_magnitude_fallback(tmp_path)
         print("OK")
 
         print("Unit: estimate_magnitude no history ............. ", end="")
-        test_estimate_magnitude_no_history(tmp_dir)
+        test_estimate_magnitude_no_history(tmp_path)
         print("OK")
 
         print("Unit: tune compute_actual_costs ................. ", end="")
-        test_tune_compute_actual_costs(tmp_dir)
+        test_tune_compute_actual_costs(tmp_path)
         print("OK")
 
         print("Unit: tune enrich_feedback deduplicates ......... ", end="")
-        test_tune_enrich_feedback_deduplicates(tmp_dir)
+        test_tune_enrich_feedback_deduplicates(tmp_path)
         print("OK")
 
         print("Unit: tune analyze_rules precision .............. ", end="")
-        test_tune_analyze_rules_precision(tmp_dir)
+        test_tune_analyze_rules_precision(tmp_path)
         print("OK")
 
         print("Unit: tune propose_weights scales proportionally  ", end="")
-        test_tune_propose_weights_scales_proportionally(tmp_dir)
+        test_tune_propose_weights_scales_proportionally(tmp_path)
         print("OK")
 
         print("Unit: tune propose_weights no eligible rules .... ", end="")
-        test_tune_propose_weights_no_eligible_rules(tmp_dir)
+        test_tune_propose_weights_no_eligible_rules(tmp_path)
         print("OK")
 
         print("Unit: tune propose_weights clamps extremes ...... ", end="")
-        test_tune_propose_weights_clamps_extremes(tmp_dir)
+        test_tune_propose_weights_clamps_extremes(tmp_path)
         print("OK")
 
     print("\nAll tests passed.")
