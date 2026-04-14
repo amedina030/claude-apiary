@@ -356,9 +356,9 @@ def cmd_list(args):
     note_type = args.type if args.type else None
     notes_list = store.list_notes(note_type=note_type, status=status, search=args.search)
 
-    # Filter by status (hide done unless --all or --archive)
+    # Filter by status (hide done and dropped unless --all or --archive)
     if not args.all and not args.archive:
-        notes_list = [n for n in notes_list if n.get('status') != 'done']
+        notes_list = [n for n in notes_list if n.get('status') not in ('done', 'dropped')]
 
     # Filter by session
     if args.session:
@@ -392,7 +392,8 @@ def cmd_list(args):
     for n in notes_list:
         ntype = n.get('type', '?')[:8]
         age = format_age(n.get('timestamp', ''))
-        status_label = ' [DONE]' if n.get('status') == 'done' else ''
+        st = n.get('status', '')
+        status_label = f' [{st.upper()}]' if st in ('done', 'dropped') else ''
         # For store entries, content is in 'summary' field; read full content for display
         content = n.get('summary', '').replace('\n', ' ')[:80]
         line = f'{_format_id(n):<12} {ntype:<10} ({age:<9}) {content}{status_label}'
@@ -529,6 +530,39 @@ def cmd_done(args):
         return
     store.update_note(note_type, year, seq, status='done')
     print(f'Marked {args.id} as done.')
+
+
+def cmd_drop(args):
+    store = args.store
+    note_type, year, seq = _parse_id_arg(str(args.id), store)
+    if note_type == 'learning':
+        print(f'Error: {args.id} is a learning — use "unlearn" to remove it.', file=sys.stderr)
+        sys.exit(1)
+    note = store.get_note(note_type, year, seq)
+    if not note:
+        print(f'Note {args.id} not found.', file=sys.stderr)
+        sys.exit(1)
+    if note.get('status') == 'dropped':
+        print(f'Note {args.id} is already dropped.')
+        return
+    if note.get('status') == 'done':
+        print(f'Error: note {args.id} is already done; cannot drop.', file=sys.stderr)
+        sys.exit(1)
+    store.update_note(note_type, year, seq, status='dropped')
+    print(f'Marked {args.id} as dropped.')
+
+
+def cmd_unarchive(args):
+    store = args.store
+    note_type, year, seq = _parse_id_arg(str(args.id), store)
+    if note_type == 'learning':
+        print(f'Error: {args.id} is a learning and does not use archive.', file=sys.stderr)
+        sys.exit(1)
+    entry = store.unarchive_note(note_type, year, seq)
+    if entry is None:
+        print(f'Note {args.id} not found in archive.', file=sys.stderr)
+        sys.exit(1)
+    print(f'Unarchived {args.id} (status preserved: {entry.get("status", "?")}).')
 
 
 def cmd_update(args):
@@ -838,6 +872,14 @@ def main():
     p_done = sub.add_parser("done")
     p_done.add_argument("id", type=str)
 
+    # drop — close without claiming completion
+    p_drop = sub.add_parser("drop")
+    p_drop.add_argument("id", type=str)
+
+    # unarchive — move a note back from its year's archive to active
+    p_unarchive = sub.add_parser("unarchive")
+    p_unarchive.add_argument("id", type=str)
+
     # update
     p_update = sub.add_parser("update")
     p_update.add_argument("id", type=str)
@@ -906,7 +948,8 @@ def main():
 
     commands = {
         'add': cmd_add, 'list': cmd_list, 'get': cmd_get, 'show': cmd_get,
-        'done': cmd_done, 'update': cmd_update, 'archive': cmd_archive,
+        'done': cmd_done, 'drop': cmd_drop, 'unarchive': cmd_unarchive,
+        'update': cmd_update, 'archive': cmd_archive,
         'learn': cmd_learn, 'learnings': cmd_learnings, 'unlearn': cmd_unlearn,
         'handoff-sessions': cmd_handoff_sessions,
         'migrate': cmd_migrate,

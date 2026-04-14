@@ -398,6 +398,41 @@ class ScribeStore:
             return target_entry
         return None
 
+    def unarchive_note(self, note_type: str, year: int, seq: int) -> dict | None:
+        """Move a note from the archive back into the active index.
+
+        Inverse of archive_note. Strips the archived_at timestamp, preserves the
+        note's status (which was preserved on archive), moves the .md body back
+        to year_dir, and appends the index entry to the active index.
+        Returns the unarchived entry dict, or None if not found in the archive.
+        """
+        type_dir = self._type_dir(note_type)
+        year_dir = type_dir / str(year)
+        archive_dir = year_dir / ARCHIVE_DIRNAME
+        if not archive_dir.exists():
+            return None
+        entries = self._read_index(archive_dir)
+        target_entry = None
+        remaining = []
+        for entry in entries:
+            if entry.get('seq') == seq:
+                target_entry = entry
+            else:
+                remaining.append(entry)
+        if target_entry is None:
+            return None
+        # Strip archived_at; preserve status as-is
+        target_entry.pop('archived_at', None)
+        self._write_index(archive_dir, remaining)
+        year_dir.mkdir(parents=True, exist_ok=True)
+        self._append_index(year_dir, target_entry)
+        src_md = archive_dir / f"{seq}.md"
+        dst_md = year_dir / f"{seq}.md"
+        if src_md.exists():
+            dst_md.write_text(src_md.read_text(encoding='utf-8'), encoding='utf-8')
+            src_md.unlink()
+        return target_entry
+
     # --- CRUD operations: Learnings ---
 
     def add_learning(self, content: str, session_id: str,

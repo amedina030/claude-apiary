@@ -186,6 +186,44 @@ class TestScribeNotes(unittest.TestCase):
         todos = self.store.list_notes(note_type='todo')
         self.assertEqual(len(todos), 1)
 
+    def test_unarchive_restores_note(self):
+        entry = self.store.add_note('todo', 'round-trip', 'sess1')
+        self.store.update_note('todo', entry['year'], entry['seq'], status='done')
+        self.store.archive_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(len(self.store.list_notes(status='active')), 0)
+
+        restored = self.store.unarchive_note('todo', entry['year'], entry['seq'])
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored['status'], 'done')
+        self.assertNotIn('archived_at', restored)
+
+        active = self.store.list_notes(status='active')
+        self.assertEqual(len(active), 1)
+        self.assertEqual(len(self.store.list_notes(status='archived')), 0)
+
+        md_path = self.tmp_dir / 'todos' / str(entry['year']) / f"{entry['seq']}.md"
+        self.assertTrue(md_path.exists())
+        self.assertEqual(md_path.read_text(encoding='utf-8'), 'round-trip')
+
+    def test_unarchive_missing_returns_none(self):
+        self.assertIsNone(self.store.unarchive_note('todo', 2026, 999))
+
+    def test_drop_status(self):
+        entry = self.store.add_note('todo', 'wontfix this', 'sess1')
+        self.store.update_note('todo', entry['year'], entry['seq'], status='dropped')
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(got['status'], 'dropped')
+
+    def test_cmd_list_hides_dropped_by_default(self):
+        e1 = self.store.add_note('todo', 'active one', 'sess1')
+        e2 = self.store.add_note('todo', 'dropped one', 'sess1')
+        self.store.update_note('todo', e2['year'], e2['seq'], status='dropped')
+        # Default active list excludes dropped
+        visible = [n for n in self.store.list_notes(status='active')
+                   if n.get('status') not in ('done', 'dropped')]
+        self.assertEqual(len(visible), 1)
+        self.assertEqual(visible[0]['seq'], e1['seq'])
+
     def test_show_alias_same_as_get(self):
         # Verify 'show' is registered as alias in argparse (covered by 'aliases=["show"]')
         # Both should call cmd_get — just verify cmd_get works
