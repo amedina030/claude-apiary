@@ -34,7 +34,7 @@ Hooks are Python scripts registered in `~/.claude/settings.json` that fire at Cl
 | Hook | Event | File | Description |
 |------|-------|------|-------------|
 | Install checker | PreToolUse | `core/hooks/check_install.py` | Verifies installed files match repo manifest. Runs once per session (sets a flag, skips subsequent calls) |
-| Install checker cleanup | Stop | `core/hooks/check_install_stop.py` | Removes the "already checked" flag file |
+| Install checker cleanup | Stop | `core/hooks/check_install_stop.py` | No-op placeholder (kept for backwards compatibility with existing settings.json). Session-scoped flags persist across turns — Stop fires every turn, not session end, so cleanup here was resetting once-per-session guards (T-2026-117). |
 | Session injector | PreToolUse | `core/hooks/inject_session.py` | Injects session identity (session_id, role, mission) into hook context |
 | Transcript saver | Stop | `core/hooks/save_transcript.py` | Saves a stripped copy of the session transcript for handoff generation |
 | Startup context injector | UserPromptSubmit | `core/hooks/startup_prompt_hook.py` | Injects identity, notes summary, learnings, and CLI reference on the first user message |
@@ -54,10 +54,10 @@ PostToolUse hooks fire after a tool returns:
 
 1. `post_tool_use.py` — logs agent costs
 
-Stop hooks fire on session end:
+Stop hooks fire at the end of every assistant turn (not session end):
 
 1. `stop_session.py` — logs final cost, cleans temp files
-2. `check_install_stop.py` — cleans flag file
+2. `check_install_stop.py` — no-op placeholder
 3. `save_transcript.py` — saves transcript
 
 ### Docs hooks

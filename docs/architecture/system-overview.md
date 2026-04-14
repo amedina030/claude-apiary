@@ -80,7 +80,7 @@ Session starts
   → ... normal work ...
   → Session ends
     → stop_session.py: logs final tool cost, cleans temp files
-    → check_install_stop.py: removes "already checked" flag
+    → check_install_stop.py: no-op (session-scoped flags persist)
     → save_transcript.py: saves transcript for next session's handoff
 ```
 

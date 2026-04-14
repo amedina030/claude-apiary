@@ -1,34 +1,21 @@
 #!/usr/bin/env python3
 """
-Stop hook — cleans up session flag files written by core PreToolUse hooks
-(check_install.py, inject_session.py).
+Stop hook — placeholder. Previously cleaned up per-session flag files
+written by PreToolUse hooks (check_install.py, inject_session.py,
+startup_hook.py, budgeter/pre_tool_use.py), but Stop fires at the end
+of *every* assistant turn — not session end — so the cleanup was
+resetting "run once per session" guards and causing context reminders
+to re-fire on every tool call (T-2026-117).
+
+Session-scoped flags are keyed by session_id and safe to persist;
+sessions don't come back. External maintenance can prune old flag
+directories by mtime if needed.
 """
 import sys
-import json
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from core.session import SessionId
-
-FLAG_SUFFIXES = ["install_checked", "session_injected", "startup_done"]
 
 
 def main():
-    try:
-        payload = json.loads(sys.stdin.read())
-    except json.JSONDecodeError:
-        sys.exit(0)
-
-    raw_id = payload.get("session_id", "")
-    if raw_id:
-        try:
-            sid = SessionId(raw_id)
-        except ValueError:
-            sys.exit(0)
-        for suffix in FLAG_SUFFIXES:
-            flag_file = sid.flag_path(suffix)
-            if flag_file.exists():
-                flag_file.unlink()
+    sys.exit(0)
 
 
 if __name__ == "__main__":

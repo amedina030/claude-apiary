@@ -19,6 +19,7 @@ from budgeter.lib import logger, estimator
 from core import flags
 from core.hook_context import context_block, join_contexts
 from core.hook_context import hook_allow, read_payload  # noqa: F401 — hook_allow used below
+from core.session import SessionId
 
 
 _CONT_INSTRUCTION = context_block(
@@ -233,11 +234,21 @@ def main():
         agent_description=agent_description,
     )
 
-    # Build context to inject — always include the [CONT] instruction and session_id.
-    blocks = [
-        _CONT_INSTRUCTION,
-        context_block("budgeter", f"session_id: {session_id}"),
-    ]
+    # Build context to inject. The [CONT] instruction and session_id only
+    # need to be injected once per session — they stay in context for the
+    # rest of the conversation. Without this guard they re-fire on every
+    # tool call and clutter the transcript (T-2026-117).
+    blocks = []
+    try:
+        sid = SessionId(session_id)
+        flag_file = sid.flag_path("budgeter_context_done")
+        if not flag_file.exists():
+            flag_file.parent.mkdir(parents=True, exist_ok=True)
+            flag_file.write_text("1", encoding="utf-8")
+            blocks.append(_CONT_INSTRUCTION)
+            blocks.append(context_block("budgeter", f"session_id: {session_id}"))
+    except ValueError:
+        pass
 
     if warning_fired:
         triggered = ", ".join(scope_flags)
