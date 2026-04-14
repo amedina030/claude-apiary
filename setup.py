@@ -194,6 +194,32 @@ def install_pre_commit_hook():
     print(f"  Pre-commit hook  : {target}")
 
 
+def install_post_merge_hook():
+    """Install git post-merge hook that closes the scribe TODO linked to
+    a merged runner branch."""
+    git_hooks_dir = APIS_DIR / ".git" / "hooks"
+    if not git_hooks_dir.is_dir():
+        print(f"  Post-merge hook  : skipped (.git/hooks/ not found)")
+        return
+
+    target = git_hooks_dir / "post-merge"
+    source = APIS_DIR / "runner" / "hooks" / "post-merge"
+
+    if not source.exists():
+        print(f"  Post-merge hook  : skipped (source not found: {source})")
+        return
+
+    if target.exists():
+        content = target.read_text(encoding="utf-8")
+        if "runner.close_source_todo" not in content:
+            print(f"  Post-merge hook  : WARNING — {target} already exists (not ours), skipping")
+            return
+
+    shutil.copy2(source, target)
+    target.chmod(target.stat().st_mode | 0o755)
+    print(f"  Post-merge hook  : {target}")
+
+
 def write_manifest(claude_dir: Path):
     """Write .install-manifest.json with hashes of all installed files."""
     installed_files = []
@@ -623,6 +649,9 @@ def main():
 
         # Pre-commit hook
         install_pre_commit_hook()
+
+        # Post-merge hook (auto-closes scribe TODOs when runner branches merge)
+        install_post_merge_hook()
 
         write_manifest(claude_dir)
 

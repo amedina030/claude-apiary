@@ -1,0 +1,17 @@
+#!/bin/bash
+# Post-merge hook: auto-close the scribe TODO linked to a merged runner branch.
+#
+# Fires after any `git merge` / `git pull` that updates HEAD. The Python
+# side walks the merge's second-parent commits looking for a runner/<uuid>
+# step subject, looks up run_history.jsonl for that uuid's source TODO,
+# and marks it done. Silent no-op when the merge isn't a runner branch.
+#
+# Installed by: python setup.py --global
+# Source: runner/hooks/post-merge
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+python -m runner.close_source_todo
+# Never block the merge; this is advisory housekeeping.
+exit 0

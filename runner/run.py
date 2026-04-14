@@ -762,6 +762,10 @@ def _run_detached_impl(cli_args) -> int:
         'total_tokens': cumulative_tokens(stage_costs),
         'exit_status': exit_status,
         'log_file': str(run_log_path),
+        # T-124-followup: propagate the source scribe note id (set by
+        # draft_ticket --from-todo) so the post-merge hook can close it
+        # after a human reviews + merges the runner branch.
+        'source': intake.get('source', ''),
     }
     history_append(entry)
 
