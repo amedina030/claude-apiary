@@ -9,17 +9,28 @@ Centralizes the spawn so every runner subprocess:
      the worker doesn't read.
   2. Emits a ``<usage>`` XML block via cost_emit so run.py can attribute
      per-stage tokens.
+  3. Forwards only an allowlisted subset of the parent environment, so
+     unrelated secrets in the parent process (AWS keys, cloud tokens,
+     SSH agent sockets, etc.) are not exposed to the spawned claude CLI
+     or the tools it invokes. Claude-, proxy-, and apiary-specific vars
+     are pass-through; system essentials for each platform are named
+     explicitly. Set ``APIARY_RUNNER_ALLOW_ALL_ENV=1`` in the parent env
+     as a temporary escape hatch if the allowlist breaks a legitimate
+     need.
 
 The startup hooks (core/hooks/startup_prompt_hook.py and
 core/hooks/startup_hook.py) check the env var on entry and short-circuit
 to a no-context allow when it is set.
 
-Module-level constant
----------------------
+Module-level constants
+----------------------
 RUNNER_SUBPROCESS_ENV_VAR : str
     Name of the environment variable set in every spawned subprocess.
     Import this constant from here rather than re-defining it in hooks so
     both sides stay in sync automatically.
+ALLOW_ALL_ENV_VAR : str
+    Name of the escape-hatch env var. If set to "1" in the parent env,
+    the full parent environment is forwarded (legacy behavior).
 """
 import os
 import subprocess
@@ -27,6 +38,67 @@ import subprocess
 from .cost_emit import emit_usage_xml
 
 RUNNER_SUBPROCESS_ENV_VAR = "APIARY_RUNNER_SUBPROCESS"
+ALLOW_ALL_ENV_VAR = "APIARY_RUNNER_ALLOW_ALL_ENV"
+
+# System-essential vars, named explicitly per platform. Missing any of
+# these from a claude subprocess would typically break basic operation
+# (PATH lookup, HOME-relative config, locale, temp dirs).
+_POSIX_SYSTEM_VARS = frozenset({
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR",
+    "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
+})
+_WINDOWS_SYSTEM_VARS = frozenset({
+    "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC",
+    "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
+    "PROGRAMFILES", "PROGRAMFILES(X86)", "COMMONPROGRAMFILES",
+    "TEMP", "TMP",
+    "USERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+})
+
+# HTTP(S) proxy vars — claude CLI's network stack reads these. Listed
+# in both cases because Windows env var names are case-insensitive but
+# subprocess inherits them with their original casing.
+_PROXY_VARS = frozenset({
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
+    "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+})
+
+# Any var starting with one of these prefixes is forwarded. Covers
+# claude CLI config (ANTHROPIC_API_KEY, CLAUDE_*), apiary's own runtime
+# flags (APIARY_*), and the runner-subprocess sentinel itself.
+_ALLOWED_PREFIXES = ("ANTHROPIC_", "CLAUDE_", "APIARY_")
+
+
+def _build_subprocess_env(parent_env: dict[str, str] | None = None,
+                          *, is_windows: bool | None = None) -> dict[str, str]:
+    """Build the env dict for a runner-spawned claude subprocess.
+
+    Forwards only allowlisted vars from ``parent_env`` (defaults to
+    ``os.environ``). Always sets ``RUNNER_SUBPROCESS_ENV_VAR=1``. If
+    ``ALLOW_ALL_ENV_VAR`` is "1" in the parent env, returns the full
+    parent env as an escape hatch.
+
+    ``is_windows`` picks the platform allowlist; defaults to detecting
+    ``os.name == 'nt'``. Exposed as a parameter for test coverage.
+    """
+    if parent_env is None:
+        parent_env = os.environ  # type: ignore[assignment]
+    if is_windows is None:
+        is_windows = os.name == "nt"
+
+    if parent_env.get(ALLOW_ALL_ENV_VAR) == "1":
+        return {**parent_env, RUNNER_SUBPROCESS_ENV_VAR: "1"}
+
+    system_vars = _WINDOWS_SYSTEM_VARS if is_windows else _POSIX_SYSTEM_VARS
+    env: dict[str, str] = {}
+    for name, value in parent_env.items():
+        if name in system_vars or name in _PROXY_VARS:
+            env[name] = value
+            continue
+        if any(name.startswith(prefix) for prefix in _ALLOWED_PREFIXES):
+            env[name] = value
+    env[RUNNER_SUBPROCESS_ENV_VAR] = "1"
+    return env
 
 # Maximum bytes buffered from stdout/stderr before we truncate.  Prevents
 # unbounded memory growth for unexpectedly large subprocess outputs.
@@ -71,7 +143,7 @@ def run_claude(
     if model:
         cmd.extend(["--model", model])
 
-    env = {**os.environ, RUNNER_SUBPROCESS_ENV_VAR: "1"}
+    env = _build_subprocess_env()
 
     try:
         result = subprocess.run(
