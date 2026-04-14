@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Tests for runner/chained_executor.py.
+"""Tests for runner/monolithic_executor.py.
 
-The chained executor spawns ONE ``claude -p`` subprocess that handles the
+The monolithic executor spawns ONE ``claude -p`` subprocess that handles the
 whole plan and is expected to commit after each step. These tests mock
 the subprocess call and use a real git repo to stage the commits the
 model "would have" produced. Post-hoc reconstruction + post-condition
@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from runner import chained_executor
+from runner import monolithic_executor
 
 
 def _git(repo: Path, *args):
@@ -42,7 +42,7 @@ class ChainedExecutorTestBase(unittest.TestCase):
         self._executions = self.repo / "executions"
         self._executions.mkdir()
         self._executions_patch = mock.patch.object(
-            chained_executor, "EXECUTIONS_DIR", self._executions,
+            monolithic_executor, "EXECUTIONS_DIR", self._executions,
         )
         self._executions_patch.start()
         from runner import validate_plan
@@ -97,16 +97,16 @@ class ChainedExecutorTestBase(unittest.TestCase):
         return plan_path, plan
 
     def _run(self, plan_path, fake_side_effect):
-        argv = ["chained_executor.py", str(plan_path)]
+        argv = ["monolithic_executor.py", str(plan_path)]
         with (
             mock.patch.object(sys, "argv", argv),
             mock.patch.object(
-                chained_executor, "_spawn_claude",
+                monolithic_executor, "_spawn_claude",
                 side_effect=fake_side_effect,
             ),
         ):
             try:
-                chained_executor.main()
+                monolithic_executor.main()
                 return 0
             except SystemExit as e:
                 return e.code
@@ -142,7 +142,7 @@ class TestChainedExecutorHappyPath(ChainedExecutorTestBase):
         self.assertEqual(log["status"], "completed")
         self.assertEqual([s["status"] for s in log["steps"]],
                          ["passed", "passed"])
-        self.assertEqual(log["mode"], "chained")
+        self.assertEqual(log["mode"], "monolithic")
 
     def test_second_step_subsumed_when_first_did_the_work(self):
         # Model writes hello.py (with helper) in step 1 and commits; step 2
@@ -292,7 +292,7 @@ class TestReconstructionHelpers(ChainedExecutorTestBase):
         _git(self.repo, "add", "a.py")
         _git(self.repo, "commit", "-m", "unrelated commit")
 
-        commits = chained_executor._commits_since_base("master")
+        commits = monolithic_executor._commits_since_base("master")
         subjects = [s for _, s in commits]
         self.assertEqual(len(commits), 2)
         self.assertIn("runner/helper-test step 1: first", subjects)
@@ -309,7 +309,7 @@ class TestReconstructionHelpers(ChainedExecutorTestBase):
             (self.repo / f).write_text("x\n", encoding="utf-8")
         _git(self.repo, "add", "a.py", "b.py", "c.py")
         _git(self.repo, "commit", "-m", "chunky")
-        unexpected = chained_executor.detect_global_unexpected_writes(
+        unexpected = monolithic_executor.detect_global_unexpected_writes(
             plan, "master",
         )
         self.assertEqual(unexpected, ["c.py"])

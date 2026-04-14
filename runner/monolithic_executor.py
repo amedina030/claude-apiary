@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
-Chained executor — Stage 4 variant that runs an entire plan inside ONE
+Monolithic executor — Stage 4 variant that runs an entire plan inside ONE
 Claude CLI subprocess instead of spawning one per step.
+
+(Originally named "chained executor"; the name was a carryover from the
+earlier SDK-based design where the orchestrator intercepted per-step tool
+calls. The CLI-only implementation doesn't chain anything — it's one
+subprocess running the whole plan.)
 
 Rationale
 ---------
 The per-step executor (executor.py) pays ~25k tokens of cache creation on
 every step because each step is a fresh ``claude -p`` subprocess. For a
 six-step plan that's ~150k tokens of pure startup overhead before any
-real work. The chained executor spawns once, hands the model the full
+real work. The monolithic executor spawns once, hands the model the full
 plan, and instructs it to commit after each step. Cache creation is
 paid once; every subsequent step hits cache reads at ~10% of creation
 cost.
@@ -30,7 +35,7 @@ Preserved (reconstructed post-hoc from git state):
 Failure mode changes
 --------------------
 If step 2 goes wrong under the per-step executor, steps 3-6 never run.
-Under the chained executor, the model sees its own mistake mid-conversation
+Under the monolithic executor, the model sees its own mistake mid-conversation
 and either self-corrects or continues — the orchestrator can no longer
 guarantee early abort. Operators reading the post-hoc execution log
 must treat it as an after-the-fact reconstruction, not a live trace.
@@ -58,10 +63,10 @@ from .executor import (
 )
 from .git_lib import format_git_error as _format_git_error
 
-CHAINED_TIMEOUT = cfg("chained_executor", "timeout_seconds", 1800)
+MONOLITHIC_TIMEOUT = cfg("monolithic_executor", "timeout_seconds", 1800)
 
 
-def build_chained_prompt(plan: dict) -> str:
+def build_monolithic_prompt(plan: dict) -> str:
     """Construct the single prompt that drives the full plan in one session.
 
     Contract the model must follow:
@@ -229,7 +234,7 @@ def reconstruct_step_results(plan: dict, base_ref: str) -> list[dict]:
         if action in ("test", "verify"):
             # Non-committing by design. Assume passed if the subprocess
             # reached the end; post-hoc we can't distinguish test exit
-            # codes from the chained transcript reliably. The final-state
+            # codes from the monolithic transcript reliably. The final-state
             # post_conditions check below is the authoritative gate.
             entry["status"] = "passed"
         elif n in commit_by_step:
@@ -361,7 +366,7 @@ def main():
     head_before = git("rev-parse", "HEAD").stdout.strip()
 
     model = plan.get("executor_model", "sonnet")
-    prompt = build_chained_prompt(plan)
+    prompt = build_monolithic_prompt(plan)
 
     EXECUTIONS_DIR.mkdir(parents=True, exist_ok=True)
     log_path = EXECUTIONS_DIR / f"{uuid}.json"
@@ -370,17 +375,17 @@ def main():
     execution_log = {
         "uuid": uuid,
         "branch": branch,
-        "mode": "chained",
+        "mode": "monolithic",
         "status": "running",
         "steps": [],
     }
     persist_execution_log(log_path, execution_log)
 
     print(f"Chained executor: running plan with {len(plan.get('steps', []))} "
-          f"steps in one subprocess (timeout {CHAINED_TIMEOUT}s)",
+          f"steps in one subprocess (timeout {MONOLITHIC_TIMEOUT}s)",
           file=sys.stderr)
 
-    rc, stdout, stderr = _spawn_claude(prompt, timeout=CHAINED_TIMEOUT, model=model)
+    rc, stdout, stderr = _spawn_claude(prompt, timeout=MONOLITHIC_TIMEOUT, model=model)
 
     # Persist the raw CLI transcript regardless of outcome — it's the
     # only post-hoc record of what the model actually did.

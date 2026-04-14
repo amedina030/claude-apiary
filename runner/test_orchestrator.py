@@ -296,7 +296,7 @@ class TestMainHappyPath(_RunnerTestCase):
         mock_run_stage.return_value = (True, "ok", "", 0.5)
         code, _, _ = self._run_main_capture(["run.py", str(intake_file)])
         self.assertIn(code, (None, 0))
-        # The executor stage module is configurable (per_step or chained);
+        # The executor stage module is configurable (per_step or monolithic);
         # read the resolved module off STAGES so this assertion tracks the
         # current config rather than hard-coding either variant.
         expected_modules = [stage[1] for stage in orchestrator.STAGES]

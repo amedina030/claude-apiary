@@ -49,12 +49,12 @@ LOG_AGENT_COST_SCRIPT = REPO_ROOT / 'budgeter' / 'log_agent_cost.py'
 
 # Stage definitions: (name, module, input_artifact_key)
 # input_artifact_key maps to the artifact path dict
-# Which executor module to drive stage 4. ``chained`` spawns one Claude
+# Which executor module to drive stage 4. ``monolithic`` spawns one Claude
 # CLI subprocess for the entire plan (cheaper, post-hoc verification);
 # ``per_step`` spawns one per step (stronger mid-run invariants). Flip
 # via runner/config.json "executor.mode".
 _EXECUTOR_MODULE = (
-    "chained_executor" if cfg("executor", "mode", "chained") == "chained"
+    "monolithic_executor" if cfg("executor", "mode", "monolithic") == "monolithic"
     else "executor"
 )
 
