@@ -22,8 +22,12 @@ from pathlib import Path
 
 
 def read_session_jsonl(path):
-    if not path or not Path(path).exists():
-        return []
+    if not path:
+        print("extract_transcript: no transcript_path provided", file=sys.stderr)
+        sys.exit(1)
+    if not Path(path).exists():
+        print(f"extract_transcript: transcript not found: {path}", file=sys.stderr)
+        sys.exit(1)
     entries = []
     with open(path, encoding="utf-8") as f:
         for line in f:

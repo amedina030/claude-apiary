@@ -59,8 +59,8 @@ Transcript paths may contain Windows backslashes (e.g. `C:\Users\...\uuid.jsonl`
 
 For each unseen session from the `[startup]` context:
 
-1. Find the transcript file. Sessions live under `C:/Users/amedi/.claude/projects/`; use glob or `find` to locate the full UUID file matching the 8-char prefix.
-2. Run `extract_transcript.py --summary <path>` to get the overview.
+1. The context block lists each session as `<prefix> <transcript_path>` on its own line directly under the `unseen_sessions:` header. Use that path verbatim — do not glob. If no path is present (older context format), fall back to globbing under `C:/Users/amedi/.claude/projects/`.
+2. Run `extract_transcript.py --summary <path>` to get the overview. This now exits non-zero on a missing path — if that happens, report the session under "failed" (bad path), do not silently treat as empty.
 3. If `total_messages < 5` or all sampled messages are the startup context-injection, treat as startup-only and skip (but **still report it as skipped in the final summary, not as "generated"**).
 4. Otherwise pull chunks via `--head` / `--tail` / `--max-chars` as needed until you have enough to write a handoff.
 5. Produce a handoff body in this shape:

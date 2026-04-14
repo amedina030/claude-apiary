@@ -87,6 +87,11 @@ def _run():
     if unseen:
         sids = ", ".join(u.get("session_id", "?")[:8] for u in unseen)
         lines.append(f"unseen_sessions: {sids}")
+        for u in unseen:
+            prefix = u.get("session_id", "?")[:8]
+            path = (u.get("transcript_path") or "").replace("\\", "/")
+            if path:
+                lines.append(f"  {prefix} {path}")
     else:
         lines.append("unseen_sessions: none")
 
