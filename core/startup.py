@@ -275,14 +275,18 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
         and _matches_role_mission(n, role, mission)
     ]
 
+    # Only forward-looking / live-state types land in the banner.
+    # Decisions, references, general, handoffs are loadable on demand via
+    # `notes.py list --type <t>` and would otherwise accumulate forever.
+    BANNER_TYPES = {"todo", "wishlist", "blocker", "context"}
     items = []
     for n in filtered_active:
-        if n.get("type") == "handoff":
+        if n.get("type") not in BANNER_TYPES:
             continue
         did = _format_id(n)
         ntype = n.get("type", "?")
         age = format_age(n.get("timestamp", ""))
-        summary = n.get("summary", "")[:40]
+        summary = n.get("summary", "")[:100]
         items.append(f"#{did} {ntype} ({age}) {summary}")
 
     learn_entries = store.list_learnings()
