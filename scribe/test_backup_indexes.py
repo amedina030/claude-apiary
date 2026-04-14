@@ -30,13 +30,16 @@ class BackupIndexesTests(unittest.TestCase):
         target, count = backup_indexes.create_backup(self.state_dir, backups_root, '2026-04-10')
 
         self.assertTrue(target.exists())
-        for folder_name in TYPE_FOLDERS.values():
+        year = str(datetime.now(timezone.utc).year)
+        # Year-layout indexes for types with data (todo, handoff, learning)
+        for folder_name in ('todos', 'handoffs'):
             self.assertTrue(
-                (target / folder_name / INDEX_FILENAME).exists(),
-                f'Missing index for folder {folder_name}',
+                (target / folder_name / year / INDEX_FILENAME).exists(),
+                f'Missing index for folder {folder_name}/{year}',
             )
-        self.assertTrue((target / LEARNING_FOLDER / INDEX_FILENAME).exists())
-        self.assertTrue((target / 'next_id').exists())
+        self.assertTrue((target / LEARNING_FOLDER / year / INDEX_FILENAME).exists())
+        # Legacy next_id must NOT appear in backup
+        self.assertFalse((target / 'next_id').exists())
         self.assertGreater(count, 0)
 
     def test_backup_idempotent_same_day(self):
@@ -56,9 +59,10 @@ class BackupIndexesTests(unittest.TestCase):
         self.assertTrue(target2.exists())
         self.assertFalse(sentinel.exists(), 'Sentinel should have been removed by overwrite')
 
-        for folder_name in TYPE_FOLDERS.values():
-            self.assertTrue((target2 / folder_name / INDEX_FILENAME).exists())
-        self.assertTrue((target2 / LEARNING_FOLDER / INDEX_FILENAME).exists())
+        year = str(datetime.now(timezone.utc).year)
+        for folder_name in ('todos', 'handoffs'):
+            self.assertTrue((target2 / folder_name / year / INDEX_FILENAME).exists())
+        self.assertTrue((target2 / LEARNING_FOLDER / year / INDEX_FILENAME).exists())
 
     def test_prune_retains_newest_n(self):
         backups_root = self.state_dir / 'backups'
@@ -110,9 +114,10 @@ class BackupIndexesTests(unittest.TestCase):
         backups_root = self.state_dir / 'backups'
         today_dir = backups_root / today
         self.assertTrue(today_dir.exists(), f'Expected backup dir {today_dir} to exist')
-        for folder_name in TYPE_FOLDERS.values():
-            self.assertTrue((today_dir / folder_name / INDEX_FILENAME).exists())
-        self.assertTrue((today_dir / LEARNING_FOLDER / INDEX_FILENAME).exists())
+        year = str(datetime.now(timezone.utc).year)
+        for folder_name in ('todos', 'handoffs'):
+            self.assertTrue((today_dir / folder_name / year / INDEX_FILENAME).exists())
+        self.assertTrue((today_dir / LEARNING_FOLDER / year / INDEX_FILENAME).exists())
 
 
 if __name__ == '__main__':

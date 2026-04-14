@@ -31,7 +31,7 @@ from pathlib import Path as _PathImport
 # Add project root to path for core.utils import
 sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
 from core.session import SessionId
-from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_ID_FILENAME, NEXT_SEQ_FILENAME
+from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME
 
 from pathlib import Path
 
@@ -184,47 +184,6 @@ def _parse_timestamp(ts):
         return None
 
 
-# ---------------------------------------------------------------------------
-# Legacy JSONL helpers (kept for backwards-compat fallback in core/startup.py)
-# ---------------------------------------------------------------------------
-
-def notes_path(project_key, *, start: Path | None = None):
-    """Return legacy notes.jsonl path for pre-v2 fallback reads."""
-    if _use_repo_layout():
-        return _repo_scribe_dir(start) / "notes.jsonl"
-    return PROJECTS_DIR / project_key / "notes.jsonl"
-
-
-def archive_path(project_key, *, start: Path | None = None):
-    """Return legacy notes_archive.jsonl path for pre-v2 fallback reads."""
-    if _use_repo_layout():
-        return _repo_scribe_dir(start) / "notes_archive.jsonl"
-    return PROJECTS_DIR / project_key / "notes_archive.jsonl"
-
-
-def learnings_path(project_key, *, start: Path | None = None):
-    """Return legacy learnings.jsonl path for pre-v2 fallback reads."""
-    if _use_repo_layout():
-        return _repo_scribe_dir(start) / "learnings.jsonl"
-    return PROJECTS_DIR / project_key / "learnings.jsonl"
-
-
-def read_jsonl(path):
-    """Read a legacy JSONL file, skipping malformed lines. Returns [] if missing."""
-    if not path.exists():
-        return []
-    entries = []
-    with open(path, encoding="utf-8") as f:
-        for lineno, line in enumerate(f, 1):
-            line = line.strip()
-            if line:
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    print(f"[scribe] WARNING: skipped malformed JSON on line {lineno} of {path}", file=sys.stderr)
-    return entries
-
-
 def format_age(ts):
     """Return human-readable relative age string from an ISO timestamp."""
     dt = _parse_timestamp(ts)
@@ -252,81 +211,6 @@ def format_age(ts):
         return f"{weeks}w ago"
     months = days // 30
     return f"{months}mo ago"
-
-
-# ---------------------------------------------------------------------------
-# Auto-archive
-# ---------------------------------------------------------------------------
-
-def _auto_archive(notes, notes_path, archive_path):
-    """Apply retention policy and move expired notes to archive.
-
-    Retention rules by type:
-      handoff  — keep only the latest per role/mission, archive the rest
-      context  — archive after 3 days
-      done     — archive after 1 day (any type marked done)
-      todo     — keep until done
-      decision — keep indefinitely
-      wishlist — keep indefinitely
-      blocker  — keep until resolved
-
-    Caller must hold a FileLock on archive_path before calling this function.
-    Returns (remaining, archived) lists."""
-    now = datetime.now(timezone.utc)
-    context_cutoff = now - timedelta(days=3)
-    done_cutoff = now - timedelta(days=1)
-    remaining = []
-    to_archive = []
-
-    # Find the latest handoff per role/mission
-    latest_handoff = {}  # (role, mission) -> newest timestamp
-    for n in notes:
-        if n.get("type") == "handoff":
-            key = (n.get("role", "user"), n.get("mission", "general"))
-            ts = _parse_timestamp(n.get("timestamp", ""))
-            if ts is not None:
-                if key not in latest_handoff or ts > latest_handoff[key]:
-                    latest_handoff[key] = ts
-
-    for n in notes:
-        ts = _parse_timestamp(n.get("timestamp", ""))
-        ntype = n.get("type", "")
-
-        # Treat unparseable timestamps as recent (don't archive them silently)
-        if ts is None:
-            remaining.append(n)
-            continue
-
-        # Done notes: archive after 1 day
-        if n.get("status") == "done" and ts < done_cutoff:
-            to_archive.append(n)
-        # Handoffs: keep only the latest per role/mission
-        elif ntype == "handoff":
-            key = (n.get("role", "user"), n.get("mission", "general"))
-            if ts < latest_handoff.get(key, ts):
-                to_archive.append(n)
-            else:
-                remaining.append(n)
-        # Context: archive after 3 days
-        elif ntype == "context" and ts < context_cutoff:
-            to_archive.append(n)
-        else:
-            remaining.append(n)
-
-    if to_archive:
-        # Read archive and deduplicate by id before writing, so that a crash
-        # between the two writes below (archive written, notes not yet trimmed)
-        # doesn't produce permanent duplicates on the next run.
-        existing_archive = read_jsonl(archive_path)
-        archive_ids = {e.get("id") for e in existing_archive}
-        new_entries = [n for n in to_archive if n.get("id") not in archive_ids]
-        if new_entries:
-            existing_archive.extend(new_entries)
-            _write_jsonl(archive_path, existing_archive)
-        # Only trim notes file after archive is safely on disk
-        _write_jsonl(notes_path, remaining)
-
-    return remaining, to_archive
 
 
 def _run_auto_archive_store(store) -> int:
@@ -804,7 +688,6 @@ def cmd_repair(args):
     dry_run = bool(getattr(args, 'dry_run', False))
     rebuilt = 0
     orphans = 0
-    max_id_seen = 0
     report_lines = []
 
     for type_folder_name in all_folder_names:
@@ -837,12 +720,6 @@ def cmd_repair(args):
                         print(f'Warning: skipping non-integer filename {md_path.name} in {folder}', file=sys.stderr)
                         continue
                     md_seqs.add(seq)
-
-                # Track legacy int IDs for next_id rebuild (ATK-003)
-                for entry in entries:
-                    eid = entry.get('id', 0)
-                    if isinstance(eid, int) and eid > max_id_seen:
-                        max_id_seen = eid
 
                 new_entries = list(entries)
 
@@ -908,21 +785,6 @@ def cmd_repair(args):
                         report_lines.append(
                             f'  * next_seq for {year_dir.relative_to(state_dir)}: {current_seq} -> {new_next_seq}'
                         )
-
-    # Rebuild global next_id for legacy compat
-    nid_path = state_dir / NEXT_ID_FILENAME
-    if nid_path.exists():
-        try:
-            current = int(nid_path.read_text(encoding='utf-8').strip())
-        except ValueError:
-            current = 1
-    else:
-        current = 1
-    new_next = max(max_id_seen + 1, current)
-    if new_next != current:
-        if not dry_run:
-            nid_path.write_text(str(new_next), encoding='utf-8')
-        report_lines.append(f'  * next_id: {current} -> {new_next}')
 
     print(
         f'Repair {"(dry-run) " if dry_run else ""}complete: '

@@ -29,6 +29,19 @@ def _force_legacy_layout():
     return handle
 
 
+class _FakeStore:
+    """Drop-in ScribeStore stub: list_notes returns a preset list."""
+
+    def __init__(self, handoffs):
+        self._handoffs = list(handoffs)
+
+    def list_notes(self, note_type=None, status=None):
+        return [
+            h for h in self._handoffs
+            if note_type is None or h.get("type") == note_type
+        ]
+
+
 class TestLoadSkipPrefixes(unittest.TestCase):
     def setUp(self):
         self._layout_patch = _force_legacy_layout()
@@ -148,24 +161,20 @@ class TestGetUnseenSessionsSkipIntegration(unittest.TestCase):
         ]
         self.history_path.write_text(json.dumps(history), encoding="utf-8")
 
-        # Handoff notes: only cccccccc has a handoff
-        self._notes_patch = patch.object(
-            startup, "read_jsonl",
-            return_value=[{
+        # Handoff notes: only cccccccc has a handoff.
+        # Patch ScribeStore so list_notes returns the single seeded handoff.
+        self._store_patch = patch.object(
+            startup, "ScribeStore",
+            return_value=_FakeStore([{
                 "type": "handoff",
                 "status": "open",
-                "session_id": "cccccccc-1111-2222-3333-444444444444",
-            }],
+                "session": "cccccccc-1111-2222-3333-444444444444",
+            }]),
         )
-        self._notes_path_patch = patch.object(
-            startup, "notes_path", return_value=self.tmp_dir / "notes.jsonl"
-        )
-        self._notes_patch.start()
-        self._notes_path_patch.start()
+        self._store_patch.start()
 
     def tearDown(self):
-        self._notes_patch.stop()
-        self._notes_path_patch.stop()
+        self._store_patch.stop()
         self._layout_patch.stop()
         self._tmp.cleanup()
 
@@ -232,18 +241,19 @@ class TestGetUnseenSessionsArchiveIntegration(unittest.TestCase):
         ]
         self.history_path.write_text(json.dumps(history), encoding="utf-8")
 
-        self._notes_path_patch = patch.object(
-            startup, "notes_path", return_value=self.notes_file
+        # Subclasses populate self._handoffs before calling _install_store_patch().
+        self._handoffs: list[dict] = []
+        self._store_patch = None
+
+    def _install_store_patch(self):
+        self._store_patch = patch.object(
+            startup, "ScribeStore", return_value=_FakeStore(self._handoffs)
         )
-        self._archive_path_patch = patch.object(
-            startup, "archive_path", return_value=self.archive_file
-        )
-        self._notes_path_patch.start()
-        self._archive_path_patch.start()
+        self._store_patch.start()
 
     def tearDown(self):
-        self._notes_path_patch.stop()
-        self._archive_path_patch.stop()
+        if self._store_patch is not None:
+            self._store_patch.stop()
         self._layout_patch.stop()
         self._tmp.cleanup()
 
@@ -263,37 +273,37 @@ class TestGetUnseenSessionsArchiveIntegration(unittest.TestCase):
         return {s["session_id"][:8] for s in unseen}
 
     def test_archived_handoff_counts_as_seen(self):
-        # aaaaaaaa's handoff lives only in the archive, not active notes
-        self._write_jsonl(self.notes_file, [])
-        self._write_jsonl(self.archive_file, [{
+        # aaaaaaaa's handoff lives only in the archive; store.list_notes(status="all")
+        # returns both active and archived, so aaaaaaaa must still be filtered out.
+        self._handoffs = [{
             "type": "handoff",
-            "status": "active",
-            "session_id": "aaaaaaaa-1111-2222-3333-444444444444",
-        }])
+            "status": "archived",
+            "session": "aaaaaaaa-1111-2222-3333-444444444444",
+        }]
+        self._install_store_patch()
         result = self._run()
         self.assertEqual(self._sids(result), {"bbbbbbbb"})
 
     def test_active_and_archived_handoffs_both_recognized(self):
-        self._write_jsonl(self.notes_file, [{
-            "type": "handoff",
-            "status": "active",
-            "session_id": "bbbbbbbb-1111-2222-3333-444444444444",
-        }])
-        self._write_jsonl(self.archive_file, [{
-            "type": "handoff",
-            "status": "active",
-            "session_id": "aaaaaaaa-1111-2222-3333-444444444444",
-        }])
+        self._handoffs = [
+            {"type": "handoff", "status": "active",
+             "session": "bbbbbbbb-1111-2222-3333-444444444444"},
+            {"type": "handoff", "status": "archived",
+             "session": "aaaaaaaa-1111-2222-3333-444444444444"},
+        ]
+        self._install_store_patch()
         result = self._run()
         self.assertEqual(self._sids(result), set())
 
     def test_missing_archive_file_does_not_crash(self):
-        self._write_jsonl(self.notes_file, [{
+        # No archived handoffs present — only active. Exercises the pre-v2
+        # "archive file absent" scenario via an empty store.
+        self._handoffs = [{
             "type": "handoff",
             "status": "active",
-            "session_id": "aaaaaaaa-1111-2222-3333-444444444444",
-        }])
-        # archive_file deliberately not created
+            "session": "aaaaaaaa-1111-2222-3333-444444444444",
+        }]
+        self._install_store_patch()
         result = self._run()
         self.assertEqual(self._sids(result), {"bbbbbbbb"})
 

@@ -276,17 +276,74 @@ def _collect_entries(state_dir: Path) -> dict:
     }
 
 
+def _collect_year_entries(state_dir: Path) -> dict:
+    """Collect entries already sitting in `<type>/<year>/` subfolders.
+
+    Used when --force is rerunning the migration after some entries were already
+    created in the typed-year layout (e.g. via live `notes.py add` calls between
+    when the flat layout was populated and when this migration runs).
+
+    Year bodies live at `<type>/<year>/<seq>.md` (active) and
+    `<type>/<year>/archive/<seq>.md` (archived). Entries are returned in the
+    same shape as _collect_entries so the downstream bucket/seq logic reassigns
+    display_ids consistently across flat + year sources.
+    """
+    result: dict[tuple[str, str], list[dict]] = {}
+    missing_body_count = 0
+
+    type_to_folder: dict[str, str] = {**TYPE_FOLDERS, _LEARNING_TYPE: LEARNING_FOLDER}
+    for type_key, folder_name in type_to_folder.items():
+        type_dir = state_dir / folder_name
+        if not type_dir.exists():
+            continue
+        for year_dir in type_dir.iterdir():
+            if not (year_dir.is_dir() and year_dir.name.isdigit() and len(year_dir.name) == 4):
+                continue
+            year = int(year_dir.name)
+            for status, body_root in (('active', year_dir), ('archived', year_dir / ARCHIVE_DIRNAME)):
+                idx = body_root / INDEX_FILENAME
+                entries = _read_jsonl(idx)
+                for entry in entries:
+                    entry['_type_key'] = type_key
+                    entry['_year'] = year
+                    seq = entry.get('seq')
+                    body_path = body_root / f'{seq}.md'
+                    if body_path.exists():
+                        entry['_body_content'] = body_path.read_text(encoding='utf-8')
+                    else:
+                        entry['_body_content'] = ''
+                        if entry.get('has_body', False):
+                            missing_body_count += 1
+                    result.setdefault((type_key, status), []).append(entry)
+
+    return {'entries': result, 'missing_body_count': missing_body_count}
+
+
+def _merge_entries(
+    base: dict[tuple[str, str], list[dict]],
+    extra: dict[tuple[str, str], list[dict]],
+) -> dict[tuple[str, str], list[dict]]:
+    """Concatenate `extra` onto `base`, keyed by (type_key, status)."""
+    for key, entries in extra.items():
+        base.setdefault(key, []).extend(entries)
+    return base
+
+
 def _dedup_entries(entries_by_key: dict[tuple[str, str], list[dict]]) -> tuple[dict, int]:
     """Dedup: for each type, if same id appears in both active and archive, archive wins.
     Returns (deduped entries_by_key, dropped_count)."""
     dropped = 0
-    # Build set of archived IDs per type_key
+    # Build set of archived IDs per type_key. Skip entries with no `id` (year-layout
+    # sources have no legacy int id — collapsing them all to None would spuriously
+    # flag every active year entry as a duplicate).
     archived_ids: dict[str, set] = {}
     for (type_key, status), entries in entries_by_key.items():
         if status == 'archived':
             ids = set()
             for e in entries:
-                ids.add(e.get('id'))
+                eid = e.get('id')
+                if eid is not None:
+                    ids.add(eid)
             archived_ids[type_key] = ids
 
     # Filter active entries
@@ -295,7 +352,8 @@ def _dedup_entries(entries_by_key: dict[tuple[str, str], list[dict]]) -> tuple[d
             arch_ids = archived_ids.get(type_key, set())
             filtered = []
             for e in entries:
-                if e.get('id') in arch_ids:
+                eid = e.get('id')
+                if eid is not None and eid in arch_ids:
                     dropped += 1
                 else:
                     filtered.append(e)
@@ -623,6 +681,31 @@ def migrate(state_dir: Path, *, dry_run: bool = False, force: bool = False) -> d
     entries_by_key = collected['entries']
     report['missing_body_count'] = collected['missing_body_count']
     report['timestamp_fallback_count'] = collected['timestamp_fallback_count']
+
+    # With --force, also absorb entries that were added directly into the
+    # typed-year layout between when the flat layout was last touched and now.
+    # Without this, `shutil.rmtree` on the year dirs below would permanently
+    # delete those entries. Skip year entries that are stale artifacts from a
+    # prior migration run (same type+session+timestamp+summary as a flat entry).
+    if force and _year_subfolder_has_data(state_dir):
+        year_collected = _collect_year_entries(state_dir)
+        flat_sig: set[tuple] = set()
+        for (type_key, _status), flat_entries in entries_by_key.items():
+            for e in flat_entries:
+                flat_sig.add((type_key, e.get('session', '') or e.get('session_id', ''),
+                              e.get('timestamp', ''), e.get('summary', '')))
+        filtered_year: dict[tuple[str, str], list[dict]] = {}
+        for (type_key, status), entries in year_collected['entries'].items():
+            kept = []
+            for e in entries:
+                sig = (type_key, e.get('session', '') or e.get('session_id', ''),
+                       e.get('timestamp', ''), e.get('summary', ''))
+                if sig not in flat_sig:
+                    kept.append(e)
+            if kept:
+                filtered_year[(type_key, status)] = kept
+        entries_by_key = _merge_entries(entries_by_key, filtered_year)
+        report['missing_body_count'] += year_collected['missing_body_count']
 
     # Dedup
     entries_by_key, dropped = _dedup_entries(entries_by_key)

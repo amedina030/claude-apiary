@@ -170,7 +170,7 @@ target_size_kb = total_kb   # already computed in Step 0
 estimated = int(rounds * 2 * (15000 + 1.5 * target_size_kb * 256))
 ```
 
-The formula accounts for two agent calls per round (Attacker + Defender), a 15 000-token base per call, and ~384 tokens per KB of target content per call. (Formula source: scribe note #188.)
+The formula accounts for two agent calls per round (Attacker + Defender), a 15 000-token base per call, and ~384 tokens per KB of target content per call. (Formula source: scribe note C-2026-24.)
 
 Show the user what will happen:
 

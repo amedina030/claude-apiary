@@ -45,7 +45,6 @@ LEARNING_FOLDER = 'learnings'
 _ALL_FOLDERS: list[str] = list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]
 
 INDEX_FILENAME = 'index.jsonl'
-NEXT_ID_FILENAME = 'next_id'
 NEXT_SEQ_FILENAME = 'next_seq'
 ARCHIVE_DIRNAME = 'archive'
 
@@ -63,22 +62,12 @@ class ScribeStore:
         self.ensure_layout()
 
     def ensure_layout(self) -> None:
-        """Create all type folders, archive subfolders, year subfolders, and counters if missing."""
+        """Create all type folders, year subfolders, and counters if missing."""
         self.state_dir.mkdir(parents=True, exist_ok=True)
         year = datetime.now(timezone.utc).year
         for folder_name in _ALL_FOLDERS:
             folder = self.state_dir / folder_name
             folder.mkdir(parents=True, exist_ok=True)
-            # Create empty index.jsonl if it doesn't exist (legacy compat)
-            idx = folder / INDEX_FILENAME
-            if not idx.exists():
-                idx.write_text('', encoding='utf-8')
-            # Create archive subfolder with its own empty index (legacy compat)
-            archive = folder / ARCHIVE_DIRNAME
-            archive.mkdir(parents=True, exist_ok=True)
-            archive_idx = archive / INDEX_FILENAME
-            if not archive_idx.exists():
-                archive_idx.write_text('', encoding='utf-8')
             # Create current-year subfolder
             year_dir = folder / str(year)
             year_dir.mkdir(parents=True, exist_ok=True)
@@ -93,10 +82,6 @@ class ScribeStore:
             year_archive_idx = year_archive / INDEX_FILENAME
             if not year_archive_idx.exists():
                 year_archive_idx.write_text('', encoding='utf-8')
-        # Create next_id file if missing (legacy compat — retained during transition)
-        nid_path = self.state_dir / NEXT_ID_FILENAME
-        if not nid_path.exists():
-            nid_path.write_text('1', encoding='utf-8')
 
     # --- Index I/O helpers ---
 
@@ -141,54 +126,6 @@ class ScribeStore:
         with FileLock(idx_path):
             with open(idx_path, 'a', encoding='utf-8') as f:
                 f.write(json.dumps(entry, separators=(',', ':')) + '\n')
-
-    # --- Global counter (legacy compat) ---
-
-    def _rebuild_next_id(self) -> int:
-        """Scan all indexes for max ID and recreate the counter file.
-
-        Returns the next ID to use (max found + 1, or 1 if no entries).
-        """
-        max_id = 0
-        for folder_name in _ALL_FOLDERS:
-            folder = self.state_dir / folder_name
-            for entry in self._read_index(folder):
-                eid = entry.get('id', 0)
-                if isinstance(eid, int) and eid > max_id:
-                    max_id = eid
-            # Also scan archive
-            archive = folder / ARCHIVE_DIRNAME
-            for entry in self._read_index(archive):
-                eid = entry.get('id', 0)
-                if isinstance(eid, int) and eid > max_id:
-                    max_id = eid
-        next_id = max_id + 1
-        nid_path = self.state_dir / NEXT_ID_FILENAME
-        nid_path.write_text(str(next_id), encoding='utf-8')
-        return next_id
-
-    def _read_next_id(self) -> int:
-        """Return current next_id value. Rebuilds if file is missing."""
-        nid_path = self.state_dir / NEXT_ID_FILENAME
-        if not nid_path.exists():
-            return self._rebuild_next_id()
-        text = nid_path.read_text(encoding='utf-8').strip()
-        try:
-            return int(text)
-        except ValueError:
-            return self._rebuild_next_id()
-
-    def _increment_id(self) -> int:
-        """Atomically read, increment, and write the next_id counter.
-
-        Returns the ID that was consumed (i.e. the value before incrementing).
-        Uses FileLock on the next_id file for concurrent safety.
-        """
-        nid_path = self.state_dir / NEXT_ID_FILENAME
-        with FileLock(nid_path):
-            current = self._read_next_id()
-            nid_path.write_text(str(current + 1), encoding='utf-8')
-        return current
 
     # --- Per-(type,year) sequence counter ---
 

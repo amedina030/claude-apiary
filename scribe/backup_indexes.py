@@ -30,21 +30,25 @@ def create_backup(state_dir: Path, backups_root: Path, date_str: str) -> tuple[P
     target.mkdir(parents=True, exist_ok=True)
     count = 0
     for folder_name in list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]:
-        src_idx = state_dir / folder_name / INDEX_FILENAME
-        if src_idx.exists():
-            dst_idx = target / folder_name / INDEX_FILENAME
-            dst_idx.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_idx, dst_idx)
-            count += 1
-        archive_src = state_dir / folder_name / ARCHIVE_DIRNAME / INDEX_FILENAME
-        if archive_src.exists():
-            archive_dst = target / folder_name / ARCHIVE_DIRNAME / INDEX_FILENAME
-            archive_dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(archive_src, archive_dst)
-            count += 1
-    next_id_src = state_dir / 'next_id'
-    if next_id_src.exists():
-        shutil.copy2(next_id_src, target / 'next_id')
+        type_dir = state_dir / folder_name
+        if not type_dir.exists():
+            continue
+        for year_dir in type_dir.iterdir():
+            if not (year_dir.is_dir() and year_dir.name.isdigit() and len(year_dir.name) == 4):
+                continue
+            for rel in ((INDEX_FILENAME,), (ARCHIVE_DIRNAME, INDEX_FILENAME)):
+                src = year_dir.joinpath(*rel)
+                if src.exists():
+                    dst = target / folder_name / year_dir.name
+                    for part in rel[:-1]:
+                        dst = dst / part
+                    dst = dst / rel[-1]
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dst)
+                    count += 1
+    map_src = state_dir / 'migration_id_map.json'
+    if map_src.exists():
+        shutil.copy2(map_src, target / 'migration_id_map.json')
         count += 1
     return (target, count)
 

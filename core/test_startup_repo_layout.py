@@ -25,20 +25,14 @@ import scribe.notes as notes  # noqa: E402
 
 
 def _write_note(state_dir: Path, *, note_id: int, content: str, ntype: str = "todo"):
-    state_dir.mkdir(parents=True, exist_ok=True)
-    entry = {
-        "id": note_id,
-        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "session_id": "test",
-        "type": ntype,
-        "content": content,
-        "status": "active",
-        "auto_generated": False,
-        "role": "user",
-        "mission": "general",
-    }
-    with (state_dir / "notes.jsonl").open("a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+    """Seed a note into the scribe store so run_summary picks it up.
+
+    note_id is retained for API compatibility but ignored — the store assigns
+    (year, seq) sequentially.
+    """
+    from scribe.store import ScribeStore
+    store = ScribeStore(state_dir)
+    store.add_note(ntype, content, "test")
 
 
 class RunSummaryRepoLayoutTests(unittest.TestCase):
@@ -103,20 +97,6 @@ class RunSummaryRepoLayoutTests(unittest.TestCase):
                     p.unlink()
             if legacy_dir.exists() and not any(legacy_dir.iterdir()):
                 legacy_dir.rmdir()
-
-
-class RunSummaryLegacyLayoutTests(unittest.TestCase):
-    """Escape-hatch: APIARY_STATE_LAYOUT=legacy still routes to PROJECTS_DIR."""
-
-    def test_legacy_env_var_uses_project_key(self):
-        with mock.patch.dict(os.environ, {notes.STATE_LAYOUT_ENV: "legacy"}):
-            # notes_path must resolve under PROJECTS_DIR regardless of start.
-            path = notes.notes_path(
-                "some-legacy-key", start=Path("/some/other/place")
-            )
-            self.assertEqual(
-                path, notes.PROJECTS_DIR / "some-legacy-key" / "notes.jsonl"
-            )
 
 
 class StartupPromptHookSkipTests(unittest.TestCase):

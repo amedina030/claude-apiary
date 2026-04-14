@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_ID_FILENAME, NEXT_SEQ_FILENAME
+from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME
 
 
 class TestEnsureLayout(unittest.TestCase):
@@ -24,13 +24,7 @@ class TestEnsureLayout(unittest.TestCase):
             for folder_name in all_folders:
                 folder = state_dir / folder_name
                 self.assertTrue(folder.is_dir(), f"{folder_name} should exist")
-                idx = folder / INDEX_FILENAME
-                self.assertTrue(idx.exists(), f"{folder_name}/index.jsonl should exist")
-                archive = folder / ARCHIVE_DIRNAME
-                self.assertTrue(archive.is_dir(), f"{folder_name}/archive should exist")
-                archive_idx = archive / INDEX_FILENAME
-                self.assertTrue(archive_idx.exists())
-                # Year subfolder
+                # Year subfolder is the only active layout
                 year_dir = folder / str(year)
                 self.assertTrue(year_dir.is_dir(), f"{folder_name}/{year} should exist")
                 year_idx = year_dir / INDEX_FILENAME
@@ -38,10 +32,13 @@ class TestEnsureLayout(unittest.TestCase):
                 seq_path = year_dir / NEXT_SEQ_FILENAME
                 self.assertTrue(seq_path.exists(), f"{folder_name}/{year}/next_seq should exist")
                 self.assertEqual(seq_path.read_text(encoding='utf-8').strip(), '1')
-            # Legacy next_id file still created
-            nid = state_dir / NEXT_ID_FILENAME
-            self.assertTrue(nid.exists())
-            self.assertEqual(nid.read_text(encoding='utf-8').strip(), '1')
+                year_archive = year_dir / ARCHIVE_DIRNAME
+                self.assertTrue(year_archive.is_dir(), f"{folder_name}/{year}/archive should exist")
+                # Flat layout must NOT be created
+                self.assertFalse((folder / INDEX_FILENAME).exists(), f"{folder_name}/index.jsonl (flat) should not exist")
+                self.assertFalse((folder / ARCHIVE_DIRNAME).exists(), f"{folder_name}/archive (flat) should not exist")
+            # next_id file must NOT be created (legacy removed)
+            self.assertFalse((state_dir / 'next_id').exists())
 
 
 class TestAddNote(unittest.TestCase):
