@@ -86,10 +86,14 @@ class ScribeStore:
     # --- Index I/O helpers ---
 
     @staticmethod
-    def _read_index(type_dir: Path) -> list[dict]:
+    def _read_index(type_dir: Path, strict: bool = False) -> list[dict]:
         """Read all valid entries from a folder's index.jsonl.
 
-        Malformed lines are skipped with a warning to stderr.
+        Malformed lines are skipped with a warning to stderr. If strict=True,
+        raise RuntimeError on the first malformed line instead. Callers that
+        rely on the index being complete (e.g. sequence counter rebuild)
+        should pass strict=True so a corrupted index cannot silently cause
+        undercounting and subsequent ID collisions.
         """
         idx_path = type_dir / INDEX_FILENAME
         if not idx_path.exists():
@@ -101,7 +105,14 @@ class ScribeStore:
                 continue
             try:
                 entries.append(json.loads(line))
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                if strict:
+                    raise RuntimeError(
+                        f"Malformed index entry at {idx_path}:{lineno} ({e.msg}). "
+                        f"Refusing to proceed — a rebuild over a corrupted index "
+                        f"would undercount seq and cause ID collisions. "
+                        f"Inspect and repair {idx_path} before retrying."
+                    ) from e
                 print(f"Warning: skipping malformed index entry at {idx_path}:{lineno}", file=sys.stderr)
         return entries
 
@@ -151,14 +162,19 @@ class ScribeStore:
         return year_dir
 
     def _rebuild_next_seq(self, year_dir: Path) -> int:
-        """Scan year_dir's index.jsonl (and archive) for max 'seq'. Write and return next_seq."""
+        """Scan year_dir's index.jsonl (and archive) for max 'seq'. Write and return next_seq.
+
+        Uses strict index reads — a malformed line in either index raises
+        RuntimeError rather than being skipped, so a corrupted index cannot
+        silently undercount and produce colliding IDs on the next write.
+        """
         max_seq = 0
-        for entry in self._read_index(year_dir):
+        for entry in self._read_index(year_dir, strict=True):
             s = entry.get('seq', 0)
             if isinstance(s, int) and s > max_seq:
                 max_seq = s
         archive_dir = year_dir / ARCHIVE_DIRNAME
-        for entry in self._read_index(archive_dir):
+        for entry in self._read_index(archive_dir, strict=True):
             s = entry.get('seq', 0)
             if isinstance(s, int) and s > max_seq:
                 max_seq = s

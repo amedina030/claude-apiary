@@ -243,6 +243,30 @@ class TestMalformedIndex(unittest.TestCase):
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0]['seq'], 1)
 
+    def test_rebuild_raises_on_malformed_index(self):
+        """Rebuild must NOT silently skip bad lines — it would undercount seq.
+
+        If next_seq is missing and the index has a malformed line covering the
+        real max seq, a skipping rebuild would reset the counter below an
+        already-used ID and the next write would collide.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            year = datetime.now(timezone.utc).year
+            store = ScribeStore(Path(tmp))
+            store.add_note('todo', 'a', 's1')  # seq=1
+            store.add_note('todo', 'b', 's1')  # seq=2
+            year_dir = Path(tmp) / 'todos' / str(year)
+            idx = year_dir / INDEX_FILENAME
+            # Corrupt the line for seq=2 so a skipping rebuild would max at 1
+            lines = idx.read_text(encoding='utf-8').splitlines()
+            lines[-1] = 'NOT VALID JSON'
+            idx.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+            # Drop next_seq so the next write triggers a rebuild
+            (year_dir / NEXT_SEQ_FILENAME).unlink()
+            with self.assertRaises(RuntimeError) as ctx:
+                store.add_note('todo', 'c', 's1')
+            self.assertIn('Malformed index entry', str(ctx.exception))
+
 
 class TestUpdateNote(unittest.TestCase):
     def test_update_summary(self):
