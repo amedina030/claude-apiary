@@ -38,6 +38,12 @@ MAX_ROUNDS = cfg("harden", "max_rounds", 3)
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
 from .git_lib import git
+from .schema_versions import (
+    EXECUTION_SCHEMA_VERSION,
+    HARDEN_SCHEMA_VERSION,
+    PLAN_SCHEMA_VERSION,
+    assert_schema_version,
+)
 
 
 def branch_exists(branch: str) -> bool:
@@ -311,6 +317,12 @@ def main():
         print(f"Invalid execution log JSON: {e}", file=sys.stderr)
         sys.exit(1)
 
+    try:
+        assert_schema_version(execution, "execution", EXECUTION_SCHEMA_VERSION)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+
     if execution.get("status") != "completed":
         print("Cannot harden aborted execution", file=sys.stderr)
         sys.exit(1)
@@ -330,6 +342,7 @@ def main():
         # Write clean result
         HARDENS_DIR.mkdir(parents=True, exist_ok=True)
         result = {
+            "schema_version": HARDEN_SCHEMA_VERSION,
             "uuid": uuid, "branch": branch, "verdict": "all_resolved",
             "rounds": [], "unresolved": [], "total_findings": 0, "total_resolved": 0,
         }
@@ -349,8 +362,9 @@ def main():
     if plan_path.exists():
         try:
             plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            assert_schema_version(plan, "plan", PLAN_SCHEMA_VERSION)
             spec = plan.get("spec", {})
-        except (json.JSONDecodeError, KeyError):
+        except (json.JSONDecodeError, KeyError, ValueError):
             pass
 
     # Checkout branch
@@ -458,6 +472,7 @@ def main():
     verdict = "all_resolved" if not unresolved else "has_unresolved"
 
     harden_result = {
+        "schema_version": HARDEN_SCHEMA_VERSION,
         "uuid": uuid,
         "branch": branch,
         "verdict": verdict,

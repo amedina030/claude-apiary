@@ -397,6 +397,7 @@ class TestExecutorEndToEnd(unittest.TestCase):
 
     def _write_plan(self, uuid="e2e-test"):
         plan = {
+            "schema_version": 1,
             "uuid": uuid,
             "valid": True,
             "executor_model": "sonnet",
@@ -581,6 +582,7 @@ class TestSubsumedStep(TestExecutorEndToEnd):
 
     def _write_two_step_plan(self, uuid="subsumed"):
         plan = {
+            "schema_version": 1,
             "uuid": uuid,
             "valid": True,
             "executor_model": "sonnet",
@@ -827,6 +829,7 @@ class TestPostConditionsInExecutorLoop(TestExecutorEndToEnd):
 
     def _write_two_step_plan_with_pcs(self, uuid="pc-subsume"):
         plan = {
+            "schema_version": 1,
             "uuid": uuid,
             "valid": True,
             "executor_model": "sonnet",

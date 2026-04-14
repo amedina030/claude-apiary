@@ -31,6 +31,14 @@ NOTES_SCRIPT = REPO_DIR / "scribe" / "notes.py"
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
 from .git_lib import git
+from .schema_versions import (
+    EXECUTION_SCHEMA_VERSION,
+    HARDEN_SCHEMA_VERSION,
+    PLAN_SCHEMA_VERSION,
+    REPORT_SCHEMA_VERSION,
+    SPEC_SCHEMA_VERSION,
+    assert_schema_version,
+)
 
 
 def get_current_branch() -> str:
@@ -211,16 +219,26 @@ def review_deferrals(deferrals: list[dict], title: str) -> tuple[bool, list[dict
 
 # -- Artifact loading --
 
-def load_artifact(path: Path, name: str) -> dict:
-    """Load a JSON artifact or exit with error."""
+def load_artifact(path: Path, name: str, schema_version: int | None = None) -> dict:
+    """Load a JSON artifact or exit with error.
+
+    If schema_version is provided, assert the artifact declares that version.
+    """
     if not path.exists():
         print(f"{name} not found: {path}", file=sys.stderr)
         sys.exit(1)
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         print(f"Invalid {name} JSON: {e}", file=sys.stderr)
         sys.exit(1)
+    if schema_version is not None:
+        try:
+            assert_schema_version(data, name.lower(), schema_version)
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(1)
+    return data
 
 
 def main():
@@ -234,7 +252,7 @@ def main():
         print(f"Harden result not found: {args.harden_result}", file=sys.stderr)
         sys.exit(1)
 
-    harden = load_artifact(harden_path, "Harden result")
+    harden = load_artifact(harden_path, "Harden result", HARDEN_SCHEMA_VERSION)
     uuid = harden.get("uuid")
     verdict = harden.get("verdict")
     branch = harden.get("branch", f"runner/{uuid}")
@@ -247,9 +265,9 @@ def main():
     exec_path = SCRIPT_DIR / "executions" / f"{uuid}.json"
 
     intake = load_artifact(intake_path, "Intake")
-    spec = load_artifact(spec_path, "Spec")
-    plan = load_artifact(plan_path, "Plan")
-    execution = load_artifact(exec_path, "Execution log")
+    spec = load_artifact(spec_path, "Spec", SPEC_SCHEMA_VERSION)
+    plan = load_artifact(plan_path, "Plan", PLAN_SCHEMA_VERSION)
+    execution = load_artifact(exec_path, "Execution log", EXECUTION_SCHEMA_VERSION)
 
     title = intake.get("title", "Untitled")
 
@@ -420,6 +438,7 @@ def main():
 
     # Build report
     report = {
+        "schema_version": REPORT_SCHEMA_VERSION,
         "uuid": uuid,
         "title": title,
         "verdict": verdict,

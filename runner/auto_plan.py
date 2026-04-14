@@ -20,6 +20,11 @@ import textwrap
 from pathlib import Path
 
 from .config_loader import get as cfg
+from .schema_versions import (
+    PLAN_SCHEMA_VERSION,
+    SPEC_SCHEMA_VERSION,
+    assert_schema_version,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PLANS_DIR = SCRIPT_DIR / "plans"
@@ -345,6 +350,12 @@ def main():
         print(f"Invalid spec JSON: {e}", file=sys.stderr)
         sys.exit(1)
 
+    try:
+        assert_schema_version(spec, "spec", SPEC_SCHEMA_VERSION)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+
     if not spec.get("valid", False):
         print("Spec is not valid -- cannot plan from invalid spec", file=sys.stderr)
         sys.exit(1)
@@ -388,6 +399,7 @@ def main():
 
         # Assemble full plan with metadata
         plan = {
+            "schema_version": PLAN_SCHEMA_VERSION,
             "uuid": spec_id,
             "executor_model": cfg("executor", "model", "sonnet"),
             "spec": spec,

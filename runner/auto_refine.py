@@ -19,6 +19,7 @@ import textwrap
 from pathlib import Path
 
 from .config_loader import get as cfg
+from .schema_versions import SPEC_SCHEMA_VERSION
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SPECS_DIR = SCRIPT_DIR / "specs"
@@ -279,6 +280,7 @@ def main():
             continue
 
         # Write spec for validation
+        spec["schema_version"] = SPEC_SCHEMA_VERSION
         spec["id"] = intake_id
         spec["intake_id"] = intake_id
         spec_path.write_text(json.dumps(spec, indent=2), encoding="utf-8")

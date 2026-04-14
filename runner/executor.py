@@ -31,6 +31,11 @@ from .config_loader import get as cfg
 # ship on master. Loading them now caches the master versions in
 # sys.modules so all later calls use them regardless of working-tree state.
 from .claude_subprocess import run_claude as _spawn_claude
+from .schema_versions import (
+    EXECUTION_SCHEMA_VERSION,
+    PLAN_SCHEMA_VERSION,
+    assert_schema_version,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 EXECUTIONS_DIR = SCRIPT_DIR / "executions"
@@ -815,6 +820,12 @@ def main():
         print(f"Invalid plan JSON: {e}", file=sys.stderr)
         sys.exit(1)
 
+    try:
+        assert_schema_version(plan, "plan", PLAN_SCHEMA_VERSION)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+
     if not plan.get("valid", False):
         print("Plan is not valid -- cannot execute invalid plan", file=sys.stderr)
         sys.exit(1)
@@ -898,6 +909,7 @@ def main():
         sys.exit(1)
 
     execution_log = {
+        "schema_version": EXECUTION_SCHEMA_VERSION,
         "uuid": uuid,
         "branch": branch,
         "status": "completed",
