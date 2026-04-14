@@ -11,6 +11,7 @@ Covers:
   - Agent PostToolUse: logs Agent token cost from tool_response.totalTokens
   - No double-count: PRE skips logging when prev_tool_name == "Agent"
 """
+import os
 import sys
 import json
 import subprocess
@@ -23,6 +24,11 @@ BUDGETER_DIR = Path(__file__).parent
 APIS_DIR = BUDGETER_DIR.parent
 HOOKS_DIR = BUDGETER_DIR / "hooks"
 PYTHON = sys.executable
+
+# Enforce that tests never write to real budgeter/data paths. Any call to
+# append_entry / append_feedback / save_baseline / save_snapshot targeting the
+# default production paths will raise while this flag is set.
+os.environ["APIARY_BUDGETER_TEST_ISOLATION"] = "1"
 
 sys.path.insert(0, str(APIS_DIR))
 from budgeter.lib import logger as _logger_module
@@ -49,11 +55,13 @@ def make_test_project(tmp_dir):
 
 
 def run_hook(script, payload):
+    env = {**os.environ, "APIARY_BUDGETER_TEST_ISOLATION": "1"}
     return subprocess.run(
         [PYTHON, str(HOOKS_DIR / script)],
         input=json.dumps(payload),
         text=True,
         capture_output=True,
+        env=env,
     )
 
 
@@ -66,6 +74,39 @@ def log_entry_count(log_path):
 # ---------------------------------------------------------------------------
 # Unit tests: logger
 # ---------------------------------------------------------------------------
+
+def test_isolation_guard_blocks_default_paths(tmp_dir):
+    """With APIARY_BUDGETER_TEST_ISOLATION=1, writing to the default production
+    LOG_PATH / FEEDBACK_PATH / TMP_DIR must raise. Protects the suite from
+    tests that forget configure_for_project or direct-patching."""
+    import budgeter.lib.logger as lg
+    orig_log, orig_feedback, orig_tmp = lg.LOG_PATH, lg.FEEDBACK_PATH, lg.TMP_DIR
+    try:
+        lg.LOG_PATH = lg._DEFAULT_LOG_PATH
+        try:
+            lg.append_entry({"tokens_delta": 100, "tool_name": "Bash"})
+            raise AssertionError("append_entry should have raised on default LOG_PATH")
+        except RuntimeError:
+            pass
+
+        lg.FEEDBACK_PATH = lg._DEFAULT_FEEDBACK_PATH
+        try:
+            lg.append_feedback({"session_id": "s1", "task_turn": 1})
+            raise AssertionError("append_feedback should have raised on default FEEDBACK_PATH")
+        except RuntimeError:
+            pass
+
+        lg.TMP_DIR = lg._DEFAULT_TMP_DIR
+        try:
+            lg.save_baseline(make_session_id(), tokens=1)
+            raise AssertionError("save_baseline should have raised on default TMP_DIR")
+        except RuntimeError:
+            pass
+    finally:
+        lg.LOG_PATH = orig_log
+        lg.FEEDBACK_PATH = orig_feedback
+        lg.TMP_DIR = orig_tmp
+
 
 def test_append_entry_skips_zero_delta(tmp_dir):
     """append_entry must not write entries with tokens_delta == 0."""
@@ -715,6 +756,10 @@ def main():
 
     with tempfile.TemporaryDirectory() as td:
         tmp_dir = Path(td)
+
+        print("Unit: isolation guard blocks default paths ", end="")
+        test_isolation_guard_blocks_default_paths(tmp_dir)
+        print("OK")
 
         print("Unit: append_entry skips zero-delta ... ", end="")
         test_append_entry_skips_zero_delta(tmp_dir)

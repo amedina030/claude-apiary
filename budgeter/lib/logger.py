@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import time
 import threading
@@ -16,6 +17,32 @@ LOG_PATH = BUDGETER_DIR / "data" / "usage_log.jsonl"
 FEEDBACK_PATH = BUDGETER_DIR / "data" / "feedback.jsonl"
 TMP_DIR = BUDGETER_DIR / "tmp"
 CONFIG_PATH = BUDGETER_DIR / "config.json"
+
+_DEFAULT_LOG_PATH = LOG_PATH
+_DEFAULT_FEEDBACK_PATH = FEEDBACK_PATH
+_DEFAULT_TMP_DIR = TMP_DIR
+
+
+def _assert_isolated_in_test_mode(path, kind):
+    """When APIARY_BUDGETER_TEST_ISOLATION=1, refuse to write to the default
+    production paths. Tests must redirect either via configure_for_project(cwd)
+    (subprocess hooks with .claude/budgeter.json) or by patching the module
+    globals directly. Any write that slips through is a test-isolation bug.
+    """
+    if os.environ.get("APIARY_BUDGETER_TEST_ISOLATION") != "1":
+        return
+    defaults = {
+        "log": _DEFAULT_LOG_PATH,
+        "feedback": _DEFAULT_FEEDBACK_PATH,
+        "tmp": _DEFAULT_TMP_DIR,
+    }
+    default = defaults[kind]
+    if Path(path).resolve() == Path(default).resolve():
+        raise RuntimeError(
+            f"budgeter test-isolation violation: write to default {kind} path {default} "
+            f"while APIARY_BUDGETER_TEST_ISOLATION=1. "
+            f"Redirect via configure_for_project(cwd) or patch the module global."
+        )
 
 # Project-level config filename placed inside a project's .claude/ directory
 _PROJECT_CONFIG_FILENAME = "budgeter.json"
@@ -152,6 +179,7 @@ def append_entry(entry):
     if not entry.get("_marker"):
         if entry.get("tokens_delta", 0) == 0 and entry.get("net_tokens_delta", 0) == 0:
             return
+    _assert_isolated_in_test_mode(LOG_PATH, "log")
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     # Strip internal-only fields before persisting
     persisted = {k: v for k, v in entry.items() if k != "_marker"}
@@ -161,6 +189,7 @@ def append_entry(entry):
 
 
 def append_feedback(entry):
+    _assert_isolated_in_test_mode(FEEDBACK_PATH, "feedback")
     FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _file_lock(FEEDBACK_PATH):
         with open(FEEDBACK_PATH, "a", encoding="utf-8") as f:
@@ -176,6 +205,7 @@ def append_feedback_if_not_present(entry, session_id, task_turn):
 
     Returns True if the entry was written, False if it was already present.
     """
+    _assert_isolated_in_test_mode(FEEDBACK_PATH, "feedback")
     FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _file_lock(FEEDBACK_PATH):
         # Read existing records while holding the lock
@@ -337,6 +367,7 @@ def get_last_call_tokens(session_entries):
 
 
 def save_snapshot(session_id, snapshot):
+    _assert_isolated_in_test_mode(TMP_DIR, "tmp")
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     path = _sid(session_id).tmp_path("pending.json", TMP_DIR)
     with open(path, "w", encoding="utf-8") as f:
@@ -374,6 +405,7 @@ def load_baseline(session_id):
 
 
 def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message="", scope_flags=None, predicted_cost=0, warning_fired=False, baseline_input=0, baseline_cache=0, baseline_output=0, agent_description=""):
+    _assert_isolated_in_test_mode(TMP_DIR, "tmp")
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     path = _sid(session_id).tmp_path("baseline.json", TMP_DIR)
     with _file_lock(path):
