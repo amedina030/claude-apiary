@@ -17,8 +17,7 @@
     "mode": "chained"
   },
   "chained_executor": {
-    "timeout_seconds": 1800,
-    "max_retries": 1
+    "timeout_seconds": 1800
   },
   "harden": {
     "max_rounds": 1,

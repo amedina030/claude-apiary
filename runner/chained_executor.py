@@ -59,7 +59,6 @@ from .executor import (
 from .git_lib import format_git_error as _format_git_error
 
 CHAINED_TIMEOUT = cfg("chained_executor", "timeout_seconds", 1800)
-CHAINED_MAX_RETRIES = cfg("chained_executor", "max_retries", 1)
 
 
 def build_chained_prompt(plan: dict) -> str:
