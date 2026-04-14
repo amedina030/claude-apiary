@@ -61,7 +61,7 @@ Session transcripts and identity files written by Claude Code itself stay under 
 
 **This state is intentionally per-checkout and is not portable.** Notes, learnings, memory, and budgeter logs reflect what *this* checkout's Claude has been working on, with paths, session IDs, and timing rooted in that machine's history. Copying them to another machine usually creates more confusion than value (stale paths, dangling session references, conflicting handoffs). If you switch machines, start fresh on the new one — the repo is the source of truth, the local state is short-horizon scratchpad.
 
-**Migration status.** The in-repo layout (decision #269) is now the default. Set `APIARY_STATE_LAYOUT=legacy` as an escape hatch if you need the pre-migration `~/.claude/projects/<project-key>/` path. A subsequent migration (`scripts/migrate_scribe_to_typed_year_ids.py`) converted the flat `notes.jsonl`/`learnings.jsonl` into the typed-year folder layout described above.
+**Migration status.** The in-repo layout (decision #269) is now the default. Set `APIARY_STATE_LAYOUT=legacy` as an escape hatch if you need the pre-migration `~/.claude/projects/<project-key>/` path.
 
 If you have a specific reason to move a single artifact (e.g. one decision note you want to carry forward), copy it by hand. There is deliberately no export/import script.
 
