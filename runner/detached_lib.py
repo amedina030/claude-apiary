@@ -12,6 +12,22 @@ INTAKE_DIR = SCRIPT_DIR / 'intake'
 OVERNIGHT_LOG = SCRIPT_DIR / 'overnight.jsonl'
 WORKTREES_DIR = REPO_ROOT / '.runner-worktrees'
 
+_DEFAULT_OVERNIGHT_LOG = OVERNIGHT_LOG
+
+
+def _assert_isolated_in_test_mode(target) -> None:
+    """Refuse to write to the production overnight.jsonl when
+    APIARY_RUNNER_TEST_ISOLATION=1 (T-2026-123)."""
+    if os.environ.get("APIARY_RUNNER_TEST_ISOLATION") != "1":
+        return
+    if Path(target).resolve() == Path(_DEFAULT_OVERNIGHT_LOG).resolve():
+        raise RuntimeError(
+            f"runner test-isolation violation: write to default overnight "
+            f"log {_DEFAULT_OVERNIGHT_LOG} while "
+            f"APIARY_RUNNER_TEST_ISOLATION=1. Patch "
+            f"runner.detached_lib.OVERNIGHT_LOG to a tempdir path in setUp."
+        )
+
 _SLUG_RE = re.compile(r'[^a-z0-9]+')
 
 def slugify(title: str) -> str:
@@ -98,6 +114,7 @@ def all_backlog_items_claimed() -> bool:
 
 def append_overnight_log(entry: dict) -> bool:
     """Append one JSON line to overnight.jsonl. Returns True on success, False on OSError (prints warning to stderr)."""
+    _assert_isolated_in_test_mode(OVERNIGHT_LOG)
     try:
         OVERNIGHT_LOG.parent.mkdir(parents=True, exist_ok=True)
         with OVERNIGHT_LOG.open('a', encoding='utf-8') as f:

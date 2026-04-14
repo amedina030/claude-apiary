@@ -5,8 +5,16 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+# T-2026-123: flip the runner-side test-isolation guard BEFORE importing the
+# runner modules so any unpatched write to production run_history.jsonl /
+# overnight.jsonl raises loudly. Tests must patch RUN_HISTORY_FILE and
+# OVERNIGHT_LOG to tempdir paths per-case (the TestDetachedRun.setUp
+# forwards the history-file patch automatically).
+os.environ["APIARY_RUNNER_TEST_ISOLATION"] = "1"
+
 from runner import run          # noqa: E402
 from runner import detached_lib  # noqa: E402
+from runner import run_history as run_history_module  # noqa: E402
 from runner import queue as runner_queue  # noqa: E402
 
 
@@ -43,6 +51,21 @@ class TestDetachedRun(unittest.TestCase):
         self._prune_patcher = mock.patch('runner.run.prune_stale_worktrees', return_value=[])
         self._prune_patcher.start()
         self.addCleanup(self._prune_patcher.stop)
+
+        # T-2026-123: every detached-run test drives run.run_detached(),
+        # which calls history_append() -> run_history.append_entry(). That
+        # write defaults to runner/run_history.jsonl (the real one) unless
+        # we redirect it. Patch the module global to a tempdir path for
+        # every test in this class; the APIARY_RUNNER_TEST_ISOLATION guard
+        # will raise if anything slips past this.
+        self._history_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._history_tmp.cleanup)
+        self._history_path = Path(self._history_tmp.name) / "run_history.jsonl"
+        self._history_patcher = mock.patch.object(
+            run_history_module, "RUN_HISTORY_FILE", self._history_path,
+        )
+        self._history_patcher.start()
+        self.addCleanup(self._history_patcher.stop)
 
     def _make_intake_file(self, directory: Path, uid: str = 'test-uuid-1234',
                           title: str = 'Test Item') -> Path:
@@ -563,6 +586,48 @@ class TestDetachedRun(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         self.assertIn('unknown', buf.getvalue())
+
+
+class TestIsolationGuards(unittest.TestCase):
+    """T-2026-123: self-tests for the APIARY_RUNNER_TEST_ISOLATION guard.
+    Confirms a test that forgets to redirect RUN_HISTORY_FILE /
+    OVERNIGHT_LOG to a tempdir path fails loudly instead of silently
+    polluting production state."""
+
+    def test_run_history_default_path_raises(self):
+        # Module env is already APIARY_RUNNER_TEST_ISOLATION=1 (set at
+        # import time). We temporarily reset the patched RUN_HISTORY_FILE
+        # back to the production default and confirm the guard fires.
+        with mock.patch.object(
+            run_history_module, "RUN_HISTORY_FILE",
+            run_history_module._DEFAULT_RUN_HISTORY_FILE,
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                run_history_module.append_entry({"uuid": "guard-check"})
+            self.assertIn("test-isolation violation", str(ctx.exception))
+            self.assertIn("run_history.jsonl", str(ctx.exception))
+
+    def test_run_history_patched_path_allowed(self):
+        # A test that HAS redirected the module global must pass cleanly.
+        with tempfile.TemporaryDirectory() as td_str:
+            target = Path(td_str) / "history.jsonl"
+            with mock.patch.object(
+                run_history_module, "RUN_HISTORY_FILE", target,
+            ):
+                ok = run_history_module.append_entry(
+                    {"uuid": "ok-check"}, path=target,
+                )
+            self.assertTrue(ok)
+            self.assertTrue(target.exists())
+
+    def test_overnight_log_default_path_raises(self):
+        with mock.patch.object(
+            detached_lib, "OVERNIGHT_LOG", detached_lib._DEFAULT_OVERNIGHT_LOG,
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                detached_lib.append_overnight_log({"uuid": "guard-check"})
+            self.assertIn("test-isolation violation", str(ctx.exception))
+            self.assertIn("overnight.jsonl", str(ctx.exception))
 
 
 class TestRunCleanup(unittest.TestCase):
