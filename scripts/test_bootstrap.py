@@ -74,16 +74,19 @@ class FreshSeedTests(BootstrapTestBase):
             bootstrap.UMBRELLA_GITIGNORE_BODY,
         )
 
-    def test_creates_scribe_state_files(self):
+    def test_creates_typed_year_layout(self):
         bootstrap.bootstrap(self.fake_repo)
-        self.assertTrue((self.scribe_dir / "notes.jsonl").is_file())
-        self.assertTrue((self.scribe_dir / "learnings.jsonl").is_file())
-        self.assertEqual(
-            (self.scribe_dir / "notes.jsonl").read_text(encoding="utf-8"), ""
-        )
-        self.assertEqual(
-            (self.scribe_dir / "learnings.jsonl").read_text(encoding="utf-8"), ""
-        )
+        # Every type folder and the learnings folder must exist
+        for folder in ("todos", "handoffs", "decisions", "wishlists",
+                       "blockers", "references", "context", "general",
+                       "learnings"):
+            self.assertTrue(
+                (self.scribe_dir / folder).is_dir(),
+                f"missing type folder: {folder}",
+            )
+        # Flat jsonl files must NOT be seeded (pre-v2 layout is gone)
+        self.assertFalse((self.scribe_dir / "notes.jsonl").exists())
+        self.assertFalse((self.scribe_dir / "learnings.jsonl").exists())
 
     def test_creates_memory_dir_and_index(self):
         bootstrap.bootstrap(self.fake_repo)
@@ -126,13 +129,14 @@ class IdempotencyTests(BootstrapTestBase):
 
     def test_rerun_does_not_clobber_preexisting_files(self):
         bootstrap.bootstrap(self.fake_repo)
-        notes_file = self.scribe_dir / "notes.jsonl"
-        notes_file.write_text('{"id":1,"type":"todo"}\n', encoding="utf-8")
+        todos_index = self.scribe_dir / "todos" / "index.jsonl"
+        self.assertTrue(todos_index.parent.is_dir())
+        todos_index.write_text('{"display_id":"T-2026-1"}\n', encoding="utf-8")
 
         bootstrap.bootstrap(self.fake_repo)
         self.assertEqual(
-            notes_file.read_text(encoding="utf-8"),
-            '{"id":1,"type":"todo"}\n',
+            todos_index.read_text(encoding="utf-8"),
+            '{"display_id":"T-2026-1"}\n',
         )
 
     def test_rerun_does_not_clobber_custom_gitignore(self):
@@ -169,8 +173,8 @@ class LegacyStateGuardTests(BootstrapTestBase):
         self.assertIn(str(legacy_dir), result.warnings[0])
         self.assertIn("migrate_scribe_state.py", result.warnings[0])
         self.assertFalse(
-            (self.scribe_dir / "notes.jsonl").exists(),
-            "bootstrap seeded files despite legacy state being present",
+            (self.scribe_dir / "todos").exists(),
+            "bootstrap laid out typed-year folders despite legacy state being present",
         )
 
     def test_refuses_when_cwd_key_has_legacy_state(self):
@@ -187,10 +191,7 @@ class LegacyStateGuardTests(BootstrapTestBase):
     def test_does_not_refuse_when_scribe_dir_already_populated(self):
         """If in-repo state already exists, the legacy guard must not fire."""
         self._make_legacy_state("claude-apiary")
-        self.scribe_dir.mkdir(parents=True)
-        (self.scribe_dir / "notes.jsonl").write_text(
-            '{"id":1}\n', encoding="utf-8"
-        )
+        (self.scribe_dir / "todos").mkdir(parents=True)
 
         with mock.patch.object(
             bootstrap, "get_project_key", return_value="claude-apiary"
@@ -204,7 +205,7 @@ class LegacyStateGuardTests(BootstrapTestBase):
         ):
             result = bootstrap.bootstrap(self.fake_repo)
         self.assertEqual(result.warnings, [])
-        self.assertTrue((self.scribe_dir / "notes.jsonl").is_file())
+        self.assertTrue((self.scribe_dir / "todos").is_dir())
 
 
 class AutoStartupFlagTests(BootstrapTestBase):

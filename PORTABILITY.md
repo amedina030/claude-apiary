@@ -24,7 +24,7 @@ python scripts/bootstrap.py
 
 - Creates `~/.claude/` (for Claude Code's own per-user state — identity files, transcripts, the auto-startup flag).
 - Creates the in-repo umbrella state directory `<repo-root>/.apiary/` and writes `<repo-root>/.apiary/.gitignore` containing `*` so the whole umbrella self-ignores.
-- Creates `<repo-root>/.apiary/scribe/` and seeds empty `notes.jsonl`, `learnings.jsonl`, and `memory/MEMORY.md` so the scribe and memory systems have something to read.
+- Creates `<repo-root>/.apiary/scribe/` and lays out the typed-year folder skeleton (`todos/`, `handoffs/`, `decisions/`, …, `learnings/`, each with an `index.jsonl`, `archive/` subfolder, and `<year>/next_seq` counter) plus an empty `memory/MEMORY.md` so the scribe and memory systems have something to read.
 - Creates `~/.claude/auto-startup-enabled` so the startup hook runs on first session.
 - Verifies your Python version meets the minimum and warns if any package in `requirements.txt` fails to import.
 
@@ -48,9 +48,11 @@ Anything checked into git is shared across all clones of the repo.
 
 Scribe state lives in the repo checkout under the umbrella `.apiary/` directory, which self-ignores via `.apiary/.gitignore` (contents: `*`). Each subdirectory is owned by one apiary tool:
 
-- `<repo-root>/.apiary/scribe/notes.jsonl` — scribe's operational notes (TODOs, decisions, handoffs, context)
-- `<repo-root>/.apiary/scribe/notes_archive.jsonl` — auto-archived old notes
-- `<repo-root>/.apiary/scribe/learnings.jsonl` — accumulated project learnings
+- `<repo-root>/.apiary/scribe/<type>/<year>/index.jsonl` — scribe's operational notes in typed-year layout (e.g. `todos/2026/index.jsonl`, `handoffs/2026/index.jsonl`)
+- `<repo-root>/.apiary/scribe/<type>/<year>/<seq>.md` — per-note body files
+- `<repo-root>/.apiary/scribe/<type>/<year>/archive/` — auto-archived old notes (moved after 30 days)
+- `<repo-root>/.apiary/scribe/learnings/<year>/` — accumulated project learnings (same typed-year layout)
+- `<repo-root>/.apiary/scribe/migration_id_map.json` — legacy bare-int to typed-year ID map for CLI lookups
 - `<repo-root>/.apiary/scribe/backfill_skip.json` — sessions skipped from unseen-session detection
 - `<repo-root>/.apiary/scribe/memory/` — long-lived memory facts loaded at session start
 - `<repo-root>/.apiary/hooks/` — hook runtime state (sanitizer hit log, etc.)
@@ -59,7 +61,7 @@ Session transcripts and identity files written by Claude Code itself stay under 
 
 **This state is intentionally per-checkout and is not portable.** Notes, learnings, memory, and budgeter logs reflect what *this* checkout's Claude has been working on, with paths, session IDs, and timing rooted in that machine's history. Copying them to another machine usually creates more confusion than value (stale paths, dangling session references, conflicting handoffs). If you switch machines, start fresh on the new one — the repo is the source of truth, the local state is short-horizon scratchpad.
 
-**Migration status.** The in-repo layout is gated on `APIARY_STATE_LAYOUT=repo` during the migration window. The legacy path `~/.claude/projects/<project-key>/` remains the default until todo #268 flips it and cleans up the old location. Decision #269 and todos #262–#268 track the work. Data was mirrored into the new layout in step #266, but writes currently still hit the legacy store.
+**Migration status.** The in-repo layout (decision #269) is now the default. Set `APIARY_STATE_LAYOUT=legacy` as an escape hatch if you need the pre-migration `~/.claude/projects/<project-key>/` path. A subsequent migration (`scripts/migrate_scribe_to_typed_year_ids.py`) converted the flat `notes.jsonl`/`learnings.jsonl` into the typed-year folder layout described above.
 
 If you have a specific reason to move a single artifact (e.g. one decision note you want to carry forward), copy it by hand. There is deliberately no export/import script.
 

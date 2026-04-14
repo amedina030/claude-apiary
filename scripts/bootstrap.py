@@ -2,9 +2,11 @@
 """Idempotent bootstrap for a fresh claude-apiary clone.
 
 Creates the in-repo scribe state directory at <repo-root>/.apiary/scribe/
-(decision #269), seeds empty notes.jsonl / learnings.jsonl / memory/MEMORY.md,
-writes the umbrella .apiary/.gitignore so the whole dir self-ignores, sets
-the auto-startup flag if missing, and verifies the runtime environment.
+(decision #269), lays out the typed-year folder skeleton (todos/, handoffs/,
+…, learnings/) via ScribeStore.ensure_layout, seeds an empty
+memory/MEMORY.md, writes the umbrella .apiary/.gitignore so the whole dir
+self-ignores, sets the auto-startup flag if missing, and verifies the
+runtime environment.
 
 Safe to run repeatedly — never clobbers existing data.
 
@@ -20,10 +22,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from core.utils.project import get_project_key, project_key_from_path  # noqa: E402
+from scribe.store import ScribeStore  # noqa: E402
 
-# Files scribe seeds. Used by both the fresh-seed path and the legacy-state
-# guard below (which detects "needs scribe state migration first" scenarios).
-SCRIBE_OWNED = ("notes.jsonl", "learnings.jsonl", "memory")
+# Markers for the pre-v2 flat-jsonl scribe layout under ~/.claude/projects/<key>/.
+# Only used by the legacy-state guard below.
+LEGACY_SCRIBE_MARKERS = ("notes.jsonl", "learnings.jsonl", "memory")
+
+# Markers indicating the in-repo scribe state dir has already been seeded or
+# migrated into the typed-year layout. "memory" is kept as a marker because it
+# survives every layout change; "todos" is the first typed folder ScribeStore
+# creates on ensure_layout().
+REPO_SCRIBE_MARKERS = ("todos", "memory")
 
 MIN_PYTHON = (3, 11)
 CLAUDE_DIR = Path.home() / ".claude"
@@ -75,6 +84,21 @@ def _ensure_text_file(path: Path, body: str, label: str, result: BootstrapResult
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8")
     result.created_or_existed(label, was_created=True)
+
+
+def _ensure_typed_year_layout(scribe_dir: Path, result: BootstrapResult) -> None:
+    """Lay out the typed-year folder skeleton via ScribeStore.
+
+    ScribeStore.ensure_layout() is idempotent: it creates every type folder
+    (todos/, handoffs/, …, learnings/), each year subfolder for the current
+    year, their empty index.jsonl files, archive subfolders, and next_seq
+    counter files. Already-populated folders are untouched.
+    """
+    already_had_todos = (scribe_dir / "todos").exists()
+    ScribeStore(scribe_dir).ensure_layout()
+    result.created_or_existed(
+        "scribe typed-year layout", was_created=not already_had_todos
+    )
 
 
 def _check_python_version(result: BootstrapResult) -> None:
@@ -132,12 +156,12 @@ def _unmigrated_legacy_state(repo_dir: Path, scribe_dir: Path) -> Optional[Path]
     """
     project_key = get_project_key(repo_dir)
     candidate_keys = {project_key, project_key_from_path(repo_dir)}
-    scribe_has_state = any((scribe_dir / name).exists() for name in SCRIBE_OWNED)
+    scribe_has_state = any((scribe_dir / name).exists() for name in REPO_SCRIBE_MARKERS)
     if scribe_has_state:
         return None
     for key in candidate_keys:
         legacy_dir = PROJECTS_DIR / key
-        if any((legacy_dir / name).exists() for name in SCRIBE_OWNED):
+        if any((legacy_dir / name).exists() for name in LEGACY_SCRIBE_MARKERS):
             return legacy_dir
     return None
 
@@ -168,8 +192,7 @@ def bootstrap(repo_dir: Path) -> BootstrapResult:
         result,
     )
     _ensure_dir(scribe_dir, f"{APIARY_UMBRELLA_NAME}/{SCRIBE_SUBDIR_NAME}/", result)
-    _ensure_empty_file(scribe_dir / "notes.jsonl", "notes.jsonl", result)
-    _ensure_empty_file(scribe_dir / "learnings.jsonl", "learnings.jsonl", result)
+    _ensure_typed_year_layout(scribe_dir, result)
 
     memory_dir = scribe_dir / "memory"
     _ensure_dir(memory_dir, "memory/", result)
