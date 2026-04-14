@@ -296,7 +296,11 @@ class TestMainHappyPath(_RunnerTestCase):
         mock_run_stage.return_value = (True, "ok", "", 0.5)
         code, _, _ = self._run_main_capture(["run.py", str(intake_file)])
         self.assertIn(code, (None, 0))
-        expected_modules = [
+        # The executor stage module is configurable (per_step or chained);
+        # read the resolved module off STAGES so this assertion tracks the
+        # current config rather than hard-coding either variant.
+        expected_modules = [stage[1] for stage in orchestrator.STAGES]
+        expected_names = [
             "validate_intake",
             "auto_refine",
             "auto_plan",
@@ -309,6 +313,7 @@ class TestMainHappyPath(_RunnerTestCase):
             name_arg = c[0][0]
             module_arg = c[0][1]
             self.assertEqual(module_arg, expected_modules[i])
+            self.assertEqual(name_arg, expected_names[i])
             self.assertEqual(name_arg, orchestrator.STAGES[i][0])
 
     @patch("runner.run.run_stage")
