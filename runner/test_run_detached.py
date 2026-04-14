@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Integration tests for run.py --detached flow. Uses unittest.mock to stub stages."""
 import io, json, os, subprocess, sys, tempfile, unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 from unittest import mock
 
@@ -529,13 +529,20 @@ class TestDetachedRun(unittest.TestCase):
                 mock.patch('runner.run.git_worktree_remove', side_effect=_track_remove),
                 mock.patch('runner.run.run_stage', side_effect=lambda *a, **kw: next(stage_seq)),
             ):
-                rc = run.run_detached(_make_cli_args())
+                err_buf = io.StringIO()
+                with redirect_stderr(err_buf):
+                    rc = run.run_detached(_make_cli_args())
 
             self.assertEqual(rc, 1)
             entries = self._read_log(log_path)
             self.assertTrue(entries[0]['exit_status'].startswith('stage_failed:'))
             # Worktree must NOT be removed on stage failure.
             self.assertEqual(len(remove_calls), 0)
+            # T-2026-130: failure message must include the cleanup command
+            # so the operator does not have to dig for the uuid.
+            stderr = err_buf.getvalue()
+            self.assertIn(str(wt_path), stderr)
+            self.assertIn(f'--cleanup {entries[0]["uuid"]}', stderr)
 
     def test_commit_failure_recorded(self):
         """ATK-001: silent commit failure must be reflected in exit_status, not 'ok'."""

@@ -755,6 +755,7 @@ def _run_detached_impl(cli_args) -> int:
                 exit_status = 'worktree_remove_failed'
         else:
             print(f'Worktree preserved for inspection: {wt_path}', file=sys.stderr)
+            print(f'  To remove: python -m runner.run --cleanup {uuid}', file=sys.stderr)
 
     end_ts = _now()
     entry = {
