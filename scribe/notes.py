@@ -486,7 +486,7 @@ def cmd_get(args):
         is_learning = True
     else:
         note = store.get_note(note_type, year, seq)
-        if note and note.get('status') == 'archived':
+        if note and note.get('_from_archive'):
             source_label = '[from archive]'
 
     if source_label:

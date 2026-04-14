@@ -55,7 +55,8 @@ class TestScribeNotes(unittest.TestCase):
         self.store.archive_note('todo', entry['year'], entry['seq'])
         result = self.store.get_note('todo', entry['year'], entry['seq'])
         self.assertIsNotNone(result)
-        self.assertEqual(result['status'], 'archived')
+        self.assertEqual(result['status'], 'active')
+        self.assertTrue(result.get('_from_archive'))
 
     def test_list_notes_all_types(self):
         self.store.add_note('todo', 'A', 'sess1')
@@ -87,7 +88,10 @@ class TestScribeNotes(unittest.TestCase):
         entry = self.store.add_note('todo', 'archive target', 'sess1')
         archived = self.store.archive_note('todo', entry['year'], entry['seq'])
         self.assertIsNotNone(archived)
-        self.assertEqual(archived['status'], 'archived')
+        # Status is preserved (not clobbered to 'archived'); archived-ness
+        # lives in folder location and the archived_at stamp.
+        self.assertEqual(archived['status'], 'active')
+        self.assertIn('archived_at', archived)
         # Should not appear in active list
         active = self.store.list_notes(status='active')
         self.assertEqual(len(active), 0)

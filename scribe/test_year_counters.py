@@ -138,7 +138,8 @@ class TestPerTypeYearCounters(unittest.TestCase):
             seq = entry['seq']
             result = store.archive_note('todo', year, seq)
             self.assertIsNotNone(result)
-            self.assertEqual(result['status'], 'archived')
+            self.assertEqual(result['status'], 'active')
+            self.assertIn('archived_at', result)
             # Verify md moved
             year_dir = Path(tmp) / 'todos' / str(year)
             self.assertFalse((year_dir / f'{seq}.md').exists())

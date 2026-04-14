@@ -283,7 +283,10 @@ class ScribeStore:
         for entry in self._read_index(archive_dir):
             if entry.get('seq') == seq:
                 content = self._read_note_file(archive_dir, seq)
-                result = {**entry, 'content': content, 'status': 'archived'}
+                # Preserve entry's own status (active/done); archived-ness
+                # is indicated by '_from_archive' so callers that care can
+                # distinguish without losing the completion state.
+                result = {**entry, 'content': content, '_from_archive': True}
                 if content is None and entry.get('has_body'):
                     result['_warning'] = 'body_file_missing'
                 return result
@@ -318,8 +321,11 @@ class ScribeStore:
                 if status == 'archived' or status == 'all':
                     archive_dir = year_dir / ARCHIVE_DIRNAME
                     for entry in self._read_index(archive_dir):
-                        entry_copy = {**entry, 'status': 'archived'}
-                        results.append(entry_copy)
+                        # Preserve entry's own status (active/done) so
+                        # archived-done notes still report as done.
+                        # Archived-ness is implicit from this code path
+                        # and from the presence of 'archived_at'.
+                        results.append({**entry})
 
         # Filter by search term (case-insensitive in summary)
         if search:
@@ -357,6 +363,10 @@ class ScribeStore:
 
         Moves the index entry from year_dir/index.jsonl to
         year_dir/archive/index.jsonl, and moves <seq>.md to archive/.
+        Preserves the note's existing status ('done' or 'active') rather
+        than clobbering it to 'archived', so completion history survives
+        the move. Archived-ness is indicated by folder location and the
+        added ``archived_at`` timestamp, not by the status field.
         Returns the archived entry dict, or None if not found.
         """
         type_dir = self._type_dir(note_type)
@@ -374,10 +384,10 @@ class ScribeStore:
         if target_entry is not None:
             # Remove from active index
             self._write_index(year_dir, remaining)
-            # Add to archive index
+            # Add to archive index — preserve status, stamp archived_at
             archive_dir = year_dir / ARCHIVE_DIRNAME
             archive_dir.mkdir(parents=True, exist_ok=True)
-            target_entry['status'] = 'archived'
+            target_entry['archived_at'] = datetime.now(timezone.utc).isoformat()
             self._append_index(archive_dir, target_entry)
             # Move .md file
             src_md = year_dir / f"{seq}.md"

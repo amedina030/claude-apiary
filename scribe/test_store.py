@@ -158,7 +158,10 @@ class TestArchiveNote(unittest.TestCase):
             added = store.add_note('todo', 'to archive', 's1')
             result = store.archive_note(added['type'], added['year'], added['seq'])
             self.assertIsNotNone(result)
-            self.assertEqual(result['status'], 'archived')
+            # An active note preserves its 'active' status when archived —
+            # archived-ness is indicated by folder location and archived_at.
+            self.assertEqual(result['status'], 'active')
+            self.assertIn('archived_at', result)
             # Active year index should be empty
             active = store._read_index(Path(tmp) / 'todos' / str(year))
             self.assertEqual(len(active), 0)
@@ -170,6 +173,22 @@ class TestArchiveNote(unittest.TestCase):
             self.assertFalse((Path(tmp) / 'todos' / str(year) / '1.md').exists())
             self.assertTrue((Path(tmp) / 'todos' / str(year) / 'archive' / '1.md').exists())
 
+    def test_archive_preserves_done_status(self):
+        """Archiving a done note must preserve status='done' — the original
+        bug clobbered it to 'archived', erasing completion history."""
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            added = store.add_note('todo', 'finished work', 's1')
+            store.update_note(added['type'], added['year'], added['seq'], status='done')
+            result = store.archive_note(added['type'], added['year'], added['seq'])
+            self.assertIsNotNone(result)
+            self.assertEqual(result['status'], 'done')
+            self.assertIn('archived_at', result)
+            # And the archive index reflects the same.
+            listed = store.list_notes(note_type='todo', status='archived')
+            self.assertEqual(len(listed), 1)
+            self.assertEqual(listed[0]['status'], 'done')
+
     def test_get_archived_note(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = ScribeStore(Path(tmp))
@@ -177,7 +196,9 @@ class TestArchiveNote(unittest.TestCase):
             store.archive_note(added['type'], added['year'], added['seq'])
             result = store.get_note(added['type'], added['year'], added['seq'])
             self.assertIsNotNone(result)
-            self.assertEqual(result['status'], 'archived')
+            # get_note returns the real status plus _from_archive flag
+            self.assertEqual(result['status'], 'active')
+            self.assertTrue(result.get('_from_archive'))
             self.assertEqual(result['content'], 'archive me')
 
 
