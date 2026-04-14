@@ -46,7 +46,13 @@ PLAN_SCHEMA = textwrap.dedent("""\
       "action": "create|modify|delete|test|verify",
       "files": ["path/to/file.py"],
       "depends_on": [],
-      "code_spec": "Detailed pseudocode: what to add/change, function signatures, logic flow. Specific enough that a coding model can translate directly to code without making design decisions."
+      "code_spec": "Detailed pseudocode: what to add/change, function signatures, logic flow. Specific enough that a coding model can translate directly to code without making design decisions.",
+      "post_conditions": [
+        {"type": "file_contains", "file": "path/to/file.py", "text": "def new_function"},
+        {"type": "file_lacks",    "file": "path/to/file.py", "text": "old_symbol_name"},
+        {"type": "file_exists",   "file": "path/to/new_file.py"},
+        {"type": "file_absent",   "file": "path/to/deleted_file.py"}
+      ]
     }
   ]
 }
@@ -148,6 +154,23 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "depends_on). Without this, the executor may run them in either order "
         "and one step's edits will clobber the other's. The validator rejects "
         "plans with unlinked file overlaps.",
+        "9. For every create/modify/delete step, include post_conditions "
+        "describing the observable end-state of the step — the executor "
+        "verifies these against the filesystem AFTER the step's subprocess "
+        "returns, regardless of which step's subprocess actually made the "
+        "change. This lets a naturally-coupled pair of steps (e.g. 'add "
+        "function' + 'wire function into caller') both succeed even when "
+        "the first step's subprocess does both edits: step 2's "
+        "post_conditions are already true, so the runner accepts it as a "
+        "no-op success instead of aborting with 'no changes'. Supported "
+        "condition types: "
+        "'file_contains' (file must contain text — requires 'file' + 'text'), "
+        "'file_lacks' (file must NOT contain text — for symbol removal), "
+        "'file_exists' (file must be present — requires 'file'), "
+        "'file_absent' (file must be gone — for delete actions). "
+        "Pick anchor texts that are specific enough to avoid false positives "
+        "(e.g. the full 'def symbol_name(' rather than just 'symbol_name'). "
+        "Post_conditions are optional for test/verify steps.",
         "",
         "## BANNED TOKENS — the validator auto-rejects plans containing these:",
         "",

@@ -687,5 +687,68 @@ class TestGitignoredPaths(unittest.TestCase):
             self.assertEqual(_check_gitignored_paths(steps), [])
 
 
+class TestPostConditionsSchema(unittest.TestCase):
+    """#T-2026-122 phase 2: post_conditions is optional but when present
+    must be well-formed. Invalid structure surfaces at plan validation
+    time rather than failing mid-run."""
+
+    def _step_with_pcs(self, pcs):
+        s = _step(1, "create", "code", files=["new_file.py"])
+        s["post_conditions"] = pcs
+        return s
+
+    def test_no_post_conditions_is_valid(self):
+        plan = _base_plan([_step(1, "create", "x", files=["runner/foo.py"])])
+        # validate() requires modify targets to exist — a create step
+        # with a new path is fine.
+        errors = validate(plan)
+        self.assertEqual([e for e in errors if "post_conditions" in e], [])
+
+    def test_post_conditions_must_be_list(self):
+        plan = _base_plan([self._step_with_pcs("not a list")])
+        errors = validate(plan)
+        self.assertTrue(
+            any("'post_conditions' must be an array" in e for e in errors),
+            errors,
+        )
+
+    def test_unknown_type_rejected(self):
+        plan = _base_plan([self._step_with_pcs(
+            [{"type": "garbage", "file": "new_file.py"}]
+        )])
+        errors = validate(plan)
+        self.assertTrue(
+            any("invalid type 'garbage'" in e for e in errors), errors,
+        )
+
+    def test_file_contains_requires_text(self):
+        plan = _base_plan([self._step_with_pcs(
+            [{"type": "file_contains", "file": "new_file.py"}]
+        )])
+        errors = validate(plan)
+        self.assertTrue(
+            any("'text' is required" in e for e in errors), errors,
+        )
+
+    def test_well_formed_conditions_pass(self):
+        plan = _base_plan([self._step_with_pcs([
+            {"type": "file_contains", "file": "new_file.py", "text": "def x"},
+            {"type": "file_exists",   "file": "new_file.py"},
+            {"type": "file_absent",   "file": "old_file.py"},
+            {"type": "file_lacks",    "file": "new_file.py", "text": "banned"},
+        ])])
+        errors = [e for e in validate(plan) if "post_conditions" in e]
+        self.assertEqual(errors, [])
+
+    def test_outside_repo_path_rejected(self):
+        plan = _base_plan([self._step_with_pcs(
+            [{"type": "file_exists", "file": "/etc/passwd"}]
+        )])
+        errors = validate(plan)
+        self.assertTrue(
+            any("outside the repo" in e for e in errors), errors,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

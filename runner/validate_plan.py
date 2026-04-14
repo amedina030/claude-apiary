@@ -29,6 +29,18 @@ VALID_ACTIONS = {"create", "modify", "delete", "test", "verify"}
 VALID_MODELS = {"opus", "sonnet", "haiku"}
 REQUIRED_STEP_FIELDS = ["step_number", "type", "description", "action", "files", "depends_on", "code_spec"]
 
+# Post-condition types a plan may declare per step (#T-2026-122 phase 2).
+# Verified by the executor after the step's subprocess returns, regardless
+# of whether the subprocess itself made the change. Satisfied post-conditions
+# = success even on no-change; unsatisfied = failure even on clean exit.
+# Each entry: {"type": <name>, "file": <repo-relative path>, ...}
+POST_CONDITION_SCHEMA = {
+    "file_contains": {"file", "text"},
+    "file_lacks":    {"file", "text"},
+    "file_exists":   {"file"},
+    "file_absent":   {"file"},
+}
+
 # Words that indicate a test code_spec is prose, not a shell command. The
 # executor passes test code_spec directly to subprocess.run(shell=True), so
 # 'Run python -m pytest ...' tries to execute literal 'Run' as a binary.
@@ -144,6 +156,54 @@ def _path_under_repo(path: Path) -> bool:
     except (OSError, RuntimeError):
         return False
     return _rel_under_repo(resolved) is not None
+
+
+def _check_post_conditions(steps: list[dict]) -> list[str]:
+    """Validate per-step post_conditions (optional field, #T-2026-122 phase 2).
+
+    Each condition must have a known ``type`` and the required keys for
+    that type. The ``file`` key must resolve under REPO_ROOT (same
+    allowlist as step.files). We don't verify that the condition *will*
+    be satisfied — that's the executor's job at run time — only that the
+    structure is well-formed.
+    """
+    errors = []
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        conds = step.get("post_conditions")
+        if conds is None:
+            continue  # optional
+        label = f"step[{i}]"
+        if not isinstance(conds, list):
+            errors.append(f"{label}: 'post_conditions' must be an array")
+            continue
+        for j, cond in enumerate(conds):
+            clabel = f"{label}.post_conditions[{j}]"
+            if not isinstance(cond, dict):
+                errors.append(f"{clabel}: not a JSON object")
+                continue
+            ctype = cond.get("type")
+            if ctype not in POST_CONDITION_SCHEMA:
+                errors.append(
+                    f"{clabel}: invalid type '{ctype}' "
+                    f"(expected: {', '.join(sorted(POST_CONDITION_SCHEMA))})"
+                )
+                continue
+            required = POST_CONDITION_SCHEMA[ctype]
+            for key in required:
+                val = cond.get(key)
+                if not isinstance(val, str) or not val.strip():
+                    errors.append(
+                        f"{clabel}: field '{key}' is required and must be a non-empty string"
+                    )
+            file_val = cond.get("file")
+            if isinstance(file_val, str) and file_val.strip():
+                if not _path_under_repo(Path(file_val)):
+                    errors.append(
+                        f"{clabel}: file '{file_val}' is outside the repo"
+                    )
+    return errors
 
 
 def _detect_cycles(steps: list[dict]) -> list[str]:
@@ -843,6 +903,11 @@ def validate(data: dict) -> list[str]:
     # Symbol removal coverage: reject plans that remove a symbol without
     # covering all files that reference it.
     errors.extend(_check_removal_coverage(steps))
+
+    # Post-conditions schema (#T-2026-122 phase 2) — optional per-step
+    # verification declarations used by the executor to decide success
+    # independent of whether the subprocess made git changes.
+    errors.extend(_check_post_conditions(steps))
 
     # Acceptance criteria coverage
     if isinstance(spec, dict):

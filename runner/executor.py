@@ -406,6 +406,90 @@ def load_previous_log(log_path: Path) -> dict:
     return by_num
 
 
+def verify_post_conditions(step: dict, repo_root: Path) -> list:
+    """Return a list of human-readable failure strings for unmet post_conditions.
+
+    Empty list = all conditions satisfied (or the step has none declared).
+    Checks operate on the live filesystem, not git state, so a condition
+    satisfied by a prior step's commit counts as met — that's the whole
+    point (#T-2026-122 phase 2): success is measured by end-state, not by
+    which step's subprocess happened to make the change.
+    """
+    conds = step.get("post_conditions")
+    if not conds or not isinstance(conds, list):
+        return []
+    failures = []
+    for j, cond in enumerate(conds):
+        if not isinstance(cond, dict):
+            continue
+        ctype = cond.get("type")
+        fpath = cond.get("file", "")
+        if not isinstance(fpath, str) or not fpath:
+            continue
+        target = repo_root / fpath
+        if ctype == "file_exists":
+            if not target.exists():
+                failures.append(f"[{j}] file_exists: '{fpath}' does not exist")
+        elif ctype == "file_absent":
+            if target.exists():
+                failures.append(f"[{j}] file_absent: '{fpath}' still exists")
+        elif ctype in ("file_contains", "file_lacks"):
+            text = cond.get("text", "")
+            if not target.exists():
+                failures.append(
+                    f"[{j}] {ctype}: '{fpath}' does not exist (cannot check text)"
+                )
+                continue
+            try:
+                body = target.read_text(encoding="utf-8")
+            except OSError as e:
+                failures.append(f"[{j}] {ctype}: cannot read '{fpath}': {e}")
+                continue
+            present = text in body
+            if ctype == "file_contains" and not present:
+                failures.append(
+                    f"[{j}] file_contains: '{fpath}' missing expected text "
+                    f"{text!r}"
+                )
+            elif ctype == "file_lacks" and present:
+                failures.append(
+                    f"[{j}] file_lacks: '{fpath}' still contains forbidden "
+                    f"text {text!r}"
+                )
+    return failures
+
+
+def files_touched_by_prior_steps(uuid: str, files: list) -> dict:
+    """Map each file in ``files`` to the list of prior runner step numbers
+    that committed changes to it on the current branch.
+
+    Used to distinguish "subsumed" no-change steps (prior step already did
+    the work) from genuine executor failures. Commit subjects follow the
+    pattern ``runner/<uuid> step <N>: ...`` so we filter on that prefix
+    and pass ``-- <file>`` to git log so only commits touching the file
+    appear.
+    """
+    if not files:
+        return {}
+    prefix = f"runner/{uuid} step "
+    touched = {}
+    for file in files:
+        touched[file] = []
+        result = git("log", "--format=%s", "HEAD", "--", file)
+        if result.returncode != 0:
+            continue
+        for line in result.stdout.splitlines():
+            if not line.startswith(prefix):
+                continue
+            rest = line[len(prefix):]
+            num_str = rest.split(":", 1)[0].strip()
+            try:
+                touched[file].append(int(num_str))
+            except ValueError:
+                continue
+    return touched
+
+
 def get_completed_step_numbers(uuid: str) -> set:
     """Return the set of step numbers already committed on the current branch.
 
@@ -947,6 +1031,21 @@ def main():
             if step_result["status"] != "passed":
                 break
 
+            # Post-condition verification (#T-2026-122 phase 2).
+            # Runs before commit so we never commit a step whose declared
+            # post-state is wrong. Operates on live filesystem so a
+            # condition already satisfied by a prior step counts as met.
+            pc_failures = verify_post_conditions(step, Path.cwd())
+            if pc_failures:
+                step_result["status"] = "failed"
+                step_result["error"] = (
+                    "Post-condition(s) not satisfied after step: "
+                    + "; ".join(pc_failures)
+                )
+                execution_log["steps"][-1] = step_result
+                persist_execution_log(log_path, execution_log)
+                break
+
             files = step.get("files", [])
             if not files or step.get("action") in ("test", "verify"):
                 break
@@ -959,6 +1058,47 @@ def main():
                 )
                 break  # success — leave the retry loop
             except NoChangesError as e:
+                # Phase-2 path: if the step declared post_conditions and
+                # they're satisfied, the end-state is correct regardless
+                # of who produced it — accept as satisfied success without
+                # a new commit. This is the architecturally clean variant
+                # of the phase-1 subsumption heuristic.
+                if step.get("post_conditions"):
+                    # verify_post_conditions already ran above and returned
+                    # empty — we only reach the commit path when PCs pass.
+                    print(
+                        f"Step {step_num}: no new changes but declared "
+                        f"post-conditions already satisfied — accepting "
+                        f"as a no-op success.",
+                        file=sys.stderr,
+                    )
+                    step_result["subsumed_by"] = "post_conditions"
+                    execution_log["steps"][-1] = step_result
+                    persist_execution_log(log_path, execution_log)
+                    break
+                # Phase-1 fallback (no post_conditions declared): check
+                # whether prior steps on this branch already committed
+                # changes covering every file in step.files. If so, the
+                # subprocess correctly did nothing — planner over-decomposed
+                # (T-2026-122).
+                touched = files_touched_by_prior_steps(uuid, files)
+                if touched and all(touched.get(f) for f in files):
+                    subsuming = sorted({
+                        n for nums in touched.values() for n in nums
+                    })
+                    print(
+                        f"Step {step_num}: no new changes — target files "
+                        f"({', '.join(files)}) already modified by prior "
+                        f"step(s) {subsuming}. Marking subsumed.",
+                        file=sys.stderr,
+                    )
+                    step_result["subsumed_by"] = subsuming
+                    # status stays 'passed' so downstream
+                    # (approval, failed_steps) treats it as success; the
+                    # subsumed_by field is the audit trail.
+                    execution_log["steps"][-1] = step_result
+                    persist_execution_log(log_path, execution_log)
+                    break
                 no_change_attempts += 1
                 if no_change_attempts > MAX_NO_CHANGE_RETRIES:
                     commit_error = str(e)

@@ -572,6 +572,371 @@ class TestRetryOnNoChanges(TestExecutorEndToEnd):
         self.assertIn("no changes", data["steps"][0]["error"].lower())
 
 
+class TestSubsumedStep(TestExecutorEndToEnd):
+    """T-2026-122: when a step's target file was already modified by a prior
+    step on the same branch, a subprocess that correctly makes no changes
+    must be treated as 'subsumed' success, not retried + failed. Prevents
+    the planner-over-decomposition failure mode where step N naturally
+    includes step N+1's work."""
+
+    def _write_two_step_plan(self, uuid="subsumed"):
+        plan = {
+            "uuid": uuid,
+            "valid": True,
+            "executor_model": "sonnet",
+            "spec": {"acceptance_criteria": ["create the hello module"]},
+            "steps": [
+                {
+                    "step_number": 1,
+                    "type": "create",
+                    "description": "create the hello module",
+                    "action": "create",
+                    "files": ["hello.py"],
+                    "depends_on": [],
+                    "code_spec": "write the module",
+                },
+                {
+                    "step_number": 2,
+                    "type": "modify",
+                    "description": "wire the hello module",
+                    "action": "modify",
+                    "files": ["hello.py"],
+                    "depends_on": [1],
+                    "code_spec": "ensure the module is wired",
+                },
+            ],
+        }
+        plan_path = self.repo / "plan.json"
+        plan_path.write_text(json.dumps(plan), encoding="utf-8")
+        return plan_path, plan
+
+    def test_second_step_marked_subsumed_when_file_already_committed(self):
+        plan_path, plan = self._write_two_step_plan("subsumed-by-prior")
+        errors = self._validate_plan.validate(plan)
+        self.assertEqual(errors, [], f"plan should validate: {errors}")
+
+        calls = {"n": 0, "hints": []}
+
+        def fake_execute(step, spec, model, retry_hint=""):
+            calls["n"] += 1
+            calls["hints"].append(retry_hint)
+            if step["step_number"] == 1:
+                # Step 1 writes the file.
+                for f in step.get("files", []):
+                    (self.repo / f).write_text("print('x')\n",
+                                               encoding="utf-8")
+            # Step 2: no file write — the content is already there from step 1.
+            return {
+                "step_number": step["step_number"],
+                "status": "passed",
+                "files_changed": step.get("files", []),
+                "error": None,
+            }
+
+        argv = ["executor.py", str(plan_path)]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(executor, "execute_step", side_effect=fake_execute),
+        ):
+            try:
+                executor.main()
+            except SystemExit as e:
+                self.assertEqual(e.code, 0, f"executor aborted: code={e.code}")
+
+        # Step 2 must not have retried — subsumption short-circuits the
+        # Edit-tool retry loop.
+        self.assertEqual(calls["n"], 2, "expected exactly 2 calls (no retries)")
+
+        log_path = self._executions / "subsumed-by-prior.json"
+        data = json.loads(log_path.read_text(encoding="utf-8"))
+        self.assertEqual(data["status"], "completed")
+        self.assertEqual(data["steps"][1]["status"], "passed")
+        self.assertEqual(data["steps"][1]["subsumed_by"], [1])
+
+        # Only step 1 produced a commit; step 2 is a subsumed no-op.
+        log = subprocess.run(
+            ["git", "log", "--format=%s"],
+            cwd=str(self.repo), capture_output=True, text=True,
+        )
+        subjects = log.stdout.splitlines()
+        self.assertIn("runner/subsumed-by-prior step 1: create the hello module",
+                      subjects)
+        self.assertNotIn("runner/subsumed-by-prior step 2: wire the hello module",
+                         subjects)
+
+    def test_untouched_file_still_triggers_retry_and_abort(self):
+        # Regression: a step whose files were NOT touched by any prior
+        # commit must still go through the Edit-nudge retry path and
+        # eventually fail as before.  Subsumption must not mask the
+        # genuine "executor did nothing" failure mode.
+        plan_path, plan = self._write_plan("no-subsume")
+        errors = self._validate_plan.validate(plan)
+        self.assertEqual(errors, [], f"plan should validate: {errors}")
+
+        calls = {"n": 0}
+
+        def fake_execute(step, spec, model, retry_hint=""):
+            calls["n"] += 1
+            # Never write — NoChangesError every attempt.
+            return {
+                "step_number": step["step_number"],
+                "status": "passed",
+                "files_changed": step.get("files", []),
+                "error": None,
+            }
+
+        argv = ["executor.py", str(plan_path)]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(executor, "execute_step", side_effect=fake_execute),
+        ):
+            with self.assertRaises(SystemExit) as ctx:
+                executor.main()
+            self.assertEqual(ctx.exception.code, 1)
+
+        # 1 initial + MAX_NO_CHANGE_RETRIES retries — subsumption check
+        # found no prior step touching the file, so the retry path ran.
+        self.assertEqual(calls["n"], 1 + executor.MAX_NO_CHANGE_RETRIES)
+
+
+class TestFilesTouchedByPriorSteps(unittest.TestCase):
+    """Unit test for the subsumption helper itself. Uses a real temp repo
+    so git log --format=%s -- <file> returns actual commit subjects."""
+
+    def setUp(self):
+        self._cwd = os.getcwd()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self._tmp.name).resolve()
+        os.chdir(self.repo)
+        for args in (
+            ("init", "--initial-branch=master"),
+            ("config", "user.email", "t@e.com"),
+            ("config", "user.name", "T"),
+        ):
+            subprocess.run(["git"] + list(args), cwd=str(self.repo), check=True)
+        (self.repo / "README.md").write_text("x\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=str(self.repo), check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=str(self.repo), check=True)
+
+    def tearDown(self):
+        os.chdir(self._cwd)
+        self._tmp.cleanup()
+
+    def _commit(self, path: str, content: str, subject: str):
+        (self.repo / path).write_text(content, encoding="utf-8")
+        subprocess.run(["git", "add", path], cwd=str(self.repo), check=True)
+        subprocess.run(["git", "commit", "-m", subject], cwd=str(self.repo), check=True)
+
+    def test_empty_files_returns_empty_dict(self):
+        self.assertEqual(executor.files_touched_by_prior_steps("abc", []), {})
+
+    def test_unrelated_commits_not_matched(self):
+        self._commit("a.py", "a\n", "not a runner commit")
+        self._commit("a.py", "b\n", "runner/other-uuid step 1: foo")
+        result = executor.files_touched_by_prior_steps("my-uuid", ["a.py"])
+        self.assertEqual(result, {"a.py": []})
+
+    def test_matched_commits_return_step_numbers(self):
+        self._commit("a.py", "a\n", "runner/my-uuid step 1: first")
+        self._commit("a.py", "ab\n", "runner/my-uuid step 3: third")
+        self._commit("b.py", "b\n", "runner/my-uuid step 2: second")
+        result = executor.files_touched_by_prior_steps("my-uuid", ["a.py", "b.py"])
+        self.assertEqual(sorted(result["a.py"]), [1, 3])
+        self.assertEqual(result["b.py"], [2])
+
+    def test_partial_coverage_one_file_untouched(self):
+        self._commit("a.py", "a\n", "runner/my-uuid step 1: first")
+        result = executor.files_touched_by_prior_steps("my-uuid", ["a.py", "b.py"])
+        self.assertEqual(result["a.py"], [1])
+        self.assertEqual(result["b.py"], [])
+
+
+class TestVerifyPostConditions(unittest.TestCase):
+    """#T-2026-122 phase 2: verify_post_conditions reads the live filesystem
+    and returns [] when every declared condition is satisfied, else a list
+    of human-readable failure strings."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name).resolve()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _write(self, rel: str, body: str):
+        p = self.root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding="utf-8")
+
+    def test_no_post_conditions_returns_empty(self):
+        self.assertEqual(executor.verify_post_conditions({}, self.root), [])
+
+    def test_file_contains_passes(self):
+        self._write("a.py", "def foo(): pass\n")
+        step = {"post_conditions": [
+            {"type": "file_contains", "file": "a.py", "text": "def foo"},
+        ]}
+        self.assertEqual(executor.verify_post_conditions(step, self.root), [])
+
+    def test_file_contains_fails(self):
+        self._write("a.py", "def bar(): pass\n")
+        step = {"post_conditions": [
+            {"type": "file_contains", "file": "a.py", "text": "def foo"},
+        ]}
+        failures = executor.verify_post_conditions(step, self.root)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("missing expected text", failures[0])
+
+    def test_file_lacks_rejects_forbidden_text(self):
+        self._write("a.py", "old_symbol = 1\n")
+        step = {"post_conditions": [
+            {"type": "file_lacks", "file": "a.py", "text": "old_symbol"},
+        ]}
+        failures = executor.verify_post_conditions(step, self.root)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("still contains", failures[0])
+
+    def test_file_exists_absent(self):
+        step = {"post_conditions": [
+            {"type": "file_exists", "file": "missing.py"},
+        ]}
+        failures = executor.verify_post_conditions(step, self.root)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("does not exist", failures[0])
+
+    def test_file_absent_passes_when_missing(self):
+        step = {"post_conditions": [
+            {"type": "file_absent", "file": "nope.py"},
+        ]}
+        self.assertEqual(executor.verify_post_conditions(step, self.root), [])
+
+    def test_file_absent_fails_when_present(self):
+        self._write("there.py", "x\n")
+        step = {"post_conditions": [
+            {"type": "file_absent", "file": "there.py"},
+        ]}
+        failures = executor.verify_post_conditions(step, self.root)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("still exists", failures[0])
+
+
+class TestPostConditionsInExecutorLoop(TestExecutorEndToEnd):
+    """End-to-end: a 2-step plan whose step 2 declares a post_condition
+    that is already satisfied by step 1. Simulates the T-2026-122
+    failure mode and confirms post_conditions cleanly rescue it."""
+
+    def _write_two_step_plan_with_pcs(self, uuid="pc-subsume"):
+        plan = {
+            "uuid": uuid,
+            "valid": True,
+            "executor_model": "sonnet",
+            "spec": {"acceptance_criteria": ["create the hello module"]},
+            "steps": [
+                {
+                    "step_number": 1,
+                    "type": "create",
+                    "description": "create the hello module",
+                    "action": "create",
+                    "files": ["hello.py"],
+                    "depends_on": [],
+                    "code_spec": "write the module and wire the marker",
+                    "post_conditions": [
+                        {"type": "file_contains", "file": "hello.py",
+                         "text": "WIRED_MARKER"},
+                    ],
+                },
+                {
+                    "step_number": 2,
+                    "type": "modify",
+                    "description": "wire the hello marker",
+                    "action": "modify",
+                    "files": ["hello.py"],
+                    "depends_on": [1],
+                    "code_spec": "ensure WIRED_MARKER is present",
+                    "post_conditions": [
+                        {"type": "file_contains", "file": "hello.py",
+                         "text": "WIRED_MARKER"},
+                    ],
+                },
+            ],
+        }
+        plan_path = self.repo / "plan.json"
+        plan_path.write_text(json.dumps(plan), encoding="utf-8")
+        return plan_path, plan
+
+    def test_satisfied_post_condition_accepts_no_op_step(self):
+        plan_path, plan = self._write_two_step_plan_with_pcs("pc-subsume")
+        errors = self._validate_plan.validate(plan)
+        self.assertEqual(errors, [], f"plan should validate: {errors}")
+
+        def fake_execute(step, spec, model, retry_hint=""):
+            if step["step_number"] == 1:
+                (self.repo / "hello.py").write_text(
+                    "# WIRED_MARKER\nprint('x')\n", encoding="utf-8",
+                )
+            # Step 2: no write — file already has WIRED_MARKER from step 1.
+            return {
+                "step_number": step["step_number"],
+                "status": "passed",
+                "files_changed": step.get("files", []),
+                "error": None,
+            }
+
+        argv = ["executor.py", str(plan_path)]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(executor, "execute_step", side_effect=fake_execute),
+        ):
+            try:
+                executor.main()
+            except SystemExit as e:
+                self.assertEqual(e.code, 0, f"executor aborted: code={e.code}")
+
+        log_path = self._executions / "pc-subsume.json"
+        data = json.loads(log_path.read_text(encoding="utf-8"))
+        self.assertEqual(data["status"], "completed")
+        self.assertEqual(data["steps"][1]["status"], "passed")
+        self.assertEqual(data["steps"][1]["subsumed_by"], "post_conditions")
+
+    def test_unsatisfied_post_condition_fails_step(self):
+        # Subprocess claims success but the declared post_condition is
+        # false — executor must reject the step before committing. Catches
+        # the inverse failure mode that today slips through silently.
+        plan_path, plan = self._write_two_step_plan_with_pcs("pc-unmet")
+        errors = self._validate_plan.validate(plan)
+        self.assertEqual(errors, [], f"plan should validate: {errors}")
+
+        def fake_execute(step, spec, model, retry_hint=""):
+            if step["step_number"] == 1:
+                # Step 1 writes the file but WITHOUT the marker — post_condition
+                # will be unmet.
+                (self.repo / "hello.py").write_text("print('no marker')\n",
+                                                    encoding="utf-8")
+            return {
+                "step_number": step["step_number"],
+                "status": "passed",
+                "files_changed": step.get("files", []),
+                "error": None,
+            }
+
+        argv = ["executor.py", str(plan_path)]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(executor, "execute_step", side_effect=fake_execute),
+        ):
+            with self.assertRaises(SystemExit) as ctx:
+                executor.main()
+            self.assertEqual(ctx.exception.code, 1)
+
+        log_path = self._executions / "pc-unmet.json"
+        data = json.loads(log_path.read_text(encoding="utf-8"))
+        self.assertEqual(data["status"], "aborted")
+        # Step 1 fails at post-condition check, before commit.
+        self.assertEqual(data["steps"][0]["status"], "failed")
+        self.assertIn("Post-condition", data["steps"][0]["error"])
+        self.assertIn("WIRED_MARKER", data["steps"][0]["error"])
+
+
 class TestAssertFilesClean(unittest.TestCase):
     """#235: assert_files_clean is a pre-step guard against pre-existing
     dirty worktree state polluting a runner commit. If the user has
