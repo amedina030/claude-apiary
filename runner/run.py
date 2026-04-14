@@ -729,7 +729,12 @@ def _run_detached_impl(cli_args) -> int:
         # capture commit failure into exit_status so the log entry does not
         # falsely report 'ok' when no artifacts were committed.
         commit_msg = f'runner/{uuid}: {title}'
-        commit_ok, commit_err = git_commit_all_in(wt_path, commit_msg)
+        # Force-stage per-uuid review artifacts (specs/plans/executions/
+        # hardens/reports .json) so they ride along with the branch on
+        # merge. Without this, the worktree teardown on success leaves
+        # reviewers with only the diff — no harden findings, no plan
+        # structure, no per-step execution log.
+        commit_ok, commit_err = git_commit_all_in(wt_path, commit_msg, uuid=uuid)
         if not commit_ok:
             print(f'WARN: git commit failed: {commit_err}', file=sys.stderr)
             if exit_status == 'ok':

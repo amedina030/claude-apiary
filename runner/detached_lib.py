@@ -144,8 +144,41 @@ def git_worktree_create(branch: str, base: str = 'master') -> tuple:
         return False, None, r.stderr
     return True, wt_path, ''
 
-def git_commit_all_in(cwd: Path, message: str) -> tuple:
-    """git add -A and git commit -m message inside `cwd` (a worktree). Allows empty."""
+_REVIEW_ARTIFACT_SUBDIRS = ('specs', 'plans', 'executions', 'hardens', 'reports')
+
+
+def stage_review_artifacts(wt_path: Path, uuid: str) -> list:
+    """Force-add the per-uuid runner/{specs,plans,executions,hardens,reports}.json
+    files that are normally gitignored, so they travel with the runner
+    branch on merge (T-2026-122 followup — human reviewers need the
+    spec/plan/harden context, not just the diff).
+
+    Returns the list of paths actually staged (best-effort; files that
+    a stage didn't produce are silently skipped). Never raises; caller
+    treats this as a soft step before the bundled run commit.
+    """
+    staged = []
+    for subdir in _REVIEW_ARTIFACT_SUBDIRS:
+        rel = f'runner/{subdir}/{uuid}.json'
+        src = wt_path / rel
+        if not src.exists():
+            continue
+        r = _git(['add', '-f', '--', rel], cwd=wt_path)
+        if r.returncode == 0:
+            staged.append(rel)
+    return staged
+
+
+def git_commit_all_in(cwd: Path, message: str, uuid: str | None = None) -> tuple:
+    """git add -A and git commit -m message inside `cwd` (a worktree). Allows empty.
+
+    When ``uuid`` is given, force-stages the runner review artifacts for
+    that uuid first (specs/plans/executions/hardens/reports), then does
+    the normal add -A sweep. Callers that want only the default behavior
+    pass ``uuid=None``.
+    """
+    if uuid:
+        stage_review_artifacts(cwd, uuid)
     r = _git(['add', '-A'], cwd=cwd)
     if r.returncode != 0:
         return False, r.stderr
