@@ -322,6 +322,110 @@ def extract_plan(raw_output: str) -> dict:
     raise json.JSONDecodeError("No valid JSON found in output", text, 0)
 
 
+_MERGEABLE_ACTIONS = {"create", "modify"}
+
+
+def _merge_subsumed_steps(steps: list[dict]) -> list[dict]:
+    """Collapse consecutive steps where step N+1 is subsumed by step N.
+
+    Rule: merge step B into step A when
+      - both A.action and B.action are in {create, modify},
+      - B.depends_on == [A.step_number] (B depends solely on A),
+      - set(B.files) ⊆ set(A.files) (B touches no file A doesn't already own).
+
+    When merged, B's description is appended to A's description, B's code_spec
+    is appended to A's code_spec under an "Additionally:" header, B's
+    post_conditions are unioned onto A's, and every other step referencing B
+    in its depends_on is rewritten to reference A. Steps are then renumbered
+    contiguously from 1.
+
+    The pass runs iteratively until no more merges are possible, so a chain
+    A -> B -> C all targeting the same file collapses to a single step.
+
+    Motivation: the planner often emits naturally-atomic pairs ("add
+    function" + "wire it into caller in same file") as two separate steps,
+    which doubles executor subprocess count and token spend. See
+    T-2026-127.
+    """
+    if not isinstance(steps, list):
+        return steps
+
+    def _files_set(step: dict) -> set:
+        files = step.get("files", [])
+        if not isinstance(files, list):
+            return set()
+        return {f.replace("\\", "/").strip() for f in files if isinstance(f, str) and f}
+
+    def _one_pass(current: list[dict]) -> tuple[list[dict], bool]:
+        for i in range(len(current) - 1):
+            a = current[i]
+            b = current[i + 1]
+            if not (isinstance(a, dict) and isinstance(b, dict)):
+                continue
+            if a.get("action") not in _MERGEABLE_ACTIONS:
+                continue
+            if b.get("action") not in _MERGEABLE_ACTIONS:
+                continue
+            a_num = a.get("step_number")
+            if not isinstance(a_num, int):
+                continue
+            if b.get("depends_on") != [a_num]:
+                continue
+            if not _files_set(b).issubset(_files_set(a)):
+                continue
+
+            b_num = b.get("step_number")
+            merged = dict(a)
+            merged["description"] = (
+                f"{a.get('description', '')} + {b.get('description', '')}"
+            ).strip(" +")
+            a_spec = a.get("code_spec", "") or ""
+            b_spec = b.get("code_spec", "") or ""
+            merged["code_spec"] = (
+                f"{a_spec}\n\nAdditionally:\n{b_spec}" if a_spec and b_spec
+                else (a_spec or b_spec)
+            )
+            a_pc = a.get("post_conditions") or []
+            b_pc = b.get("post_conditions") or []
+            seen = []
+            for pc in list(a_pc) + list(b_pc):
+                if pc not in seen:
+                    seen.append(pc)
+            if seen:
+                merged["post_conditions"] = seen
+
+            new_steps = current[:i] + [merged] + current[i + 2:]
+            for s in new_steps:
+                if not isinstance(s, dict):
+                    continue
+                deps = s.get("depends_on")
+                if isinstance(deps, list):
+                    s["depends_on"] = [a_num if d == b_num else d for d in deps]
+            return new_steps, True
+        return current, False
+
+    current = list(steps)
+    changed = True
+    while changed:
+        current, changed = _one_pass(current)
+
+    # Renumber contiguously from 1, preserving order, and remap depends_on.
+    renumber = {}
+    for new_idx, s in enumerate(current, start=1):
+        if isinstance(s, dict) and isinstance(s.get("step_number"), int):
+            renumber[s["step_number"]] = new_idx
+    for s in current:
+        if not isinstance(s, dict):
+            continue
+        old = s.get("step_number")
+        if isinstance(old, int) and old in renumber:
+            s["step_number"] = renumber[old]
+        deps = s.get("depends_on")
+        if isinstance(deps, list):
+            s["depends_on"] = [renumber.get(d, d) for d in deps]
+    return current
+
+
 def validate_plan(plan_path: Path) -> list[str]:
     """Run validate_plan.py and return list of errors (empty = valid)."""
     result = subprocess.run(
@@ -397,13 +501,17 @@ def main():
             previous_errors = [f"Output was not valid JSON: {e}"]
             continue
 
+        # Collapse naturally-atomic consecutive steps (T-2026-127) before
+        # validation so the file-overlap check sees the merged shape.
+        merged_steps = _merge_subsumed_steps(plan_data.get("steps", []))
+
         # Assemble full plan with metadata
         plan = {
             "schema_version": PLAN_SCHEMA_VERSION,
             "uuid": spec_id,
             "executor_model": cfg("executor", "model", "sonnet"),
             "spec": spec,
-            "steps": plan_data.get("steps", []),
+            "steps": merged_steps,
         }
         plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
