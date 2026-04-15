@@ -21,6 +21,7 @@ Framework version: **1.0** | Last updated: 2026-04-02
 - [Code Style](standards/code-style.md) — Naming, structure, testing patterns
 - [Doc Style](standards/doc-style.md) — How to write docs for this project
 - [New Tool Checklist](standards/new-tool-checklist.md) — What a new tool needs
+- [Schema Migration](standards/schema-migration.md) — How to bump a runner stage-artifact schema version
 
 ## Guides
 
