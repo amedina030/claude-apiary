@@ -21,22 +21,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from budgeter.lib import logger
 from core import flags
+from core.session import SessionId
 
 
 _MAX_STDIN_BYTES = 64 * 1024  # 64 KB — far more than any <usage> block needs
-
-# Allow only characters that are safe as path components: hex digits and hyphens
-# (UUID format). Reject anything that could navigate the filesystem.
-_SESSION_ID_RE = re.compile(r'^[0-9a-fA-F\-]{1,64}$')
 
 # request_id may be a UUID or a short slug-style id; allow alphanumerics + hyphen + underscore
 _REQUEST_ID_RE = re.compile(r'^[0-9a-zA-Z_\-]{1,64}$')
 
 
 def _validate_session_id(session_id: str) -> str:
-    """Raise ValueError if session_id contains path-traversal or unexpected chars."""
-    if not session_id or not _SESSION_ID_RE.match(session_id):
-        raise ValueError(f"Invalid session_id: {session_id!r}")
+    """Raise ValueError if session_id is not a valid UUID or 8-char hex prefix."""
+    SessionId(session_id)  # raises ValueError on bad format
     return session_id
 
 
