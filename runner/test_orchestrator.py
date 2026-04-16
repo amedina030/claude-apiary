@@ -2,6 +2,7 @@
 """Tests for runner/run.py orchestrator."""
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -11,7 +12,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from runner import run as orchestrator
-from runner.run import run_stage, main, STAGES, SCRIPT_DIR
+from runner.run import run_stage, main, STAGES, SCRIPT_DIR, REPO_ROOT
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +158,32 @@ class TestRunStage(_RunnerTestCase):
         ok, _, output, _elapsed = orchestrator.run_stage("test", "validate_intake", input_f)
         self.assertFalse(ok)
         self.assertIn("Stage failed to launch: spawn failed", output)
+
+    @patch("runner.run.subprocess.Popen")
+    def test_pythonpath_env_points_to_apiary(self, mock_popen):
+        """Phase 2: subprocess env must set PYTHONPATH to apiary REPO_ROOT so
+        stages load `runner` from apiary regardless of cwd (multi-repo)."""
+        input_f = self.tmp_path / "input.json"
+        input_f.write_text("{}", encoding="utf-8")
+        mock_popen.return_value = make_popen(returncode=0)
+        orchestrator.run_stage("test", "validate_intake", input_f)
+        env = mock_popen.call_args.kwargs["env"]
+        self.assertIn("PYTHONPATH", env)
+        pp_entries = env["PYTHONPATH"].split(os.pathsep)
+        self.assertEqual(pp_entries[0], str(REPO_ROOT))
+
+    @patch("runner.run.subprocess.Popen")
+    def test_pythonpath_prepends_existing(self, mock_popen):
+        """Existing PYTHONPATH entries must be preserved after the apiary root."""
+        input_f = self.tmp_path / "input.json"
+        input_f.write_text("{}", encoding="utf-8")
+        mock_popen.return_value = make_popen(returncode=0)
+        with patch.dict(os.environ, {"PYTHONPATH": "/some/other/path"}, clear=False):
+            orchestrator.run_stage("test", "validate_intake", input_f)
+        env = mock_popen.call_args.kwargs["env"]
+        pp_entries = env["PYTHONPATH"].split(os.pathsep)
+        self.assertEqual(pp_entries[0], str(REPO_ROOT))
+        self.assertIn("/some/other/path", pp_entries)
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
 import re
 import shutil
 import signal
@@ -701,38 +702,37 @@ def _run_detached_impl(cli_args) -> int:
     exit_status = 'ok'
 
     try:
-        # Promote backlog item -> intake inside the worktree. The worktree
-        # starts from `master`, so it has its own copy of runner/backlog/ and
-        # runner/intake/. Mutations here become part of the runner branch's
-        # commit; the operator's main checkout is untouched.
-        wt_intake_dir = wt_path / 'runner' / 'intake'
-        wt_intake_dir.mkdir(parents=True, exist_ok=True)
-        wt_intake_dest = wt_intake_dir / f'{uuid}.json'
+        # Promote backlog item -> intake in apiary/runner/. Review artifacts
+        # (specs/plans/executions/hardens/reports) live centrally under apiary,
+        # not the worktree, so a single apiary history spans runs against
+        # multiple target repos. The worktree carries only the executor's
+        # code-change diff.
+        intake_dest = SCRIPT_DIR / 'intake' / f'{uuid}.json'
+        intake_dest.parent.mkdir(parents=True, exist_ok=True)
         if from_backlog:
-            wt_backlog_file = wt_path / 'runner' / 'backlog' / picked_path.name
-            if wt_backlog_file.exists():
-                shutil.copy2(str(wt_backlog_file), str(wt_intake_dest))
-                try:
-                    wt_backlog_file.unlink()
-                except OSError as e:
-                    print(f'WARN: could not remove backlog file {wt_backlog_file}: {e}', file=sys.stderr)
-            else:
-                # Worktree didn't have it (e.g. picked path resolved from
-                # outside the tracked backlog dir) — fall back to copying the
-                # source file directly into the worktree intake dir.
-                shutil.copy2(str(picked_path), str(wt_intake_dest))
+            # picked_path already lives in apiary/runner/backlog/. Copy into
+            # apiary/runner/intake/ and drop the backlog entry so it isn't
+            # re-picked on the next run.
+            shutil.copy2(str(picked_path), str(intake_dest))
+            try:
+                picked_path.unlink()
+            except OSError as e:
+                print(f'WARN: could not remove backlog file {picked_path}: {e}', file=sys.stderr)
         else:
-            # --intake explicit path: just stage it under the worktree.
-            shutil.copy2(str(picked_path), str(wt_intake_dest))
+            # --intake explicit path: copy into the canonical apiary location.
+            # Skip the copy if the caller already pointed at it.
+            if picked_path.resolve() != intake_dest.resolve():
+                shutil.copy2(str(picked_path), str(intake_dest))
 
-        # Build artifact paths rooted at the worktree, not SCRIPT_DIR.
+        # Artifact paths are apiary-rooted (SCRIPT_DIR) so stages find them
+        # regardless of which target repo's worktree is the cwd.
         artifacts = {
-            'intake':    wt_path / 'runner' / 'intake'     / f'{uuid}.json',
-            'spec':      wt_path / 'runner' / 'specs'      / f'{uuid}.json',
-            'plan':      wt_path / 'runner' / 'plans'      / f'{uuid}.json',
-            'execution': wt_path / 'runner' / 'executions' / f'{uuid}.json',
-            'harden':    wt_path / 'runner' / 'hardens'    / f'{uuid}.json',
-            'report':    wt_path / 'runner' / 'reports'    / f'{uuid}.json',
+            'intake':    SCRIPT_DIR / 'intake'     / f'{uuid}.json',
+            'spec':      SCRIPT_DIR / 'specs'      / f'{uuid}.json',
+            'plan':      SCRIPT_DIR / 'plans'      / f'{uuid}.json',
+            'execution': SCRIPT_DIR / 'executions' / f'{uuid}.json',
+            'harden':    SCRIPT_DIR / 'hardens'    / f'{uuid}.json',
+            'report':    SCRIPT_DIR / 'reports'    / f'{uuid}.json',
         }
 
         reached_resume = (resume_from is None)
@@ -889,6 +889,13 @@ def run_stage(name: str, module_name: str, input_path: Path, cwd: Path | None = 
     `cwd` defaults to the main repo root (interactive mode). Detached mode
     passes its isolated worktree path so stages mutate worktree state, never
     the operator's main checkout.
+
+    PYTHONPATH is set to the apiary repo root so the subprocess loads the
+    `runner` package from apiary regardless of cwd. Without this, a worktree
+    whose cwd is outside apiary (multi-repo target) would either fail to
+    import runner.<stage> or load a stale copy from the worktree's own
+    runner/ subtree (apiary-self case), silently overriding fixes shipped
+    on apiary master.
     """
     module_file = SCRIPT_DIR / f"{module_name}.py"
     if not module_file.exists():
@@ -899,12 +906,18 @@ def run_stage(name: str, module_name: str, input_path: Path, cwd: Path | None = 
     global _active_stage_proc
     cwd_str = str(cwd) if cwd is not None else str(REPO_ROOT)
     timeout_val = cfg("orchestrator", "stage_timeout", 3600)
+    stage_env = os.environ.copy()
+    apiary_path = str(REPO_ROOT)
+    existing = stage_env.get("PYTHONPATH")
+    stage_env["PYTHONPATH"] = (
+        apiary_path if not existing else apiary_path + os.pathsep + existing
+    )
     start = time.time()
     try:
         proc = subprocess.Popen(
             [sys.executable, "-m", f"runner.{module_name}", str(input_path)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            cwd=cwd_str,
+            cwd=cwd_str, env=stage_env,
         )
     except OSError as e:
         elapsed = time.time() - start

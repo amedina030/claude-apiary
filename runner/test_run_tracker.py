@@ -71,43 +71,65 @@ class TestRunTracker(unittest.TestCase):
 
 
 class TestGetResumeStage(unittest.TestCase):
+    """Phase 2: resume detection reads artifacts from apiary/runner/ (SCRIPT_DIR),
+    not the target worktree. The worktree_path parameter is retained for
+    backwards compatibility but is ignored by the implementation."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.wt = Path(self.tmp.name)
-        # Create runner artifact directories
+        self.fake_apiary = Path(self.tmp.name)
+        # Create apiary artifact directories (what SCRIPT_DIR now points at)
         for d in ("intake", "specs", "plans", "executions", "hardens", "reports"):
-            (self.wt / "runner" / d).mkdir(parents=True)
+            (self.fake_apiary / d).mkdir(parents=True)
+        # Point SCRIPT_DIR at our temp apiary for the duration of each test
+        self._patcher = patch.object(run_tracker, "SCRIPT_DIR", self.fake_apiary)
+        self._patcher.start()
+        # wt arg is still accepted for compat; pass an arbitrary path to confirm
+        # it doesn't influence lookups.
+        self.wt = Path(self.tmp.name) / "ignored-worktree"
 
     def tearDown(self):
+        self._patcher.stop()
         self.tmp.cleanup()
 
     def test_no_artifacts_returns_none(self):
         self.assertIsNone(run_tracker.get_resume_stage("uuid1", self.wt))
 
     def test_spec_exists_resumes_from_auto_plan(self):
-        (self.wt / "runner" / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_apiary / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
         self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "auto_plan")
 
     def test_plan_exists_resumes_from_executor(self):
-        (self.wt / "runner" / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
-        (self.wt / "runner" / "plans" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_apiary / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_apiary / "plans" / "uuid1.json").write_text("{}", encoding="utf-8")
         self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "executor")
 
     def test_execution_exists_resumes_from_auto_harden(self):
         for d in ("specs", "plans", "executions"):
-            (self.wt / "runner" / d / "uuid1.json").write_text("{}", encoding="utf-8")
+            (self.fake_apiary / d / "uuid1.json").write_text("{}", encoding="utf-8")
         self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "auto_harden")
 
     def test_harden_exists_resumes_from_approval(self):
         for d in ("specs", "plans", "executions", "hardens"):
-            (self.wt / "runner" / d / "uuid1.json").write_text("{}", encoding="utf-8")
+            (self.fake_apiary / d / "uuid1.json").write_text("{}", encoding="utf-8")
         self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "approval")
 
     def test_picks_latest_artifact(self):
         """When only a plan exists (no execution), should resume from executor."""
-        (self.wt / "runner" / "plans" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_apiary / "plans" / "uuid1.json").write_text("{}", encoding="utf-8")
         self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "executor")
+
+    def test_worktree_path_arg_is_ignored(self):
+        """Artifacts under a path passed as worktree_path must NOT trigger resume
+        — only apiary SCRIPT_DIR-rooted artifacts count."""
+        decoy = Path(self.tmp.name) / "decoy-worktree"
+        (decoy / "runner" / "specs").mkdir(parents=True)
+        (decoy / "runner" / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
+        self.assertIsNone(run_tracker.get_resume_stage("uuid1", decoy))
+
+    def test_wt_path_optional(self):
+        """Callers may omit the worktree_path arg entirely."""
+        self.assertIsNone(run_tracker.get_resume_stage("uuid1"))
 
 
 if __name__ == "__main__":

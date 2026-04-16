@@ -77,15 +77,19 @@ _ARTIFACT_RESUME_MAP = [
 ]
 
 
-def get_resume_stage(uuid: str, worktree_path: Path) -> str | None:
-    """Determine which stage to resume from based on artifacts in the worktree.
+def get_resume_stage(uuid: str, worktree_path: Path | None = None) -> str | None:
+    """Determine which stage to resume from based on apiary-rooted artifacts.
+
+    Review artifacts (specs/plans/executions/hardens/reports) now live under
+    apiary/runner/ regardless of the target worktree (Phase 2 multi-repo).
+    The ``worktree_path`` parameter is retained for backwards compatibility
+    with existing callers but is ignored.
 
     Returns the stage name to resume from, or ``None`` if no artifacts
     exist (= start from the beginning).
     """
-    runner_dir = worktree_path / "runner"
     for _key, pattern, resume_stage in _ARTIFACT_RESUME_MAP:
-        artifact = runner_dir / pattern.format(uuid=uuid)
+        artifact = SCRIPT_DIR / pattern.format(uuid=uuid)
         if artifact.exists():
             return resume_stage
     return None
