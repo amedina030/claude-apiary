@@ -165,5 +165,90 @@ class TestStageReviewArtifacts(unittest.TestCase):
         self.assertNotIn(f'runner/specs/{uuid}.json', tree.stdout)
 
 
+class TestWorktreesDirFor(unittest.TestCase):
+    """Phase 1 multi-repo: target-repo aware worktree directory."""
+
+    def test_default_returns_apiary_worktrees_dir(self):
+        self.assertEqual(
+            detached_lib.worktrees_dir_for(None),
+            detached_lib.WORKTREES_DIR,
+        )
+
+    def test_custom_target_returns_target_subdir(self):
+        custom = Path('/tmp/some/scratch_repo')
+        self.assertEqual(
+            detached_lib.worktrees_dir_for(custom),
+            custom / '.runner-worktrees',
+        )
+
+
+class TestGitWorktreeCreateTargetRepo(unittest.TestCase):
+    """Phase 1 multi-repo: git_worktree_create operates on the given target repo.
+
+    Real git operations against a tempdir prove end-to-end that the worktree
+    lands under the target's .runner-worktrees/ and the new branch is created
+    on the target's git tree, not apiary's.
+    """
+
+    def setUp(self):
+        import subprocess
+        self._tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self._tmp.name).resolve() / 'target_repo'
+        self.target.mkdir()
+        for args in (
+            ['init', '--initial-branch=master'],
+            ['config', 'user.email', 't@e.com'],
+            ['config', 'user.name', 'T'],
+        ):
+            subprocess.run(['git', *args], cwd=str(self.target), check=True,
+                           capture_output=True)
+        (self.target / 'README.md').write_text('seed\n', encoding='utf-8')
+        subprocess.run(['git', 'add', 'README.md'], cwd=str(self.target),
+                       check=True, capture_output=True)
+        subprocess.run(['git', 'commit', '-m', 'init'], cwd=str(self.target),
+                       check=True, capture_output=True)
+
+    def tearDown(self):
+        # Best-effort: tear down any worktree so the tempdir cleanup
+        # doesn't trip on git's metadata locks.
+        import subprocess
+        wt_root = self.target / '.runner-worktrees'
+        if wt_root.exists():
+            for entry in wt_root.iterdir():
+                subprocess.run(
+                    ['git', 'worktree', 'remove', '--force', str(entry)],
+                    cwd=str(self.target), capture_output=True,
+                )
+        self._tmp.cleanup()
+
+    def test_creates_worktree_under_target_repo(self):
+        ok, wt_path, err = detached_lib.git_worktree_create(
+            'runner/test-branch', target_repo=self.target,
+        )
+        self.assertTrue(ok, err)
+        self.assertIsNotNone(wt_path)
+        # Worktree must live under target/.runner-worktrees/, NOT apiary's
+        expected_root = self.target / '.runner-worktrees'
+        self.assertTrue(
+            str(wt_path).startswith(str(expected_root)),
+            f'worktree {wt_path} not under {expected_root}',
+        )
+        self.assertTrue(wt_path.exists())
+        self.assertTrue((wt_path / 'README.md').exists(),
+                        'worktree should contain target repo files, not apiary')
+
+    def test_branch_created_on_target_not_apiary(self):
+        import subprocess
+        ok, _wt, err = detached_lib.git_worktree_create(
+            'runner/branch-on-target', target_repo=self.target,
+        )
+        self.assertTrue(ok, err)
+        result = subprocess.run(
+            ['git', 'branch', '--list', 'runner/branch-on-target'],
+            cwd=str(self.target), capture_output=True, text=True, check=True,
+        )
+        self.assertIn('runner/branch-on-target', result.stdout)
+
+
 if __name__ == '__main__':
     unittest.main()

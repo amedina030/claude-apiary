@@ -124,22 +124,51 @@ def append_overnight_log(entry: dict) -> bool:
         print(f'WARN: overnight log write failed: {e}', file=sys.stderr)
         return False
 
-def git_worktree_create(branch: str, base: str = 'master') -> tuple:
-    """Create an isolated git worktree at WORKTREES_DIR/<safe-branch>/ on a new branch from base.
+def worktrees_dir_for(target_repo: Path | None = None) -> Path:
+    """Return the .runner-worktrees/ path for a given target repo.
 
-    Returns (ok, worktree_path_or_None, stderr). The worktree is checked out from
-    `base`; the branch is created fresh. Caller is responsible for git_worktree_remove.
-    Detached mode uses this so a runner pass cannot disturb the operator's main checkout.
+    Defaults to apiary's WORKTREES_DIR for backwards compatibility. Phase 3
+    of the multi-repo rearchitecture will start passing non-apiary targets;
+    until then every caller resolves to the same apiary path it always did.
     """
+    if target_repo is None:
+        return WORKTREES_DIR
+    return Path(target_repo) / '.runner-worktrees'
+
+
+def git_worktree_create(
+    branch: str,
+    base: str = 'master',
+    *,
+    target_repo: Path | None = None,
+) -> tuple:
+    """Create an isolated git worktree on a new branch from base.
+
+    Returns (ok, worktree_path_or_None, stderr). The worktree lives at
+    ``<target_repo>/.runner-worktrees/<safe-branch>/`` and is checked out
+    from ``base``; the branch is created fresh. Caller is responsible for
+    git_worktree_remove.
+
+    ``target_repo`` (phase 1 of the multi-repo rearchitecture) controls
+    which repo owns the worktree. Defaults to apiary REPO_ROOT, so
+    pre-existing callers see no behavior change. When set, both the
+    ``.runner-worktrees/`` directory and the ``git worktree add`` command
+    operate on the target repo's git tree.
+
+    Detached mode uses this so a runner pass cannot disturb the operator's
+    main checkout.
+    """
+    repo = Path(target_repo) if target_repo is not None else REPO_ROOT
+    worktrees_dir = worktrees_dir_for(target_repo)
     try:
-        WORKTREES_DIR.mkdir(parents=True, exist_ok=True)
+        worktrees_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         return False, None, f'could not create worktrees dir: {e}'
     safe = branch.replace('/', '_').replace('\\', '_')
-    wt_path = WORKTREES_DIR / safe
+    wt_path = worktrees_dir / safe
     if wt_path.exists():
         return False, None, f'worktree path already exists: {wt_path}'
-    r = _git(['worktree', 'add', '-b', branch, str(wt_path), base])
+    r = _git(['worktree', 'add', '-b', branch, str(wt_path), base], cwd=repo)
     if r.returncode != 0:
         return False, None, r.stderr
     return True, wt_path, ''
