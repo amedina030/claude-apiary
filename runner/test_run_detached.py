@@ -15,6 +15,7 @@ os.environ["APIARY_RUNNER_TEST_ISOLATION"] = "1"
 from runner import run          # noqa: E402
 from runner import detached_lib  # noqa: E402
 from runner import run_history as run_history_module  # noqa: E402
+from runner import run_tracker as run_tracker_module  # noqa: E402
 from runner import queue as runner_queue  # noqa: E402
 
 
@@ -66,6 +67,18 @@ class TestDetachedRun(unittest.TestCase):
         )
         self._history_patcher.start()
         self.addCleanup(self._history_patcher.stop)
+
+        # Redirect run_tracker.RUNS_DIR to a tempdir so tests don't
+        # accumulate tracker state in the real runner/runs/ directory
+        # and don't hit cross-run caps from previous test invocations.
+        self._tracker_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tracker_tmp.cleanup)
+        self._tracker_patcher = mock.patch.object(
+            run_tracker_module, "RUNS_DIR",
+            Path(self._tracker_tmp.name) / "runs",
+        )
+        self._tracker_patcher.start()
+        self.addCleanup(self._tracker_patcher.stop)
 
     def _make_intake_file(self, directory: Path, uid: str = 'test-uuid-1234',
                           title: str = 'Test Item') -> Path:

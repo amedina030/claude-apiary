@@ -1,0 +1,100 @@
+"""Cross-invocation run tracking for detached runner mode.
+
+Each intake UUID gets a tracker file at ``runner/runs/<uuid>.json`` that
+persists across cron invocations.  The tracker records cumulative token
+spend and attempt count so the orchestrator can enforce cross-run caps
+and detect which stage to resume from.
+"""
+import datetime
+import json
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+RUNS_DIR = SCRIPT_DIR / "runs"
+
+
+def _path(uuid: str) -> Path:
+    return RUNS_DIR / f"{uuid}.json"
+
+
+def load(uuid: str) -> dict:
+    """Read the tracker for *uuid*. Returns ``{}`` if no tracker exists."""
+    p = _path(uuid)
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save(uuid: str, data: dict) -> None:
+    """Write *data* as the tracker for *uuid*."""
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    _path(uuid).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def record_attempt(
+    uuid: str,
+    tokens_this_run: int,
+    stages_completed: int,
+    exit_status: str,
+    last_stage_completed: str | None = None,
+) -> dict:
+    """Append an attempt to the tracker and return the updated tracker dict."""
+    tracker = load(uuid)
+    tracker.setdefault("uuid", uuid)
+    tracker.setdefault("attempts", [])
+
+    prev_total = tracker.get("total_tokens", 0)
+    tracker["total_tokens"] = prev_total + tokens_this_run
+    tracker["attempt_count"] = len(tracker["attempts"]) + 1
+    tracker["last_exit_status"] = exit_status
+    if last_stage_completed is not None:
+        tracker["last_stage_completed"] = last_stage_completed
+
+    tracker["attempts"].append({
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "tokens": tokens_this_run,
+        "exit_status": exit_status,
+        "stages_completed": stages_completed,
+    })
+
+    save(uuid, tracker)
+    return tracker
+
+
+# Maps each artifact key to the stage that PRODUCES it and the stage
+# that should be resumed (the next one after the producer).
+# Order matters: check from latest to earliest so we resume as late
+# as possible.
+_ARTIFACT_RESUME_MAP = [
+    # (artifact_key, file_pattern, resume_from_stage)
+    ("harden",    "hardens/{uuid}.json",    "approval"),
+    ("execution", "executions/{uuid}.json", "auto_harden"),
+    ("plan",      "plans/{uuid}.json",      "executor"),
+    ("spec",      "specs/{uuid}.json",      "auto_plan"),
+]
+
+
+def get_resume_stage(uuid: str, worktree_path: Path) -> str | None:
+    """Determine which stage to resume from based on artifacts in the worktree.
+
+    Returns the stage name to resume from, or ``None`` if no artifacts
+    exist (= start from the beginning).
+    """
+    runner_dir = worktree_path / "runner"
+    for _key, pattern, resume_stage in _ARTIFACT_RESUME_MAP:
+        artifact = runner_dir / pattern.format(uuid=uuid)
+        if artifact.exists():
+            return resume_stage
+    return None
+
+
+def delete(uuid: str) -> None:
+    """Remove the tracker file for *uuid*. No-op if it doesn't exist."""
+    p = _path(uuid)
+    try:
+        p.unlink(missing_ok=True)
+    except OSError:
+        pass

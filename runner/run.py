@@ -23,6 +23,7 @@ from pathlib import Path
 
 from .config_loader import get as cfg
 from . import run_lock
+from . import run_tracker
 from . import abort as abort_mod
 from .usher import assess as usher_assess
 from .usher_order import (
@@ -360,6 +361,10 @@ def print_cost_summary(stage_costs: list) -> None:
     for entry in stage_costs:
         stage = entry['stage']
         status = entry['status']
+        if status == 'prior':
+            # Synthetic seed from cross-invocation tracker; don't itemize.
+            total_tokens += entry['tokens']
+            continue
         if status == 'no_usage':
             print(f'  runner-{stage}: no usage reported')
             continue
@@ -606,6 +611,40 @@ def _run_detached_impl(cli_args) -> int:
     # item is already claimed by an in-flight branch.
     branch = f'runner/{slug}-{uuid}'
 
+    # Cross-invocation guardrails: check tracker for restart and token caps.
+    max_restarts = cfg('detached', 'max_restarts', 3)
+    tracker = run_tracker.load(uuid)
+    prior_attempts = tracker.get('attempt_count', 0)
+    prior_tokens = tracker.get('total_tokens', 0)
+
+    if prior_attempts >= max_restarts:
+        print(f'Run tracker: {uuid} exhausted {prior_attempts}/{max_restarts} restarts, giving up',
+              file=sys.stderr)
+        if order_ticket is not None:
+            order_update_status(order_ticket["uuid"], "failed")
+            cascade_failure(order_ticket["uuid"])
+        history_append({
+            'start_ts': start_ts, 'end_ts': _now(),
+            'exit_status': 'max_restarts_exceeded',
+            'stages_completed': 0, 'total_tokens': 0,
+            'uuid': uuid, 'slug': slug, 'branch': None,
+        })
+        return 1
+
+    if prior_tokens >= token_cap:
+        print(f'Run tracker: {uuid} already spent {prior_tokens} tokens (cap={token_cap}), giving up',
+              file=sys.stderr)
+        if order_ticket is not None:
+            order_update_status(order_ticket["uuid"], "failed")
+            cascade_failure(order_ticket["uuid"])
+        history_append({
+            'start_ts': start_ts, 'end_ts': _now(),
+            'exit_status': 'cross_run_token_cap',
+            'stages_completed': 0, 'total_tokens': prior_tokens,
+            'uuid': uuid, 'slug': slug, 'branch': None,
+        })
+        return 1
+
     # Create isolated worktree at .runner-worktrees/<safe-branch>/. The runner
     # operates entirely inside this directory so the operator's main checkout
     # is never disturbed (no rogue branch checkout, no untracked artifact files
@@ -639,6 +678,25 @@ def _run_detached_impl(cli_args) -> int:
     run_log_path = logs_dir / run_log_name
 
     stage_costs: list[dict] = []
+    # Seed historical token spend so cumulative_tokens() includes prior
+    # invocations. This makes the per-invocation token_cap check work
+    # across restarts without any changes to the stage loop.
+    if prior_tokens > 0:
+        stage_costs.append({
+            'stage': '_prior_runs',
+            'tokens': prior_tokens,
+            'tool_uses': 0,
+            'duration_ms': 0,
+            'status': 'prior',
+        })
+
+    # Detect resumable state: if a previous failed run left artifacts in
+    # the worktree, skip stages that already completed successfully.
+    resume_from = run_tracker.get_resume_stage(uuid, wt_path)
+    if resume_from is not None:
+        print(f'Run tracker: resuming from {resume_from} (attempt {prior_attempts + 1})',
+              file=sys.stderr)
+
     stages_completed = 0
     exit_status = 'ok'
 
@@ -677,7 +735,16 @@ def _run_detached_impl(cli_args) -> int:
             'report':    wt_path / 'runner' / 'reports'    / f'{uuid}.json',
         }
 
+        reached_resume = (resume_from is None)
         for stage_idx, (name, module_name, input_key) in enumerate(STAGES, 1):
+            # Skip stages before the resume point (artifacts already exist)
+            if resume_from is not None and not reached_resume:
+                if name == resume_from:
+                    reached_resume = True
+                else:
+                    print(f'  [{stage_idx}/6] {name}... SKIPPED (resuming)', file=sys.stderr)
+                    continue
+
             if _interrupt_requested:
                 exit_status = 'interrupted'
                 break
@@ -762,6 +829,22 @@ def _run_detached_impl(cli_args) -> int:
             print(f'Worktree preserved for inspection: {wt_path}', file=sys.stderr)
             print(f'  To remove: python -m runner.run --cleanup {uuid}', file=sys.stderr)
         run_lock.delete(uuid)
+
+    # Record this attempt in the cross-invocation tracker. Tokens from
+    # the _prior_runs seed entry are already in cumulative_tokens, so
+    # subtract prior_tokens to get the actual spend of this invocation.
+    this_run_tokens = cumulative_tokens(stage_costs) - prior_tokens
+    # Determine the last stage that completed successfully
+    completed_stages = [e['stage'] for e in stage_costs
+                        if e.get('status') == 'logged' and e['stage'] != '_prior_runs']
+    last_completed = completed_stages[-1] if completed_stages else None
+    run_tracker.record_attempt(
+        uuid, this_run_tokens, stages_completed, exit_status,
+        last_stage_completed=last_completed,
+    )
+    # On success, clean up the tracker — the run is done.
+    if exit_status == 'ok':
+        run_tracker.delete(uuid)
 
     end_ts = _now()
     entry = {

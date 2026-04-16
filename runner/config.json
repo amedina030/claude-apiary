@@ -30,7 +30,8 @@
   },
   "detached": {
     "token_cap": 10000000,
-    "max_unreviewed": 5
+    "max_unreviewed": 5,
+    "max_restarts": 3
   },
   "usher": {
     "max_files": {"pass": 5, "warn": 8},
