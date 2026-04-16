@@ -283,6 +283,12 @@ def main():
         spec["schema_version"] = SPEC_SCHEMA_VERSION
         spec["id"] = intake_id
         spec["intake_id"] = intake_id
+        # Phase 4: propagate target_repo intake field onto the spec so
+        # downstream stages (auto_plan, validate_plan) can use it without
+        # having to walk back to the intake file themselves.
+        intake_target = intake.get("target_repo")
+        if isinstance(intake_target, str) and intake_target.strip():
+            spec["target_repo"] = intake_target.strip()
         spec_path.write_text(json.dumps(spec, indent=2), encoding="utf-8")
 
         # Validate

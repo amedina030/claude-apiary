@@ -14,15 +14,27 @@ from runner.validate_plan import (
     validate,
     _check_test_code_spec_format,
     _check_test_shell_metacharacters,
-    _check_banned_tokens,
+    _check_banned_tokens as _check_banned_tokens_impl,
     _check_test_failure_language,
     _check_path_allowlist,
     _check_gitignored_paths,
     _check_criteria_coverage,
     _criterion_bigrams,
     _check_file_overlap,
+    _resolve_banned_tokens,
 )
 from runner import validate_plan
+
+
+# Phase 4: _check_banned_tokens now takes the banned-tokens dict explicitly.
+# Existing tests assert apiary-default behavior, so wrap with the apiary map
+# resolved from config (target_repo=None => apiary fallback).
+_APIARY_BANNED = _resolve_banned_tokens(None)
+
+
+def _check_banned_tokens(steps):
+    """Back-compat shim: apply the apiary-default banned-tokens map."""
+    return _check_banned_tokens_impl(steps, _APIARY_BANNED)
 
 
 def _base_plan(steps):

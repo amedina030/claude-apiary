@@ -34,7 +34,14 @@
     "max_restarts": 3
   },
   "runner": {
-    "target_repo": null
+    "target_repo": null,
+    "banned_tokens": {
+      "pytest": "use unittest (stdlib) — see docs/standards/code-style.md",
+      "shell=true": "shell=True is banned — use list-form subprocess args",
+      "import requests": "external dependencies are banned — stdlib only",
+      "from requests": "external dependencies are banned — stdlib only"
+    },
+    "target_overrides": {}
   },
   "usher": {
     "max_files": {"pass": 5, "warn": 8},

@@ -41,6 +41,17 @@ def _sanitize_prompt_value(value: str, max_length: int = 300) -> str:
     return sanitized[:max_length]
 
 
+def _resolve_banned_tokens_for_prompt(target_repo: str) -> dict:
+    """Resolve the banned-tokens map for the prompt's BANNED TOKENS section.
+
+    Delegates to validate_plan._resolve_banned_tokens so the prompt and the
+    validator stay in sync — same target, same banned list. Imported lazily
+    to avoid a module-level circular import.
+    """
+    from .validate_plan import _resolve_banned_tokens
+    return _resolve_banned_tokens(target_repo)
+
+
 PLAN_SCHEMA = textwrap.dedent("""\
 {
   "steps": [
@@ -64,9 +75,78 @@ PLAN_SCHEMA = textwrap.dedent("""\
 """)
 
 
-def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
-    """Construct the prompt for the Claude Code subprocess."""
+_APIARY_INSTRUCTION_1 = (
+    "1. ALWAYS read CLAUDE.md (project root) and docs/standards/code-style.md "
+    "BEFORE deciding on test frameworks, library choices, naming conventions, "
+    "module structure, or file I/O patterns. These two files document hard "
+    "rules in this codebase: stdlib only (no external dependencies), "
+    "use unittest (no pytest), explicit encoding='utf-8' on file I/O, "
+    "pathlib.Path end-to-end (no string concatenation), no shell=True, no "
+    "absolute paths. Reading these two files does NOT count against the "
+    "search budget below. A plan that proposes pytest, requests, or any "
+    "external dependency will be rejected by the validator. "
+    "RUNNER-PACKAGE IMPORT CONVENTION: when generating test files under "
+    "runner/ (e.g. runner/test_<module>.py) that will be run as "
+    "'python -m unittest runner.test_<module>', do NOT use bare imports "
+    "of sibling runner modules — `import detached_lib` will fail with "
+    "ModuleNotFoundError because runner/ is a package with relative imports. "
+    "Use `from runner import detached_lib` or `from runner.detached_lib import ...` "
+    "for test imports. Entry points are `python -m runner.X`, not `python runner/X.py`. "
+    "Do the same for any test action whose code_spec runs a runner test module."
+)
+
+_GENERIC_INSTRUCTION_1 = (
+    "1. The target repo's coding conventions, test framework, and any hard "
+    "rules appear below under '## Target repo conventions' (the target's "
+    "CLAUDE.md). Read and follow those rules when deciding on test frameworks, "
+    "library choices, naming conventions, module structure, and file I/O "
+    "patterns. If conventions specify a banned-token list or forbidden "
+    "patterns, plans that violate them will be rejected by the validator."
+)
+
+
+def build_prompt(
+    spec: dict,
+    previous_errors: list[str] | None = None,
+    *,
+    target_repo: str | Path | None = None,
+) -> str:
+    """Construct the prompt for the Claude Code subprocess.
+
+    ``target_repo`` selects which conventions to embed (phase 4 multi-repo):
+      - apiary (or None): keep the historical apiary-specific instruction
+        block and the hardcoded banned-tokens list — byte-identical output
+        to the pre-phase-4 prompt.
+      - non-apiary: swap in a generic instruction pointing at the target's
+        CLAUDE.md, inject that file's contents as '## Target repo
+        conventions', and render the banned-tokens list resolved from
+        runner/config.json per-target overrides (empty section omitted).
+    """
     spec_text = json.dumps(spec, indent=2)
+
+    # Resolve target (default = apiary) and whether we're in the apiary case.
+    target_path = Path(target_repo) if target_repo else REPO_ROOT
+    try:
+        is_apiary = target_path.resolve() == REPO_ROOT.resolve()
+    except OSError:
+        is_apiary = False
+
+    # Read the target's CLAUDE.md for non-apiary runs. The apiary case
+    # already references its own CLAUDE.md via the instruction text, so
+    # we skip the redundant injection there to preserve byte-identity.
+    target_claude_md = None
+    if not is_apiary:
+        claude_md = target_path / "CLAUDE.md"
+        if claude_md.exists() and claude_md.is_file():
+            try:
+                target_claude_md = claude_md.read_text(encoding="utf-8")
+            except OSError:
+                target_claude_md = None
+
+    # Resolve banned tokens for this target via the same config path
+    # validate_plan uses, so the instruction text and the validator stay
+    # in sync. Empty dict -> omit the BANNED TOKENS section entirely.
+    banned_tokens = _resolve_banned_tokens_for_prompt(str(target_path))
 
     # Pre-compute files_examined so instruction 2 can reference pre-read files (ATK-002)
     files_examined_raw = spec.get("files_examined") or []
@@ -90,23 +170,7 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "",
         "## Instructions",
         "",
-        "1. ALWAYS read CLAUDE.md (project root) and docs/standards/code-style.md "
-        "BEFORE deciding on test frameworks, library choices, naming conventions, "
-        "module structure, or file I/O patterns. These two files document hard "
-        "rules in this codebase: stdlib only (no external dependencies), "
-        "use unittest (no pytest), explicit encoding='utf-8' on file I/O, "
-        "pathlib.Path end-to-end (no string concatenation), no shell=True, no "
-        "absolute paths. Reading these two files does NOT count against the "
-        "search budget below. A plan that proposes pytest, requests, or any "
-        "external dependency will be rejected by the validator. "
-        "RUNNER-PACKAGE IMPORT CONVENTION: when generating test files under "
-        "runner/ (e.g. runner/test_<module>.py) that will be run as "
-        "'python -m unittest runner.test_<module>', do NOT use bare imports "
-        "of sibling runner modules — `import detached_lib` will fail with "
-        "ModuleNotFoundError because runner/ is a package with relative imports. "
-        "Use `from runner import detached_lib` or `from runner.detached_lib import ...` "
-        "for test imports. Entry points are `python -m runner.X`, not `python runner/X.py`. "
-        "Do the same for any test action whose code_spec runs a runner test module.",
+        _APIARY_INSTRUCTION_1 if is_apiary else _GENERIC_INSTRUCTION_1,
         (
             "2. The files listed under 'Files already examined' below were read "
             "during spec-writing and do NOT count against the search budget — skip "
@@ -177,15 +241,39 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "(e.g. the full 'def symbol_name(' rather than just 'symbol_name'). "
         "Post_conditions are optional for test/verify steps.",
         "",
-        "## BANNED TOKENS — the validator auto-rejects plans containing these:",
-        "",
-        "- 'pytest' → use 'python -m unittest <module>' instead",
-        "- 'shell=true' → use list-form subprocess args instead",
-        "- 'import requests' / 'from requests' → stdlib only (use urllib)",
-        "",
-        "These apply to ALL fields: description, code_spec, and file names.",
-        "Even one occurrence anywhere in the plan causes automatic rejection.",
-        "",
+    ]
+
+    if is_apiary:
+        # Byte-identical apiary-case banned-token block (phase 4: this MUST
+        # match the pre-refactor prompt for the apiary-self acceptance test).
+        parts.extend([
+            "## BANNED TOKENS — the validator auto-rejects plans containing these:",
+            "",
+            "- 'pytest' → use 'python -m unittest <module>' instead",
+            "- 'shell=true' → use list-form subprocess args instead",
+            "- 'import requests' / 'from requests' → stdlib only (use urllib)",
+            "",
+            "These apply to ALL fields: description, code_spec, and file names.",
+            "Even one occurrence anywhere in the plan causes automatic rejection.",
+            "",
+        ])
+    elif banned_tokens:
+        # Non-apiary with a configured override: render the configured list.
+        parts.append(
+            "## BANNED TOKENS — the validator auto-rejects plans containing these:"
+        )
+        parts.append("")
+        for token, reason in banned_tokens.items():
+            parts.append(f"- '{token}' → {reason}")
+        parts.extend([
+            "",
+            "These apply to ALL fields: description, code_spec, and file names.",
+            "Even one occurrence anywhere in the plan causes automatic rejection.",
+            "",
+        ])
+    # Non-apiary with no configured override: no banned-tokens section at all.
+
+    parts.extend([
         "## Output format",
         "",
         "Output ONLY valid JSON matching this schema (no markdown, no explanation):",
@@ -195,7 +283,23 @@ def build_prompt(spec: dict, previous_errors: list[str] | None = None) -> str:
         "```",
         "",
         "Valid step types and actions: create, modify, delete, test, verify.",
-    ]
+    ])
+
+    # Inject the target repo's CLAUDE.md for non-apiary runs so the planner
+    # can consult the actual target conventions without a separate file read.
+    if target_claude_md is not None:
+        parts.extend([
+            "",
+            "## Target repo conventions",
+            "",
+            "The following is the target repository's CLAUDE.md. Treat these "
+            "as the hard rules for this plan (test framework, imports, style, "
+            "forbidden patterns). If it conflicts with generic advice above, "
+            "the target's CLAUDE.md wins.",
+            "",
+            target_claude_md.rstrip(),
+            "",
+        ])
 
     # Inject file-trust context if spec has files_examined
     if unique_entries:
@@ -472,10 +576,15 @@ def main():
     best_errors = None
     previous_errors = None
 
+    # Phase 4: pick the target repo for this run so build_prompt can inject
+    # the right CLAUDE.md and banned-tokens section. Spec's target_repo
+    # field is propagated from the intake by auto_refine; None = apiary.
+    spec_target_repo = spec.get("target_repo")
+
     for attempt in range(1, MAX_RETRIES + 1):
         print(f"Attempt {attempt}/{MAX_RETRIES}...", file=sys.stderr)
 
-        prompt = build_prompt(spec, previous_errors)
+        prompt = build_prompt(spec, previous_errors, target_repo=spec_target_repo)
 
         try:
             returncode, stdout, stderr = run_claude(prompt)
@@ -513,6 +622,11 @@ def main():
             "spec": spec,
             "steps": merged_steps,
         }
+        # Phase 4: propagate target_repo so validate_plan can resolve the
+        # correct banned-tokens list for this target.
+        spec_target = spec.get("target_repo")
+        if isinstance(spec_target, str) and spec_target.strip():
+            plan["target_repo"] = spec_target.strip()
         plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
         # Validate

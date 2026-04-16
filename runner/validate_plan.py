@@ -24,6 +24,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .config_loader import get as cfg
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
 VALID_TYPES = {"create", "modify", "delete", "test", "verify"}
 VALID_ACTIONS = {"create", "modify", "delete", "test", "verify"}
 VALID_MODELS = {"opus", "sonnet", "haiku"}
@@ -49,30 +53,53 @@ _PROSE_STARTERS = {
     "please", "here", "the", "we", "you",
 }
 
-# Banned tokens — substrings that, if found in any step's code_spec or
-# description, indicate the planner ignored project conventions documented
-# in CLAUDE.md and docs/standards/code-style.md. Hard rule violations only:
-# things the codebase forbids outright. Extend this map as new violations
-# are caught in runner runs. The reason string is shown to the planner
-# on retry so it can correct course.
-_BANNED_TOKENS = {
-    "pytest": "use unittest (stdlib) — see docs/standards/code-style.md",
-    "shell=true": "shell=True is banned — use list-form subprocess args",
-    "import requests": "external dependencies are banned — stdlib only",
-    "from requests": "external dependencies are banned — stdlib only",
-}
+# Banned tokens are resolved per-run via _resolve_banned_tokens(target_repo).
+# The map is configured in runner/config.json under runner.banned_tokens
+# (apiary default) with optional per-target overrides under
+# runner.target_overrides.<key>.banned_tokens. Phase 4 of the multi-repo
+# epic: a non-apiary target with no override gets an empty map, so the
+# validator doesn't reject, e.g., a Node project's plan that legitimately
+# mentions "pytest" in prose.
 
-# Word-boundary-aware patterns for each banned token (#239). Plain
-# substring match would false-positive on 'from requests_mock' matching
-# the 'from requests' ban, or 'requests_toolbelt' matching 'requests'.
-# The (?<!\w)...(?!\w) guards ensure we only match when the token is
-# bounded by non-word characters (or the start/end of the haystack),
-# which correctly rejects identifier-suffix false positives while still
-# catching 'pytest-asyncio' (hyphen IS a word boundary).
-_BANNED_TOKEN_PATTERNS = {
-    token: re.compile(rf"(?<!\w){re.escape(token)}(?!\w)")
-    for token in _BANNED_TOKENS
-}
+
+def _compile_banned_patterns(banned: dict) -> dict:
+    """Compile word-boundary-aware regexes for each banned token (#239).
+
+    Plain substring match would false-positive on 'from requests_mock'
+    matching the 'from requests' ban, or 'requests_toolbelt' matching
+    'requests'. The (?<!\\w)...(?!\\w) guards match only when the token
+    is bounded by non-word characters, correctly rejecting
+    identifier-suffix false positives while still catching
+    'pytest-asyncio' (hyphen IS a word boundary).
+    """
+    return {token: re.compile(rf"(?<!\w){re.escape(token)}(?!\w)") for token in banned}
+
+
+def _resolve_banned_tokens(target_repo: str | None) -> dict:
+    """Pick the banned-tokens map for a given resolved target_repo path.
+
+    Precedence:
+      1. runner.target_overrides.<key>.banned_tokens — per-target exact match,
+         keyed by the target's basename (e.g. 'claude-apiary' or 'scratch').
+      2. If target IS apiary (or unset): runner.banned_tokens — apiary default.
+      3. Otherwise: empty dict — non-apiary targets have their own conventions
+         and the apiary banned-list is not relevant.
+    """
+    overrides = cfg("runner", "target_overrides", {}) or {}
+    if target_repo:
+        key = Path(target_repo).name
+        if isinstance(overrides, dict):
+            entry = overrides.get(key)
+            if isinstance(entry, dict) and "banned_tokens" in entry:
+                bt = entry.get("banned_tokens")
+                if isinstance(bt, dict):
+                    return bt
+    # Default: apiary list applies only when target is apiary itself (or
+    # unresolved). Non-apiary targets with no explicit override get {}.
+    if target_repo is None or Path(target_repo).resolve() == _REPO_ROOT.resolve():
+        default = cfg("runner", "banned_tokens", {}) or {}
+        return default if isinstance(default, dict) else {}
+    return {}
 
 # Phrases that, when found in a test-action step's description, indicate the
 # planner is using a test step as a gating audit run rather than a pass/fail
@@ -107,9 +134,6 @@ _SHELL_METACHARACTERS = [';', '&', '|', '>', '<', '`', '$(', '${']
 # against themselves — and the result must fall under REPO_ROOT. Resolving
 # against REPO_ROOT instead of cwd means validate_plan can be invoked from
 # anywhere without path rejection false positives (#232).
-
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-
 
 def _resolve_repo_path(path: Path) -> Path:
     """Resolve `path` relative to REPO_ROOT if not already absolute.
@@ -464,15 +488,19 @@ def _check_gitignored_paths(steps: list[dict]) -> list[str]:
     return errors
 
 
-def _check_banned_tokens(steps: list[dict]) -> list[str]:
+def _check_banned_tokens(steps: list[dict], banned_tokens: dict) -> list[str]:
     """Reject plans whose code_spec or description references banned tokens.
 
-    The planner has access to CLAUDE.md and docs/standards/code-style.md and
-    is explicitly told the hard rules in the auto_plan prompt. If it still
-    proposes pytest, shell=True, or external imports, the validator catches
-    it before any code gets written. Errors flow into the existing 3-attempt
-    retry loop in auto_plan, so the planner gets a chance to self-correct.
+    The planner has access to CLAUDE.md and is explicitly told the hard
+    rules in the auto_plan prompt. If it still proposes pytest, shell=True,
+    or external imports (apiary case), the validator catches it before any
+    code gets written. Errors flow into the existing 3-attempt retry loop
+    in auto_plan, so the planner gets a chance to self-correct. Non-apiary
+    targets resolve to an empty map by default — see _resolve_banned_tokens.
     """
+    if not banned_tokens:
+        return []
+    patterns = _compile_banned_patterns(banned_tokens)
     errors = []
     for i, step in enumerate(steps):
         if not isinstance(step, dict):
@@ -486,8 +514,8 @@ def _check_banned_tokens(steps: list[dict]) -> list[str]:
             str(step.get("code_spec", "")),
             str(step.get("description", "")),
         ]).lower()
-        for token, reason in _BANNED_TOKENS.items():
-            if _BANNED_TOKEN_PATTERNS[token].search(haystack):
+        for token, reason in banned_tokens.items():
+            if patterns[token].search(haystack):
                 errors.append(
                     f"step[{i}]: banned token '{token}' found in plan — {reason}"
                 )
@@ -776,8 +804,16 @@ def _check_criteria_coverage(spec: dict, steps: list[dict]) -> list[str]:
     return errors
 
 
-def validate(data: dict) -> list[str]:
-    """Validate plan data and return list of error strings (empty = valid)."""
+def validate(data: dict, banned_tokens: dict | None = None) -> list[str]:
+    """Validate plan data and return list of error strings (empty = valid).
+
+    ``banned_tokens`` defaults to the apiary map resolved from the plan's
+    ``target_repo`` field (or apiary fallback). Callers may pass an explicit
+    map to override — used by tests and by main() once it has read the
+    plan's target_repo.
+    """
+    if banned_tokens is None:
+        banned_tokens = _resolve_banned_tokens(data.get("target_repo"))
     errors = []
 
     if not isinstance(data, dict):
@@ -887,7 +923,9 @@ def validate(data: dict) -> list[str]:
     errors.extend(_check_test_failure_language(steps))
 
     # Banned-token check (project convention violations: pytest, shell=True, etc.)
-    errors.extend(_check_banned_tokens(steps))
+    # The list is resolved per-target via runner/config.json; apiary target
+    # gets the full list, non-apiary targets default to empty.
+    errors.extend(_check_banned_tokens(steps, banned_tokens))
 
     # Path allowlist (#212): reject absolute paths outside repo + state dir.
     errors.extend(_check_path_allowlist(steps))
