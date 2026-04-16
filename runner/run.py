@@ -22,6 +22,8 @@ import time
 from pathlib import Path
 
 from .config_loader import get as cfg
+from . import run_lock
+from . import abort as abort_mod
 from .usher import assess as usher_assess
 from .usher_order import (
     load_order, next_eligible, update_status as order_update_status,
@@ -624,6 +626,8 @@ def _run_detached_impl(cli_args) -> int:
         })
         return 1
 
+    run_lock.write(uuid, stage="init", worktree_path=str(wt_path))
+
     # Mark order ticket as running
     if order_ticket is not None:
         order_update_status(order_ticket["uuid"], "running")
@@ -673,10 +677,11 @@ def _run_detached_impl(cli_args) -> int:
             'report':    wt_path / 'runner' / 'reports'    / f'{uuid}.json',
         }
 
-        for name, module_name, input_key in STAGES:
+        for stage_idx, (name, module_name, input_key) in enumerate(STAGES, 1):
             if _interrupt_requested:
                 exit_status = 'interrupted'
                 break
+            run_lock.update(uuid, stage=name, step_number=stage_idx)
             input_path = artifacts[input_key]
 
             ok, stdout_text, stderr_text, _elapsed = run_stage(name, module_name, input_path, cwd=wt_path)
@@ -756,6 +761,7 @@ def _run_detached_impl(cli_args) -> int:
         else:
             print(f'Worktree preserved for inspection: {wt_path}', file=sys.stderr)
             print(f'  To remove: python -m runner.run --cleanup {uuid}', file=sys.stderr)
+        run_lock.delete(uuid)
 
     end_ts = _now()
     entry = {
@@ -1083,6 +1089,9 @@ def main():
     parser.add_argument("--cleanup", dest="cleanup", default=None, metavar="UUID",
                         help="Abort/cleanup: delete runner branch(es) for the given uuid "
                              "and archive the execution log (#245)")
+    parser.add_argument("--abort", dest="abort_uuid", default=None, metavar="UUID",
+                        help="Abort a crashed run: archive artifacts, remove worktree, "
+                             "delete lockfile. Pass 'all' to abort every stale run.")
     parser.add_argument("--prune-failed", dest="prune_failed", action="store_true",
                         default=False,
                         help="Prune old failed/aborted runner branches via --older-than (#246)")
@@ -1092,6 +1101,38 @@ def main():
     parser.add_argument("--dry-run", dest="dry_run", action="store_true", default=False,
                         help="List prune candidates without deleting anything")
     cli_args = parser.parse_args()
+
+    # Abort mode: clean up crashed runs (T-2026-128).
+    if cli_args.abort_uuid is not None:
+        if cli_args.abort_uuid == "all":
+            count = abort_mod.abort_all()
+            sys.exit(0 if count > 0 else 1)
+        lock = run_lock.read(cli_args.abort_uuid)
+        if lock is None and not (run_lock.LOCKS_DIR / f"{cli_args.abort_uuid}.lock").exists():
+            print(f"No stale run found for {cli_args.abort_uuid}", file=sys.stderr)
+            sys.exit(1)
+        try:
+            abort_mod.abort_run(cli_args.abort_uuid)
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(1)
+        sys.exit(0)
+
+    # Stale lockfile check: block new runs while crashed runs remain (T-2026-128).
+    stale_runs = run_lock.scan_stale()
+    if stale_runs:
+        print("Stale run(s) detected — clean up before starting a new run:\n",
+              file=sys.stderr)
+        for entry in stale_runs:
+            uid = entry.get("uuid", "?")
+            stage = entry.get("stage", "?")
+            step = entry.get("step_number", "?")
+            age_s = time.time() - entry.get("started_at", time.time())
+            print(f"  {uid}  stage={stage}  step={step}  age={age_s / 60:.0f}m",
+                  file=sys.stderr)
+        print(f"\nRun: python -m runner.run --abort <uuid>  (or --abort all)",
+              file=sys.stderr)
+        sys.exit(1)
 
     # Cleanup mode: abort path for a killed/interrupted runner run.
     if cli_args.cleanup is not None:
@@ -1193,6 +1234,8 @@ def main():
     print(f"Runner: {intake.get('title', 'Untitled')} [{uuid}]")
     print(f"{'=' * 60}")
 
+    run_lock.write(uuid, stage=STAGES[0][0])
+
     total_start = time.time()
     stages_completed = 0
     final_output = ""
@@ -1204,97 +1247,101 @@ def main():
     stage_costs: list[dict] = []  # each entry: {'stage': str, 'tokens': int, 'tool_uses': int, 'status': 'logged'|'no_usage'|'malformed'}
 
     try:
-        for i, (name, module_name, input_key) in enumerate(STAGES, 1):
-            # Skip stages before resume point
-            if resume_from is not None and not reached_resume:
-                if name == resume_from:
-                    reached_resume = True
+        try:
+            for i, (name, module_name, input_key) in enumerate(STAGES, 1):
+                # Skip stages before resume point
+                if resume_from is not None and not reached_resume:
+                    if name == resume_from:
+                        reached_resume = True
+                    else:
+                        print(f"\n[{i}/6] {name}... SKIPPED (resuming)")
+                        continue  # ATK-001: skipped stages do not count as completed
+
+                current_stage_name = name
+                current_stage_idx = i
+                run_lock.update(uuid, stage=name, step_number=i)
+                input_path = artifacts[input_key]
+
+                print(f"\n[{i}/6] {name}...", flush=True)
+
+                ok, stdout_text, stderr_text, elapsed = run_stage(name, module_name, input_path)
+                record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
+                output = stdout_text.strip() if ok else stderr_text.strip()
+
+                # #247: interactive-mode token budget. If --token-cap is set,
+                # abort the run as soon as cumulative tokens exceed it, so a
+                # runaway hardening loop can't keep spawning forever.
+                # Detached mode already has this check (#423 region); this
+                # brings parity to the interactive path.
+                if cli_args.token_cap is not None:
+                    used = cumulative_tokens(stage_costs)
+                    if used > cli_args.token_cap:
+                        print(
+                            f"\n{'=' * 60}\n"
+                            f"ABORTED: token cap exceeded at stage {i} ({name}): "
+                            f"{used} > {cli_args.token_cap}",
+                            file=sys.stderr,
+                        )
+                        print(f"Stages completed: {stages_completed}/{len(STAGES)}")
+                        try:
+                            print_cost_summary(stage_costs)
+                        except Exception:
+                            pass
+                        print(
+                            f"To resume: python -m runner.run {intake_path_abs} "
+                            f"--resume-from {name}",
+                            file=sys.stderr,
+                        )
+                        sys.exit(1)
+
+                if ok:
+                    print(f"  PASSED ({elapsed:.1f}s)")
+                    if output:
+                        # Show last line of output (usually the file path or verdict)
+                        last_line = output.strip().splitlines()[-1]
+                        print(f"  -> {last_line}")
+                    stages_completed += 1
+                    final_output = output
                 else:
-                    print(f"\n[{i}/6] {name}... SKIPPED (resuming)")
-                    continue  # ATK-001: skipped stages do not count as completed
-
-            current_stage_name = name
-            current_stage_idx = i
-            input_path = artifacts[input_key]
-
-            print(f"\n[{i}/6] {name}...", flush=True)
-
-            ok, stdout_text, stderr_text, elapsed = run_stage(name, module_name, input_path)
-            record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
-            output = stdout_text.strip() if ok else stderr_text.strip()
-
-            # #247: interactive-mode token budget. If --token-cap is set,
-            # abort the run as soon as cumulative tokens exceed it, so a
-            # runaway hardening loop can't keep spawning forever.
-            # Detached mode already has this check (#423 region); this
-            # brings parity to the interactive path.
-            if cli_args.token_cap is not None:
-                used = cumulative_tokens(stage_costs)
-                if used > cli_args.token_cap:
-                    print(
-                        f"\n{'=' * 60}\n"
-                        f"ABORTED: token cap exceeded at stage {i} ({name}): "
-                        f"{used} > {cli_args.token_cap}",
-                        file=sys.stderr,
-                    )
+                    print(f"  FAILED ({elapsed:.1f}s)")
+                    if output:
+                        lines = output.strip().splitlines()
+                        cap = 500
+                        for line in lines[:cap]:
+                            print(f"  ! {line}")
+                        if len(lines) > cap:
+                            print(f"  ! ... ({len(lines) - cap} more lines truncated)")
+                    print(f"\n{'=' * 60}")
+                    print(f"FAILED at stage {i}: {name}")
                     print(f"Stages completed: {stages_completed}/{len(STAGES)}")
+                    print(f"Total time: {time.time() - total_start:.1f}s")
                     try:
                         print_cost_summary(stage_costs)
                     except Exception:
                         pass
-                    print(
-                        f"To resume: python -m runner.run {intake_path_abs} "
-                        f"--resume-from {name}",
-                        file=sys.stderr,
-                    )
+                    print(f"To resume: python -m runner.run {intake_path_abs} --resume-from {name}", file=sys.stderr)  # ATK-007
                     sys.exit(1)
 
-            if ok:
-                print(f"  PASSED ({elapsed:.1f}s)")
-                if output:
-                    # Show last line of output (usually the file path or verdict)
-                    last_line = output.strip().splitlines()[-1]
-                    print(f"  -> {last_line}")
-                stages_completed += 1
-                final_output = output
-            else:
-                print(f"  FAILED ({elapsed:.1f}s)")
-                if output:
-                    lines = output.strip().splitlines()
-                    cap = 500
-                    for line in lines[:cap]:
-                        print(f"  ! {line}")
-                    if len(lines) > cap:
-                        print(f"  ! ... ({len(lines) - cap} more lines truncated)")
-                print(f"\n{'=' * 60}")
-                print(f"FAILED at stage {i}: {name}")
-                print(f"Stages completed: {stages_completed}/{len(STAGES)}")
-                print(f"Total time: {time.time() - total_start:.1f}s")
-                try:
-                    print_cost_summary(stage_costs)
-                except Exception:
-                    pass
-                print(f"To resume: python -m runner.run {intake_path_abs} --resume-from {name}", file=sys.stderr)  # ATK-007
-                sys.exit(1)
+        except KeyboardInterrupt:
+            print(f"\n\nInterrupted during stage {current_stage_idx}: {current_stage_name}")  # ATK-004
+            print(f"Stages completed: {stages_completed}/{len(STAGES)}")
+            print_cost_summary(stage_costs)
+            print(f"To resume: python -m runner.run {intake_path_abs} --resume-from {current_stage_name}", file=sys.stderr)  # ATK-007
+            sys.exit(1)
 
-    except KeyboardInterrupt:
-        print(f"\n\nInterrupted during stage {current_stage_idx}: {current_stage_name}")  # ATK-004
+        # All stages completed
+        total_elapsed = time.time() - total_start
+        print(f"\n{'=' * 60}")
+
+        # Parse verdict from approval output
+        verdict_line = final_output.strip().splitlines()[0] if final_output else "unknown"
+        print(f"COMPLETE: {verdict_line}")
         print(f"Stages completed: {stages_completed}/{len(STAGES)}")
+        print(f"Total time: {total_elapsed:.1f}s")
+        print(f"Report: {artifacts['report']}")
         print_cost_summary(stage_costs)
-        print(f"To resume: python -m runner.run {intake_path_abs} --resume-from {current_stage_name}", file=sys.stderr)  # ATK-007
-        sys.exit(1)
-
-    # All stages completed
-    total_elapsed = time.time() - total_start
-    print(f"\n{'=' * 60}")
-
-    # Parse verdict from approval output
-    verdict_line = final_output.strip().splitlines()[0] if final_output else "unknown"
-    print(f"COMPLETE: {verdict_line}")
-    print(f"Stages completed: {stages_completed}/{len(STAGES)}")
-    print(f"Total time: {total_elapsed:.1f}s")
-    print(f"Report: {artifacts['report']}")
-    print_cost_summary(stage_costs)
+    finally:
+        run_lock.delete(uuid)
 
 
 if __name__ == "__main__":

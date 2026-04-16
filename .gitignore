@@ -29,8 +29,10 @@ runner/reports/*
 !runner/reports/.gitkeep
 !runner/reports/.gitkeep
 
-# Runner runtime logs and history
+# Runner runtime logs, history, and crash recovery
 runner/logs/
+runner/locks/
+runner/crashes/
 runner/overnight.jsonl
 runner/run_history.jsonl
 runner/usher_order.json.lock
