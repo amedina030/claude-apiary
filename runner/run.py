@@ -39,6 +39,7 @@ from .detached_lib import (
     prune_stale_worktrees,
     OVERNIGHT_LOG, BACKLOG_DIR, INTAKE_DIR,
 )
+from .target_repo import resolve_target_repo
 
 # Stages that legitimately make no Claude calls and so always emit zero
 # <usage> blocks. Used by run_detached's no_usage safety check (ATK-010):
@@ -646,11 +647,36 @@ def _run_detached_impl(cli_args) -> int:
         })
         return 1
 
-    # Create isolated worktree at .runner-worktrees/<safe-branch>/. The runner
-    # operates entirely inside this directory so the operator's main checkout
-    # is never disturbed (no rogue branch checkout, no untracked artifact files
-    # bleeding across runs, no collision with an active interactive session).
-    ok, wt_path, err = git_worktree_create(branch)
+    # Resolve target repo (phase 3): CLI flag > intake field > config > apiary.
+    # Validation ensures the resolved path exists and is a git repo. The
+    # worktree is then created inside THAT repo's git tree.
+    try:
+        target_repo_path = resolve_target_repo(
+            cli_override=getattr(cli_args, 'target_repo', None),
+            intake=intake,
+        )
+    except ValueError as e:
+        print(f'ERROR: target_repo invalid: {e}', file=sys.stderr)
+        history_append({
+            'start_ts': start_ts,
+            'end_ts': _now(),
+            'exit_status': 'target_repo_invalid',
+            'stderr': str(e),
+            'uuid': uuid,
+            'slug': slug,
+            'branch': None,
+            'stages_completed': 0,
+            'total_tokens': 0,
+            'target_repo': None,
+        })
+        return 1
+
+    # Create isolated worktree at <target_repo>/.runner-worktrees/<safe-branch>/.
+    # The runner operates entirely inside this directory so the target repo's
+    # main checkout is never disturbed (no rogue branch checkout, no untracked
+    # artifact files bleeding across runs, no collision with an active
+    # interactive session on the same repo).
+    ok, wt_path, err = git_worktree_create(branch, target_repo=target_repo_path)
     if not ok:
         print(f'ERROR: git worktree setup failed: {err}', file=sys.stderr)
         history_append({
@@ -663,6 +689,7 @@ def _run_detached_impl(cli_args) -> int:
             'branch': None,
             'stages_completed': 0,
             'total_tokens': 0,
+            'target_repo': str(target_repo_path),
         })
         return 1
 
@@ -861,6 +888,9 @@ def _run_detached_impl(cli_args) -> int:
         # draft_ticket --from-todo) so the post-merge hook can close it
         # after a human reviews + merges the runner branch.
         'source': intake.get('source', ''),
+        # Phase 3: record which repo this run targeted so a single apiary
+        # checkout's history captures runs across multiple target repos.
+        'target_repo': str(target_repo_path),
     }
     history_append(entry)
 
@@ -1196,6 +1226,10 @@ def main():
                         help="Age threshold in days for --prune-failed (default: 7)")
     parser.add_argument("--dry-run", dest="dry_run", action="store_true", default=False,
                         help="List prune candidates without deleting anything")
+    parser.add_argument("--target-repo", dest="target_repo", default=None, metavar="PATH",
+                        help="Run against a non-apiary target repo. Precedence: this flag > "
+                             "intake.target_repo > config runner.target_repo > apiary fallback. "
+                             "Path must be an existing directory containing a .git entry.")
     cli_args = parser.parse_args()
 
     # Abort mode: clean up crashed runs (T-2026-128).
@@ -1296,6 +1330,19 @@ def main():
               f'subsystems={usher_metrics["subsystem_count"]}, '
               f'desc_chars={usher_metrics["description_chars"]}')
 
+    # Resolve target repo (phase 3). Interactive mode runs stages directly
+    # against the resolved target's checkout (no worktree — that's detached's
+    # concern). When nothing is configured this resolves to apiary REPO_ROOT
+    # and matches the pre-phase-3 behavior exactly.
+    try:
+        target_repo_path = resolve_target_repo(
+            cli_override=getattr(cli_args, 'target_repo', None),
+            intake=intake,
+        )
+    except ValueError as e:
+        print(f'Target repo invalid: {e}', file=sys.stderr)
+        sys.exit(1)
+
     # Derive artifact paths
     artifacts = {
         "intake":    SCRIPT_DIR / "intake"     / f"{uuid}.json",
@@ -1360,7 +1407,7 @@ def main():
 
                 print(f"\n[{i}/6] {name}...", flush=True)
 
-                ok, stdout_text, stderr_text, elapsed = run_stage(name, module_name, input_path)
+                ok, stdout_text, stderr_text, elapsed = run_stage(name, module_name, input_path, cwd=target_repo_path)
                 record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
                 output = stdout_text.strip() if ok else stderr_text.strip()
 

@@ -380,13 +380,47 @@ class TestMainHappyPath(_RunnerTestCase):
         self.assertNotIn("  -> ", out)
 
     @patch("runner.run.run_stage")
+    def test_target_repo_flag_sets_stage_cwd(self, mock_run_stage):
+        """Phase 3: --target-repo on interactive runs must become the cwd
+        argument for every stage subprocess."""
+        import subprocess as _sp  # avoid shadowing
+        intake_file, _ = self.make_intake_file()
+        mock_run_stage.return_value = (True, "ok", "", 0.5)
+        scratch = self.tmp_path / "scratch"
+        scratch.mkdir()
+        _sp.run(["git", "init", "--quiet", str(scratch)], check=True, capture_output=True)
+        code, _, _ = self._run_main_capture(
+            ["run.py", str(intake_file), "--target-repo", str(scratch)],
+        )
+        self.assertIn(code, (None, 0))
+        for call in mock_run_stage.call_args_list:
+            self.assertEqual(
+                Path(call.kwargs["cwd"]).resolve(), scratch.resolve(),
+                f"stage call {call} did not receive target_repo as cwd",
+            )
+
+    @patch("runner.run.run_stage")
+    def test_target_repo_defaults_to_apiary_when_unset(self, mock_run_stage):
+        """No --target-repo + no intake field → cwd defaults to apiary REPO_ROOT
+        so the pre-phase-3 behavior is preserved."""
+        intake_file, _ = self.make_intake_file()
+        mock_run_stage.return_value = (True, "ok", "", 0.5)
+        code, _, _ = self._run_main_capture(["run.py", str(intake_file)])
+        self.assertIn(code, (None, 0))
+        # Every stage gets cwd=<apiary REPO_ROOT>
+        for call in mock_run_stage.call_args_list:
+            self.assertEqual(
+                Path(call.kwargs["cwd"]).resolve(), REPO_ROOT.resolve(),
+            )
+
+    @patch("runner.run.run_stage")
     def test_final_stage_empty_stdout_verdict_unknown(self, mock_run_stage):
         """When the final stage (approval) returns empty stdout, verdict_line
         is 'unknown'. Covers run.py:157 where empty final_output triggers the
         'unknown' fallback."""
         intake_file, _ = self.make_intake_file()
 
-        def side_effect(name, script, input_path):
+        def side_effect(name, script, input_path, cwd=None):
             if name == "approval":
                 return (True, "", "", 1.0)
             return (True, "ok", "", 0.5)
@@ -408,7 +442,7 @@ class TestMainFailurePropagation(_RunnerTestCase):
     def test_stage3_failure_stops_runner(self, mock_run_stage):
         intake_file, _ = self.make_intake_file()
 
-        def side_effect(name, script, input_path):
+        def side_effect(name, script, input_path, cwd=None):
             if name == "auto_plan":
                 return (False, "", "plan error", 2.0)
             return (True, "ok", "", 0.5)
@@ -452,7 +486,7 @@ class TestMainKeyboardInterrupt(_RunnerTestCase):
     def test_interrupt_during_stage4(self, mock_run_stage):
         intake_file, _ = self.make_intake_file()
 
-        def side_effect(name, script, input_path):
+        def side_effect(name, script, input_path, cwd=None):
             if name == "executor":  # stage 4
                 raise KeyboardInterrupt()
             return (True, "ok", "", 0.5)

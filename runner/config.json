@@ -33,6 +33,9 @@
     "max_unreviewed": 5,
     "max_restarts": 3
   },
+  "runner": {
+    "target_repo": null
+  },
   "usher": {
     "max_files": {"pass": 5, "warn": 8},
     "max_subsystems": {"pass": 2, "warn": 3},

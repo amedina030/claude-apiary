@@ -327,15 +327,21 @@ End-to-end runner orchestrator. Sequences all 6 stages, passes artifact paths vi
 
 ```bash
 python -m runner.run runner/intake/<uuid>.json
+python -m runner.run runner/intake/<uuid>.json --target-repo /path/to/other/repo
 ```
 
-| Argument | Required | Description |
-|----------|----------|-------------|
+| Argument / Flag | Required | Description |
+|-----------------|----------|-------------|
 | `intake_path` | yes | Path to intake JSON file (`runner/intake/<uuid>.json`) |
+| `--target-repo PATH` | no | Run against a non-apiary git repo. Precedence: CLI flag > intake `target_repo` field > config `runner.target_repo` > apiary fallback. Path must exist and contain a `.git` entry. |
 
 Stages run in order: validate_intake → auto_refine → auto_plan → executor → auto_harden → approval. Each stage's input path is derived from the UUID. Prints per-stage status and elapsed time. Exit 0 if all stages pass; exit 1 on first failure.
 
 Stage timeout is configurable via `runner/config.json` under `orchestrator.stage_timeout` (default: 3600s).
+
+### Multi-repo (`--target-repo`)
+
+All runner artifacts (specs/plans/executions/hardens/reports) always live under apiary's `runner/<dir>/<uuid>.json`, regardless of target. Only the executor's code-change diff lands in the target repo, on a `runner/<slug>-<uuid>` branch off its `master`. A single apiary checkout therefore holds the centralized run history across every target repo it has run against; each `run_history.jsonl` entry carries a `target_repo` field to disambiguate.
 
 ## runner/create_intake.py
 

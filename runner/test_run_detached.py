@@ -26,12 +26,16 @@ def _make_fake_usage(tokens: int = 1000) -> str:
     )
 
 
-def _make_cli_args(token_cap: int = 5_000_000, max_unreviewed: int = 5, intake=None):
+def _make_cli_args(token_cap: int = 5_000_000, max_unreviewed: int = 5, intake=None,
+                   target_repo=None):
     """Build a minimal namespace compatible with run_detached(cli_args)."""
     ns = mock.MagicMock()
     ns.token_cap = token_cap
     ns.max_unreviewed = max_unreviewed
     ns.intake = intake
+    # MagicMock auto-generates attrs; pinning target_repo to None (or the
+    # test's choice) stops phase 3's resolver from seeing a mock path.
+    ns.target_repo = target_repo
     return ns
 
 
@@ -197,6 +201,159 @@ class TestDetachedRun(unittest.TestCase):
                                 f'artifact path {p} not rooted in apiary SCRIPT_DIR {td}')
                 self.assertFalse(str(p.resolve()).startswith(str(wt_resolved) + os.sep),
                                  f'artifact path {p} incorrectly rooted in worktree')
+
+    def _init_scratch_repo(self, root: Path) -> Path:
+        """Create a minimal git repo for use as a phase-3 target_repo fixture."""
+        root.mkdir(parents=True, exist_ok=True)
+        subprocess.run(['git', 'init', '-q', '-b', 'master'], cwd=str(root), check=True)
+        subprocess.run(['git', 'config', 'user.email', 't@t'], cwd=str(root), check=True)
+        subprocess.run(['git', 'config', 'user.name', 't'], cwd=str(root), check=True)
+        (root / 'README').write_text('x', encoding='utf-8')
+        subprocess.run(['git', 'add', '-A'], cwd=str(root), check=True)
+        subprocess.run(['git', 'commit', '-q', '-m', 'init'], cwd=str(root), check=True)
+        return root
+
+    def test_target_repo_cli_flag_passed_to_worktree_create(self):
+        """Phase 3: --target-repo must propagate into git_worktree_create's
+        target_repo kwarg so the worktree is created inside the target repo's
+        git tree (not apiary's)."""
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            (td / 'backlog').mkdir()
+            (td / 'intake').mkdir()
+            intake_file = self._make_intake_file(td / 'backlog')
+            scratch = self._init_scratch_repo(td / 'scratch')
+            wt_path = self._make_fake_worktree(td, intake_file)
+            log_path = td / 'overnight.jsonl'
+
+            captured = {}
+            def _capture(branch, *args, **kwargs):
+                captured['target_repo'] = kwargs.get('target_repo')
+                return (True, wt_path, '')
+
+            with (
+                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
+                mock.patch('runner.run.INTAKE_DIR', td / 'intake'),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.next_eligible', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_worktree_create', side_effect=_capture),
+                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
+                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
+                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(50), '', 0.1)),
+            ):
+                rc = run.run_detached(_make_cli_args(target_repo=str(scratch)))
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(Path(captured['target_repo']).resolve(), scratch.resolve())
+
+    def test_target_repo_recorded_in_history_entry(self):
+        """Phase 3: successful runs record the resolved target_repo in the
+        run_history entry so multi-repo runs can be disambiguated later."""
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            (td / 'backlog').mkdir()
+            (td / 'intake').mkdir()
+            intake_file = self._make_intake_file(td / 'backlog')
+            scratch = self._init_scratch_repo(td / 'scratch')
+            wt_path = self._make_fake_worktree(td, intake_file)
+            log_path = td / 'overnight.jsonl'
+
+            with (
+                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
+                mock.patch('runner.run.INTAKE_DIR', td / 'intake'),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.next_eligible', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
+                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
+                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
+                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(50), '', 0.1)),
+            ):
+                rc = run.run_detached(_make_cli_args(target_repo=str(scratch)))
+
+            self.assertEqual(rc, 0)
+            entries = self._read_log(log_path)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]['exit_status'], 'ok')
+            self.assertEqual(Path(entries[0]['target_repo']).resolve(), scratch.resolve())
+
+    def test_target_repo_intake_field_used_when_no_cli(self):
+        """Phase 3 precedence: with no --target-repo, intake.target_repo wins."""
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            (td / 'backlog').mkdir()
+            (td / 'intake').mkdir()
+            scratch = self._init_scratch_repo(td / 'scratch')
+            # Intake JSON declares target_repo via its field
+            intake_path = td / 'backlog' / 'test-uuid-1234.json'
+            intake_path.write_text(json.dumps({
+                'id': 'test-uuid-1234',
+                'title': 'Test Item',
+                'target_repo': str(scratch),
+            }), encoding='utf-8')
+            wt_path = self._make_fake_worktree(td, intake_path)
+            log_path = td / 'overnight.jsonl'
+
+            captured = {}
+            def _capture(branch, *args, **kwargs):
+                captured['target_repo'] = kwargs.get('target_repo')
+                return (True, wt_path, '')
+
+            with (
+                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
+                mock.patch('runner.run.INTAKE_DIR', td / 'intake'),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.next_eligible', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_path),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_worktree_create', side_effect=_capture),
+                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
+                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
+                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(50), '', 0.1)),
+            ):
+                rc = run.run_detached(_make_cli_args())
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(Path(captured['target_repo']).resolve(), scratch.resolve())
+
+    def test_invalid_target_repo_aborts_before_worktree(self):
+        """Phase 3: an unresolvable target_repo aborts with
+        exit_status='target_repo_invalid' BEFORE any worktree is created."""
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            (td / 'backlog').mkdir()
+            (td / 'intake').mkdir()
+            intake_file = self._make_intake_file(td / 'backlog')
+            log_path = td / 'overnight.jsonl'
+
+            create_calls = []
+
+            with (
+                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
+                mock.patch('runner.run.INTAKE_DIR', td / 'intake'),
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.next_eligible', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_worktree_create',
+                           side_effect=lambda *a, **kw: create_calls.append(kw) or (True, td, '')),
+            ):
+                rc = run.run_detached(_make_cli_args(
+                    target_repo=str(td / 'does-not-exist-x9z2q'),
+                ))
+
+            self.assertEqual(rc, 1)
+            self.assertEqual(create_calls, [])  # aborted before worktree creation
+            entries = self._read_log(log_path)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]['exit_status'], 'target_repo_invalid')
 
     def test_token_cap_exceeded(self):
         """Stage returns 1000 tokens but cap is 500 → exit 1, exit_status='token_cap_exceeded'."""
