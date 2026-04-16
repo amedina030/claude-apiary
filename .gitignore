@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 *.pyo
+.venv/
 
 # Hook forensic logs
 core/hooks/*.log

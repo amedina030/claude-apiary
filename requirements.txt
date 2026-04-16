@@ -1,4 +1,5 @@
 # Third-party Python dependencies for claude-apiary.
+# Canonical source: pyproject.toml — this file is kept as a pip-only fallback.
 # Project is primarily stdlib-only (see CLAUDE.md / docs/standards/code-style.md).
 # Pinned to version RANGES, not exact versions, per the portability epic (T5).
 

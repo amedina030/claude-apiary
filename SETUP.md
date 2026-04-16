@@ -4,8 +4,9 @@
 
 - Python 3.11+
 - [Claude Code](https://claude.ai/claude-code) installed and configured
+- [Poetry](https://python-poetry.org/) (recommended) or pip
 
-No external Python dependencies.
+No external runtime dependencies — dev dependencies (pytest) are managed via `pyproject.toml`.
 
 ---
 
@@ -18,7 +19,17 @@ git clone https://github.com/amedina030/claude-apiary.git /path/to/claude-apiary
 cd /path/to/claude-apiary
 ```
 
-### 2. Run the installer
+### 2. Install dependencies
+
+```bash
+# Preferred: Poetry (creates a virtualenv, locks dependencies)
+poetry install
+
+# Alternative: pip (no lockfile)
+pip install -r requirements.txt
+```
+
+### 3. Run the installer
 
 ```bash
 python setup.py --global
@@ -29,11 +40,11 @@ This will:
 - Copy slash commands to `~/.claude/commands/` (budgeter, scribe, startup, etc.)
 - Check whether `~/.claude/CLAUDE.md` exists
 
-### 3. Start a new Claude Code session
+### 4. Start a new Claude Code session
 
 Hooks and command files are loaded at session start. Restart Claude Code after setup.
 
-### 4. Enable the features you want
+### 5. Enable the features you want
 
 In any Claude Code session:
 
@@ -70,6 +81,7 @@ Safe to re-run at any time — old `claude-apiary` hook entries are stripped bef
 
 ```bash
 git pull
+poetry install    # or: pip install -r requirements.txt
 python setup.py --global
 ```
 

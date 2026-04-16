@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "claude-apiary"
+version = "0.1.0"
+description = "A toolkit extending Claude Code with budgeter, scribe, refiner, harden, and runner."
+authors = ["amedina030 <amedina030@gmail.com>"]
+readme = "README.md"
+packages = [
+    { include = "core" },
+    { include = "budgeter" },
+    { include = "scribe" },
+    { include = "runner" },
+    { include = "refiner" },
+    { include = "harden" },
+]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0,<9.0"
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

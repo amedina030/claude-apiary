@@ -16,7 +16,13 @@ That's it — no system services, no daemons, no compiled extensions.
 ```bash
 git clone <repo-url> claude-apiary
 cd claude-apiary
+
+# Preferred: Poetry (creates a virtualenv, locks dependencies)
+poetry install
+
+# Alternative: pip (no lockfile)
 pip install -r requirements.txt
+
 python scripts/bootstrap.py
 ```
 
@@ -87,7 +93,7 @@ If you spot a violation while doing other work, file a follow-up rather than fix
 You're on a Python older than 3.11. Install a newer version and make sure `python` on your `PATH` resolves to it. Check with `python --version`.
 
 **Missing packages warning from bootstrap.**
-Run `pip install -r requirements.txt`. If you use a virtualenv, make sure it's activated before bootstrapping.
+Run `poetry install` (or `pip install -r requirements.txt`). If you use a virtualenv, make sure it's activated before bootstrapping.
 
 **`CLAUDE_PROJECT_DIR` not set in hook commands.**
 Claude Code sets this automatically when invoking hooks. If you're running a hook manually for testing, set it to the repo root: `CLAUDE_PROJECT_DIR=$(pwd) python core/hooks/<hook>.py`.

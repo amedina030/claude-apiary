@@ -110,24 +110,62 @@ def _check_python_version(result: BootstrapResult) -> None:
         )
 
 
-def _check_requirements(result: BootstrapResult) -> None:
-    """Soft check: parse requirements.txt and verify each top-level package imports."""
-    if not REQUIREMENTS_FILE.is_file():
-        return
-    missing: list[str] = []
-    for raw in REQUIREMENTS_FILE.read_text(encoding="utf-8").splitlines():
+def _parse_dep_names_from_pyproject(path: Path) -> list[str]:
+    """Extract package names from pyproject.toml dev dependencies.
+
+    Parses the ``[tool.poetry.group.dev.dependencies]`` table using a
+    minimal line-by-line scan (no third-party TOML library needed).
+    """
+    names: list[str] = []
+    in_dev_deps = False
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line.startswith("["):
+            in_dev_deps = line == "[tool.poetry.group.dev.dependencies]"
+            continue
+        if in_dev_deps and "=" in line:
+            name = line.split("=", 1)[0].strip()
+            if name:
+                names.append(name)
+    return names
+
+
+def _parse_dep_names_from_requirements(path: Path) -> list[str]:
+    """Extract package names from a pip requirements.txt file."""
+    names: list[str] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        # Extract bare package name from "pkg>=1.0,<2.0" / "pkg==1.0" / "pkg".
         name = ""
         for ch in line:
             if ch.isalnum() or ch in ("_", "-"):
                 name += ch
             else:
                 break
-        if not name:
-            continue
+        if name:
+            names.append(name)
+    return names
+
+
+PYPROJECT_FILE = REPO_ROOT / "pyproject.toml"
+
+
+def _check_requirements(result: BootstrapResult) -> None:
+    """Soft check: verify each dependency package imports successfully.
+
+    Prefers pyproject.toml (canonical) and falls back to requirements.txt.
+    """
+    if PYPROJECT_FILE.is_file():
+        dep_names = _parse_dep_names_from_pyproject(PYPROJECT_FILE)
+        install_hint = "poetry install"
+    elif REQUIREMENTS_FILE.is_file():
+        dep_names = _parse_dep_names_from_requirements(REQUIREMENTS_FILE)
+        install_hint = f"pip install -r {REQUIREMENTS_FILE.name}"
+    else:
+        return
+    missing: list[str] = []
+    for name in dep_names:
         import_name = name.replace("-", "_")
         try:
             __import__(import_name)
@@ -136,7 +174,7 @@ def _check_requirements(result: BootstrapResult) -> None:
     if missing:
         result.warnings.append(
             f"Missing Python packages: {', '.join(missing)}. "
-            f"Run: pip install -r {REQUIREMENTS_FILE.name}"
+            f"Run: {install_hint}"
         )
 
 
