@@ -107,6 +107,18 @@ class TestScribeNotes(unittest.TestCase):
         count = notes._run_auto_archive_store(self.store)
         self.assertGreaterEqual(count, 1)
 
+    def test_auto_archive_old_decisions(self):
+        entry = self.store.add_note('decision', 'old decision', 'sess1')
+        old_ts = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+        self.store.update_note('decision', entry['year'], entry['seq'], timestamp=old_ts)
+        count = notes._run_auto_archive_store(self.store)
+        self.assertGreaterEqual(count, 1)
+        # Recent decision should NOT be archived
+        fresh = self.store.add_note('decision', 'recent decision', 'sess1')
+        notes._run_auto_archive_store(self.store)
+        got = self.store.get_note('decision', fresh['year'], fresh['seq'])
+        self.assertFalse(got.get('_from_archive'))
+
     def test_learn_creates_entry(self):
         entry = self.store.add_learning('discovered a trick', 'sess1')
         self.assertIn('display_id', entry)
@@ -221,6 +233,45 @@ class TestScribeNotes(unittest.TestCase):
         # Default active list excludes dropped
         visible = [n for n in self.store.list_notes(status='active')
                    if n.get('status') not in ('done', 'dropped')]
+        self.assertEqual(len(visible), 1)
+        self.assertEqual(visible[0]['seq'], e1['seq'])
+
+    def test_defer_sets_deferred_status(self):
+        entry = self.store.add_note('todo', 'need more data first', 'sess1')
+        args = self._make_args(id=entry['display_id'])
+        notes.cmd_defer(args)
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(got['status'], 'deferred')
+
+    def test_resume_returns_to_active(self):
+        entry = self.store.add_note('todo', 'defer me', 'sess1')
+        self.store.update_note('todo', entry['year'], entry['seq'], status='deferred')
+        args = self._make_args(id=entry['display_id'])
+        notes.cmd_resume(args)
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(got['status'], 'active')
+
+    def test_defer_rejects_done_note(self):
+        entry = self.store.add_note('todo', 'done note', 'sess1')
+        self.store.update_note('todo', entry['year'], entry['seq'], status='done')
+        args = self._make_args(id=entry['display_id'])
+        with self.assertRaises(SystemExit):
+            notes.cmd_defer(args)
+
+    def test_resume_noop_on_active_note(self):
+        entry = self.store.add_note('todo', 'already active', 'sess1')
+        args = self._make_args(id=entry['display_id'])
+        # Should print a message but not raise or change status
+        notes.cmd_resume(args)
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(got['status'], 'active')
+
+    def test_default_list_hides_deferred(self):
+        e1 = self.store.add_note('todo', 'visible', 'sess1')
+        e2 = self.store.add_note('todo', 'hidden', 'sess1')
+        self.store.update_note('todo', e2['year'], e2['seq'], status='deferred')
+        visible = [n for n in self.store.list_notes(status='active')
+                   if n.get('status') not in ('done', 'dropped', 'deferred')]
         self.assertEqual(len(visible), 1)
         self.assertEqual(visible[0]['seq'], e1['seq'])
 

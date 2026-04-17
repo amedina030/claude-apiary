@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-04-07"
+last_verified: "2026-04-17"
 ---
 
 # CLI Tools
@@ -23,6 +23,8 @@ Core note and learning management.
 | `list` | `notes.py list [filters]` | List active notes |
 | `get` | `notes.py get <ID>` | Show a single note by ID (e.g. `T-2026-1`) |
 | `done` | `notes.py done <ID>` | Mark a note as done (e.g. `T-2026-1`) |
+| `defer` | `notes.py defer <ID>` | Hide from default listings and startup banner without closing. Use when revisiting needs more data. |
+| `resume` | `notes.py resume <ID>` | Undo a defer — return the note to active |
 | `update` | `notes.py update <ID> --content "<text>"` | Update note content (e.g. `T-2026-1`) |
 | `archive` | `notes.py archive [--before YYYY-MM-DD]` | Archive old notes |
 | `learn` | `notes.py learn --content "<text>"` | Add a learning |
@@ -46,7 +48,8 @@ Core note and learning management.
 | `--full` | learnings | Print full content (not truncated) |
 | `--search TEXT` | list, learnings | Full-text search |
 | `--last N` / `--limit N` | list | Show last N notes (both spellings accepted as aliases) |
-| `--all` | list | Include done notes |
+| `--all` | list | Include done, dropped, and deferred notes |
+| `--deferred` | list | Show only deferred notes |
 | `--archive` | list | Search archive instead of active |
 | `--role ROLE` | add, list, learn | Session role filter |
 | `--mission MISSION` | add, list, learn | Session mission filter |

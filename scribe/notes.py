@@ -218,12 +218,14 @@ def _run_auto_archive_store(store) -> int:
 
     Retention rules by type:
       handoff  - keep only the latest per role/mission, archive the rest
-      context  - archive after 3 days
+      context  - archive after 3 days (mid-session checkpoints decay fast)
+      decision - archive after 30 days (historical record, not live state)
       done     - archive after 1 day (any type marked done)
-      todo/decision/wishlist/blocker - keep until done
+      todo/wishlist/blocker - keep until done
     """
     now = datetime.now(timezone.utc)
     context_cutoff = now - timedelta(days=3)
+    decision_cutoff = now - timedelta(days=30)
     done_cutoff = now - timedelta(days=1)
 
     all_notes = store.list_notes(status='active')
@@ -251,6 +253,8 @@ def _run_auto_archive_store(store) -> int:
             if ts < latest_handoff.get(key, ts):
                 to_archive_ids.append((n['type'], n['year'], n['seq']))
         elif ntype == 'context' and ts < context_cutoff:
+            to_archive_ids.append((n['type'], n['year'], n['seq']))
+        elif ntype == 'decision' and ts < decision_cutoff:
             to_archive_ids.append((n['type'], n['year'], n['seq']))
 
     for ntype, nyear, nseq in to_archive_ids:
@@ -356,9 +360,12 @@ def cmd_list(args):
     note_type = args.type if args.type else None
     notes_list = store.list_notes(note_type=note_type, status=status, search=args.search)
 
-    # Filter by status (hide done and dropped unless --all or --archive)
-    if not args.all and not args.archive:
-        notes_list = [n for n in notes_list if n.get('status') not in ('done', 'dropped')]
+    # --deferred shows only deferred notes; takes precedence over default hiding.
+    if getattr(args, 'deferred', False):
+        notes_list = [n for n in notes_list if n.get('status') == 'deferred']
+    elif not args.all and not args.archive:
+        # Default active view hides done/dropped/deferred. --all includes all three.
+        notes_list = [n for n in notes_list if n.get('status') not in ('done', 'dropped', 'deferred')]
 
     # Filter by session
     if args.session:
@@ -393,7 +400,7 @@ def cmd_list(args):
         ntype = n.get('type', '?')[:8]
         age = format_age(n.get('timestamp', ''))
         st = n.get('status', '')
-        status_label = f' [{st.upper()}]' if st in ('done', 'dropped') else ''
+        status_label = f' [{st.upper()}]' if st in ('done', 'dropped', 'deferred') else ''
         # For store entries, content is in 'summary' field; read full content for display
         content = n.get('summary', '').replace('\n', ' ')[:80]
         line = f'{_format_id(n):<12} {ntype:<10} ({age:<9}) {content}{status_label}'
@@ -550,6 +557,46 @@ def cmd_drop(args):
         sys.exit(1)
     store.update_note(note_type, year, seq, status='dropped')
     print(f'Marked {args.id} as dropped.')
+
+
+def cmd_defer(args):
+    store = args.store
+    note_type, year, seq = _parse_id_arg(str(args.id), store)
+    if note_type == 'learning':
+        print(f'Error: {args.id} is a learning — use "unlearn" to remove it.', file=sys.stderr)
+        sys.exit(1)
+    note = store.get_note(note_type, year, seq)
+    if not note:
+        print(f'Note {args.id} not found.', file=sys.stderr)
+        sys.exit(1)
+    if note.get('status') == 'deferred':
+        print(f'Note {args.id} is already deferred.')
+        return
+    if note.get('status') in ('done', 'dropped'):
+        print(
+            f'Error: note {args.id} is {note.get("status")}; cannot defer a closed note.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    store.update_note(note_type, year, seq, status='deferred')
+    print(f'Deferred {args.id}. Use "resume {args.id}" to bring it back.')
+
+
+def cmd_resume(args):
+    store = args.store
+    note_type, year, seq = _parse_id_arg(str(args.id), store)
+    if note_type == 'learning':
+        print(f'Error: {args.id} is a learning and cannot be resumed.', file=sys.stderr)
+        sys.exit(1)
+    note = store.get_note(note_type, year, seq)
+    if not note:
+        print(f'Note {args.id} not found.', file=sys.stderr)
+        sys.exit(1)
+    if note.get('status') != 'deferred':
+        print(f'Note {args.id} is not deferred (status: {note.get("status", "?")}).')
+        return
+    store.update_note(note_type, year, seq, status='active')
+    print(f'Resumed {args.id}.')
 
 
 def cmd_unarchive(args):
@@ -859,7 +906,8 @@ def main():
     p_list.add_argument("--search")
     p_list.add_argument("--last", "--limit", type=int, dest="last",
                         help="Show only the N most recent matching notes (--limit is an alias)")
-    p_list.add_argument("--all", action="store_true", help="Include done notes")
+    p_list.add_argument("--all", action="store_true", help="Include done, dropped, and deferred notes")
+    p_list.add_argument("--deferred", action="store_true", help="Show only deferred notes")
     p_list.add_argument("--archive", action="store_true", help="Search archive instead")
     p_list.add_argument("--role", help="Filter by session role")
     p_list.add_argument("--mission", help="Filter by session mission")
@@ -875,6 +923,14 @@ def main():
     # drop — close without claiming completion
     p_drop = sub.add_parser("drop")
     p_drop.add_argument("id", type=str)
+
+    # defer — hide from default listings without closing
+    p_defer = sub.add_parser("defer")
+    p_defer.add_argument("id", type=str)
+
+    # resume — undo defer; returns note to active
+    p_resume = sub.add_parser("resume")
+    p_resume.add_argument("id", type=str)
 
     # unarchive — move a note back from its year's archive to active
     p_unarchive = sub.add_parser("unarchive")
@@ -948,7 +1004,8 @@ def main():
 
     commands = {
         'add': cmd_add, 'list': cmd_list, 'get': cmd_get, 'show': cmd_get,
-        'done': cmd_done, 'drop': cmd_drop, 'unarchive': cmd_unarchive,
+        'done': cmd_done, 'drop': cmd_drop, 'defer': cmd_defer, 'resume': cmd_resume,
+        'unarchive': cmd_unarchive,
         'update': cmd_update, 'archive': cmd_archive,
         'learn': cmd_learn, 'learnings': cmd_learnings, 'unlearn': cmd_unlearn,
         'handoff-sessions': cmd_handoff_sessions,

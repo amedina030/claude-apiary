@@ -271,7 +271,7 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
     active_entries = store.list_notes(status="active")
     filtered_active = [
         n for n in active_entries
-        if n.get("status") not in ("done", "resolved")
+        if n.get("status") not in ("done", "resolved", "dropped", "deferred")
         and _matches_role_mission(n, role, mission)
     ]
 
