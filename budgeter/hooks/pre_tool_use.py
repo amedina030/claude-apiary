@@ -8,6 +8,7 @@ the true cost of the previous tool call, attributed correctly.
 
 The final tool in a session is logged by the Stop hook.
 """
+import os
 import sys
 import json
 from pathlib import Path
@@ -264,6 +265,22 @@ def main():
             f"triggered: {triggered}. {magnitude}. "
             f"Ask the user if they want to proceed before running.",
         ))
+
+    # Session-length nudge: one-shot suggestion to wrap up when the current
+    # prompt size crosses configured thresholds. Skipped for headless runner
+    # subprocesses — the suggestion is only actionable in live sessions.
+    if warn_enabled and os.environ.get("APIARY_RUNNER_SUBPROCESS") != "1":
+        tier, nudge_msg = estimator.session_length_nudge(last_input + last_cache, config)
+        if tier:
+            try:
+                sid_for_flag = SessionId(session_id)
+                flag_file = sid_for_flag.flag_path(f"budgeter_session_len_{tier}_fired")
+                if not flag_file.exists():
+                    flag_file.parent.mkdir(parents=True, exist_ok=True)
+                    flag_file.write_text("1", encoding="utf-8")
+                    blocks.append(context_block("budgeter", nudge_msg))
+            except ValueError:
+                pass
 
     hook_allow(join_contexts(*blocks))
 

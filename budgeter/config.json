@@ -34,5 +34,7 @@
   },
   "warn_score_threshold": 1.0,
   "min_flagged_tasks": 10,
-  "expensive_percentile_feedback": 75
+  "expensive_percentile_feedback": 75,
+  "session_warn_soft_tokens": 600000,
+  "session_warn_hard_tokens": 800000
 }

@@ -161,6 +161,31 @@ def _group_tasks(log_entries, config):
     return tasks
 
 
+def session_length_nudge(context_tokens, config):
+    """
+    Return (tier, message) for the current context-window utilization, or
+    (None, None) if we are below the soft threshold.
+
+    *context_tokens* is the size of the most recent prompt (input + cache_read),
+    which directly corresponds to how full the model's context window is.
+    Thresholds are configurable with defaults calibrated for the 1M-context
+    Opus model.
+    """
+    hard = config.get("session_warn_hard_tokens", 800000)
+    soft = config.get("session_warn_soft_tokens", 600000)
+    if context_tokens >= hard:
+        return ("hard",
+                f"Session context is very long ({context_tokens:,} tokens). "
+                "Suggest to the user that they start a new session now — "
+                "context-compression fidelity loss is likely beyond this point.")
+    if context_tokens >= soft:
+        return ("soft",
+                f"Session context is getting long ({context_tokens:,} tokens). "
+                "Consider wrapping up at the next natural checkpoint and "
+                "suggesting the user start a fresh session.")
+    return (None, None)
+
+
 def estimate_magnitude(current_flags, log_entries, config):
     """
     Given the current task's scope flags, find historical flagged tasks that share

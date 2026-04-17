@@ -885,7 +885,256 @@ def main():
         test_tune_propose_weights_clamps_extremes(tmp_path)
         print("OK")
 
+        print("Unit: session_length_nudge below threshold ...... ", end="")
+        test_session_length_nudge_below_threshold(tmp_path)
+        print("OK")
+
+        print("Unit: session_length_nudge soft tier ............ ", end="")
+        test_session_length_nudge_soft_tier(tmp_path)
+        print("OK")
+
+        print("Unit: session_length_nudge hard tier ............ ", end="")
+        test_session_length_nudge_hard_tier(tmp_path)
+        print("OK")
+
+        print("Unit: session_length_nudge config override ...... ", end="")
+        test_session_length_nudge_config_override(tmp_path)
+        print("OK")
+
+        print("Integration: session nudge fires once per tier .. ", end="")
+        test_session_length_nudge_fires_once_per_tier(tmp_path)
+        print("OK")
+
+        print("Integration: session nudge hard tier fires ...... ", end="")
+        test_session_length_nudge_hard_tier_fires(tmp_path)
+        print("OK")
+
+        print("Integration: session nudge skipped if detached .. ", end="")
+        test_session_length_nudge_skipped_when_detached(tmp_path)
+        print("OK")
+
+        print("Integration: session nudge skipped if warn off .. ", end="")
+        test_session_length_nudge_skipped_when_warn_disabled(tmp_path)
+        print("OK")
+
     print("\nAll tests passed.")
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: session_length_nudge
+# ---------------------------------------------------------------------------
+
+def test_session_length_nudge_below_threshold(tmp_path):
+    """Below soft threshold returns (None, None)."""
+    from budgeter.lib.estimator import session_length_nudge
+    tier, msg = session_length_nudge(0, {})
+    assert tier is None and msg is None
+    tier, msg = session_length_nudge(599_999, {})
+    assert tier is None and msg is None
+
+
+def test_session_length_nudge_soft_tier(tmp_path):
+    """At/above soft threshold returns soft tier."""
+    from budgeter.lib.estimator import session_length_nudge
+    tier, msg = session_length_nudge(600_000, {})
+    assert tier == "soft"
+    assert "getting long" in msg
+    assert "600,000" in msg
+
+
+def test_session_length_nudge_hard_tier(tmp_path):
+    """At/above hard threshold returns hard tier."""
+    from budgeter.lib.estimator import session_length_nudge
+    tier, msg = session_length_nudge(800_000, {})
+    assert tier == "hard"
+    assert "very long" in msg
+    assert "800,000" in msg
+
+
+def test_session_length_nudge_config_override(tmp_path):
+    """Custom thresholds in config are honored."""
+    from budgeter.lib.estimator import session_length_nudge
+    cfg = {"session_warn_soft_tokens": 100, "session_warn_hard_tokens": 200}
+    assert session_length_nudge(50, cfg) == (None, None)
+    assert session_length_nudge(150, cfg)[0] == "soft"
+    assert session_length_nudge(250, cfg)[0] == "hard"
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: session-length nudge in pre_tool_use hook
+# ---------------------------------------------------------------------------
+
+def _write_transcript(tmp_path, *, input_tokens=0, cache_read=0, output_tokens=0):
+    """Write a minimal Claude Code transcript with one assistant usage record."""
+    path = tmp_path / "transcript.jsonl"
+    entry = {
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "ok"}],
+            "usage": {
+                "input_tokens": input_tokens,
+                "cache_read_input_tokens": cache_read,
+                "output_tokens": output_tokens,
+            },
+        }
+    }
+    path.write_text(json.dumps(entry) + "\n", encoding="utf-8")
+    return path
+
+
+def _with_budgeter_warn_enabled():
+    """Enable budgeter-warn flag for a test, returning a cleanup callable."""
+    from core import flags
+    was_enabled = flags.is_enabled("budgeter-warn")
+    if not was_enabled:
+        flags.enable("budgeter-warn")
+    return lambda: (None if was_enabled else flags.disable("budgeter-warn"))
+
+
+def _cleanup_session_flag_files(session_id):
+    """Remove any flag files created by the hook for this session_id."""
+    from core.session import SessionId
+    try:
+        sid = SessionId(session_id)
+    except ValueError:
+        return
+    for suffix in ("budgeter_context_done",
+                   "budgeter_session_len_soft_fired",
+                   "budgeter_session_len_hard_fired"):
+        path = sid.flag_path(suffix)
+        if path.exists():
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+
+def _extract_additional_context(hook_stdout):
+    """Parse hook stdout JSON and return additionalContext string, or ''."""
+    try:
+        payload = json.loads(hook_stdout.strip())
+        return payload.get("hookSpecificOutput", {}).get("additionalContext", "") or ""
+    except json.JSONDecodeError:
+        return ""
+
+
+def test_session_length_nudge_fires_once_per_tier(tmp_path):
+    """Soft nudge fires on first PRE over the threshold; re-runs do not re-inject."""
+    project_dir = make_test_project(tmp_path / "project_nudge_once")
+    cwd = str(project_dir)
+    session_id = make_session_id()
+    transcript = _write_transcript(tmp_path, input_tokens=600_000)
+    payload = {
+        "tool_name": "Bash",
+        "session_id": session_id,
+        "transcript_path": str(transcript),
+        "cwd": cwd,
+    }
+
+    restore_warn = _with_budgeter_warn_enabled()
+    try:
+        r1 = run_hook("pre_tool_use.py", payload)
+        assert r1.returncode == 0, f"PRE failed: {r1.stderr}"
+        ctx1 = _extract_additional_context(r1.stdout)
+        assert "Session context is getting long" in ctx1, \
+            f"Soft nudge should fire at 600k tokens; got: {ctx1!r}"
+
+        r2 = run_hook("pre_tool_use.py", payload)
+        assert r2.returncode == 0, f"PRE #2 failed: {r2.stderr}"
+        ctx2 = _extract_additional_context(r2.stdout)
+        assert "Session context is getting long" not in ctx2, \
+            f"Second PRE must not re-inject soft nudge; got: {ctx2!r}"
+    finally:
+        restore_warn()
+        _cleanup_session_flag_files(session_id)
+
+
+def test_session_length_nudge_hard_tier_fires(tmp_path):
+    """Hard nudge fires on first PRE over the hard threshold."""
+    project_dir = make_test_project(tmp_path / "project_nudge_hard")
+    cwd = str(project_dir)
+    session_id = make_session_id()
+    transcript = _write_transcript(tmp_path, input_tokens=800_000)
+    payload = {
+        "tool_name": "Bash",
+        "session_id": session_id,
+        "transcript_path": str(transcript),
+        "cwd": cwd,
+    }
+
+    restore_warn = _with_budgeter_warn_enabled()
+    try:
+        r = run_hook("pre_tool_use.py", payload)
+        assert r.returncode == 0, f"PRE failed: {r.stderr}"
+        ctx = _extract_additional_context(r.stdout)
+        assert "Session context is very long" in ctx, \
+            f"Hard nudge should fire at 800k tokens; got: {ctx!r}"
+    finally:
+        restore_warn()
+        _cleanup_session_flag_files(session_id)
+
+
+def test_session_length_nudge_skipped_when_detached(tmp_path):
+    """APIARY_RUNNER_SUBPROCESS=1 suppresses the nudge even over threshold."""
+    project_dir = make_test_project(tmp_path / "project_nudge_detached")
+    cwd = str(project_dir)
+    session_id = make_session_id()
+    transcript = _write_transcript(tmp_path, input_tokens=900_000)
+    payload = {
+        "tool_name": "Bash",
+        "session_id": session_id,
+        "transcript_path": str(transcript),
+        "cwd": cwd,
+    }
+
+    restore_warn = _with_budgeter_warn_enabled()
+    try:
+        env = {**os.environ,
+               "APIARY_BUDGETER_TEST_ISOLATION": "1",
+               "APIARY_RUNNER_SUBPROCESS": "1"}
+        r = subprocess.run(
+            [PYTHON, str(HOOKS_DIR / "pre_tool_use.py")],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            env=env,
+        )
+        assert r.returncode == 0, f"PRE failed: {r.stderr}"
+        ctx = _extract_additional_context(r.stdout)
+        assert "Session context" not in ctx, \
+            f"Nudge must not fire in detached runner; got: {ctx!r}"
+    finally:
+        restore_warn()
+        _cleanup_session_flag_files(session_id)
+
+
+def test_session_length_nudge_skipped_when_warn_disabled(tmp_path):
+    """budgeter-warn flag disabled suppresses the nudge."""
+    from core import flags
+    project_dir = make_test_project(tmp_path / "project_nudge_warn_off")
+    cwd = str(project_dir)
+    session_id = make_session_id()
+    transcript = _write_transcript(tmp_path, input_tokens=900_000)
+    payload = {
+        "tool_name": "Bash",
+        "session_id": session_id,
+        "transcript_path": str(transcript),
+        "cwd": cwd,
+    }
+
+    was_enabled = flags.is_enabled("budgeter-warn")
+    if was_enabled:
+        flags.disable("budgeter-warn")
+    try:
+        r = run_hook("pre_tool_use.py", payload)
+        assert r.returncode == 0, f"PRE failed: {r.stderr}"
+        ctx = _extract_additional_context(r.stdout)
+        assert "Session context" not in ctx, \
+            f"Nudge must not fire when warn disabled; got: {ctx!r}"
+    finally:
+        if was_enabled:
+            flags.enable("budgeter-warn")
+        _cleanup_session_flag_files(session_id)
 
 
 if __name__ == "__main__":
