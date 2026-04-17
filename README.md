@@ -58,7 +58,7 @@ Claude Code sessions are isolated — each one starts fresh with no memory of wh
 /startup          # session init — generates handoff + loads notes and learnings
 ```
 
-**Storage:** `<repo-root>/.apiary/scribe/notes.jsonl` and `learnings.jsonl` — repo-local and self-ignored via the umbrella `.apiary/.gitignore`. Gated by `APIARY_STATE_LAYOUT=repo` during the migration window (todo #268 flips the default); the legacy path `~/.claude/projects/<project-key>/` remains the fallback until then.
+**Storage:** `<repo-root>/.apiary/scribe/` — typed-year folder layout (`todos/2026/`, `handoffs/2026/`, …, each with `index.jsonl` and per-note `<seq>.md` files). Repo-local and self-ignored via the umbrella `.apiary/.gitignore`. This is the default; set `APIARY_STATE_LAYOUT=legacy` only as an escape hatch to read the pre-migration `~/.claude/projects/<project-key>/` path. See [`PORTABILITY.md`](PORTABILITY.md) for the full state map.
 
 ---
 
@@ -124,7 +124,7 @@ python -m runner.mark_done <slug>                                            # c
 
 **Safety:** `NO_USAGE_STAGES` whitelists stages that legitimately make no Claude calls; any other zero-usage stage aborts the run so token caps can't be bypassed. Each handoff is gated by a validator (`validate_intake.py`, `validate_spec.py`, `validate_plan.py`).
 
-**Overnight / detached mode:** `detached_lib.py` handles branch creation, claim-based backlog picking, hygiene prechecks, and appends to an overnight log. Cron setup is in `runner/cron_setup.md`.
+**Overnight / detached mode:** `detached_lib.py` handles branch creation, claim-based backlog picking, hygiene prechecks, and appends to an overnight log. Cron setup is in [`runner/scheduling.md`](runner/scheduling.md). To detect and fix drift in the registered scheduled task (after repo moves, renames, or bootstrap runs), use `python -m runner.cron_health check` or `... repair --apply`; the canonical state lives in `runner/cron_registry.json`.
 
 ---
 
@@ -200,11 +200,14 @@ claude-apiary/
 │   ├── mark_done.py             # Close a ticket hand-fixed outside the runner
 │   ├── queue.py                 # Backlog queue helpers
 │   ├── detached_lib.py          # Overnight/cron detached-mode helpers
+│   ├── cron_health.py           # Check/repair OS scheduler against cron_registry.json
+│   ├── cron_registry.json       # Canonical scheduled-entry registry
+│   ├── schedulers/              # Backend protocol + Windows Task Scheduler impl
 │   ├── claude_subprocess.py     # Claude CLI wrapper shared by stages
 │   ├── cost_emit.py             # Emits <usage> XML from Claude envelope
 │   ├── config_loader.py         # Shared config loader
 │   ├── config.json              # Default orchestrator/stage config
-│   ├── cron_setup.md            # Cron registration instructions
+│   ├── scheduling.md            # Cron/schedule setup (supersedes cron_setup.md)
 │   ├── backlog/                 # Draft tickets (ticketed but not yet run)
 │   ├── intake/                  # Stage 1 input JSON files (<uuid>.json)
 │   ├── specs/                   # Stage 2 output (git-ignored)
