@@ -559,6 +559,36 @@ emit_usage_xml(claude_subprocess_stdout)  # writes <usage>...</usage> to stderr
 
 Silent on any failure — cost logging never breaks a stage. Sums all numeric fields under the envelope's `usage` key (input + output + cache_*) into a single `total_tokens` value.
 
+## runner/cron_health.py
+
+Check or repair the host OS scheduler against apiary's canonical scheduled-entry registry (`runner/cron_registry.json`). Detects drift when the repo moves, files rename, or the registered command points at a path that no longer exists — the trigger case was the `pipeline` → `runner` rename silently breaking an overnight cron entry.
+
+```bash
+python ~/.claude/apiary_launch.py runner/cron_health.py check
+python ~/.claude/apiary_launch.py runner/cron_health.py repair [--apply]
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `check` | Read-only inspection; prints a status table, exit 0 when everything matches the registry |
+| `repair` | Dry-run by default (prints intended changes); pass `--apply` to execute delete + recreate against the scheduler |
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | All entries match the registry (or `repair` dry-run succeeded) |
+| `1` | Drift detected, or one or more operations failed during `repair --apply` |
+| `2` | Config or platform error (registry missing, malformed JSON, unsupported OS, scheduler binary not on PATH) |
+
+### Platform support
+
+Windows Task Scheduler only in this release — backed by `schtasks`. The scheduler-backend protocol (`runner/schedulers/base.py`) keeps launchd (macOS) and crontab (Linux) cheap to add when there's a real user for them. Running on any other platform exits with code 2 and a "not supported" message.
+
+`scripts/bootstrap.py` invokes `check` at the tail of its run, prints the status table, and never propagates drift into its own exit code — the check is informational only.
+
 ## runner/config_loader.py
 
 Shared config loader. Library module — not a CLI tool. Used by runner stages to read `runner/config.json`.

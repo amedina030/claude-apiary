@@ -218,5 +218,32 @@ class AutoStartupFlagTests(BootstrapTestBase):
         )
 
 
+class CronHealthHookTests(unittest.TestCase):
+    """The tail-end cron_health check must never affect bootstrap's exit."""
+
+    def test_cron_health_failure_is_swallowed(self):
+        from runner import cron_health
+
+        with mock.patch.object(
+            cron_health, "run_bootstrap_check", side_effect=RuntimeError("boom")
+        ):
+            # Should not raise — bootstrap's exit must be independent.
+            bootstrap._run_cron_health_check(quiet=True)
+
+    def test_cron_health_invoked_when_available(self):
+        from runner import cron_health
+
+        called = []
+
+        def fake_check(*, stream):
+            called.append(True)
+
+        with mock.patch.object(
+            cron_health, "run_bootstrap_check", side_effect=fake_check
+        ):
+            bootstrap._run_cron_health_check(quiet=True)
+        self.assertEqual(called, [True])
+
+
 if __name__ == "__main__":
     unittest.main()

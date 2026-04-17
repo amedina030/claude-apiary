@@ -1,0 +1,11 @@
+{
+  "entries": [
+    {
+      "id": "overnight-runner",
+      "description": "Nightly detached runner pass",
+      "schedule": {"type": "daily", "time": "02:00"},
+      "command": ["python", "-m", "runner.run", "--detached"],
+      "cwd": "<apiary_repo>"
+    }
+  ]
+}

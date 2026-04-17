@@ -39,6 +39,8 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `python -m runner.approval` | Approval gate (stage 6) | `<harden_result>` |
 | `python -m runner.draft_ticket` | Create backlog draft ticket | --title, --problem, --description, --scope, --context, --from-todo (only fills description) |
 | `python -m runner.promote` | Promote backlog draft to intake | `<slug>` (filename without dir or .json extension) |
+| `python -m runner.cron_health check` | Inspect OS-scheduler drift against `runner/cron_registry.json` | none |
+| `python -m runner.cron_health repair` | Fix scheduler drift (dry-run default) | `--apply` |
 | `runner/cost_emit.py` | Emit usage XML from Claude envelope | Library — no CLI |
 | `runner/config_loader.py` | Shared runner config loader | Library — no CLI |
 | `setup.py` | Unified installer | --global, --project-path, --check |

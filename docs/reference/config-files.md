@@ -32,6 +32,34 @@ Runner stage settings. Located in the repo at `runner/config.json`. All values h
 
 Loaded by `runner/config_loader.py`: `get(section, key, default)`.
 
+## runner/cron_registry.json
+
+Canonical list of scheduled OS-scheduler entries that apiary owns. Located in the repo at `runner/cron_registry.json`. Read by `runner/cron_health.py` (`check` and `repair` subcommands) and by `scripts/bootstrap.py`'s tail-end drift report.
+
+```json
+{
+  "entries": [
+    {
+      "id": "overnight-runner",
+      "description": "Nightly detached runner pass",
+      "schedule": {"type": "daily", "time": "02:00"},
+      "command": ["python", "-m", "runner.run", "--detached"],
+      "cwd": "<apiary_repo>"
+    }
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | yes | Stable handle; becomes the suffix after the `\apiary\` scheduler prefix |
+| `description` | string | no | Human-readable label shown in the `check` table |
+| `schedule.type` | string | yes | `"daily"` is the only type implemented this release |
+| `schedule.time` | string | yes | 24-hour `HH:MM` |
+| `command` | list of strings | yes | List-form command; rendered with backend-specific quoting at register time |
+| `cwd` | string | no | Working directory; supports the `<apiary_repo>` placeholder |
+| `disabled` | bool | no | `true` means the entry must NOT exist in the scheduler; `repair --apply` deletes any matching entry |
+
 ## budgeter/config.json
 
 Global budgeter configuration. Located in the repo at `budgeter/config.json`.

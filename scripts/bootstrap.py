@@ -351,7 +351,29 @@ def main() -> int:
     if not args.no_context_rules:
         _prompt_context_rules_install(quiet=args.quiet, assume_yes=args.yes)
 
+    _run_cron_health_check(quiet=args.quiet)
+
     return 1 if result.warnings else 0
+
+
+def _run_cron_health_check(*, quiet: bool) -> None:
+    """Informational cron-health report at the tail end of bootstrap.
+
+    Calls ``runner.cron_health.run_bootstrap_check`` which prints the
+    current scheduled-entry drift status (if any registry entries exist).
+    Never propagates failure — bootstrap's exit code intentionally does
+    not depend on whether the host's scheduled tasks happen to match
+    the registry.
+    """
+    try:
+        from runner import cron_health  # noqa: WPS433 (lazy import)
+    except Exception:
+        return
+    try:
+        cron_health.run_bootstrap_check(stream=sys.stdout)
+    except Exception as exc:
+        if not quiet:
+            print(f"cron_health check skipped: {exc}")
 
 
 if __name__ == "__main__":
