@@ -913,8 +913,12 @@ def main():
         test_session_length_nudge_skipped_when_detached(tmp_path)
         print("OK")
 
-        print("Integration: session nudge skipped if warn off .. ", end="")
-        test_session_length_nudge_skipped_when_warn_disabled(tmp_path)
+        print("Integration: session nudge skipped if session-warn off ", end="")
+        test_session_length_nudge_skipped_when_session_warn_disabled(tmp_path)
+        print("OK")
+
+        print("Integration: session nudge independent of magnitude-warn ", end="")
+        test_session_length_nudge_independent_of_magnitude_warn(tmp_path)
         print("OK")
 
     print("\nAll tests passed.")
@@ -982,13 +986,13 @@ def _write_transcript(tmp_path, *, input_tokens=0, cache_read=0, output_tokens=0
     return path
 
 
-def _with_budgeter_warn_enabled():
-    """Enable budgeter-warn flag for a test, returning a cleanup callable."""
+def _with_flag_enabled(flag_name):
+    """Enable a budgeter flag for a test, returning a cleanup callable."""
     from core import flags
-    was_enabled = flags.is_enabled("budgeter-warn")
+    was_enabled = flags.is_enabled(flag_name)
     if not was_enabled:
-        flags.enable("budgeter-warn")
-    return lambda: (None if was_enabled else flags.disable("budgeter-warn"))
+        flags.enable(flag_name)
+    return lambda: (None if was_enabled else flags.disable(flag_name))
 
 
 def _cleanup_session_flag_files(session_id):
@@ -1031,7 +1035,7 @@ def test_session_length_nudge_fires_once_per_tier(tmp_path):
         "cwd": cwd,
     }
 
-    restore_warn = _with_budgeter_warn_enabled()
+    restore_warn = _with_flag_enabled("budgeter-session-warn")
     try:
         r1 = run_hook("pre_tool_use.py", payload)
         assert r1.returncode == 0, f"PRE failed: {r1.stderr}"
@@ -1062,7 +1066,7 @@ def test_session_length_nudge_hard_tier_fires(tmp_path):
         "cwd": cwd,
     }
 
-    restore_warn = _with_budgeter_warn_enabled()
+    restore_warn = _with_flag_enabled("budgeter-session-warn")
     try:
         r = run_hook("pre_tool_use.py", payload)
         assert r.returncode == 0, f"PRE failed: {r.stderr}"
@@ -1087,7 +1091,7 @@ def test_session_length_nudge_skipped_when_detached(tmp_path):
         "cwd": cwd,
     }
 
-    restore_warn = _with_budgeter_warn_enabled()
+    restore_warn = _with_flag_enabled("budgeter-session-warn")
     try:
         env = {**os.environ,
                "APIARY_BUDGETER_TEST_ISOLATION": "1",
@@ -1108,10 +1112,10 @@ def test_session_length_nudge_skipped_when_detached(tmp_path):
         _cleanup_session_flag_files(session_id)
 
 
-def test_session_length_nudge_skipped_when_warn_disabled(tmp_path):
-    """budgeter-warn flag disabled suppresses the nudge."""
+def test_session_length_nudge_skipped_when_session_warn_disabled(tmp_path):
+    """budgeter-session-warn flag disabled suppresses the nudge."""
     from core import flags
-    project_dir = make_test_project(tmp_path / "project_nudge_warn_off")
+    project_dir = make_test_project(tmp_path / "project_nudge_session_warn_off")
     cwd = str(project_dir)
     session_id = make_session_id()
     transcript = _write_transcript(tmp_path, input_tokens=900_000)
@@ -1122,17 +1126,48 @@ def test_session_length_nudge_skipped_when_warn_disabled(tmp_path):
         "cwd": cwd,
     }
 
-    was_enabled = flags.is_enabled("budgeter-warn")
+    was_enabled = flags.is_enabled("budgeter-session-warn")
     if was_enabled:
-        flags.disable("budgeter-warn")
+        flags.disable("budgeter-session-warn")
     try:
         r = run_hook("pre_tool_use.py", payload)
         assert r.returncode == 0, f"PRE failed: {r.stderr}"
         ctx = _extract_additional_context(r.stdout)
         assert "Session context" not in ctx, \
-            f"Nudge must not fire when warn disabled; got: {ctx!r}"
+            f"Nudge must not fire when session-warn disabled; got: {ctx!r}"
     finally:
         if was_enabled:
+            flags.enable("budgeter-session-warn")
+        _cleanup_session_flag_files(session_id)
+
+
+def test_session_length_nudge_independent_of_magnitude_warn(tmp_path):
+    """Nudge fires with budgeter-warn OFF as long as budgeter-session-warn is ON."""
+    from core import flags
+    project_dir = make_test_project(tmp_path / "project_nudge_indep")
+    cwd = str(project_dir)
+    session_id = make_session_id()
+    transcript = _write_transcript(tmp_path, input_tokens=700_000)
+    payload = {
+        "tool_name": "Bash",
+        "session_id": session_id,
+        "transcript_path": str(transcript),
+        "cwd": cwd,
+    }
+
+    warn_was_on = flags.is_enabled("budgeter-warn")
+    if warn_was_on:
+        flags.disable("budgeter-warn")
+    restore_session = _with_flag_enabled("budgeter-session-warn")
+    try:
+        r = run_hook("pre_tool_use.py", payload)
+        assert r.returncode == 0, f"PRE failed: {r.stderr}"
+        ctx = _extract_additional_context(r.stdout)
+        assert "Session context is getting long" in ctx, \
+            f"Nudge must fire regardless of budgeter-warn state; got: {ctx!r}"
+    finally:
+        restore_session()
+        if warn_was_on:
             flags.enable("budgeter-warn")
         _cleanup_session_flag_files(session_id)
 

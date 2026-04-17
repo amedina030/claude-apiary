@@ -19,6 +19,7 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 | `/backfill-handoffs` | `core/commands/backfill-handoffs.md` | Process unseen session transcripts into handoff notes |
 | `/budgeter-log` | `budgeter/commands/budgeter-log.md` | Toggle token logging on/off |
 | `/budgeter-warn` | `budgeter/commands/budgeter-warn.md` | Toggle cost estimation warnings on/off |
+| `/budgeter-session-warn` | `budgeter/commands/budgeter-session-warn.md` | Toggle session-length wrap-up nudge on/off |
 | `/budgeter-setup` | `budgeter/commands/budgeter-setup.md` | Set up budgeter for a specific project |
 | `/note` | `scribe/commands/note.md` | Add a typed note (type auto-detected from prefix) |
 | `/notes` | `scribe/commands/notes.md` | List and query notes |
@@ -35,6 +36,7 @@ These commands create or remove flag files at `~/.claude/<name>-enabled`:
 |---------|-----------|---------|
 | `/budgeter-log` | `~/.claude/budgeter-log-enabled` | off |
 | `/budgeter-warn` | `~/.claude/budgeter-warn-enabled` | off |
+| `/budgeter-session-warn` | `~/.claude/budgeter-session-warn-enabled` | off |
 
 Toggles persist across sessions.
 

@@ -269,7 +269,10 @@ def main():
     # Session-length nudge: one-shot suggestion to wrap up when the current
     # prompt size crosses configured thresholds. Skipped for headless runner
     # subprocesses — the suggestion is only actionable in live sessions.
-    if warn_enabled and os.environ.get("APIARY_RUNNER_SUBPROCESS") != "1":
+    # Gated separately from budgeter-warn so users can opt into the context-fill
+    # nudge without also re-enabling the noisier magnitude warning.
+    session_warn_enabled = flags.is_enabled("budgeter-session-warn")
+    if session_warn_enabled and os.environ.get("APIARY_RUNNER_SUBPROCESS") != "1":
         tier, nudge_msg = estimator.session_length_nudge(last_input + last_cache, config)
         if tier:
             try:
