@@ -80,6 +80,17 @@ The dimensions config (`compass/dimensions.json`) ships in the repo, not under `
 |------|------|-------------|
 | Round counter | `refiner/tmp/round_<session-id>.json` | Per-session refinement round count (repo-local, git-ignored) |
 
+## Researcher data
+
+Researcher state lives at `<repo-root>/.apiary/research/` under the umbrella `.apiary/` directory. All git-ignored.
+
+| Path | Description |
+|------|-------------|
+| `research/tags.yaml` | Controlled-tag vocabulary for this repo. Edited via `researcher/cli.py register-tag` |
+| `research/<topic>/<slug>.md` | One research entry per file. YAML-subset frontmatter (title, topic, tags, date_created, date_last_verified, sources) followed by Summary / Context / Findings / Code / Caveats sections |
+
+The template (`researcher/template.md`) ships in the repo, not under `.apiary/` — it's source, not state.
+
 ## Transcripts
 
 | File | Path | Description |

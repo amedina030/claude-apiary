@@ -230,6 +230,31 @@ Track refinement round counts per session. Used by the `/refine` skill to enforc
 
 State is stored at `refiner/tmp/round_<session-id>.json`. Directory is auto-created on first write.
 
+## researcher/cli.py
+
+Manage structured research findings per repo. Entries live at `<repo>/.apiary/research/<topic>/<slug>.md` with a YAML-subset frontmatter (title, topic, tags, dates, sources) and a standard body (Summary / Context / Findings / Code / Caveats). A controlled tag vocabulary lives at `<repo>/.apiary/research/tags.yaml`.
+
+### Subcommands
+
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `add` | `cli.py add <topic> "<title>" [--tags t1,t2,...]` | Scaffold a new entry from the template. Rejects unknown tags and duplicate slugs |
+| `find` | `cli.py find <query> [--limit N]` | Ranked search (title ×3, tags ×2, content ×1). Exits 0 even on zero hits |
+| `list` | `cli.py list [--topic X] [--tag Y]` | List entries grouped by topic, optionally filtered |
+| `show` | `cli.py show <topic> <slug>` | Print the full entry file to stdout |
+| `verify` | `cli.py verify <topic> <slug>` | Bump `date_last_verified` to today |
+| `register-tag` | `cli.py register-tag <tag>` | Append a tag to `tags.yaml` (controlled vocabulary) |
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success (also returned by `find` with zero hits) |
+| `2` | Validation error: unknown tag, duplicate slug, entry not found, tag already registered |
+| `3` | Config error: invalid YAML in `tags.yaml` or entry frontmatter |
+
+State is auto-created on first `add` or `register-tag`: `.apiary/research/` directory and a default `tags.yaml` with empty tag list.
+
 ## harden/validate_and_assign.py
 
 Combined validate + assign-IDs script. Preferred over calling validators and assign_ids separately.

@@ -115,6 +115,10 @@ python scripts/install_context_rules.py --uninstall
 - Delete `~/.claude/commands/review.md`
 - Delete `.git/hooks/pre-commit` (if it references `docs/check.py`)
 
+**Researcher:**
+- Delete `~/.claude/commands/research.md`
+- Optionally delete the repo-local researcher state at `<repo-root>/.apiary/research/` (entries and `tags.yaml`)
+
 **Everything:**
 - Delete the `claude-apiary` repo directory
 

@@ -26,6 +26,7 @@ DOCS_DIR = APIS_DIR / "docs"
 REFINER_DIR = APIS_DIR / "refiner"
 HARDEN_DIR = APIS_DIR / "harden"
 COMPASS_DIR = APIS_DIR / "compass"
+RESEARCHER_DIR = APIS_DIR / "researcher"
 
 sys.path.insert(0, str(APIS_DIR))
 from core.hooks_lib import (
@@ -230,7 +231,7 @@ def write_manifest(claude_dir: Path):
     installed_files = []
 
     # Add all command files
-    for cmd_dir in [BUDGETER_DIR / "commands", SCRIBE_DIR / "commands", CORE_DIR / "commands", DOCS_DIR / "commands", REFINER_DIR / "commands", HARDEN_DIR / "commands", COMPASS_DIR / "commands"]:
+    for cmd_dir in [BUDGETER_DIR / "commands", SCRIBE_DIR / "commands", CORE_DIR / "commands", DOCS_DIR / "commands", REFINER_DIR / "commands", HARDEN_DIR / "commands", COMPASS_DIR / "commands", RESEARCHER_DIR / "commands"]:
         if cmd_dir.is_dir():
             for cmd_file in cmd_dir.glob("*.md"):
                 installed_files.append({
@@ -314,6 +315,7 @@ def _enumerate_installed_files(claude_dir):
         REFINER_DIR / 'commands',
         HARDEN_DIR / 'commands',
         COMPASS_DIR / 'commands',
+        RESEARCHER_DIR / 'commands',
     ]:
         if cmd_dir.is_dir():
             for cmd_file in cmd_dir.glob('*.md'):
@@ -750,6 +752,11 @@ def main():
         for cmd_file in (COMPASS_DIR / "commands").glob("*.md"):
             shutil.copy2(cmd_file, commands_dir / cmd_file.name)
         print(f"  Compass commands : {commands_dir}")
+
+        # Researcher commands
+        for cmd_file in (RESEARCHER_DIR / "commands").glob("*.md"):
+            shutil.copy2(cmd_file, commands_dir / cmd_file.name)
+        print(f"  Researcher cmds  : {commands_dir}")
 
         # Pre-commit hook
         install_pre_commit_hook()

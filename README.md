@@ -116,6 +116,22 @@ Bloat handling: rolling archive at 50+ active observations and 90+ days old; nev
 
 ---
 
+### Researcher
+
+Per-repo compendium of structured research findings — a place to capture what you learned from a WebSearch so next time you (or Claude) need the same answer it comes from the compendium, not another round of googling. Entries are markdown files under `<repo>/.apiary/research/<topic>/<slug>.md` with a YAML-subset frontmatter (title, topic, tags, dates, sources) and standard sections (Summary, Context, Findings, Code, Caveats). Tags are drawn from a controlled vocabulary at `<repo>/.apiary/research/tags.yaml`.
+
+The `/research` skill is expected to be invoked **before** `WebSearch` on any topic plausibly in the compendium — `/research find <keywords>` first, fall through to web only on miss.
+
+```
+/research register-tag multiplayer                                        # grow the vocab
+/research add unreal "Replication basics" --tags multiplayer,networking   # scaffold entry
+/research find replication                                                # search compendium
+/research list --topic unreal                                             # browse a topic
+/research verify unreal replication-basics                                # bump last-verified date
+```
+
+---
+
 ### Runner
 
 Autonomous six-stage orchestrator that takes a backlog ticket from fuzzy idea to review-ready code without a human in the loop. Designed to run overnight via cron.
@@ -216,6 +232,15 @@ claude-apiary/
 │   ├── dimensions.json          # Configured personality dimensions
 │   ├── CLAUDE.md                # Lane discipline, observation quality bar, synthesis cycle
 │   └── test_store.py            # Tests
+│
+├── researcher/                  # Per-repo compendium of structured research findings
+│   ├── commands/
+│   │   └── research.md          # /research slash command definition
+│   ├── cli.py                   # CLI: add, find, list, show, verify, register-tag
+│   ├── store.py                 # Path resolution, template, frontmatter I/O
+│   ├── _yaml_mini.py            # Minimal YAML subset parser (stdlib-only)
+│   ├── template.md              # Entry body template (Summary / Context / Findings / …)
+│   └── test_researcher.py       # Tests
 │
 ├── runner/                      # Autonomous 6-stage orchestrator
 │   ├── run.py                   # End-to-end orchestrator (all 6 stages)
