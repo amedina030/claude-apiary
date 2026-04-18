@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>apiary</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="header">
+        <div class="header-left">
+          <span class="brand">apiary</span>
+          <span id="model-badge" class="badge model" title="Active model (most recent assistant record)">
+            <span class="k">model</span> <span id="model-name">—</span>
+          </span>
+        </div>
+        <div class="header-right">
+          <span id="totals" class="totals">
+            <span class="badge"><span class="k">in</span> <span id="tot-in">0</span></span>
+            <span class="badge"><span class="k">out</span> <span id="tot-out">0</span></span>
+            <span class="badge"><span class="k">cache r</span> <span id="tot-cache-r">0</span></span>
+            <span class="badge"><span class="k">cache w</span> <span id="tot-cache-w">0</span></span>
+            <span class="badge sum" title="Raw sum: in + out + cache_r + cache_w"><span class="k">raw</span> <span id="tot-raw">0</span></span>
+            <span class="badge sum" title="Weighted: in×1 + out×5 + cache_r×0.1 + cache_w×1.25 (input-equivalent tokens)"><span class="k">weighted</span> <span id="tot-weighted">0</span></span>
+          </span>
+        </div>
+      </header>
+
+      <main id="main">
+        <section id="chat">
+          <div id="status" class="status hidden"></div>
+          <ol id="messages" class="messages"></ol>
+        </section>
+        <aside id="sidebar" class="sidebar">
+          <div class="sidebar-search">
+            <input type="search" id="sidebar-search" placeholder="search notes…" />
+          </div>
+          <div id="sidebar-list" class="sidebar-list"></div>
+        </aside>
+      </main>
+
+      <section id="pty-strip-wrap" class="pty-strip-wrap collapsed">
+        <button id="pty-toggle" type="button" class="pty-toggle" aria-label="toggle pty output">
+          <span class="pty-toggle-chevron"></span>
+          <span class="pty-toggle-label">pty output</span>
+          <span id="pty-unread" class="pty-unread hidden"></span>
+        </button>
+        <pre id="pty-strip" class="pty-strip" aria-label="pty output"></pre>
+      </section>
+
+      <footer id="composer">
+        <textarea id="input" rows="3" placeholder="message Claude Code (Enter to send · Shift+Enter for newline · Ctrl+C to interrupt · Esc to cancel)"></textarea>
+      </footer>
+
+      <div id="toasts" class="toasts"></div>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>

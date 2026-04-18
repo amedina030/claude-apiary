@@ -1,0 +1,10 @@
+# gui/ runtime dependencies.
+# This file is the explicit deviation from the "stdlib only" rule recorded in D-2026-47.
+# Only the gui/ component depends on these packages; all other apiary components stay stdlib-only.
+
+pywebview>=5.0,<6.0
+pywinpty>=2.0,<3.0 ; sys_platform == "win32"
+watchdog>=4.0,<7.0
+
+# Build-time only (not needed to run from source):
+# pyinstaller>=6.0,<7.0
