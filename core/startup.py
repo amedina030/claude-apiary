@@ -11,6 +11,7 @@ import json
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -354,6 +355,65 @@ def cmd_summary(args):
 
 
 # ---------------------------------------------------------------------------
+# skip command — append a session to backfill_skip.json
+# ---------------------------------------------------------------------------
+
+def run_skip(session_id: str, reason: str, repo_dir: str | None = None,
+             date: str | None = None) -> tuple[str, Path]:
+    """Append *session_id* to backfill_skip.json. Idempotent on 8-char prefix.
+
+    Returns ("added"|"exists", path). Raises FileNotFoundError when the path
+    cannot be resolved (repo layout with no git repo at *repo_dir*).
+    """
+    start = Path(repo_dir) if repo_dir else None
+    path = _resolve_backfill_skip_path(start)
+    if path is None:
+        raise FileNotFoundError(
+            "cannot resolve backfill_skip.json path (not inside a git repo)"
+        )
+
+    sid = session_id.strip()
+    if not sid:
+        raise ValueError("session_id required")
+
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {"skipped": []}
+    else:
+        data = {"skipped": []}
+    if not isinstance(data, dict) or not isinstance(data.get("skipped"), list):
+        data = {"skipped": []}
+
+    prefix = sid[:8].lower()
+    for entry in data["skipped"]:
+        if isinstance(entry, dict) and entry.get("session_id", "")[:8].lower() == prefix:
+            return "exists", path
+
+    date_str = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    data["skipped"].append({
+        "session_id": sid,
+        "reason": reason or "unspecified",
+        "date": date_str,
+    })
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return "added", path
+
+
+def cmd_skip(args):
+    try:
+        status, path = run_skip(args.session_id, args.reason, args.repo_dir, args.date)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
+    prefix = args.session_id.strip()[:8].lower()
+    print(f"{status}: {prefix} ({path})")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -371,9 +431,17 @@ def main():
     p_summary.add_argument("--role", default="user")
     p_summary.add_argument("--mission", default="general")
 
+    p_skip = sub.add_parser("skip", help="append a session to backfill_skip.json")
+    p_skip.add_argument("--session-id", required=True)
+    p_skip.add_argument("--reason", default="unspecified")
+    p_skip.add_argument("--repo-dir", default=None,
+                        help="session's repo root (default: cwd)")
+    p_skip.add_argument("--date", default=None,
+                        help="YYYY-MM-DD (default: today UTC)")
+
     args = parser.parse_args()
 
-    commands = {"init": cmd_init, "summary": cmd_summary}
+    commands = {"init": cmd_init, "summary": cmd_summary, "skip": cmd_skip}
     if args.command in commands:
         commands[args.command](args)
     else:

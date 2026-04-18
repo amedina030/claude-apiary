@@ -308,5 +308,83 @@ class TestGetUnseenSessionsArchiveIntegration(unittest.TestCase):
         self.assertEqual(self._sids(result), {"bbbbbbbb"})
 
 
+class TestRunSkip(unittest.TestCase):
+    """Cover run_skip() — the writer that powers `startup.py skip`."""
+
+    def setUp(self):
+        self._layout_patch = _force_legacy_layout()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self._tmp.name) / "backfill_skip.json"
+
+    def tearDown(self):
+        self._layout_patch.stop()
+        self._tmp.cleanup()
+
+    def _run(self, session_id, reason="test", date=None):
+        with patch.object(startup, "BACKFILL_SKIP_PATH", self.tmp_path):
+            return startup.run_skip(session_id, reason, date=date)
+
+    def _load(self):
+        return json.loads(self.tmp_path.read_text(encoding="utf-8"))
+
+    def test_creates_file_when_missing(self):
+        status, path = self._run("aaaaaaaa-1111-2222-3333-444444444444", "startup-only")
+        self.assertEqual(status, "added")
+        self.assertEqual(path, self.tmp_path)
+        self.assertTrue(self.tmp_path.exists())
+        data = self._load()
+        self.assertEqual(len(data["skipped"]), 1)
+        entry = data["skipped"][0]
+        self.assertEqual(entry["session_id"], "aaaaaaaa-1111-2222-3333-444444444444")
+        self.assertEqual(entry["reason"], "startup-only")
+        self.assertRegex(entry["date"], r"^\d{4}-\d{2}-\d{2}$")
+
+    def test_idempotent_on_full_id(self):
+        self._run("aaaaaaaa-1111-2222-3333-444444444444")
+        status, _ = self._run("aaaaaaaa-1111-2222-3333-444444444444")
+        self.assertEqual(status, "exists")
+        self.assertEqual(len(self._load()["skipped"]), 1)
+
+    def test_idempotent_on_prefix_match(self):
+        """Different full UUIDs with the same 8-char prefix dedupe."""
+        self._run("aaaaaaaa-1111-2222-3333-444444444444")
+        status, _ = self._run("AAAAAAAA-9999-8888-7777-666666666666")
+        self.assertEqual(status, "exists")
+        self.assertEqual(len(self._load()["skipped"]), 1)
+
+    def test_preserves_existing_entries(self):
+        self.tmp_path.write_text(json.dumps({
+            "skipped": [
+                {"session_id": "cccccccc-1111-2222-3333-444444444444",
+                 "reason": "pre-existing", "date": "2026-01-01"},
+            ]
+        }), encoding="utf-8")
+        self._run("aaaaaaaa-1111-2222-3333-444444444444", "new")
+        data = self._load()
+        self.assertEqual(len(data["skipped"]), 2)
+        self.assertEqual(data["skipped"][0]["reason"], "pre-existing")
+        self.assertEqual(data["skipped"][1]["reason"], "new")
+
+    def test_explicit_date_used(self):
+        self._run("aaaaaaaa-1111-2222-3333-444444444444", date="2020-01-15")
+        self.assertEqual(self._load()["skipped"][0]["date"], "2020-01-15")
+
+    def test_empty_session_id_raises(self):
+        with self.assertRaises(ValueError):
+            self._run("")
+
+    def test_malformed_file_overwritten(self):
+        self.tmp_path.write_text("{not json", encoding="utf-8")
+        status, _ = self._run("aaaaaaaa-1111-2222-3333-444444444444")
+        self.assertEqual(status, "added")
+        self.assertEqual(len(self._load()["skipped"]), 1)
+
+    def test_creates_parent_dirs(self):
+        nested = Path(self._tmp.name) / "a" / "b" / "backfill_skip.json"
+        with patch.object(startup, "BACKFILL_SKIP_PATH", nested):
+            startup.run_skip("aaaaaaaa-1111-2222-3333-444444444444", "x")
+        self.assertTrue(nested.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

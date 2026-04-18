@@ -60,8 +60,15 @@ Transcript paths may contain Windows backslashes (e.g. `C:\Users\...\uuid.jsonl`
 For each unseen session from the `[startup]` context:
 
 1. The context block lists each session as `<prefix> <transcript_path>` on its own line directly under the `unseen_sessions:` header. Use that path verbatim — do not glob. If no path is present (older context format), fall back to globbing under `C:/Users/amedi/.claude/projects/`.
-2. Run `extract_transcript.py --summary <path>` to get the overview. This now exits non-zero on a missing path — if that happens, report the session under "failed" (bad path), do not silently treat as empty.
+2. Run `extract_transcript.py --summary <path>` to get the overview. This now exits non-zero on a missing path — if that happens, report the session under "failed" (bad path) AND add it to the skip list (see step 3a) with reason `"failed: bad path"` so it does not re-appear on every future startup.
 3. If `total_messages < 5` or all sampled messages are the startup context-injection, treat as startup-only and skip (but **still report it as skipped in the final summary, not as "generated"**).
+3a. **After a skip decision (startup-only or unrecoverable-failure), durably record it** so the session is never re-surfaced as unseen on future startups:
+    ```bash
+    python ~/.claude/apiary_launch.py core/startup.py skip \
+        --session-id <full-or-8char-id> \
+        --reason "startup-only"   # or "failed: <short reason>"
+    ```
+    The command is idempotent (no duplicate entries). Verify exit code 0 — if nonzero, report in the final summary's "failed" bucket and do NOT count it under "added to skip list".
 4. Otherwise pull chunks via `--head` / `--tail` / `--max-chars` as needed until you have enough to write a handoff.
 5. Produce a handoff body in this shape:
    ```
@@ -96,8 +103,11 @@ Return a message with EXACTLY this structure (no extras):
 **Handoffs generated:** <count> — <list of session IDs, or "None">
 **Sessions skipped (startup-only or empty):** <count> — <list, or "None">
 **Sessions failed (ingestion/write error):** <count> — <list with short reason, or "None">
+**Added to skip list:** <count> — <list of session IDs, or "None">
 **Extracted from transcripts:** <count> learnings, <count> TODOs — or "None"
 ```
+
+The "Added to skip list" count should equal `(startup-only skipped) + (failed sessions that were successfully skip-recorded)`. A session counted under "skipped" or "failed" but NOT under "Added to skip list" means the `startup.py skip` call failed — flag that explicitly.
 
 **Accuracy rules** (hard requirements, not suggestions):
 - The counts MUST match what actually happened. If you ran into a blocker and couldn't write a handoff, that session goes in "failed", not "generated".
