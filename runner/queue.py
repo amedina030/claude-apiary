@@ -7,6 +7,21 @@ from .detached_lib import list_unmerged_runner_branches, OVERNIGHT_LOG, SCRIPT_D
 
 INTAKE_DIR = SCRIPT_DIR / 'intake'
 BACKLOG_DIR = SCRIPT_DIR / 'backlog'
+HARDENS_DIR = SCRIPT_DIR / 'hardens'
+
+
+def load_harden_verdict(uuid: str) -> str:
+    """Return the harden verdict for a runner run, or 'n/a' if the artifact
+    is missing. Distinguishes defender_failed runs from plain has_unresolved."""
+    if not uuid:
+        return 'n/a'
+    p = HARDENS_DIR / f'{uuid}.json'
+    if not p.exists():
+        return 'n/a'
+    try:
+        return json.loads(p.read_text(encoding='utf-8')).get('verdict', 'unknown')
+    except (OSError, json.JSONDecodeError):
+        return 'unknown'
 
 def load_overnight_entries() -> dict:
     """Return dict mapping branch_name -> latest entry dict. Missing file -> {}."""
@@ -53,7 +68,7 @@ def main() -> int:
         print('No runner/* branches ready for review.')
         return 0
     # Header
-    header = ['BRANCH', 'TICKET', 'STAGES', 'TOKENS', 'STATUS', 'SUMMARY']
+    header = ['BRANCH', 'TICKET', 'STAGES', 'TOKENS', 'STATUS', 'HARDEN', 'SUMMARY']
     rows = []
     for b in sorted(branches):
         entry = entries.get(b, {})
@@ -62,7 +77,8 @@ def main() -> int:
         stages = str(entry.get('stages_completed', 'unknown'))
         tokens = str(entry.get('total_tokens', 'unknown'))
         status = str(entry.get('exit_status', 'unknown'))
-        rows.append([b, title, stages, tokens, status, summary])
+        harden = load_harden_verdict(uuid)
+        rows.append([b, title, stages, tokens, status, harden, summary])
     # Compute column widths
     widths = [max(len(h), max((len(r[i]) for r in rows), default=0)) for i, h in enumerate(header)]
     fmt = '  '.join('{:<' + str(w) + '}' for w in widths)

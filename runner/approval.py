@@ -354,6 +354,14 @@ def main():
                         f"{total_resolved} findings resolved across {harden_rounds} harden rounds."
                     )
 
+    elif verdict == "defender_failed":
+        # Harden run is structurally broken — defender produced no responses
+        # despite attacker findings. Do not auto-merge, do not review deferrals
+        # (there are none), do not write a scribe note. The reviewer sees this
+        # in the runner queue via the HARDEN column and overnight.jsonl status.
+        path_taken = "defender-failed"
+        exit_code = 1
+
     elif verdict == "has_unresolved":
         # Review deferrals before deciding
         deferrals = collect_deferrals(harden)

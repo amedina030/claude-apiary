@@ -300,6 +300,34 @@ def run_defender(findings: list[dict], files: list[str]) -> list[dict] | None:
     return None
 
 
+def compute_verdict(rounds: list[dict]) -> tuple[str, list[str]]:
+    """Compute verdict and unresolved list from per-round data.
+
+    Verdicts:
+      - defender_failed: any round had findings but defender produced no
+        responses (either None or empty list). Means the run is structurally
+        broken — do NOT auto-merge; a human must inspect.
+      - has_unresolved: at least one finding is not fixed/refactored.
+      - all_resolved: every finding was fixed or refactored, or no findings.
+    """
+    defender_failed = any(
+        len(rnd.get("findings", [])) > 0 and len(rnd.get("responses", [])) == 0
+        for rnd in rounds
+    )
+
+    unresolved = []
+    for rnd in rounds:
+        for rid, action in rnd.get("resolutions", {}).items():
+            if action not in ("fixed", "refactored") and rid not in unresolved:
+                unresolved.append(rid)
+
+    if defender_failed:
+        return "defender_failed", unresolved
+    if unresolved:
+        return "has_unresolved", unresolved
+    return "all_resolved", unresolved
+
+
 def main():
     parser = argparse.ArgumentParser(description="Autonomous hardener — runner stage 5")
     parser.add_argument("execution_log", help="Path to execution log JSON")
@@ -415,8 +443,10 @@ def main():
 
             # Defend
             responses = run_defender(findings, changed_files)
-            if responses is None:
-                # Defender failed — mark all findings as unresolved
+            if responses is None or len(responses) == 0:
+                # Defender produced no responses despite findings — mark all unresolved.
+                # Covers two failure modes: run_defender returned None (subprocess/validation
+                # error) and run_defender returned [] (validation passed on empty array).
                 resolutions = {f.get("id", f"unknown-{i}"): "unresolved" for i, f in enumerate(findings)}
                 rounds.append({
                     "round": round_num,
@@ -424,7 +454,7 @@ def main():
                     "responses": [],
                     "resolutions": resolutions,
                 })
-                print(f"  Defender failed in round {round_num}, findings marked unresolved", file=sys.stderr)
+                print(f"  Defender produced no responses in round {round_num}, findings marked unresolved", file=sys.stderr)
                 break
 
             # Commit defender fixes
@@ -462,14 +492,7 @@ def main():
         # Always return to original branch
         checkout(original_branch)
 
-    # Determine verdict
-    unresolved = []
-    for rnd in rounds:
-        for rid, action in rnd.get("resolutions", {}).items():
-            if action not in ("fixed", "refactored") and rid not in unresolved:
-                unresolved.append(rid)
-
-    verdict = "all_resolved" if not unresolved else "has_unresolved"
+    verdict, unresolved = compute_verdict(rounds)
 
     harden_result = {
         "schema_version": HARDEN_SCHEMA_VERSION,

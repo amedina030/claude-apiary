@@ -537,9 +537,14 @@ python -m runner.auto_harden runner/executions/<uuid>.json
 
 Output: `runner/hardens/<uuid>.json`. Rounds, models, and timeout configurable via `runner/config.json` under `harden` (default: 1 round).
 
+Verdicts written to the artifact:
+- `all_resolved` — every finding fixed/refactored (or no findings).
+- `has_unresolved` — some findings deferred or unresolved; human review needed.
+- `defender_failed` — attacker produced findings but defender returned no responses; run is structurally broken. Reviewer sees this in `queue.py`'s HARDEN column.
+
 ## runner/approval.py
 
-Approval — Stage 6. Reads the harden verdict and either auto-merges (all resolved), flags for review (unresolved findings), or rejects. Includes a deferral review sub-step that uses Claude to evaluate deferred findings.
+Approval — Stage 6. Reads the harden verdict and either auto-merges (all resolved), flags for review (unresolved findings), or halts on `defender_failed` without merging or writing a note. Includes a deferral review sub-step that uses Claude to evaluate deferred findings on the `has_unresolved` path.
 
 ```bash
 python -m runner.approval runner/hardens/<uuid>.json
@@ -549,7 +554,7 @@ python -m runner.approval runner/hardens/<uuid>.json
 |----------|----------|-------------|
 | `harden_result` | yes | Path to harden result JSON |
 
-Output: `runner/reports/<uuid>.json`. Verdicts: `auto-merged`, `pending-review`, or stage failure.
+Output: `runner/reports/<uuid>.json`. Path taken: `auto-merged`, `pending-review`, `defender-failed`, or a merge/push error. Exits non-zero on `defender_failed` so `overnight.jsonl` records the failure.
 
 ## runner/draft_ticket.py
 
