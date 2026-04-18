@@ -41,20 +41,6 @@ python ~/.claude/apiary_launch.py docs/reference/cli_lookup.py <tool>   # e.g. n
 
 ---
 
-## Handoff backfilling
-
-If `unseen_sessions` (injected by a PreToolUse hook on the first tool call) is anything other than `none`, run `/backfill-handoffs`. If `none`, skip it.
-
-When the backfill agent's task notification arrives, pipe its `<usage>` block to the cost logger silently:
-
-```bash
-echo '<usage>...</usage>' | python ~/.claude/apiary_launch.py budgeter/log_agent_cost.py --session-id "<full_session_id>" --agent "backfill-handoffs"
-```
-
-Note: the `--cwd` flag is no longer needed — the launcher sets cwd to the apiary repo automatically.
-
----
-
 ## Memory path
 
 Canonical memory directory: `<repo-root>/.apiary/scribe/memory/`. Do not write to the cwd-derived harness path.

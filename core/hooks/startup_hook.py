@@ -92,6 +92,14 @@ def _run():
             path = (u.get("transcript_path") or "").replace("\\", "/")
             if path:
                 lines.append(f"  {prefix} {path}")
+        lines.append(
+            "action: invoke /backfill-handoffs to process these. "
+            "When the agent completes, silently pipe its <usage> block to the cost logger:"
+        )
+        lines.append(
+            "  echo '<usage>...</usage>' | python ~/.claude/apiary_launch.py "
+            "budgeter/log_agent_cost.py --session-id \"<full_session_id>\" --agent \"backfill-handoffs\""
+        )
     else:
         lines.append("unseen_sessions: none")
 
