@@ -4,10 +4,6 @@ description: Load apiary toolkit context (scribe, budgeter, runner, portability 
 user-invocable: true
 ---
 
-This environment uses **claude-apiary** -- a toolkit extending Claude Code with **budgeter**, **scribe**, **refiner**, **harden**, **runner**, and shared **core** infrastructure.
-
----
-
 ## CLI invocation — the launcher
 
 All apiary CLI tools must be invoked via the launcher, which resolves the apiary repo path programmatically:
@@ -62,7 +58,7 @@ If the file is missing, do nothing (no error, no fallback). The personality prof
 
 ## Portability
 
-All apiary code must be portable across Windows / macOS / Linux. **Read `PORTABILITY.md` before modifying code, hooks, scripts, or `settings.json` entries.**
+Code must work on Windows / macOS / Linux — see `PORTABILITY.md` before touching code, hooks, scripts, or `settings.json`.
 
 ---
 
@@ -90,12 +86,3 @@ subprocess.run(["python", os.path.expanduser("~/.claude/apiary_launch.py"),
 ```
 
 **Never:** `python scribe/notes.py add --content "text with `backticks` and it's broken"`
-
----
-
-## Historical drift
-
-Old references are archival -- do not re-introduce removed names.
-
-- **Clarifier** -- removed 2026-04-07. The `clarifier/` directory and `/clarifier` command no longer exist.
-- **Pipeline -> Runner** -- renamed 2026-04-07. The orchestrator lives at `runner/` (formerly `pipeline/`).
