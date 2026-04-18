@@ -4,7 +4,7 @@ title: File Storage
 scope: project
 description: Runtime data locations — where JSONL logs, flags, transcripts, and session state live
 framework_version: "1.0"
-last_verified: 2026-04-09
+last_verified: 2026-04-17
 ---
 
 # File Storage
@@ -60,6 +60,19 @@ All scribe data lives inside the repo checkout at `<repo-root>/.apiary/scribe/`,
 **Layout gate.** Scribe's path resolution is selected by the `APIARY_STATE_LAYOUT` environment variable. When set to `repo`, the helpers in `scribe.notes` run `git rev-parse --show-toplevel` on the session's cwd and resolve state under `<repo-root>/.apiary/scribe/`. When unset (current default), they fall back to the legacy per-project location `~/.claude/projects/<project-key>/{notes,notes_archive,learnings}.jsonl` where `<project-key>` comes from the `.claude-project-key` marker file. Todo #268 flips the default; decision #269 tracks the migration.
 
 **Historical note.** Before decision #269, scribe state was project-scoped under `~/.claude/projects/<project-key>/`. The `<project-key>` was originally derived from the absolute cwd path (e.g. `D--Professional-claude-apiary`); the T5c migration moved it to a stable key read from the `.claude-project-key` marker file. The current in-repo layout supersedes both schemes.
+
+## Compass data
+
+Compass state lives at `<repo-root>/.apiary/compass/` under the umbrella `.apiary/` directory. All git-ignored.
+
+| Path | Description |
+|------|-------------|
+| `compass/observations/<session_id_short>.json` | Per-session personality observations written by `/wrapup` capture or `compass/backfill.py` |
+| `compass/observations/archive/<iso-year>-<iso-week>/` | Archived observations (moved when active count ≥ 50 AND age ≥ 90 days) |
+| `compass/personality.md` | Synthesized personality profile, regenerated weekly. Read at startup by `/apiary-context` |
+| `compass/corrections.md` | Optional manual high-weight evidence the synthesizer treats above raw observations |
+
+The dimensions config (`compass/dimensions.json`) ships in the repo, not under `.apiary/` — it's source code, not state.
 
 ## Refiner data
 

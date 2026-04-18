@@ -25,6 +25,7 @@ SCRIBE_DIR = APIS_DIR / "scribe"
 DOCS_DIR = APIS_DIR / "docs"
 REFINER_DIR = APIS_DIR / "refiner"
 HARDEN_DIR = APIS_DIR / "harden"
+COMPASS_DIR = APIS_DIR / "compass"
 
 sys.path.insert(0, str(APIS_DIR))
 from core.hooks_lib import (
@@ -229,7 +230,7 @@ def write_manifest(claude_dir: Path):
     installed_files = []
 
     # Add all command files
-    for cmd_dir in [BUDGETER_DIR / "commands", SCRIBE_DIR / "commands", CORE_DIR / "commands", DOCS_DIR / "commands", REFINER_DIR / "commands", HARDEN_DIR / "commands"]:
+    for cmd_dir in [BUDGETER_DIR / "commands", SCRIBE_DIR / "commands", CORE_DIR / "commands", DOCS_DIR / "commands", REFINER_DIR / "commands", HARDEN_DIR / "commands", COMPASS_DIR / "commands"]:
         if cmd_dir.is_dir():
             for cmd_file in cmd_dir.glob("*.md"):
                 installed_files.append({
@@ -312,6 +313,7 @@ def _enumerate_installed_files(claude_dir):
         DOCS_DIR / 'commands',
         REFINER_DIR / 'commands',
         HARDEN_DIR / 'commands',
+        COMPASS_DIR / 'commands',
     ]:
         if cmd_dir.is_dir():
             for cmd_file in cmd_dir.glob('*.md'):
@@ -522,6 +524,37 @@ def run_check():
             fail(f"Pre-commit hook exists but doesn't run docs/check.py")
     print()
 
+    # 7c. Compass
+    print("[Compass]")
+    check_file(COMPASS_DIR / "dimensions.json", "Dimensions config")
+    if (COMPASS_DIR / "dimensions.json").exists():
+        try:
+            dims = json.loads((COMPASS_DIR / "dimensions.json").read_text(encoding="utf-8"))
+            names = [d.get("name") for d in dims.get("dimensions", [])]
+            if not names:
+                fail("Dimensions config: no dimensions defined")
+            elif len(names) != len(set(names)):
+                fail("Dimensions config: duplicate dimension names")
+            else:
+                ok(f"Dimensions config: {len(names)} dimensions ({sum(1 for d in dims['dimensions'] if d.get('volatile'))} volatile)")
+        except json.JSONDecodeError:
+            fail("Dimensions config: invalid JSON")
+    check_file(COMPASS_DIR / "synthesize.py", "Synthesizer")
+    check_file(COMPASS_DIR / "backfill.py", "Backfill CLI")
+    check_file(COMPASS_DIR / "observations.py", "Observations CLI")
+    cron_registry = APIS_DIR / "runner" / "cron_registry.json"
+    if cron_registry.exists():
+        try:
+            registry = json.loads(cron_registry.read_text(encoding="utf-8"))
+            ids = [e.get("id") for e in registry.get("entries", [])]
+            if "compass-weekly-synthesis" in ids:
+                ok("Cron entry: compass-weekly-synthesis registered")
+            else:
+                fail("Cron entry: compass-weekly-synthesis missing from cron_registry.json")
+        except json.JSONDecodeError:
+            fail("cron_registry.json: invalid JSON")
+    print()
+
     # 7b. Drift detection: compare installed files byte-for-byte against sources.
     print("[Drift]")
     for source, installed, label in _enumerate_installed_files(claude_dir):
@@ -563,6 +596,8 @@ def run_check():
         "budgeter.lib.logger",
         "budgeter.lib.estimator",
         "scribe.notes",
+        "compass.store",
+        "compass.synthesize",
     ]
     import importlib
     for mod_name in import_checks:
@@ -710,6 +745,11 @@ def main():
         for cmd_file in (HARDEN_DIR / "commands").glob("*.md"):
             shutil.copy2(cmd_file, commands_dir / cmd_file.name)
         print(f"  Harden commands  : {commands_dir}")
+
+        # Compass commands
+        for cmd_file in (COMPASS_DIR / "commands").glob("*.md"):
+            shutil.copy2(cmd_file, commands_dir / cmd_file.name)
+        print(f"  Compass commands : {commands_dir}")
 
         # Pre-commit hook
         install_pre_commit_hook()

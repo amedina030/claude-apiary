@@ -61,6 +61,19 @@ Canonical memory directory: `<repo-root>/.apiary/scribe/memory/`. Do not write t
 
 ---
 
+## Compass personality profile
+
+If `<repo-root>/.apiary/compass/personality.md` exists, read it as part of loading this context. It describes the user's personality, behavior patterns, and quirks as inferred from prior sessions, and should inform how you respond — preferred verbosity, when to ask vs decide, communication style, autonomy tolerance, etc.
+
+```bash
+apiary_root=$(python ~/.claude/apiary_launch.py --print-repo-path)
+test -f "$apiary_root/.apiary/compass/personality.md" && cat "$apiary_root/.apiary/compass/personality.md"
+```
+
+If the file is missing, do nothing (no error, no fallback). The personality profile is updated weekly by the compass synthesizer (`/compass-sync` for manual trigger). Treat its content as soft guidance — explicit user statements and `feedback`-type memory entries still override it.
+
+---
+
 ## Portability
 
 All apiary code must be portable across Windows / macOS / Linux. **Read `PORTABILITY.md` before modifying code, hooks, scripts, or `settings.json` entries.**

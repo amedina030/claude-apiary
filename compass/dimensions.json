@@ -1,0 +1,49 @@
+{
+  "dimensions": [
+    {
+      "name": "communication_style",
+      "volatile": false,
+      "description": "Verbosity, directness, formality of user messages and reactions to assistant verbosity. Includes preferred message length, use of jargon, and tolerance for ceremony."
+    },
+    {
+      "name": "decision_making",
+      "volatile": false,
+      "description": "How the user weighs tradeoffs, tolerance for ambiguity, depth of analysis preferred before deciding, willingness to commit vs explore alternatives."
+    },
+    {
+      "name": "pushback",
+      "volatile": false,
+      "description": "When and how the user corrects, challenges, or rejects assistant proposals. Includes the pattern of challenges (e.g. 'why X not Y' style)."
+    },
+    {
+      "name": "engagement",
+      "volatile": false,
+      "description": "Collaborative co-design vs directive delegation. How much the user wants to be in the loop on micro-decisions."
+    },
+    {
+      "name": "autonomy",
+      "volatile": false,
+      "description": "Tolerance for the assistant making decisions without check-ins. When the user wants to be asked vs told."
+    },
+    {
+      "name": "risk_tolerance",
+      "volatile": false,
+      "description": "Comfort with destructive actions, experimentation, 'just try it' vs verify-first temperament."
+    },
+    {
+      "name": "trust_calibration",
+      "volatile": false,
+      "description": "When the user verifies assistant outputs vs accepts at face value. Patterns of trust and skepticism by domain or context."
+    },
+    {
+      "name": "meta_awareness",
+      "volatile": false,
+      "description": "How often and in what ways the user steps back to reflect on the working relationship itself, rather than the immediate task."
+    },
+    {
+      "name": "mood_tone",
+      "volatile": true,
+      "description": "Current emotional state, energy, frustration, enthusiasm. VOLATILE — reflects current state, not stable personality. Synthesized from recent sessions only."
+    }
+  ]
+}

@@ -4,7 +4,7 @@ title: Config Files
 scope: project
 description: All configuration files, their location, format, and editable fields
 framework_version: "1.0"
-last_verified: 2026-04-05
+last_verified: 2026-04-17
 ---
 
 # Config Files
@@ -45,6 +45,13 @@ Canonical list of scheduled OS-scheduler entries that apiary owns. Located in th
       "schedule": {"type": "daily", "time": "02:00"},
       "command": ["python", "-m", "runner.run", "--detached"],
       "cwd": "<apiary_repo>"
+    },
+    {
+      "id": "compass-weekly-synthesis",
+      "description": "Weekly compass synthesis (self-throttled to 7-day cadence via --cron)",
+      "schedule": {"type": "daily", "time": "03:00"},
+      "command": ["python", "-m", "compass.synthesize", "--cron"],
+      "cwd": "<apiary_repo>"
     }
   ]
 }
@@ -59,6 +66,35 @@ Canonical list of scheduled OS-scheduler entries that apiary owns. Located in th
 | `command` | list of strings | yes | List-form command; rendered with backend-specific quoting at register time |
 | `cwd` | string | no | Working directory; supports the `<apiary_repo>` placeholder |
 | `disabled` | bool | no | `true` means the entry must NOT exist in the scheduler; `repair --apply` deletes any matching entry |
+
+## compass/dimensions.json
+
+List of personality dimensions the compass synthesizer extracts and emits. Located at `compass/dimensions.json` (in the repo, not under `.apiary/` — it's source, not state).
+
+```json
+{
+  "dimensions": [
+    {
+      "name": "communication_style",
+      "volatile": false,
+      "description": "Verbosity, directness, formality of user messages..."
+    },
+    {
+      "name": "mood_tone",
+      "volatile": true,
+      "description": "Current emotional state, energy..."
+    }
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `dimensions[].name` | string | yes | Snake_case dimension name. Must be unique within the file |
+| `dimensions[].volatile` | bool | yes | `true` for current-state signals (mood, energy); `false` for stable traits |
+| `dimensions[].description` | string | yes | One-paragraph description used by the capture and synthesis prompts |
+
+Adding a dimension: edit the JSON, then re-run any backfill or wait for the next `/wrapup` and weekly synthesis to start populating it. Removing a dimension: existing observations with that dimension will fail validation; archive or delete them first.
 
 ## budgeter/config.json
 

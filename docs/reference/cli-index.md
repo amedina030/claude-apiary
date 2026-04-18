@@ -4,7 +4,7 @@ title: CLI Tools Index
 scope: project
 description: Quick-reference table of all CLI entry points with key flags — use cli_lookup.py for full details
 framework_version: "1.0"
-last_verified: "2026-04-07"
+last_verified: "2026-04-17"
 ---
 
 # CLI Tools Index
@@ -20,6 +20,9 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `budgeter/tune.py` | Suggest rule weight adjustments | --min, --percentile, --yes |
 | `budgeter/log_agent_cost.py` | Log background agent token costs | --session-id, --agent, --cwd |
 | `budgeter/query_request.py` | Sum tokens for a given request_id | --request-id, --cwd |
+| `compass/observations.py` | Inspect/maintain personality observation files | count, list, validate, archive |
+| `compass/synthesize.py` | Synthesize personality.md from active observations | --dry-run, --model, --cron |
+| `compass/backfill.py` | Extract observations from historical transcripts | --last, --session-ids, --since, --force, --model |
 | `refiner/round_counter.py` | Track refinement round counts | start, tick, reset, status |
 | `harden/validate_and_assign.py` | Validate + assign IDs in one step | findings, response |
 | `harden/assign_ids.py` | Assign sequential IDs to output | --prefix, --file |

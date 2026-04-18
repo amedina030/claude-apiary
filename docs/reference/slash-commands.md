@@ -4,7 +4,7 @@ title: Slash Commands
 scope: project
 description: All slash commands, what they do, and when to use them
 framework_version: "1.0"
-last_verified: 2026-04-07
+last_verified: 2026-04-17
 ---
 
 # Slash Commands
@@ -26,7 +26,8 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 | `/refine` | `refiner/commands/refine.md` | Refine a fuzzy idea into a structured handoff spec through value-first adversarial questioning |
 | `/harden` | `harden/commands/harden.md` | Adversarial attack-defend loop that stress-tests code or plans |
 | `/review` | `docs/commands/review.md` | Review changes against standards, then fix issues |
-| `/wrapup` | `core/commands/wrapup.md` | Commit, push, and generate a session handoff note |
+| `/wrapup` | `core/commands/wrapup.md` | Commit, push, and generate a session handoff note. Also captures compass observations from the session (Step 4, non-blocking). |
+| `/compass-sync` | `compass/commands/compass-sync.md` | Manually trigger compass synthesis — regenerate `personality.md` from active observations |
 
 ## Toggles
 

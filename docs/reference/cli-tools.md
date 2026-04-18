@@ -158,6 +158,57 @@ echo '<usage>...</usage>' | python budgeter/log_agent_cost.py --session-id ID [-
 | `--cwd DIR` | no | Working directory for config resolution |
 | `--request-id ID` | no | Optional grouping id for multi-call chains (e.g. one runner run). Surfaces in `report.py --by-request`. |
 
+## compass/observations.py
+
+Inspect and maintain per-session personality observation files at `<repo>/.apiary/compass/observations/`.
+
+### Subcommands
+
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `count` | `observations.py count` | Print active observation count |
+| `list` | `observations.py list [--full] [--archive]` | List observation files (one per line; `--full` prints JSON; `--archive` lists archived files instead) |
+| `validate` | `observations.py validate <path> [--no-filename-check]` | Validate one observation file's schema. Default checks `session_id` matches the filename stem |
+| `archive` | `observations.py archive [--apply]` | Archive sweep — moves files older than 90 days into `observations/archive/<iso-year>-<iso-week>/`. Skips entirely when active count is below 50. Dry-run by default; `--apply` performs the move |
+
+## compass/synthesize.py
+
+Read active observations, previous `personality.md`, and `corrections.md`; call headless `claude -p` to produce a new `personality.md`. Used by `/compass-sync` and the weekly cron entry.
+
+```bash
+python ~/.claude/apiary_launch.py compass/synthesize.py
+python ~/.claude/apiary_launch.py compass/synthesize.py --dry-run
+python -m compass.synthesize --cron        # cron-driven; no-ops if personality.md is < 7 days old
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--dry-run` | no | Print the synthesis prompt instead of calling claude |
+| `--model MODEL` | no | Override the claude CLI's default model |
+| `--cron` | no | Self-throttle to a 7-day cadence (no-op if `personality.md` was rewritten in the last week) |
+
+Exit codes: `0` wrote `personality.md`; `1` no active observations; `2` claude subprocess failed (previous file untouched).
+
+## compass/backfill.py
+
+Extract observations from historical session transcripts via headless claude. Selectors are combinable and intersected.
+
+```bash
+python ~/.claude/apiary_launch.py compass/backfill.py --last 5
+python ~/.claude/apiary_launch.py compass/backfill.py --session-ids 1089da5c,8123e697
+python ~/.claude/apiary_launch.py compass/backfill.py --since 2026-04-10 --last 5
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--last N` | one of these | N most recent transcripts by mtime |
+| `--session-ids LIST` | one of these | Comma-separated 8-char prefixes or full UUIDs |
+| `--since YYYY-MM-DD` | one of these | Only transcripts modified on/after this date |
+| `--force` | no | Overwrite existing observation files (default: skip) |
+| `--model MODEL` | no | Override the claude CLI's default model |
+
+Exit codes: `0` at least one file written; `1` no selectors / no matches / nothing written; `2` claude subprocess failed for every selected session.
+
 ## refiner/round_counter.py
 
 Track refinement round counts per session. Used by the `/refine` skill to enforce the 15-round soft limit.
