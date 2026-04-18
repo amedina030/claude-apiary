@@ -36,6 +36,7 @@ from runner.claude_subprocess import run_claude
 
 VOLATILE_RECENT_WINDOW = 5  # last N sessions count toward volatile dimensions
 CRON_MIN_AGE_DAYS = 7        # --cron mode no-ops if personality.md is younger than this
+DEFAULT_MODEL = "opus"       # synthesis benefits from Opus's integration of subtle signals
 
 
 def _load_active(now_active: list[Path]) -> list[dict]:
@@ -203,8 +204,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Synthesize personality.md from observations")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the prompt instead of calling claude")
-    parser.add_argument("--model", default=None,
-                        help="override claude model (default: CLI default)")
+    parser.add_argument("--model", default=DEFAULT_MODEL,
+                        help=f"claude model alias (default: {DEFAULT_MODEL!r})")
     parser.add_argument("--cron", action="store_true",
                         help=f"weekly-throttle mode: no-op if personality.md is "
                              f"younger than {CRON_MIN_AGE_DAYS} days")
