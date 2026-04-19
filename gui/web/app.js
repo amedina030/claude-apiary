@@ -16,7 +16,9 @@
   const ptyTermEl = document.getElementById("pty-term");
   const ptyToggleEl = document.getElementById("pty-toggle");
   const ptyUnreadEl = document.getElementById("pty-unread");
+  const promptBannerEl = document.getElementById("prompt-banner");
   const inputEl = document.getElementById("input");
+  const INPUT_PLACEHOLDER_DEFAULT = inputEl.getAttribute("placeholder") || "";
   const sidebarSearchEl = document.getElementById("sidebar-search");
   const sidebarListEl = document.getElementById("sidebar-list");
 
@@ -469,8 +471,7 @@
   // xterm.js renders the pty stream as a real terminal, so ANSI escapes, cursor
   // repaints, and spinner redraws work correctly instead of leaving visible
   // garbage like the previous "stripAnsi-then-show-last-N-lines" approach.
-  const PTY_QUIET_SETTLE_MS = 1500;
-  const PTY_QUIET_CHECK_MS = 250;
+  //
   // After an assistant message lands, claude repaints its status line, spinner
   // cleanup, tool result boxes, footer hints, etc. Suppress unread counting
   // during this window so trailing repaints don't fake an "awaiting input" signal.
@@ -507,12 +508,12 @@
   });
   const fitAddon = new window.FitAddon.FitAddon();
   term.loadAddon(fitAddon);
-  // Defer term.open() until the terminal is first expanded. Opening on a
-  // zero-height container leaves xterm's renderer un-initialized and later
-  // fit() calls don't recover. Writes before open go into an array and are
-  // replayed on first open.
+  // Defer term.open() until the terminal first has real size — opening on a
+  // zero-height container leaves xterm's renderer un-initialized. Writes to
+  // term BEFORE open still update the internal buffer (xterm parses them),
+  // so the prompt detector can read the buffer the whole time even while the
+  // terminal is visually collapsed.
   let termOpened = false;
-  const preOpenBuffer = [];
 
   // ConPTY bracketed-paste: pywinpty wraps multi-byte writes in paste markers,
   // inside which "\r" is a literal newline rather than a submit. Route Enter
@@ -556,11 +557,6 @@
     term.open(ptyTermEl);
     termOpened = true;
     try { fitAddon.fit(); } catch (_) {}
-    // Replay any chunks that arrived before the user expanded. xterm buffers
-    // writes internally once open, but doing the replay explicitly keeps the
-    // pre-open array from growing unbounded across a long collapsed session.
-    for (const c of preOpenBuffer) term.write(c);
-    preOpenBuffer.length = 0;
     if (bridgeReady() && typeof window.pywebview.api.pty_resize === "function") {
       window.pywebview.api.pty_resize(term.rows, term.cols);
     }
@@ -613,42 +609,266 @@
     return lastAsstMsgAt > 0 && Date.now() - lastAsstMsgAt < PTY_POST_MSG_GRACE_MS;
   }
 
-  const PRE_OPEN_BUFFER_MAX = 512 * 1024;
-  let preOpenBufferSize = 0;
   function appendPtyChunk(chunk) {
-    if (termOpened) {
-      term.write(chunk);
-    } else {
-      preOpenBuffer.push(chunk);
-      preOpenBufferSize += chunk.length;
-      // Drop oldest if buffer blows past the cap — user hasn't expanded in a
-      // long time, so replaying 10MB of scroll would slam the renderer anyway.
-      while (preOpenBufferSize > PRE_OPEN_BUFFER_MAX && preOpenBuffer.length > 1) {
-        preOpenBufferSize -= preOpenBuffer.shift().length;
-      }
-    }
+    // Always write — the buffer is valid pre-open, so the prompt detector can
+    // read it even when the terminal is visually collapsed.
+    term.write(chunk);
+    scheduleDetect();
     if (inPostMessageGrace()) return;
     lastPtyChunkAt = Date.now();
     if (ptyStripWrapEl.classList.contains("collapsed")) bumpUnread();
   }
 
-  // Auto-expand heuristic: pty went quiet AND last pty activity was after last
-  // assistant message → claude is probably waiting on a prompt that never made
-  // it to JSONL. Fires only while collapsed and unread > 0.
-  setInterval(() => {
-    if (!ptyStripWrapEl.classList.contains("collapsed")) return;
-    if (unreadCount === 0) return;
-    if (lastPtyChunkAt === 0) return;
-    const now = Date.now();
-    if (now - lastPtyChunkAt < PTY_QUIET_SETTLE_MS) return;
-    if (lastPtyChunkAt <= lastAsstMsgAt) return;
-    ptyExpand();
-  }, PTY_QUIET_CHECK_MS);
+  // (Auto-expand removed — the prompt detector surfaces interactive prompts
+  // as native banners, so the terminal should stay where the user put it.
+  // Unread badge still tracks pty activity for the toggle.)
 
   ptyToggleEl.addEventListener("click", () => {
     if (ptyStripWrapEl.classList.contains("collapsed")) ptyExpand();
     else ptyCollapse();
   });
+
+  // --- prompt detector (reads xterm's screen buffer) -----------------------
+  // Claude Code's interactive prompts (plan-mode approval, trust folder,
+  // tool permission, etc.) share one visual shape:
+  //
+  //     <question text>
+  //
+  //     ❯ 1. <option text>
+  //       2. <option text>
+  //       3. <option text>
+  //
+  //     <optional footer with keyboard hints>
+  //
+  // We read xterm's post-render buffer (cursor movements already applied, so
+  // no spinner garbage) and extract that structure. Match anywhere in the
+  // buffer — prompts often live a few rows above the status line.
+  const PROMPT_DETECT_DEBOUNCE_MS = 250;
+  const PROMPT_MAX_OPTIONS = 9;  // claude uses 1-digit numbering
+  const PROMPT_SCAN_BACK_LINES = 6;
+  // After the user answers or dismisses a prompt, claude takes ~300-800ms to
+  // repaint the buffer (spinner frames, transition to feedback mode, etc.).
+  // Suppress re-showing the same prompt during this window so the banner
+  // doesn't immediately pop back for a prompt the user already dealt with.
+  const DISMISS_COOLDOWN_MS = 4000;
+  let promptDetectTimer = null;
+  let activePrompt = null;   // { question, options, signature }
+  let awaitingFeedback = false;  // true while claude is in option-4 feedback mode
+  let lastDismissedSig = null;
+  let lastDismissedAt = 0;
+
+  const SCREEN_SCAN_ROWS = 200;
+  function readScreenLines() {
+    const buf = term.buffer.active;
+    if (!buf) return [];
+    const total = buf.length;
+    const start = Math.max(0, total - SCREEN_SCAN_ROWS);
+    const lines = [];
+    for (let y = start; y < total; y++) {
+      const line = buf.getLine(y);
+      if (!line) continue;
+      lines.push(line.translateToString(true).replace(/\s+$/, ""));
+    }
+    return lines;
+  }
+
+  function detectPrompt(lines) {
+    // Find a selected-option line: "❯ N. ..." possibly indented.
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const sel = lines[i].match(/^\s*❯\s*(\d+)\.\s+(.+)$/);
+      if (!sel) continue;
+      const firstNum = parseInt(sel[1], 10);
+      const options = [{
+        number: firstNum,
+        text: sel[2].trim(),
+        selected: true,
+      }];
+      // Forward-scan: additional numbered options, allowing continuation
+      // lines (indented without a number) attached to the previous option.
+      let expected = firstNum + 1;
+      for (let j = i + 1; j < lines.length && options.length < PROMPT_MAX_OPTIONS; j++) {
+        const m = lines[j].match(/^\s+(\d+)\.\s+(.+)$/);
+        if (m && parseInt(m[1], 10) === expected) {
+          options.push({ number: expected, text: m[2].trim(), selected: false });
+          expected += 1;
+          continue;
+        }
+        if (m) break;  // number out of order — end of options
+        if (lines[j].trim() === "") continue;  // blank tolerated inside options
+        // Non-numbered, non-blank → options section ended.
+        break;
+      }
+      if (options.length < 2) continue;  // need at least 2 to be a choice
+      // Backward-scan: last non-empty line before options = question.
+      let question = "";
+      let questionIdx = -1;
+      for (let k = i - 1; k >= 0 && k >= i - PROMPT_SCAN_BACK_LINES; k--) {
+        const t = lines[k].trim();
+        if (t) { question = t; questionIdx = k; break; }
+      }
+      // Extract context text above the prompt. Plan mode frames its body with
+      // a ╌-divider (U+254C) separating the plan from the question. The top
+      // of the plan is bounded either by a second ╌-divider (long plans) or
+      // by Claude Code's status chrome — status-line ─-dividers (U+2500) or
+      // mode indicators like "⏸ plan mode on". Scan accordingly.
+      let context = "";
+      if (questionIdx > 0) {
+        const PLAN_DIV = /^\s*╌{10,}\s*$/;
+        const CHROME_LINE = /^\s*─{10,}\s*$|^\s*[─❯⏸▐▛▜▟▝▘█]/;
+        let bottomDiv = -1;
+        for (let k = questionIdx - 1; k >= 0; k--) {
+          if (PLAN_DIV.test(lines[k])) { bottomDiv = k; break; }
+        }
+        if (bottomDiv >= 0) {
+          let topBound = 0;
+          for (let k = bottomDiv - 1; k >= 0; k--) {
+            if (PLAN_DIV.test(lines[k]) || CHROME_LINE.test(lines[k])) {
+              topBound = k + 1;
+              break;
+            }
+          }
+          const body = lines.slice(topBound, bottomDiv)
+                            .map(s => s.replace(/^\s{1,2}/, ""))
+                            .join("\n")
+                            .replace(/\n{3,}/g, "\n\n")
+                            .trim();
+          if (body) context = body;
+        }
+      }
+      const signature = (context ? context.slice(0, 80) + "|" : "") +
+                        options.map(o => `${o.number}.${o.text}`).join("|");
+      return { question, context, options, signature };
+    }
+    return null;
+  }
+
+  function renderPromptBanner(prompt) {
+    promptBannerEl.innerHTML = "";
+    // Block chat input while a prompt is pending — otherwise the user's text
+    // lands in whatever input field the prompt is still showing (e.g. plan
+    // mode's "tell claude what to change" feedback box).
+    inputEl.classList.add("input-blocked");
+    inputEl.placeholder = "Claude is waiting on a response — pick an option above, or click ✕ to cancel";
+    const close = document.createElement("button");
+    close.className = "prompt-dismiss";
+    close.type = "button";
+    close.textContent = "✕";
+    close.title = "cancel the prompt (sends Esc to claude) and hide this banner";
+    close.addEventListener("click", () => hidePromptBanner({ cancel: true }));
+    promptBannerEl.appendChild(close);
+
+    if (prompt.context) {
+      const ctx = document.createElement("pre");
+      ctx.className = "prompt-context";
+      ctx.textContent = prompt.context;
+      promptBannerEl.appendChild(ctx);
+    }
+    if (prompt.question) {
+      const q = document.createElement("div");
+      q.className = "prompt-question";
+      q.textContent = prompt.question;
+      promptBannerEl.appendChild(q);
+    }
+    const row = document.createElement("div");
+    row.className = "prompt-options";
+    for (const opt of prompt.options) {
+      const btn = document.createElement("button");
+      btn.className = "prompt-option" + (opt.selected ? " selected" : "");
+      btn.type = "button";
+      btn.textContent = `${opt.number}. ${opt.text}`;
+      btn.addEventListener("click", () => answerPrompt(opt.number, opt.text));
+      row.appendChild(btn);
+    }
+    promptBannerEl.appendChild(row);
+    promptBannerEl.classList.remove("hidden");
+  }
+
+  function hidePromptBanner({ cancel = false } = {}) {
+    // When the user explicitly dismisses the banner, also send Esc to the pty
+    // so the underlying prompt is actually cancelled — otherwise the user
+    // starts typing in the chat and their text lands in whatever input field
+    // the prompt is still showing.
+    if (cancel && bridgeReady()) {
+      try { window.pywebview.api.send_escape(); } catch (_) {}
+    }
+    if (activePrompt) {
+      lastDismissedSig = activePrompt.signature;
+      lastDismissedAt = Date.now();
+    }
+    promptBannerEl.classList.add("hidden");
+    promptBannerEl.innerHTML = "";
+    activePrompt = null;
+    awaitingFeedback = false;
+    inputEl.classList.remove("input-blocked");
+    inputEl.placeholder = INPUT_PLACEHOLDER_DEFAULT;
+  }
+
+  function recordPromptResolution(prompt, chosenOpt) {
+    // Synthesize a chat record so the conversation history shows what claude
+    // asked and how the user responded. Without this, the chat jumps from
+    // "user: plan this" straight to "user: <feedback text>" with no trace of
+    // the plan body the user was reacting to.
+    const parts = [];
+    if (prompt.question) parts.push(`**${prompt.question}**`);
+    if (prompt.context) parts.push("", prompt.context);
+    parts.push("", `→ chose: **${chosenOpt.number}. ${chosenOpt.text}**`);
+    appendMessage({
+      uuid: `prompt-${Date.now()}-${chosenOpt.number}`,
+      role: "prompt",
+      text: parts.join("\n"),
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  function answerPrompt(digit, optText = "") {
+    if (!bridgeReady() || !activePrompt) return;
+    const chosenOpt = activePrompt.options.find(o => o.number === digit)
+                   || { number: digit, text: optText };
+    recordPromptResolution(activePrompt, chosenOpt);
+    // Feedback-entry options (plan mode's "4. Tell Claude what to change") put
+    // claude into a text-input sub-mode. We send the digit to enter that
+    // mode, skip the Enter, hide the banner, and unblock the chat input so
+    // the user can type their feedback and submit it with Enter as normal.
+    const isFeedback = /^\s*tell\b|what to change|with this feedback/i.test(optText);
+    window.pywebview.api.send_text(String(digit));
+    if (isFeedback) {
+      awaitingFeedback = true;
+      hidePromptBanner();
+      inputEl.placeholder = "Type your feedback for claude — Enter to submit, Esc to cancel";
+      inputEl.focus();
+    } else {
+      setTimeout(() => window.pywebview.api.send_control("m"), 30);
+      hidePromptBanner();
+    }
+  }
+
+  function scheduleDetect() {
+    if (promptDetectTimer) clearTimeout(promptDetectTimer);
+    promptDetectTimer = setTimeout(() => {
+      promptDetectTimer = null;
+      const found = detectPrompt(readScreenLines());
+      if (!found) {
+        if (activePrompt) hidePromptBanner();
+        // Also clear the dismiss cooldown — if the prompt is truly gone, a
+        // later recurrence is a NEW prompt and deserves a banner.
+        if (lastDismissedSig && (!activePrompt)) {
+          lastDismissedSig = null;
+          lastDismissedAt = 0;
+        }
+        return;
+      }
+      if (activePrompt && activePrompt.signature === found.signature) return;
+      // Suppress re-show if the user just dismissed this exact prompt — claude
+      // takes a moment to repaint, and the stale buffer would fire the banner
+      // right back in the user's face.
+      if (found.signature === lastDismissedSig &&
+          Date.now() - lastDismissedAt < DISMISS_COOLDOWN_MS) {
+        return;
+      }
+      activePrompt = found;
+      renderPromptBanner(found);
+    }, PROMPT_DETECT_DEBOUNCE_MS);
+  }
 
   // --- bridge surface (Python → JS) ----------------------------------------
   function bridgeReady() {
@@ -729,13 +949,28 @@
     if (!bridgeReady()) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      // While a prompt banner is visible, forwarding the chat text would land
+      // it inside whatever input field the pty prompt is showing (plan mode's
+      // feedback field, etc.). Block the send and nudge the user.
+      if (activePrompt) {
+        toast("Pick an option in the banner above (or click ✕ to cancel the prompt).", "error");
+        return;
+      }
       const text = inputEl.value;
       inputEl.value = "";
       // Render optimistically — the tail will reconcile when the real record
       // lands. Skip empties and slash commands (slash commands shouldn't show
-      // as user messages; claude often handles them differently).
-      if (text && !text.startsWith("/")) appendTentativeUserMessage(text);
+      // as user messages; claude often handles them differently). Also skip
+      // the tentative render while we're in feedback-submission mode —
+      // claude treats this as input to the plan prompt, not a new user msg.
+      if (text && !text.startsWith("/") && !awaitingFeedback) {
+        appendTentativeUserMessage(text);
+      }
       window.pywebview.api.send_input(text);
+      if (awaitingFeedback) {
+        awaitingFeedback = false;
+        inputEl.placeholder = INPUT_PLACEHOLDER_DEFAULT;
+      }
       return;
     }
     if (e.key === "Escape") {

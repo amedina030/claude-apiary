@@ -339,6 +339,16 @@ class App:
 
 
 def main() -> int:
+    # WebView2 aggressively caches app.js / app.css / vendored assets across
+    # launches, which makes iterating on the frontend painful — edits don't
+    # appear until a manual Ctrl+F5. Disable disk cache for our WebView2
+    # browser. Must be set BEFORE webview is imported (WebView2 reads the env
+    # var at browser-process start).
+    os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
+        os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
+        + " --disable-cache --disable-application-cache --disk-cache-size=1"
+    ).strip()
+
     with SingleInstance() as guard:
         if not guard.acquired:
             print("apiary GUI is already running.", file=sys.stderr)
