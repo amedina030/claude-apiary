@@ -15,8 +15,8 @@ Windows V1 only (pywinpty). Code stays portability-clean (`pathlib`, `os.devnull
 ## Run from source
 
 ```bash
-pip install -r gui/requirements.txt
-python -m gui.app
+poetry install --with gui
+poetry run python -m gui.app
 ```
 
 ## Build .exe
@@ -33,3 +33,24 @@ Auto-created on first run under `~/.claude/apiary_gui/`:
 - `theme.json` — CSS variable values (hot-reloads)
 - `launch.json` — Claude Code spawn args + cwd
 - `apiary_repos.json` — list of apiary repos to aggregate scribe notes from
+- `captures/` — raw pty-output captures (only populated when capture mode is on)
+
+## Capturing pty output for new prompt handlers
+
+When Claude Code shows an interactive UI we haven't parsed yet (permission
+prompt variant, plan-mode, MCP OAuth, etc.), capture the raw pty stream so it
+can be added as a fixture to `gui/test_prompt_detector.py`.
+
+```bash
+# Launch GUI with capture on (writes ~/.claude/apiary_gui/captures/<ts>-<label>.bin)
+poetry run python -m gui.capture_session --label tool_permission
+
+# Reproduce the UI in the GUI, then close the window.
+
+# List existing captures
+poetry run python -m gui.capture_session list
+```
+
+Capture is controlled by the `APIARY_GUI_CAPTURE_LABEL` env var — the CLI is
+just a convenience wrapper that sets it and delegates to `gui.app`. Files are
+raw bytes (pre-decode) so ANSI escapes and control sequences survive intact.

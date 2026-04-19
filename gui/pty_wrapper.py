@@ -44,6 +44,7 @@ class PtyWrapper:
         on_stdout: Optional[Callable[[str], None]] = None,
         on_exit: Optional[Callable[[int], None]] = None,
         ring_size: int = 4096,
+        capture=None,
     ) -> None:
         self.argv = list(argv) if argv else ["claude"]
         self.cwd = cwd
@@ -56,6 +57,10 @@ class PtyWrapper:
         self._reader_thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
+        # Optional raw-bytes sink (gui.pty_capture.CaptureWriter). Writes are
+        # pre-decode so captures preserve exact terminal fidelity for the
+        # prompt-detector fixtures.
+        self._capture = capture
 
     @property
     def buffer(self) -> str:
@@ -115,6 +120,13 @@ class PtyWrapper:
                     break
                 self._stop.wait(0.05)
                 continue
+            # Capture raw chunk (pre-decode) for fidelity — ANSI escapes,
+            # control bytes, and any invalid UTF-8 survive to the fixture file.
+            if self._capture is not None:
+                try:
+                    self._capture.write(chunk)
+                except Exception:
+                    pass
             if isinstance(chunk, bytes):
                 chunk = chunk.decode("utf-8", errors="replace")
             with self._lock:

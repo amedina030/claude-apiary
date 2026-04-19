@@ -13,7 +13,7 @@
   const modelNameEl = document.getElementById("model-name");
   const toastsEl = document.getElementById("toasts");
   const ptyStripWrapEl = document.getElementById("pty-strip-wrap");
-  const ptyStripEl = document.getElementById("pty-strip");
+  const ptyTermEl = document.getElementById("pty-term");
   const ptyToggleEl = document.getElementById("pty-toggle");
   const ptyUnreadEl = document.getElementById("pty-unread");
   const inputEl = document.getElementById("input");
@@ -465,35 +465,140 @@
     sidebarSearchTimer = setTimeout(renderSidebar, 200);
   });
 
-  // --- pty strip ------------------------------------------------------------
-  const PTY_RING_MAX = 16384;
-  const PTY_DISPLAY_LINES = 12;
-  // "Quiet pty + no new assistant message" → claude is probably waiting for
-  // you (permission prompt, plan-mode confirm, MCP OAuth, etc.). Auto-expand
-  // the strip when those conditions hold.
+  // --- pty terminal (xterm.js) ---------------------------------------------
+  // xterm.js renders the pty stream as a real terminal, so ANSI escapes, cursor
+  // repaints, and spinner redraws work correctly instead of leaving visible
+  // garbage like the previous "stripAnsi-then-show-last-N-lines" approach.
   const PTY_QUIET_SETTLE_MS = 1500;
   const PTY_QUIET_CHECK_MS = 250;
   // After an assistant message lands, claude repaints its status line, spinner
   // cleanup, tool result boxes, footer hints, etc. Suppress unread counting
   // during this window so trailing repaints don't fake an "awaiting input" signal.
   const PTY_POST_MSG_GRACE_MS = 3000;
-  let ptyBuf = "";
   let unreadCount = 0;
   let lastPtyChunkAt = 0;
   let lastAsstMsgAt = 0;
-  function stripAnsi(s) {
-    return s
-      .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
-      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
-      .replace(/\x1b[@-_]/g, "")
-      .replace(/\r(?!\n)/g, "\n");
+
+  // Read back CSS vars for xterm theme so a theme.json change propagates.
+  function themeVar(name, fallback) {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
   }
+
+  if (typeof window.Terminal !== "function") {
+    console.error("[apiary-gui] xterm.js failed to load (window.Terminal undefined).");
+  }
+  if (typeof window.FitAddon !== "object" || !window.FitAddon.FitAddon) {
+    console.error("[apiary-gui] xterm FitAddon failed to load (window.FitAddon.FitAddon missing).");
+  }
+
+  const term = new window.Terminal({
+    fontFamily: themeVar("--font-family", "Consolas, monospace"),
+    fontSize: 13,
+    cursorBlink: true,
+    scrollback: 5000,
+    convertEol: false,
+    cols: 120,
+    rows: 30,
+    theme: {
+      background: themeVar("--pty-bg", "#010409"),
+      foreground: themeVar("--pty-fg", "#c9d1d9"),
+    },
+  });
+  const fitAddon = new window.FitAddon.FitAddon();
+  term.loadAddon(fitAddon);
+  // Defer term.open() until the terminal is first expanded. Opening on a
+  // zero-height container leaves xterm's renderer un-initialized and later
+  // fit() calls don't recover. Writes before open go into an array and are
+  // replayed on first open.
+  let termOpened = false;
+  const preOpenBuffer = [];
+
+  // ConPTY bracketed-paste: pywinpty wraps multi-byte writes in paste markers,
+  // inside which "\r" is a literal newline rather than a submit. Route Enter
+  // (CR) and Esc through the dedicated control paths to avoid that wrapping;
+  // everything else (printable keys, arrows, Tab, Ctrl+*) goes raw via send_text.
+  term.onData((data) => {
+    if (!bridgeReady()) return;
+    if (data === "\r") {
+      window.pywebview.api.send_control("m");
+      return;
+    }
+    if (data === "\x1b") {
+      window.pywebview.api.send_escape();
+      return;
+    }
+    window.pywebview.api.send_text(data);
+  });
+
+  // Refit and notify the backend of new rows/cols. Only meaningful while the
+  // terminal is visible — a collapsed (height:0) container yields bogus sizes.
+  function refitTerminal() {
+    if (ptyStripWrapEl.classList.contains("collapsed")) return;
+    try {
+      fitAddon.fit();
+    } catch (_) {
+      return;
+    }
+    if (bridgeReady() && typeof window.pywebview.api.pty_resize === "function") {
+      window.pywebview.api.pty_resize(term.rows, term.cols);
+    }
+  }
+  window.addEventListener("resize", refitTerminal);
+
+  function ensureTermOpen() {
+    if (termOpened) return;
+    if (ptyTermEl.clientHeight < 10) {
+      // Container still collapsed / mid-transition. The ResizeObserver below
+      // will call us again once size settles.
+      return;
+    }
+    term.open(ptyTermEl);
+    termOpened = true;
+    try { fitAddon.fit(); } catch (_) {}
+    // Replay any chunks that arrived before the user expanded. xterm buffers
+    // writes internally once open, but doing the replay explicitly keeps the
+    // pre-open array from growing unbounded across a long collapsed session.
+    for (const c of preOpenBuffer) term.write(c);
+    preOpenBuffer.length = 0;
+    if (bridgeReady() && typeof window.pywebview.api.pty_resize === "function") {
+      window.pywebview.api.pty_resize(term.rows, term.cols);
+    }
+  }
+  // Fallback trigger: once the terminal's container actually has size, open.
+  // This is the robust path — it doesn't care whether the size came from a
+  // manual toggle, auto-expand, or the user resizing the window. Also keeps
+  // calling fit() after open so that the CSS height transition (0 → 280px)
+  // doesn't leave xterm stuck at the mid-transition row count.
+  try {
+    const ro = new ResizeObserver(() => {
+      const h = ptyTermEl.clientHeight;
+      if (!termOpened && h >= 10) {
+        ensureTermOpen();
+      } else if (termOpened && h >= 10) {
+        try { fitAddon.fit(); } catch (_) {}
+        if (bridgeReady() && typeof window.pywebview.api.pty_resize === "function") {
+          window.pywebview.api.pty_resize(term.rows, term.cols);
+        }
+      }
+    });
+    ro.observe(ptyTermEl);
+  } catch (_) { /* ResizeObserver unavailable — toggle path still works */ }
 
   function ptyExpand() {
     ptyStripWrapEl.classList.remove("collapsed");
     unreadCount = 0;
     ptyUnreadEl.classList.add("hidden");
     ptyUnreadEl.textContent = "";
+    // ResizeObserver will catch the height change and call ensureTermOpen. As
+    // a safety net, retry a few times across the CSS transition window too.
+    const retryUntil = Date.now() + 400;
+    function tryOpen() {
+      ensureTermOpen();
+      if (!termOpened && Date.now() < retryUntil) requestAnimationFrame(tryOpen);
+      else refitTerminal();
+    }
+    requestAnimationFrame(tryOpen);
   }
   function ptyCollapse() {
     ptyStripWrapEl.classList.add("collapsed");
@@ -508,13 +613,21 @@
     return lastAsstMsgAt > 0 && Date.now() - lastAsstMsgAt < PTY_POST_MSG_GRACE_MS;
   }
 
+  const PRE_OPEN_BUFFER_MAX = 512 * 1024;
+  let preOpenBufferSize = 0;
   function appendPtyChunk(chunk) {
-    ptyBuf += stripAnsi(chunk);
-    if (ptyBuf.length > PTY_RING_MAX) ptyBuf = ptyBuf.slice(-PTY_RING_MAX);
-    const lines = ptyBuf.split("\n");
-    ptyStripEl.textContent = lines.slice(-PTY_DISPLAY_LINES).join("\n");
-    ptyStripEl.scrollTop = ptyStripEl.scrollHeight;
-    if (inPostMessageGrace()) return; // suppress repaint trail
+    if (termOpened) {
+      term.write(chunk);
+    } else {
+      preOpenBuffer.push(chunk);
+      preOpenBufferSize += chunk.length;
+      // Drop oldest if buffer blows past the cap — user hasn't expanded in a
+      // long time, so replaying 10MB of scroll would slam the renderer anyway.
+      while (preOpenBufferSize > PRE_OPEN_BUFFER_MAX && preOpenBuffer.length > 1) {
+        preOpenBufferSize -= preOpenBuffer.shift().length;
+      }
+    }
+    if (inPostMessageGrace()) return;
     lastPtyChunkAt = Date.now();
     if (ptyStripWrapEl.classList.contains("collapsed")) bumpUnread();
   }
@@ -598,6 +711,13 @@
             document.documentElement.style.setProperty(name, v);
           }
         }
+        // Re-apply pty colors to xterm (CSS vars alone don't reach the canvas).
+        try {
+          term.options.theme = {
+            background: themeVar("--pty-bg", "#010409"),
+            foreground: themeVar("--pty-fg", "#c9d1d9"),
+          };
+        } catch (_) { /* noop */ }
       } catch (e) {
         console.error("onTheme parse error", e);
       }

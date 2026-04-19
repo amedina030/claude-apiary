@@ -8,13 +8,14 @@ hot-reload, single-instance, packaging come in later phases.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import time
 from pathlib import Path
 from typing import Optional
 
-from gui import repo_registry, sidebar_state
+from gui import pty_capture, repo_registry, sidebar_state
 from gui.pty_wrapper import PtySpawnError, PtyWrapper
 from gui.scribe_aggregator import NoteEntry, ScribeAggregatorService, read_body
 from gui.single_instance import SingleInstance
@@ -91,6 +92,20 @@ class GuiBridge:
     def restart_pty(self) -> bool:
         return self._app.start_pty(restart=True)
 
+    def pty_resize(self, rows, cols) -> bool:
+        """Forward xterm.js-computed dimensions to the pty. Best-effort."""
+        if self._app.pty is None:
+            return False
+        try:
+            r = int(rows)
+            c = int(cols)
+        except (TypeError, ValueError):
+            return False
+        if r <= 0 or c <= 0:
+            return False
+        self._app.pty.resize(r, c)
+        return True
+
     def get_note_body(self, body_path: str) -> str:
         """Frontend calls this when a sidebar note is clicked. Read-only — no scribe writes."""
         if not isinstance(body_path, str):
@@ -116,6 +131,14 @@ class App:
         self._theme_watcher: Optional[ThemeWatcher] = None
         self._js_lock = threading.Lock()
         self._current_path: Optional[Path] = None
+        # Pty capture is opt-in via APIARY_GUI_CAPTURE_LABEL. Capture stays
+        # on for the lifetime of the process (across pty restarts).
+        self._capture: Optional[pty_capture.CaptureWriter] = None
+        capture_env = os.environ.get("APIARY_GUI_CAPTURE_LABEL")
+        if capture_env is not None:
+            path = pty_capture.next_capture_path(capture_env or None)
+            self._capture = pty_capture.CaptureWriter(path)
+            print(f"[gui] pty capture → {path}", file=sys.stderr)
 
     # --- frontend bridge helpers --------------------------------------------------
 
@@ -183,6 +206,21 @@ class App:
         rows = int(launch.get("rows", 40) or 40)
         cols = int(launch.get("cols", 120) or 120)
 
+        # Scrub CLAUDECODE-family env vars so the inner claude starts as a
+        # fresh user session. If we inherit them from the outer Claude Code
+        # process (which is how a dev launches the GUI via `claude`), the
+        # inner claude thinks it's a programmatic sub-invocation and auto-
+        # approves every tool — no permission prompts ever render.
+        spawn_env = os.environ.copy()
+        for key in (
+            "CLAUDECODE",
+            "CLAUDE_CODE_ENTRYPOINT",
+            "CLAUDE_CODE_EXECPATH",
+            "CLAUDE_CODE_SESSION",
+            "CLAUDE_CODE_SESSION_ID",
+        ):
+            spawn_env.pop(key, None)
+
         # Capture pre-spawn JSONLs so session-discovery ignores any session that
         # existed before the GUI launched its own claude. Also record the spawn
         # moment as a ctime threshold (1s slop for clock skew).
@@ -193,9 +231,11 @@ class App:
             pty = PtyWrapper(
                 argv=argv,
                 cwd=cwd,
+                env=spawn_env,
                 dimensions=(rows, cols),
                 on_stdout=self._push_pty_chunk,
                 on_exit=self._push_pty_exit,
+                capture=self._capture,
             )
             pty.start()
         except PtySpawnError as e:
@@ -294,6 +334,8 @@ class App:
             self._theme_watcher.stop()
         if self.pty is not None:
             self.pty.stop()
+        if self._capture is not None:
+            self._capture.close()
 
 
 def main() -> int:
