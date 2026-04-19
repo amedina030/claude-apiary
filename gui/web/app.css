@@ -283,6 +283,9 @@ body {
   font-family: var(--font-family);
   font-size: var(--font-size);
   line-height: 1.45;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
 .msg-body code {
@@ -401,6 +404,16 @@ body {
   font-family: var(--font-family);
   color: var(--accent);
   font-size: 11px;
+  cursor: pointer;
+  width: fit-content;
+  padding: 1px 4px;
+  margin: -1px -4px;
+  border-radius: 3px;
+}
+
+.sidebar-item-id:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  text-decoration: underline;
 }
 
 .sidebar-item-summary {
@@ -440,6 +453,9 @@ body {
   /* Cap very long bodies but let most short notes show in full. */
   max-height: 360px;
   overflow-y: auto;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
 .sidebar-item.expanded .sidebar-item-body {

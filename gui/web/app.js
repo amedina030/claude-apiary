@@ -286,6 +286,25 @@
     setTimeout(() => el.remove(), 4000);
   }
 
+  // Insert text at the current caret position in the chat input and focus it.
+  // Used by sidebar ID clicks so the user can compose messages that reference
+  // notes ("see T-2026-153") without typing the ID by hand.
+  function insertIntoInput(text) {
+    if (!text) return;
+    const start = inputEl.selectionStart ?? inputEl.value.length;
+    const end = inputEl.selectionEnd ?? inputEl.value.length;
+    const before = inputEl.value.slice(0, start);
+    const after = inputEl.value.slice(end);
+    // Pad with spaces so the ID doesn't glue to surrounding words.
+    const needsLeadSpace = before.length > 0 && !/\s$/.test(before);
+    const needsTrailSpace = after.length > 0 && !/^\s/.test(after);
+    const insertText = (needsLeadSpace ? " " : "") + text + (needsTrailSpace ? " " : "");
+    inputEl.value = before + insertText + after;
+    const caret = start + insertText.length;
+    inputEl.focus();
+    inputEl.setSelectionRange(caret, caret);
+  }
+
   // --- sidebar --------------------------------------------------------------
   let allNotes = [];
   let sidebarFilter = "";
@@ -390,6 +409,11 @@
         const idEl = document.createElement("div");
         idEl.className = "sidebar-item-id";
         idEl.textContent = n.display_id;
+        idEl.title = "click to insert this ID into the chat input";
+        idEl.addEventListener("click", (e) => {
+          e.stopPropagation();
+          insertIntoInput(n.display_id);
+        });
         item.appendChild(idEl);
 
         const sumEl = document.createElement("div");
@@ -759,8 +783,6 @@
   // no spinner garbage) and extract that structure. Match anywhere in the
   // buffer — prompts often live a few rows above the status line.
   const PROMPT_DETECT_DEBOUNCE_MS = 250;
-  const PROMPT_MAX_OPTIONS = 9;  // claude uses 1-digit numbering
-  const PROMPT_SCAN_BACK_LINES = 6;
   // After the user answers or dismisses a prompt, claude takes ~300-800ms to
   // repaint the buffer (spinner frames, transition to feedback mode, etc.).
   // Suppress re-showing the same prompt during this window so the banner
@@ -771,6 +793,9 @@
   let awaitingFeedback = false;  // true while claude is in option-4 feedback mode
   let lastDismissedSig = null;
   let lastDismissedAt = 0;
+  // Parser lives in prompt_detector.js so it can be Node-tested. If the bundle
+  // failed to load, fall back to a no-op stub so the rest of the UI still works.
+  const detectPrompt = (window.apiaryPromptDetector && window.apiaryPromptDetector.detectPrompt) || (() => null);
 
   const SCREEN_SCAN_ROWS = 200;
   function readScreenLines() {
@@ -785,76 +810,6 @@
       lines.push(line.translateToString(true).replace(/\s+$/, ""));
     }
     return lines;
-  }
-
-  function detectPrompt(lines) {
-    // Find a selected-option line: "❯ N. ..." possibly indented.
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const sel = lines[i].match(/^\s*❯\s*(\d+)\.\s+(.+)$/);
-      if (!sel) continue;
-      const firstNum = parseInt(sel[1], 10);
-      const options = [{
-        number: firstNum,
-        text: sel[2].trim(),
-        selected: true,
-      }];
-      // Forward-scan: additional numbered options, allowing continuation
-      // lines (indented without a number) attached to the previous option.
-      let expected = firstNum + 1;
-      for (let j = i + 1; j < lines.length && options.length < PROMPT_MAX_OPTIONS; j++) {
-        const m = lines[j].match(/^\s+(\d+)\.\s+(.+)$/);
-        if (m && parseInt(m[1], 10) === expected) {
-          options.push({ number: expected, text: m[2].trim(), selected: false });
-          expected += 1;
-          continue;
-        }
-        if (m) break;  // number out of order — end of options
-        if (lines[j].trim() === "") continue;  // blank tolerated inside options
-        // Non-numbered, non-blank → options section ended.
-        break;
-      }
-      if (options.length < 2) continue;  // need at least 2 to be a choice
-      // Backward-scan: last non-empty line before options = question.
-      let question = "";
-      let questionIdx = -1;
-      for (let k = i - 1; k >= 0 && k >= i - PROMPT_SCAN_BACK_LINES; k--) {
-        const t = lines[k].trim();
-        if (t) { question = t; questionIdx = k; break; }
-      }
-      // Extract context text above the prompt. Plan mode frames its body with
-      // a ╌-divider (U+254C) separating the plan from the question. The top
-      // of the plan is bounded either by a second ╌-divider (long plans) or
-      // by Claude Code's status chrome — status-line ─-dividers (U+2500) or
-      // mode indicators like "⏸ plan mode on". Scan accordingly.
-      let context = "";
-      if (questionIdx > 0) {
-        const PLAN_DIV = /^\s*╌{10,}\s*$/;
-        const CHROME_LINE = /^\s*─{10,}\s*$|^\s*[─❯⏸▐▛▜▟▝▘█]/;
-        let bottomDiv = -1;
-        for (let k = questionIdx - 1; k >= 0; k--) {
-          if (PLAN_DIV.test(lines[k])) { bottomDiv = k; break; }
-        }
-        if (bottomDiv >= 0) {
-          let topBound = 0;
-          for (let k = bottomDiv - 1; k >= 0; k--) {
-            if (PLAN_DIV.test(lines[k]) || CHROME_LINE.test(lines[k])) {
-              topBound = k + 1;
-              break;
-            }
-          }
-          const body = lines.slice(topBound, bottomDiv)
-                            .map(s => s.replace(/^\s{1,2}/, ""))
-                            .join("\n")
-                            .replace(/\n{3,}/g, "\n\n")
-                            .trim();
-          if (body) context = body;
-        }
-      }
-      const signature = (context ? context.slice(0, 80) + "|" : "") +
-                        options.map(o => `${o.number}.${o.text}`).join("|");
-      return { question, context, options, signature };
-    }
-    return null;
   }
 
   function renderPromptBanner(prompt) {

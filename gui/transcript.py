@@ -95,6 +95,13 @@ def filter_record(rec: dict) -> Optional[Message]:
         content = msg.get("content")
         if not isinstance(content, str) or not content.strip():
             return None
+        # Claude Code wraps slash-command invocations in a synthetic user record
+        # that starts with <local-command-caveat>…</local-command-caveat> plus
+        # <command-name>/foo</command-name>. It's not user-authored prose — it's
+        # an internal marker — so drop it from the rendered chat.
+        stripped = content.lstrip()
+        if stripped.startswith("<local-command-caveat>") or stripped.startswith("<command-name>"):
+            return None
         return Message(role="user", text=content, timestamp=ts, uuid=uuid)
 
     if rtype == "assistant":

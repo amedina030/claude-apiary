@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 import time
 from pathlib import Path
 from typing import Optional
+
+_CLEAR_CMD_RE = re.compile(r"^\s*/clear(\s|$)")
 
 from gui import pty_capture, repo_registry, sidebar_state
 from gui.pty_wrapper import PtySpawnError, PtyWrapper
@@ -69,7 +72,18 @@ class GuiBridge:
         time.sleep(0.03)
         # sendcontrol('m') → 0x0d (Ctrl+M = Enter), routed via a key-event path
         # that doesn't get bracket-wrapped.
-        return self._app.pty.send_control("m")
+        ok = self._app.pty.send_control("m")
+        if ok and _CLEAR_CMD_RE.match(normalized):
+            # /clear makes claude start a fresh JSONL. Without a discovery
+            # re-pin the lock_after_first latch keeps us tailing the old file
+            # forever. Fire the reset in a background thread so this call
+            # returns immediately and the pty write isn't held up.
+            threading.Thread(
+                target=self._app.on_clear_requested,
+                name="clear-reset",
+                daemon=True,
+            ).start()
+        return ok
 
     def send_control(self, ch: str) -> bool:
         """Forward a control character: 'c' → Ctrl+C (0x03), etc."""
@@ -286,6 +300,33 @@ class App:
             pass
         tail.start()
         self._tail = tail
+
+    def on_clear_requested(self) -> None:
+        """React to the user typing /clear: drop the discovery lock so the new
+        post-clear JSONL is picked up. Runs on a background thread so the pty
+        send path isn't blocked.
+        """
+        if self._discovery is None:
+            return
+        # Claude needs a moment to finalize the old JSONL and create the new one.
+        # 0.5s clears it comfortably without feeling laggy.
+        time.sleep(0.5)
+        # Re-pin: bump min_ctime past the old session's creation. set_pin will
+        # drop self._current because its ctime now predates min_ctime, which
+        # unlocks the latch and lets the next poll pick up the fresh JSONL.
+        # Keep the existing exclude_paths (they're still valid); the old
+        # transcript is naturally excluded by the ctime bump.
+        spawn_time = time.time() - 1.0
+        self._discovery.set_pin(
+            min_ctime=spawn_time,
+            lock_after_first=True,
+        )
+        if self._tail is not None:
+            self._tail.stop()
+            self._tail = None
+        self._current_path = None
+        self._push_clear()
+        self._push_status("Waiting for post-clear session…")
 
     def _on_session_switch(self, path: Path) -> None:
         if self._current_path is not None and path == self._current_path:
