@@ -131,6 +131,7 @@ class App:
         self._theme_watcher: Optional[ThemeWatcher] = None
         self._js_lock = threading.Lock()
         self._current_path: Optional[Path] = None
+        self._services_started = False
         # Pty capture is opt-in via APIARY_GUI_CAPTURE_LABEL. Capture stays
         # on for the lifetime of the process (across pty restarts).
         self._capture: Optional[pty_capture.CaptureWriter] = None
@@ -299,6 +300,19 @@ class App:
         self._start_tail(path)
 
     def start_services(self) -> None:
+        # Webview 'loaded' fires again on every page reload (Ctrl+F5). Without
+        # the idempotence guard, every reload would leak a fresh ThemeWatcher,
+        # aggregator, and SessionDiscovery — and the new Discovery would start
+        # *unpinned*, so it'd latch onto whatever JSONL looked most recent in
+        # the projects dir (often the OUTER Claude Code session the dev
+        # launched the GUI from, leaking that transcript into the GUI chat).
+        # Instead, on reload we just re-push the current state to the new JS
+        # context.
+        if self._services_started:
+            self._resync_frontend_state()
+            return
+        self._services_started = True
+
         ensure_theme_defaults()
         vars_, theme_err = load_theme()
         self._push_theme(vars_, theme_err)
@@ -322,6 +336,30 @@ class App:
 
         self.start_pty()
         self._discovery.start()
+
+    def _resync_frontend_state(self) -> None:
+        """Re-push current state to the webview after a page reload."""
+        vars_, theme_err = load_theme()
+        self._push_theme(vars_, theme_err)
+        # Replay the active transcript so the chat shows history again.
+        if self._current_path is not None:
+            try:
+                text = self._current_path.read_text(encoding="utf-8", errors="replace")
+                history = parse_jsonl_lines(text)
+                self._push_messages(history)
+            except OSError as e:
+                self._push_status(f"Cannot re-read transcript: {e}")
+        # One-shot notes refresh (the aggregator's next tick would push them
+        # anyway, but doing it now avoids a blank sidebar for the poll interval).
+        if self._aggregator is not None:
+            from gui.scribe_aggregator import aggregate
+
+            try:
+                repos, _ = repo_registry.load()
+                notes, warnings = aggregate(repos)
+                self._push_notes(notes, warnings)
+            except Exception as e:
+                print(f"[gui] notes resync failed: {e}", file=sys.stderr)
 
     def shutdown(self) -> None:
         if self._tail is not None:
