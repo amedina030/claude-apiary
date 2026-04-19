@@ -23,6 +23,7 @@ class NoteEntry:
     folder: str          # raw scribe subfolder name (e.g. "todos", "decisions")
     display_id: str
     summary: str
+    brief_summary: str   # one-sentence headline for sidebar display (may be "")
     status: str
     timestamp: str
     has_body: bool
@@ -36,6 +37,7 @@ class NoteEntry:
             "folder": self.folder,
             "display_id": self.display_id,
             "summary": self.summary,
+            "brief_summary": self.brief_summary,
             "status": self.status,
             "timestamp": self.timestamp,
             "has_body": self.has_body,
@@ -112,6 +114,7 @@ def _scan_repo(repo: Path) -> list[NoteEntry]:
                                 folder=folder,
                                 display_id=rec.get("display_id", ""),
                                 summary=rec.get("summary", ""),
+                                brief_summary=rec.get("brief_summary", ""),
                                 status=status,
                                 timestamp=rec.get("timestamp", ""),
                                 has_body=has_body,

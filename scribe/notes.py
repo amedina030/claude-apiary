@@ -31,7 +31,7 @@ from pathlib import Path as _PathImport
 # Add project root to path for core.utils import
 sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
 from core.session import SessionId
-from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME
+from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME, BRIEF_SUMMARY_MAX, derive_brief_summary
 
 from pathlib import Path
 
@@ -317,6 +317,15 @@ def cmd_add(args):
         )
         sys.exit(1)
 
+    brief_summary = (getattr(args, 'brief_summary', '') or '').strip()
+    if len(brief_summary) > BRIEF_SUMMARY_MAX:
+        print(
+            f'Error: --brief-summary exceeds {BRIEF_SUMMARY_MAX} chars ({len(brief_summary)}). '
+            'Keep it to a one-sentence headline.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # Build metadata dict for extra fields
     metadata = {}
     if getattr(args, 'auto', False):
@@ -331,6 +340,7 @@ def cmd_add(args):
         content=content,
         session_id=args.session_id or '',
         summary=summary,
+        brief_summary=brief_summary,
         **metadata,
     )
     print(f"Added {_format_id(entry)} ({entry['type']})")
@@ -613,11 +623,18 @@ def cmd_unarchive(args):
 
 
 def cmd_update(args):
-    if args.content is None and args.session_id is None:
-        print('Error: provide --content and/or --session-id', file=sys.stderr)
+    brief_override = (getattr(args, 'brief_summary', '') or '').strip()
+    if args.content is None and args.session_id is None and not brief_override:
+        print('Error: provide --content, --session-id, and/or --brief-summary', file=sys.stderr)
         sys.exit(1)
     if args.content is not None and len(args.content.encode('utf-8')) > MAX_CONTENT_LENGTH:
         print(f'Error: content exceeds {MAX_CONTENT_LENGTH} bytes', file=sys.stderr)
+        sys.exit(1)
+    if len(brief_override) > BRIEF_SUMMARY_MAX:
+        print(
+            f'Error: --brief-summary exceeds {BRIEF_SUMMARY_MAX} chars ({len(brief_override)}).',
+            file=sys.stderr,
+        )
         sys.exit(1)
     store = args.store
     note_type, year, seq = _parse_id_arg(str(args.id), store)
@@ -637,6 +654,8 @@ def cmd_update(args):
         kwargs['summary'] = args.content[:120].replace('\n', ' ').strip()
     if args.session_id is not None:
         kwargs['session'] = args.session_id
+    if brief_override:
+        kwargs['brief_summary'] = brief_override
     store.update_note(note_type, year, seq, **kwargs)
     print(f'Updated {args.id}.')
 
@@ -682,6 +701,13 @@ def cmd_learn(args):
     if len(content.encode('utf-8')) > MAX_CONTENT_LENGTH:
         print(f'Error: content exceeds {MAX_CONTENT_LENGTH} bytes', file=sys.stderr)
         sys.exit(1)
+    brief_summary = (getattr(args, 'brief_summary', '') or '').strip()
+    if len(brief_summary) > BRIEF_SUMMARY_MAX:
+        print(
+            f'Error: --brief-summary exceeds {BRIEF_SUMMARY_MAX} chars ({len(brief_summary)}).',
+            file=sys.stderr,
+        )
+        sys.exit(1)
     metadata = {}
     if getattr(args, 'role', ''):
         metadata['role'] = args.role
@@ -690,6 +716,7 @@ def cmd_learn(args):
     entry = store.add_learning(
         content=content,
         session_id=args.session_id or '',
+        brief_summary=brief_summary,
         **metadata,
     )
     print(f"Learned {_format_id(entry)}")
@@ -757,6 +784,73 @@ def _folder_to_note_type(folder_name: str) -> str:
     return inverse.get(folder_name, 'general')
 
 
+def cmd_backfill_brief(args):
+    """Populate brief_summary on every existing entry that lacks one.
+
+    Walks active + archive indices under the scribe state dir, reads each
+    note's .md body, and derives a brief_summary via derive_brief_summary().
+    Dry-run prints what would change without writing. One-shot migration —
+    safe to re-run (it only touches entries with missing/empty brief, unless
+    --force is passed which re-derives every entry).
+    """
+    store = args.store
+    state_dir = store.state_dir
+    dry_run = bool(getattr(args, 'dry_run', False))
+    force = bool(getattr(args, 'force', False))
+
+    all_folder_names = list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]
+    updated = 0
+    already_set = 0
+    report: list[str] = []
+
+    for folder_name in all_folder_names:
+        type_dir = state_dir / folder_name
+        if not type_dir.exists():
+            continue
+        for child in type_dir.iterdir():
+            if not child.is_dir() or not child.name.isdigit():
+                continue
+            year_dir = child
+            for is_archive in (False, True):
+                folder = year_dir / ARCHIVE_DIRNAME if is_archive else year_dir
+                if not folder.exists():
+                    continue
+                entries = ScribeStore._read_index(folder)
+                changed = False
+                for entry in entries:
+                    seq = entry.get('seq')
+                    if not isinstance(seq, int):
+                        continue
+                    existing = (entry.get('brief_summary') or '').strip()
+                    if existing and not force:
+                        already_set += 1
+                        continue
+                    md_path = folder / f'{seq}.md'
+                    if not md_path.exists():
+                        # No body — derive from the stored summary as a best effort.
+                        derived = derive_brief_summary(entry.get('summary', ''))
+                    else:
+                        derived = derive_brief_summary(
+                            md_path.read_text(encoding='utf-8', errors='replace')
+                        )
+                    if derived == existing:
+                        already_set += 1
+                        continue
+                    entry['brief_summary'] = derived
+                    updated += 1
+                    changed = True
+                    report.append(f'  + {entry.get("display_id", "?")}: {derived[:60]!r}')
+                if changed and not dry_run:
+                    ScribeStore._write_index(folder, entries)
+
+    prefix = '(dry-run) ' if dry_run else ''
+    print(f'Backfill {prefix}complete: {updated} updated, {already_set} already set.')
+    for line in report[:50]:
+        print(line)
+    if len(report) > 50:
+        print(f'  ... and {len(report) - 50} more')
+
+
 def cmd_repair(args):
     store = args.store
     state_dir = store.state_dir
@@ -821,6 +915,7 @@ def cmd_repair(args):
                         'session': '',
                         'timestamp': ts,
                         'summary': summary,
+                        'brief_summary': derive_brief_summary(content),
                         'has_body': bool(content),
                     }
                     new_entries.append(entry)
@@ -892,6 +987,8 @@ def main():
     p_add.add_argument("--content", required=True)
     p_add.add_argument("--summary", default="",
                         help="One-line abstract shown in lists and startup. Required for --type handoff.")
+    p_add.add_argument("--brief-summary", default="", dest="brief_summary",
+                        help=f"One-sentence headline (<={BRIEF_SUMMARY_MAX} chars) for GUI sidebar. Auto-derived from content if omitted.")
     p_add.add_argument("--session-id", default="")
     p_add.add_argument("--auto", action="store_true", help="Mark as auto-generated")
     p_add.add_argument("--if-no-handoff-for", default=None,
@@ -941,6 +1038,8 @@ def main():
     p_update.add_argument("id", type=str)
     p_update.add_argument("--content", default=None)
     p_update.add_argument("--session-id", default=None)
+    p_update.add_argument("--brief-summary", default="", dest="brief_summary",
+                          help=f"Replace brief_summary (<={BRIEF_SUMMARY_MAX} chars).")
 
     # archive
     p_archive = sub.add_parser("archive")
@@ -954,6 +1053,8 @@ def main():
     p_learn = sub.add_parser("learn")
     p_learn.add_argument("--content", required=True)
     p_learn.add_argument("--session-id", default="")
+    p_learn.add_argument("--brief-summary", default="", dest="brief_summary",
+                          help=f"One-sentence headline (<={BRIEF_SUMMARY_MAX} chars) for GUI sidebar. Auto-derived if omitted.")
     p_learn.add_argument("--role", default="", help="Session role")
     p_learn.add_argument("--mission", default="", help="Session mission")
 
@@ -973,6 +1074,14 @@ def main():
 
     p_repair = sub.add_parser("repair")
     p_repair.add_argument("--dry-run", action="store_true", help="Report what would be fixed without modifying files")
+
+    # backfill-brief — one-shot migration: populate brief_summary on existing notes.
+    p_bf = sub.add_parser("backfill-brief",
+                          help="Populate brief_summary on entries that don't have one yet")
+    p_bf.add_argument("--dry-run", action="store_true",
+                       help="Report what would change without writing")
+    p_bf.add_argument("--force", action="store_true",
+                       help="Re-derive brief_summary even for entries that already have one")
 
     args = parser.parse_args()
 
@@ -1011,6 +1120,7 @@ def main():
         'handoff-sessions': cmd_handoff_sessions,
         'migrate': cmd_migrate,
         'repair': cmd_repair,
+        'backfill-brief': cmd_backfill_brief,
     }
     handler = commands.get(args.command)
     if handler:

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME
+from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME, BRIEF_SUMMARY_MAX, derive_brief_summary
 
 
 class TestEnsureLayout(unittest.TestCase):
@@ -351,6 +351,177 @@ class TestEmptyContent(unittest.TestCase):
             self.assertFalse(result['has_body'])
             md = Path(tmp) / 'todos' / str(year) / '1.md'
             self.assertEqual(md.read_text(encoding='utf-8'), '')
+
+
+class TestDeriveBriefSummary(unittest.TestCase):
+    def test_empty_returns_empty(self):
+        self.assertEqual(derive_brief_summary(''), '')
+        self.assertEqual(derive_brief_summary('   \n  '), '')
+
+    def test_markdown_header_takes_first_line_without_hashes(self):
+        content = '## Goal\n\nRewrite the auth middleware.\n\nSteps follow.'
+        self.assertEqual(derive_brief_summary(content), 'Goal')
+
+    def test_first_sentence_preferred(self):
+        content = 'Fix the crash. Then add the feature. Then celebrate.'
+        self.assertEqual(derive_brief_summary(content), 'Fix the crash.')
+
+    def test_mid_word_cut_trims_to_last_space_with_ellipsis(self):
+        # One token ("supercalifragilisticexpialidocious") kept whole-or-omitted
+        # so we can prove the truncator never splits a word mid-letters.
+        token = 'supercalifragilisticexpialidocious'
+        content = ' '.join([token] * 10) + ' end-of-sentence-without-period'
+        result = derive_brief_summary(content)
+        self.assertLessEqual(len(result), BRIEF_SUMMARY_MAX + 1)
+        self.assertTrue(result.endswith('…'))
+        # Everything before the ellipsis (excluding trailing space) must be a
+        # sequence of complete tokens — no partial token clipped by the cap.
+        body = result[:-1].rstrip()
+        for tok in body.split():
+            self.assertTrue(
+                tok == token or tok == 'end-of-sentence-without-period',
+                f'unexpected partial token in truncated result: {tok!r}',
+            )
+
+    def test_short_content_returned_verbatim(self):
+        self.assertEqual(derive_brief_summary('fix the bug'), 'fix the bug')
+
+    def test_real_note_that_hit_the_permissi_bug(self):
+        content = (
+            'GUI V1 open kinks (post-detector session). Items 1 (intermittent '
+            'Enter bug) and 2 (untested permission-prompt auto-expand) from the '
+            'original list are obsolete.'
+        )
+        result = derive_brief_summary(content)
+        self.assertTrue(result.endswith('.'), f'expected sentence-end, got {result!r}')
+        self.assertIn('GUI V1 open kinks', result)
+        self.assertNotIn('permissi ', result + ' ')  # never leave a mid-word fragment
+
+    def test_newlines_collapsed_to_spaces(self):
+        content = 'first line\nsecond line. third.'
+        result = derive_brief_summary(content)
+        self.assertNotIn('\n', result)
+        self.assertEqual(result, 'first line second line.')
+
+    def test_header_colon_used_when_no_sentence_end_and_no_paren(self):
+        # Colon fallback is used only when no sentence-end and no closing
+        # paren in the meaningful range.
+        content = 'Tier 2 partial deferral details: a, b, c, and more continuing on'
+        self.assertEqual(
+            derive_brief_summary(content),
+            'Tier 2 partial deferral details:',
+        )
+
+    def test_colon_ignored_when_stuck_to_following_char(self):
+        # "http://" / "C:\path" — colon followed by non-space should NOT trigger.
+        content = 'See http://example.com/docs for context and related work stretching on and on without a sentence end right here either in any form oh dear' * 2
+        result = derive_brief_summary(content)
+        self.assertFalse(result.endswith(':'))
+
+    def test_closing_paren_used_for_informative_parenthetical(self):
+        # L-2026-17 shape: "... (not just tool calls), continues on and on..."
+        content = (
+            'UserPromptSubmit hooks fire on every user message (not just tool calls), '
+            'making them ideal for injecting startup context throughout the session'
+        )
+        self.assertEqual(
+            derive_brief_summary(content),
+            'UserPromptSubmit hooks fire on every user message (not just tool calls)',
+        )
+
+    def test_closing_paren_keeps_date_in_header(self):
+        # D-2026-13 shape: "<header> (date): <long list>"
+        content = (
+            'Tier 2 partial deferral (decided 2026-04-06): L-2026-15 (budgeter usage), '
+            'L-2026-3 (budgeter rule retune), and more'
+        )
+        self.assertEqual(
+            derive_brief_summary(content),
+            'Tier 2 partial deferral (decided 2026-04-06)',
+        )
+
+    def test_closing_paren_skipped_when_too_early(self):
+        # "(WIP) Do thing" — paren at pos 4 is too early to be a meaningful cut.
+        content = '(WIP) Do thing X and Y and Z'
+        self.assertEqual(derive_brief_summary(content), '(WIP) Do thing X and Y and Z')
+
+    def test_em_dash_cut_before_elaboration(self):
+        # Long run-on: main clause — elaboration.
+        content = (
+            'session-history.json stores absolute transcript_path entries — '
+            'any project folder rename must update these paths too or the '
+            'tail breaks on stale state'
+        )
+        self.assertEqual(
+            derive_brief_summary(content),
+            'session-history.json stores absolute transcript_path entries',
+        )
+
+    def test_deep_comma_cut_as_last_resort(self):
+        # No sentence, paren, colon, or dash — fall back to last comma >= 60.
+        content = (
+            'Hooks that scan Claude Code session transcripts must walk structured '
+            'tool_use blocks, carrying the assistant context forward for downstream tools'
+        )
+        result = derive_brief_summary(content)
+        self.assertFalse(result.endswith('…'))
+        self.assertTrue(result.endswith('blocks'), f'expected comma cut, got {result!r}')
+
+
+class TestBriefSummaryOnAdd(unittest.TestCase):
+    def test_auto_derived_when_omitted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            entry = store.add_note('todo', 'First sentence. Second sentence.', 's1')
+            self.assertEqual(entry['brief_summary'], 'First sentence.')
+
+    def test_explicit_override_respected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            entry = store.add_note('todo', 'some content here', 's1',
+                                   brief_summary='hand-written title')
+            self.assertEqual(entry['brief_summary'], 'hand-written title')
+
+    def test_explicit_brief_capped_at_max(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            long_brief = 'x' * (BRIEF_SUMMARY_MAX + 50)
+            entry = store.add_note('todo', 'body', 's1', brief_summary=long_brief)
+            self.assertEqual(len(entry['brief_summary']), BRIEF_SUMMARY_MAX)
+
+    def test_learning_gets_brief_summary_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            entry = store.add_learning('Fix: pass --foo. Reason: obscure flag.', 's1')
+            self.assertEqual(entry['brief_summary'], 'Fix: pass --foo.')
+
+    def test_persisted_to_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            year = datetime.now(timezone.utc).year
+            store = ScribeStore(Path(tmp))
+            store.add_note('todo', 'One. Two. Three.', 's1')
+            idx = Path(tmp) / 'todos' / str(year) / INDEX_FILENAME
+            entry = json.loads(idx.read_text(encoding='utf-8').strip())
+            self.assertEqual(entry['brief_summary'], 'One.')
+
+
+class TestBriefSummaryOnUpdate(unittest.TestCase):
+    def test_redetivred_when_content_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            added = store.add_note('todo', 'First version.', 's1')
+            updated = store.update_note(added['type'], added['year'], added['seq'],
+                                         content='Rewritten version. More detail.')
+            self.assertEqual(updated['brief_summary'], 'Rewritten version.')
+
+    def test_explicit_brief_overrides_derivation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            added = store.add_note('todo', 'First.', 's1')
+            updated = store.update_note(added['type'], added['year'], added['seq'],
+                                         content='Rewritten.',
+                                         brief_summary='hand-picked title')
+            self.assertEqual(updated['brief_summary'], 'hand-picked title')
 
 
 if __name__ == '__main__':

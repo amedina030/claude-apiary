@@ -418,7 +418,11 @@
 
         const sumEl = document.createElement("div");
         sumEl.className = "sidebar-item-summary";
-        sumEl.textContent = n.summary || "(no summary)";
+        // Prefer brief_summary — it's the one-sentence headline produced by
+        // scribe's derivation, so mid-word cutoffs like "permissi" don't
+        // leak into the sidebar. Fall back to the legacy `summary` for any
+        // note that predates backfill (should be none after migration).
+        sumEl.textContent = n.brief_summary || n.summary || "(no summary)";
         item.appendChild(sumEl);
 
         const repoEl = document.createElement("div");

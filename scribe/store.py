@@ -5,6 +5,7 @@ individual .md files organized into type folders, each with its own
 index.jsonl for fast listing.
 """
 import json
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -47,6 +48,60 @@ _ALL_FOLDERS: list[str] = list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]
 INDEX_FILENAME = 'index.jsonl'
 NEXT_SEQ_FILENAME = 'next_seq'
 ARCHIVE_DIRNAME = 'archive'
+
+# Brief-summary cap — shorter than `summary` (300), aimed at one-line display
+# in the GUI sidebar. Lives next to summary on each index entry.
+BRIEF_SUMMARY_MAX = 120
+
+
+def derive_brief_summary(content: str) -> str:
+    """Produce a short, readable brief_summary from note content.
+
+    Preference order (all capped at BRIEF_SUMMARY_MAX):
+    1. Markdown heading line — first line, stripped of leading #s.
+    2. Sentence end (``.!?``) within the cap.
+    3. Closing paren ``)`` at position >= 30 — keeps informative
+       parentheticals like "(decided 2026-04-06)" or "(not just tool calls)"
+       and stops cleanly right after them.
+    4. Colon ``:`` followed by whitespace at position >= 10 — catches
+       "header: details" notes where the header is a clean brief.
+    5. Last word boundary within the cap, with an ellipsis suffix.
+    """
+    s = (content or '').strip()
+    if not s:
+        return ''
+    first_nl = s.find('\n')
+    if re.match(r'^#{1,6}\s', s):
+        head_line = s if first_nl == -1 else s[:first_nl]
+        head = head_line.lstrip('#').strip()
+        return head[:BRIEF_SUMMARY_MAX].rstrip()
+    flat = re.sub(r'\s+', ' ', s).strip()
+    window = flat[:BRIEF_SUMMARY_MAX]
+    sent = re.search(r'[.!?](?=\s|$)', window)
+    if sent:
+        return window[:sent.end()].rstrip()
+    paren_close = window.find(')')
+    if paren_close >= 30:
+        return window[:paren_close + 1].rstrip()
+    colon = re.search(r':(?=\s)', window)
+    if colon and colon.start() >= 10:
+        return window[:colon.end()].rstrip()
+    # Em-dash (U+2014) or double-hyphen often separates a clause from its
+    # elaboration ("X foo — does Y"); cut just before it.
+    dash = re.search(r'\s[—–]\s|\s--\s', window)
+    if dash and dash.start() >= 30:
+        return window[:dash.start()].rstrip()
+    if len(flat) <= BRIEF_SUMMARY_MAX:
+        return flat
+    # Last-resort deep comma cut — only if well into the brief so we don't
+    # chop trivially short. Drops the trailing fragment cleanly.
+    comma = window.rfind(',')
+    if comma >= 60:
+        return window[:comma].rstrip()
+    last_space = window.rfind(' ')
+    if last_space > 40:
+        return window[:last_space].rstrip() + '…'
+    return window.rstrip() + '…'
 
 
 class ScribeStore:
@@ -232,8 +287,13 @@ class ScribeStore:
     # --- CRUD operations: Notes ---
 
     def add_note(self, note_type: str, content: str, session_id: str,
-                 summary: str = '', **metadata) -> dict:
-        """Add a new note. Returns the created index entry dict."""
+                 summary: str = '', brief_summary: str = '',
+                 **metadata) -> dict:
+        """Add a new note. Returns the created index entry dict.
+
+        ``brief_summary`` is a sidebar-friendly one-liner (<= 120 chars).
+        Omit to auto-derive from ``content`` via ``derive_brief_summary``.
+        """
         type_dir = self._type_dir(note_type)
         now = datetime.now(timezone.utc)
         year = now.year
@@ -243,6 +303,9 @@ class ScribeStore:
         # If no summary provided, use first 120 chars of content
         if not summary:
             summary = content[:120].replace('\n', ' ').strip()
+        brief = brief_summary.strip() if brief_summary else derive_brief_summary(content)
+        if len(brief) > BRIEF_SUMMARY_MAX:
+            brief = brief[:BRIEF_SUMMARY_MAX].rstrip()
         prefix = TYPE_PREFIXES.get(note_type, 'G')
         display_id = f"{prefix}-{year}-{seq}"
         entry = {
@@ -254,6 +317,7 @@ class ScribeStore:
             'session': session_id,
             'timestamp': timestamp,
             'summary': summary,
+            'brief_summary': brief,
             'has_body': bool(content),
             **metadata,
         }
@@ -339,8 +403,11 @@ class ScribeStore:
     def update_note(self, note_type: str, year: int, seq: int, **kwargs) -> dict | None:
         """Update fields on an existing note's index entry.
 
-        Supports updating: summary, status, content (rewrites .md file).
-        Returns the updated entry dict, or None if not found.
+        Supports updating: summary, brief_summary, status, content (rewrites
+        .md file). When ``content`` is updated without an explicit
+        ``brief_summary`` kwarg, brief_summary is re-derived from the new
+        content so the sidebar stays in sync. Returns the updated entry dict,
+        or None if not found.
         """
         content_update = kwargs.pop('content', None)
         type_dir = self._type_dir(note_type)
@@ -354,6 +421,10 @@ class ScribeStore:
                 if content_update is not None:
                     self._write_note_file(year_dir, seq, content_update)
                     entries[i]['has_body'] = bool(content_update)
+                    if 'brief_summary' not in kwargs:
+                        entries[i]['brief_summary'] = derive_brief_summary(content_update)
+                if 'brief_summary' in kwargs and len(entries[i].get('brief_summary', '')) > BRIEF_SUMMARY_MAX:
+                    entries[i]['brief_summary'] = entries[i]['brief_summary'][:BRIEF_SUMMARY_MAX].rstrip()
                 self._write_index(year_dir, entries)
                 return entries[i]
         return None
@@ -436,7 +507,8 @@ class ScribeStore:
     # --- CRUD operations: Learnings ---
 
     def add_learning(self, content: str, session_id: str,
-                     summary: str = '', **metadata) -> dict:
+                     summary: str = '', brief_summary: str = '',
+                     **metadata) -> dict:
         """Add a new learning. Returns the created index entry dict."""
         learn_dir = self._learning_dir()
         now = datetime.now(timezone.utc)
@@ -446,6 +518,9 @@ class ScribeStore:
         timestamp = now.isoformat()
         if not summary:
             summary = content[:120].replace('\n', ' ').strip()
+        brief = brief_summary.strip() if brief_summary else derive_brief_summary(content)
+        if len(brief) > BRIEF_SUMMARY_MAX:
+            brief = brief[:BRIEF_SUMMARY_MAX].rstrip()
         display_id = f"L-{year}-{seq}"
         entry = {
             'display_id': display_id,
@@ -456,6 +531,7 @@ class ScribeStore:
             'session': session_id,
             'timestamp': timestamp,
             'summary': summary,
+            'brief_summary': brief,
             'has_body': bool(content),
             **metadata,
         }

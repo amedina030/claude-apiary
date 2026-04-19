@@ -38,6 +38,14 @@ class RepairTests(unittest.TestCase):
             result = notes_mod.cmd_repair(args)
         return result, out.getvalue(), err.getvalue()
 
+    def _run_backfill_brief(self, dry_run=False):
+        out = io.StringIO()
+        err = io.StringIO()
+        args = Namespace(dry_run=dry_run, store=self.store)
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            result = notes_mod.cmd_backfill_brief(args)
+        return result, out.getvalue(), err.getvalue()
+
     def test_rebuilds_missing_index_entry(self):
         entry = self.store.add_note('todo', 'rebuild me please', 'sess1')
         year, seq = entry['year'], entry['seq']
@@ -160,6 +168,104 @@ class RepairTests(unittest.TestCase):
             notes_mod.cmd_repair(args)
 
         self.assertIn('skipping non-integer filename', err.getvalue())
+
+
+class BackfillBriefTests(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmpdir = Path(self.tmp.name)
+        self.state_dir = self.tmpdir / 'scribe'
+        self.store = ScribeStore(self.state_dir)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run(self, dry_run=False):
+        out = io.StringIO()
+        err = io.StringIO()
+        args = Namespace(dry_run=dry_run, store=self.store)
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            notes_mod.cmd_backfill_brief(args)
+        return out.getvalue(), err.getvalue()
+
+    def _strip_brief(self, note_type, year, seq):
+        """Simulate a pre-migration entry — rewrite index without brief_summary."""
+        folder = self.state_dir / TYPE_FOLDERS[note_type] / str(year)
+        entries = ScribeStore._read_index(folder)
+        for e in entries:
+            if e.get('seq') == seq:
+                e.pop('brief_summary', None)
+        ScribeStore._write_index(folder, entries)
+
+    def test_populates_missing_brief_from_body(self):
+        entry = self.store.add_note('todo', 'Do the thing. Then next.', 'sess1')
+        self._strip_brief('todo', entry['year'], entry['seq'])
+
+        self._run()
+
+        # Verify the entry now has a derived brief.
+        fetched = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(fetched['brief_summary'], 'Do the thing.')
+
+    def test_dry_run_reports_without_writing(self):
+        entry = self.store.add_note('todo', 'A sentence.', 'sess1')
+        self._strip_brief('todo', entry['year'], entry['seq'])
+
+        out, _ = self._run(dry_run=True)
+        self.assertIn('(dry-run)', out)
+
+        # Still empty on disk.
+        fetched = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(fetched.get('brief_summary', ''), '')
+
+    def test_idempotent_on_already_populated(self):
+        # fresh adds already get a brief via store.add_note; running backfill
+        # should report "already set" and not touch them.
+        entry = self.store.add_note('todo', 'Already good.', 'sess1')
+        out, _ = self._run()
+        self.assertIn('already set', out)
+        fetched = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(fetched['brief_summary'], 'Already good.')
+
+    def test_archived_notes_also_backfilled(self):
+        entry = self.store.add_note('todo', 'To archive. More context.', 'sess1')
+        self.store.archive_note('todo', entry['year'], entry['seq'])
+
+        # Archive copy may still have brief from add-time — strip to simulate
+        # a genuinely pre-migration archived entry.
+        arc = self.state_dir / TYPE_FOLDERS['todo'] / str(entry['year']) / ARCHIVE_DIRNAME
+        entries = ScribeStore._read_index(arc)
+        for e in entries:
+            e.pop('brief_summary', None)
+        ScribeStore._write_index(arc, entries)
+
+        self._run()
+
+        entries_after = ScribeStore._read_index(arc)
+        self.assertEqual(entries_after[0]['brief_summary'], 'To archive.')
+
+    def test_missing_body_falls_back_to_summary(self):
+        # Pre-migration index entry with no .md file — derive from summary.
+        year_dir = self.state_dir / TYPE_FOLDERS['todo'] / '2026'
+        year_dir.mkdir(parents=True, exist_ok=True)
+        ScribeStore._append_index(year_dir, {
+            'display_id': 'T-2026-777',
+            'type': 'todo',
+            'year': 2026,
+            'seq': 777,
+            'status': 'active',
+            'session': '',
+            'timestamp': '2026-04-19T00:00:00+00:00',
+            'summary': 'Summary line only. No body file.',
+            'has_body': False,
+        })
+
+        self._run()
+
+        entries = ScribeStore._read_index(year_dir)
+        e = next(x for x in entries if x['seq'] == 777)
+        self.assertEqual(e['brief_summary'], 'Summary line only.')
 
 
 if __name__ == '__main__':

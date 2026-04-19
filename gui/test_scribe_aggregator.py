@@ -122,6 +122,40 @@ class AggregateTests(unittest.TestCase):
             self.assertEqual([n.display_id for n in notes], ["T-2026-1"])
             self.assertEqual(warnings, [])
 
+    def test_brief_summary_passed_through_when_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "r"
+            repo.mkdir()
+            _seed_scribe(
+                repo,
+                [{
+                    "display_id": "T-2026-1",
+                    "seq": 1,
+                    "status": "active",
+                    "summary": "Long summary text that would wrap badly.",
+                    "brief_summary": "Short headline.",
+                    "timestamp": "z",
+                    "has_body": True,
+                }],
+            )
+            notes, _ = aggregate([repo])
+            self.assertEqual(notes[0].brief_summary, "Short headline.")
+            d = notes[0].to_dict()
+            self.assertEqual(d["brief_summary"], "Short headline.")
+
+    def test_brief_summary_absent_defaults_to_empty(self):
+        # Pre-migration entries lack the field — aggregator must still load.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "r"
+            repo.mkdir()
+            _seed_scribe(
+                repo,
+                [{"display_id": "T-2026-1", "seq": 1, "status": "active",
+                  "summary": "ok", "timestamp": "z", "has_body": False}],
+            )
+            notes, _ = aggregate([repo])
+            self.assertEqual(notes[0].brief_summary, "")
+
     def test_body_path_resolves_when_file_present(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "r"

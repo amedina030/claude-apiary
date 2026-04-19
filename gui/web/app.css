@@ -419,16 +419,11 @@ body {
 .sidebar-item-summary {
   color: var(--fg);
   line-height: 1.3;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.sidebar-item.expanded .sidebar-item-summary {
-  -webkit-line-clamp: unset;
-  display: block;
-  overflow: visible;
+  /* No line-clamp: brief_summary is capped at 120 chars by scribe, so at
+     sidebar width it renders in at most ~3 short lines. Clamping to 2 lines
+     hid the tail with a browser-added ellipsis even when the content was
+     already a clean one-sentence headline. */
+  overflow-wrap: anywhere;
 }
 
 .sidebar-item-repo {
