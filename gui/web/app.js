@@ -168,12 +168,17 @@
     if (msg.uuid) seen.add(msg.uuid);
 
     // Optimistic-render reconciliation: when a real user message arrives with
-    // text that matches an outstanding tentative, replace the tentative element
-    // in place rather than appending a duplicate.
+    // text that matches an outstanding tentative, replace the tentative in
+    // place so the chronology holds. Previously we removed the tentative and
+    // appended the real message at the end — but if an assistant message had
+    // already landed between the tentative and the reconciliation, the real
+    // user message would drop *below* the assistant reply.
+    let insertAnchor = null;
     if (msg.role === "user" && msg.text) {
       const tentatives = messagesEl.querySelectorAll("li.msg.user.tentative");
       for (const el of tentatives) {
         if (el.dataset.text === msg.text) {
+          insertAnchor = el.nextSibling;
           el.remove();
           break;
         }
@@ -219,7 +224,11 @@
     body.innerHTML = renderBody(msg.text || "");
     li.appendChild(body);
 
-    messagesEl.appendChild(li);
+    if (insertAnchor && insertAnchor.parentNode === messagesEl) {
+      messagesEl.insertBefore(li, insertAnchor);
+    } else {
+      messagesEl.appendChild(li);
+    }
 
     if (msg.role === "assistant") {
       if (msg.tokens) addTokens(msg.tokens);
@@ -232,6 +241,10 @@
         ptyUnreadEl.classList.add("hidden");
         ptyUnreadEl.textContent = "";
       }
+      // The real message is now in the chat — drop the transient dots above
+      // it (if any). The idle timer would catch it too, but this makes the
+      // transition visually clean the instant the message lands.
+      if (typeof hideThinkingBubble === "function") hideThinkingBubble();
     }
 
     maybeScroll();
@@ -609,19 +622,121 @@
     return lastAsstMsgAt > 0 && Date.now() - lastAsstMsgAt < PTY_POST_MSG_GRACE_MS;
   }
 
+  // --- thinking bubble + pty rate indicator ---------------------------------
+  // While the pty is streaming chunks, show a transient bubble at the bottom
+  // of the chat with three animated dots and the current throughput. Hides on
+  // idle (>THINKING_IDLE_MS since last chunk) or when a real assistant message
+  // arrives via JSONL (whichever comes first).
+  const THINKING_IDLE_MS = 600;
+  const RATE_WINDOW_MS = 1000;
+  const rateWindow = []; // [{t: ms, b: bytes}, ...]
+  let thinkingEl = null;
+
+  function recordChunkForRate(size) {
+    const now = Date.now();
+    rateWindow.push({ t: now, b: size });
+    while (rateWindow.length && now - rateWindow[0].t > RATE_WINDOW_MS) {
+      rateWindow.shift();
+    }
+  }
+
+  function currentRate() {
+    if (rateWindow.length === 0) return 0;
+    const now = Date.now();
+    const span = Math.max(now - rateWindow[0].t, 100);
+    let total = 0;
+    for (const e of rateWindow) total += e.b;
+    return (total * 1000) / span;
+  }
+
+  function fmtRate(bps) {
+    if (bps < 1024) return `${Math.round(bps)} B/s`;
+    if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`;
+    return `${(bps / 1024 / 1024).toFixed(2)} MB/s`;
+  }
+
+  function ensureThinkingBubble() {
+    if (thinkingEl && thinkingEl.isConnected) return;
+    thinkingEl = document.createElement("li");
+    thinkingEl.className = "msg thinking";
+    thinkingEl.innerHTML =
+      '<div class="thinking-body">' +
+        '<span class="dot"></span><span class="dot"></span><span class="dot"></span>' +
+        '<span class="thinking-rate"></span>' +
+      '</div>';
+    messagesEl.appendChild(thinkingEl);
+    maybeScroll();
+  }
+
+  function hideThinkingBubble() {
+    if (thinkingEl) {
+      thinkingEl.remove();
+      thinkingEl = null;
+    }
+  }
+
+  setInterval(() => {
+    if (!thinkingEl) return;
+    if (Date.now() - lastPtyChunkAt > THINKING_IDLE_MS) {
+      hideThinkingBubble();
+      return;
+    }
+    const rateEl = thinkingEl.querySelector(".thinking-rate");
+    if (rateEl) rateEl.textContent = fmtRate(currentRate());
+  }, 200);
+
   function appendPtyChunk(chunk) {
     // Always write — the buffer is valid pre-open, so the prompt detector can
     // read it even when the terminal is visually collapsed.
     term.write(chunk);
     scheduleDetect();
+    recordChunkForRate(chunk.length || 0);
+    ensureThinkingBubble();
+    // Buffer is moving again → next time it goes stationary with an unparsed
+    // prompt, the fallback should fire anew (not dedup against the stale
+    // signature from the last stationary state).
+    unknownPromptNotifiedSig = null;
     if (inPostMessageGrace()) return;
     lastPtyChunkAt = Date.now();
     if (ptyStripWrapEl.classList.contains("collapsed")) bumpUnread();
   }
 
-  // (Auto-expand removed — the prompt detector surfaces interactive prompts
-  // as native banners, so the terminal should stay where the user put it.
-  // Unread badge still tracks pty activity for the toggle.)
+  // Fallback auto-expand: if the pty has been stationary for a while AND the
+  // buffer shows a numbered-option prompt that the detector *couldn't* parse
+  // into a banner (unknown prompt type, new claude version, MCP OAuth, etc.),
+  // reveal the terminal so the user isn't stuck. Active/streaming claude
+  // doesn't trigger this — only "waiting" states do.
+  const UNKNOWN_PROMPT_QUIET_MS = 2500;
+  const UNKNOWN_PROMPT_CHECK_MS = 500;
+  let unknownPromptNotifiedSig = null;
+  setInterval(() => {
+    if (!ptyStripWrapEl.classList.contains("collapsed")) return;
+    if (activePrompt) return;               // banner is handling it
+    if (lastPtyChunkAt === 0) return;        // nothing has happened yet
+    if (Date.now() - lastPtyChunkAt < UNKNOWN_PROMPT_QUIET_MS) return; // still busy
+    const lines = readScreenLines();
+    // If the structured detector would *accept* this buffer, the detector
+    // (with its dismiss-cooldown) is in charge — not the fallback. This
+    // covers the common "user just answered, prompt text is still in the
+    // buffer but we're in cooldown" case: previously the fallback fired even
+    // though there was nothing the user needed to see.
+    if (detectPrompt(lines)) return;
+    // Now the only remaining case: numbered options are visible but the
+    // structured parser rejected the shape. That's a genuinely unknown prompt
+    // type → reveal the terminal.
+    let hasNumbered = false;
+    for (let i = lines.length - 1; i >= 0 && i >= lines.length - 20; i--) {
+      if (/^\s*❯\s*\d+\.\s+/.test(lines[i])) { hasNumbered = true; break; }
+    }
+    if (!hasNumbered) return;
+    // Dedupe — fire exactly once per distinct stationary-with-prompt state.
+    // Reset happens when appendPtyChunk runs (claude is doing things again).
+    const sig = lines.slice(-10).join("\n");
+    if (sig === unknownPromptNotifiedSig) return;
+    unknownPromptNotifiedSig = sig;
+    ptyExpand();
+    toast("Claude is waiting on something the GUI couldn't parse — check the terminal.", "error");
+  }, UNKNOWN_PROMPT_CHECK_MS);
 
   ptyToggleEl.addEventListener("click", () => {
     if (ptyStripWrapEl.classList.contains("collapsed")) ptyExpand();
