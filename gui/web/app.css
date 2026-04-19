@@ -186,6 +186,14 @@ body {
   border-left: 3px solid var(--accent);
 }
 
+.msg.prompt .prompt-choice {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  color: var(--accent);
+  font-size: 12px;
+}
+
 .msg-meta {
   display: flex;
   justify-content: space-between;

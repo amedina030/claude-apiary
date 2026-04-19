@@ -748,7 +748,7 @@
     // lands in whatever input field the prompt is still showing (e.g. plan
     // mode's "tell claude what to change" feedback box).
     inputEl.classList.add("input-blocked");
-    inputEl.placeholder = "Claude is waiting on a response — pick an option above, or click ✕ to cancel";
+    inputEl.placeholder = "Claude is waiting on a response — pick an option, or click ✕ to cancel";
     const close = document.createElement("button");
     close.className = "prompt-dismiss";
     close.type = "button";
@@ -757,12 +757,9 @@
     close.addEventListener("click", () => hidePromptBanner({ cancel: true }));
     promptBannerEl.appendChild(close);
 
-    if (prompt.context) {
-      const ctx = document.createElement("pre");
-      ctx.className = "prompt-context";
-      ctx.textContent = prompt.context;
-      promptBannerEl.appendChild(ctx);
-    }
+    // Question only in the banner — the plan body / context lives in the
+    // chat (recorded the moment the prompt was detected), so repeating it
+    // here would be visual noise right above the input.
     if (prompt.question) {
       const q = document.createElement("div");
       q.className = "prompt-question";
@@ -803,19 +800,50 @@
     inputEl.placeholder = INPUT_PLACEHOLDER_DEFAULT;
   }
 
-  function recordPromptResolution(prompt, chosenOpt) {
-    // Synthesize a chat record so the conversation history shows what claude
-    // asked and how the user responded. Without this, the chat jumps from
-    // "user: plan this" straight to "user: <feedback text>" with no trace of
-    // the plan body the user was reacting to.
+  function promptUuid(sig) {
+    // Deterministic id per prompt signature so the "appeared" record and the
+    // later resolution update target the same DOM element.
+    return `prompt-${btoa(unescape(encodeURIComponent(sig))).replace(/[^A-Za-z0-9]/g, "").slice(0, 32)}`;
+  }
+
+  function recordPromptAppeared(prompt) {
+    const uuid = promptUuid(prompt.signature);
+    if (messagesEl.querySelector(`li[data-uuid="${uuid}"]`)) return;
     const parts = [];
     if (prompt.question) parts.push(`**${prompt.question}**`);
     if (prompt.context) parts.push("", prompt.context);
-    parts.push("", `→ chose: **${chosenOpt.number}. ${chosenOpt.text}**`);
     appendMessage({
-      uuid: `prompt-${Date.now()}-${chosenOpt.number}`,
+      uuid,
       role: "prompt",
       text: parts.join("\n"),
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  function recordPromptResolution(prompt, chosenOpt) {
+    const uuid = promptUuid(prompt.signature);
+    const existing = messagesEl.querySelector(`li[data-uuid="${uuid}"]`);
+    if (existing) {
+      // Append the choice to the existing record instead of creating a second
+      // entry — keeps history as one block per prompt interaction.
+      const body = existing.querySelector(".msg-body");
+      if (body && !existing.dataset.resolved) {
+        const choice = document.createElement("div");
+        choice.className = "prompt-choice";
+        choice.innerHTML = "→ chose: <strong></strong>";
+        choice.querySelector("strong").textContent =
+          `${chosenOpt.number}. ${chosenOpt.text}`;
+        body.appendChild(choice);
+        existing.dataset.resolved = "1";
+      }
+      return;
+    }
+    // Fallback — shouldn't normally fire, but if the "appeared" record never
+    // went out for some reason, at least record the resolution.
+    appendMessage({
+      uuid: `${uuid}-resolved`,
+      role: "prompt",
+      text: `→ chose: **${chosenOpt.number}. ${chosenOpt.text}**`,
       timestamp: new Date().toISOString(),
     });
   }
@@ -866,6 +894,7 @@
         return;
       }
       activePrompt = found;
+      recordPromptAppeared(found);
       renderPromptBanner(found);
     }, PROMPT_DETECT_DEBOUNCE_MS);
   }
