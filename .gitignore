@@ -49,3 +49,7 @@ session_*.txt
 # Scribe runtime
 .claude/notes.md
 .claude/issues.md
+
+# GUI PyInstaller build outputs
+build/
+dist/

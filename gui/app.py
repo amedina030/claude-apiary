@@ -27,7 +27,17 @@ from gui.theme import (
 from gui.transcript import Message, parse_jsonl_lines
 from gui.win_titlebar import apply_dark_titlebar, find_window_by_title
 
-WEB_DIR = Path(__file__).resolve().parent / "web"
+def _web_dir() -> Path:
+    # PyInstaller-frozen builds put the entry script at the bundle root, so
+    # Path(__file__).parent points at _internal/, not _internal/gui/. The spec
+    # bundles web assets under _internal/gui/web/ — sys._MEIPASS is the bundle
+    # root in both one-folder and one-file modes.
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "gui" / "web"  # type: ignore[attr-defined]
+    return Path(__file__).resolve().parent / "web"
+
+
+WEB_DIR = _web_dir()
 INDEX_HTML = WEB_DIR / "index.html"
 
 

@@ -19,12 +19,24 @@ poetry install --with gui
 poetry run python -m gui.app
 ```
 
-## Build .exe
+## Build .exe (one-folder, Windows)
+
+V1 builds a one-folder bundle for local iteration — `dist/apiary-gui/apiary-gui.exe`
+plus its `_internal/` sibling. Not intended for distribution yet.
 
 ```bash
-pip install pyinstaller
-pyinstaller gui/packaging/apiary_gui.spec
+poetry run pip install "pyinstaller>=6.0,<7.0"   # one-time, build-only dep
+poetry run python gui/packaging/build.py
 ```
+
+The build script wraps `pyinstaller gui/packaging/apiary_gui.spec`, cleans
+stale `build/` and `dist/apiary-gui/` first, and prints the exe path on
+success. The spec bundles `gui/web/` (HTML/CSS/JS + xterm vendor) under
+`_internal/gui/web/` so `Path(__file__).parent / "web"` resolves the same
+way frozen as it does from source.
+
+HiDPI: `gui/packaging/apiary_gui.manifest` declares PerMonitorV2 awareness
+so the window doesn't blur on display scaling > 100%.
 
 ## Config files
 
