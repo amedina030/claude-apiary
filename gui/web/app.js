@@ -2,7 +2,10 @@
 
 (() => {
   // --- DOM handles ----------------------------------------------------------
+  const tabsEl = document.getElementById("tabs");
   const messagesEl = document.getElementById("messages");
+  const emptyStateEl = document.getElementById("empty-state");
+  const emptyPickBtn = document.getElementById("empty-pick");
   const statusEl = document.getElementById("status");
   const totIn = document.getElementById("tot-in");
   const totOut = document.getElementById("tot-out");
@@ -21,6 +24,80 @@
   const INPUT_PLACEHOLDER_DEFAULT = inputEl.getAttribute("placeholder") || "";
   const sidebarSearchEl = document.getElementById("sidebar-search");
   const sidebarListEl = document.getElementById("sidebar-list");
+
+  // --- tab bar --------------------------------------------------------------
+  // Backend sends onSessions(list) whenever tabs open/close/switch. We render
+  // a chip per session plus a "+" button that opens a folder picker.
+  function renderTabs(sessions) {
+    if (!Array.isArray(sessions)) return;
+    tabsEl.innerHTML = "";
+    // Empty-state toggle: when no tabs, hide messages list and show the
+    // "pick a directory" CTA. When there are tabs, flip it back.
+    if (sessions.length === 0) {
+      emptyStateEl.classList.remove("hidden");
+      messagesEl.style.display = "none";
+    } else {
+      emptyStateEl.classList.add("hidden");
+      messagesEl.style.display = "";
+    }
+    for (const s of sessions) {
+      const tab = document.createElement("div");
+      tab.className = "tab" + (s.active ? " active" : "");
+      tab.dataset.sid = s.session_id;
+      tab.title = s.cwd;
+
+      const label = document.createElement("span");
+      label.className = "tab-label";
+      label.textContent = s.label || s.cwd || "session";
+      tab.appendChild(label);
+
+      const close = document.createElement("button");
+      close.className = "tab-close";
+      close.type = "button";
+      close.textContent = "×";
+      close.title = "close tab";
+      close.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeTab(s.session_id);
+      });
+      tab.appendChild(close);
+
+      tab.addEventListener("click", () => {
+        if (!s.active) switchTab(s.session_id);
+      });
+      tabsEl.appendChild(tab);
+    }
+    const addBtn = document.createElement("button");
+    addBtn.className = "tab-new";
+    addBtn.type = "button";
+    addBtn.textContent = "+";
+    addBtn.title = "open a new session in another directory";
+    addBtn.addEventListener("click", openNewTab);
+    tabsEl.appendChild(addBtn);
+  }
+  window.renderTabs = renderTabs;
+
+  async function switchTab(sid) {
+    if (!bridgeReady()) return;
+    try { await window.pywebview.api.switch_session(sid); } catch (e) { console.error(e); }
+  }
+
+  async function closeTab(sid) {
+    if (!bridgeReady()) return;
+    try { await window.pywebview.api.close_session(sid); } catch (e) { console.error(e); }
+  }
+
+  async function openNewTab() {
+    if (!bridgeReady()) return;
+    try {
+      const dir = await window.pywebview.api.pick_directory();
+      if (!dir) return;
+      await window.pywebview.api.open_session(dir);
+    } catch (e) {
+      console.error("open new tab failed", e);
+    }
+  }
+  emptyPickBtn.addEventListener("click", openNewTab);
 
   // --- chat state -----------------------------------------------------------
   const totals = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
@@ -650,53 +727,30 @@
     return lastAsstMsgAt > 0 && Date.now() - lastAsstMsgAt < PTY_POST_MSG_GRACE_MS;
   }
 
-  // --- thinking bubble + pty rate indicator ---------------------------------
-  // While the pty is streaming chunks, show a transient bubble at the bottom
-  // of the chat with three animated dots and the current throughput. Hides on
-  // idle (>THINKING_IDLE_MS since last chunk) or when a real assistant message
-  // arrives via JSONL (whichever comes first).
-  const THINKING_IDLE_MS = 600;
-  const RATE_WINDOW_MS = 1000;
-  const rateWindow = []; // [{t: ms, b: bytes}, ...]
+  // --- thinking bubble ------------------------------------------------------
+  // Three animated dots at the bottom of the chat while claude is working on
+  // a reply. Only visible between a user-sent Enter and the next assistant
+  // message landing. Startup pty noise and /clear output don't trigger it.
+  // 15s idle safety net covers the "claude crashed mid-generation" case.
+  const THINKING_IDLE_MS = 15000;
   let thinkingEl = null;
-
-  function recordChunkForRate(size) {
-    const now = Date.now();
-    rateWindow.push({ t: now, b: size });
-    while (rateWindow.length && now - rateWindow[0].t > RATE_WINDOW_MS) {
-      rateWindow.shift();
-    }
-  }
-
-  function currentRate() {
-    if (rateWindow.length === 0) return 0;
-    const now = Date.now();
-    const span = Math.max(now - rateWindow[0].t, 100);
-    let total = 0;
-    for (const e of rateWindow) total += e.b;
-    return (total * 1000) / span;
-  }
-
-  function fmtRate(bps) {
-    if (bps < 1024) return `${Math.round(bps)} B/s`;
-    if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`;
-    return `${(bps / 1024 / 1024).toFixed(2)} MB/s`;
-  }
+  let waitingForAssistant = false;
 
   function ensureThinkingBubble() {
+    if (!waitingForAssistant) return;
     if (thinkingEl && thinkingEl.isConnected) return;
     thinkingEl = document.createElement("li");
     thinkingEl.className = "msg thinking";
     thinkingEl.innerHTML =
       '<div class="thinking-body">' +
         '<span class="dot"></span><span class="dot"></span><span class="dot"></span>' +
-        '<span class="thinking-rate"></span>' +
       '</div>';
     messagesEl.appendChild(thinkingEl);
     maybeScroll();
   }
 
   function hideThinkingBubble() {
+    waitingForAssistant = false;
     if (thinkingEl) {
       thinkingEl.remove();
       thinkingEl = null;
@@ -707,18 +761,14 @@
     if (!thinkingEl) return;
     if (Date.now() - lastPtyChunkAt > THINKING_IDLE_MS) {
       hideThinkingBubble();
-      return;
     }
-    const rateEl = thinkingEl.querySelector(".thinking-rate");
-    if (rateEl) rateEl.textContent = fmtRate(currentRate());
-  }, 200);
+  }, 1000);
 
   function appendPtyChunk(chunk) {
     // Always write — the buffer is valid pre-open, so the prompt detector can
     // read it even when the terminal is visually collapsed.
     term.write(chunk);
     scheduleDetect();
-    recordChunkForRate(chunk.length || 0);
     ensureThinkingBubble();
     // Buffer is moving again → next time it goes stationary with an unparsed
     // prompt, the fallback should fire anew (not dedup against the stale
@@ -978,8 +1028,38 @@
     return typeof window.pywebview !== "undefined" && window.pywebview.api;
   }
 
+  // Tab-aware routing: each push from the backend carries the session_id
+  // it came from. Non-active session pushes are dropped on the floor for
+  // now (Phase 3 will buffer them per-tab). session_id is empty for app-
+  // global pushes (theme, notes) — those always apply.
+  let activeSessionId = "";
+  function pushIsForActive(sid) {
+    if (!sid) return true;          // app-global
+    if (!activeSessionId) return true;  // no active yet — accept
+    return sid === activeSessionId;
+  }
+
   window.apiary = {
-    onMessage(msgJson) {
+    setActiveSession(sid) {
+      const nextSid = String(sid || "");
+      if (nextSid === activeSessionId) return;
+      const isFirstActivation = !activeSessionId;
+      activeSessionId = nextSid;
+      // On a real tab SWITCH we reset UI state so the outgoing tab's messages,
+      // xterm scrollback, prompt banner, and sidebar don't leak into the new
+      // tab. On the FIRST activation (app startup, empty "" → real sid), we
+      // skip the reset because the backend's discovery thread might have
+      // already pushed the active session's history before setActiveSession
+      // arrives — clearing would wipe that history.
+      if (isFirstActivation) return;
+      try { clearMessages(); } catch (_) {}
+      try { term.reset(); } catch (_) {}
+      if (typeof hideThinkingBubble === "function") hideThinkingBubble();
+      if (typeof hidePromptBanner === "function") hidePromptBanner();
+      try { allNotes = []; renderSidebar(); } catch (_) {}
+    },
+    onMessage(msgJson, sessionId) {
+      if (!pushIsForActive(sessionId)) return;
       try {
         const msg = typeof msgJson === "string" ? JSON.parse(msgJson) : msgJson;
         appendMessage(msg);
@@ -987,7 +1067,8 @@
         console.error("onMessage parse error", e);
       }
     },
-    onMessages(arrJson) {
+    onMessages(arrJson, sessionId) {
+      if (!pushIsForActive(sessionId)) return;
       try {
         const arr = typeof arrJson === "string" ? JSON.parse(arrJson) : arrJson;
         if (Array.isArray(arr)) for (const m of arr) appendMessage(m);
@@ -995,26 +1076,44 @@
         console.error("onMessages parse error", e);
       }
     },
-    onClear() {
+    onClear(sessionId) {
+      if (!pushIsForActive(sessionId)) return;
       clearMessages();
     },
-    onStatus(text) {
+    onStatus(text, sessionId) {
+      if (!pushIsForActive(sessionId)) return;
       setStatus(text || "");
     },
-    onToast(text, kind) {
+    onToast(text, kind, sessionId) {
+      if (!pushIsForActive(sessionId)) return;
       toast(text, kind);
     },
-    onPtyChunk(text) {
+    onPtyChunk(text, sessionId) {
+      if (!pushIsForActive(sessionId)) return;
       try {
         appendPtyChunk(String(text || ""));
       } catch (e) {
         console.error("onPtyChunk error", e);
       }
     },
-    onPtyExit(code) {
+    onPtyExit(code, sessionId) {
+      if (!pushIsForActive(sessionId)) return;
       toast(`Claude Code exited (code ${code}) — restart from menu`, "error");
     },
-    onNotes(arrJson) {
+    onSessions(arrJson) {
+      // Phase 2: data only. Phase 3 renders the tab bar.
+      try {
+        const arr = typeof arrJson === "string" ? JSON.parse(arrJson) : arrJson;
+        if (Array.isArray(arr)) {
+          window.apiary.__sessions = arr;
+          if (typeof window.renderTabs === "function") window.renderTabs(arr);
+        }
+      } catch (e) {
+        console.error("onSessions parse error", e);
+      }
+    },
+    onNotes(arrJson, sessionId) {
+      if (!pushIsForActive(sessionId)) return;
       try {
         const arr = typeof arrJson === "string" ? JSON.parse(arrJson) : arrJson;
         if (Array.isArray(arr)) {
@@ -1068,6 +1167,10 @@
       // claude treats this as input to the plan prompt, not a new user msg.
       if (text && !text.startsWith("/") && !awaitingFeedback) {
         appendTentativeUserMessage(text);
+        // From here until the assistant message lands, the thinking bubble
+        // may spawn on pty chunks. Slash commands and feedback submissions
+        // don't get a normal assistant reply, so we don't arm for them.
+        waitingForAssistant = true;
       }
       window.pywebview.api.send_input(text);
       if (awaitingFeedback) {

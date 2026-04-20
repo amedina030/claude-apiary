@@ -9,6 +9,7 @@
   </head>
   <body>
     <div id="app">
+      <nav id="tabs" class="tabs" aria-label="open sessions"></nav>
       <header id="header">
         <div class="header-left">
           <span class="brand">apiary</span>
@@ -31,6 +32,11 @@
       <main id="main">
         <section id="chat">
           <div id="status" class="status hidden"></div>
+          <div id="empty-state" class="empty-state hidden">
+            <div class="empty-title">No session open</div>
+            <div class="empty-subtitle">Pick a working directory to start a claude session.</div>
+            <button id="empty-pick" type="button" class="empty-pick">Pick directory…</button>
+          </div>
           <ol id="messages" class="messages"></ol>
         </section>
         <aside id="sidebar" class="sidebar">
