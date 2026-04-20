@@ -48,11 +48,14 @@
       </main>
 
       <section id="pty-strip-wrap" class="pty-strip-wrap collapsed">
-        <button id="pty-toggle" type="button" class="pty-toggle" aria-label="toggle pty output">
-          <span class="pty-toggle-chevron"></span>
-          <span class="pty-toggle-label">terminal</span>
+        <div id="pty-toggle" class="pty-toggle" role="separator" aria-orientation="horizontal" aria-label="drag to resize chat input">
+          <button id="pty-toggle-label" type="button" class="pty-toggle-label" aria-label="toggle pty output">
+            <span class="pty-toggle-chevron"></span>
+            <span>terminal</span>
+          </button>
+          <span class="pty-toggle-divider" aria-hidden="true"></span>
           <span id="pty-unread" class="pty-unread hidden"></span>
-        </button>
+        </div>
         <div id="pty-term" class="pty-term" aria-label="pty terminal"></div>
       </section>
 

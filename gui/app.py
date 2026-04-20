@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from gui import pty_capture, sidebar_state, tabs_state
+from gui import composer_state, pty_capture, sidebar_state, tabs_state
 from gui.scribe_aggregator import NoteEntry, read_body
 from gui.session import Session
 from gui.single_instance import SingleInstance
@@ -100,6 +100,14 @@ class GuiBridge:
         if not isinstance(collapsed, list):
             return False
         return sidebar_state.save([str(x) for x in collapsed if isinstance(x, str)])
+
+    def get_composer_height(self) -> int:
+        return composer_state.load()
+
+    def save_composer_height(self, height_px: int) -> bool:
+        if not isinstance(height_px, (int, float)):
+            return False
+        return composer_state.save(int(height_px))
 
     # --- session / tab surface ---------------------------------------------------
 

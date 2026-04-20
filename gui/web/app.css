@@ -600,22 +600,47 @@ body {
 
 .pty-toggle {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 8px;
-  padding: 4px 10px;
+  padding: 0 10px;
   background: var(--header-bg);
   color: var(--muted);
   border: none;
   border-bottom: 1px solid var(--border);
-  cursor: pointer;
+  cursor: ns-resize;
   font-family: var(--font-family);
-  font-size: 11px;
+  font-size: 10px;
   text-align: left;
   user-select: none;
 }
 
-.pty-toggle:hover {
+.pty-toggle.dragging {
+  background: color-mix(in srgb, var(--accent) 20%, var(--header-bg));
+}
+
+.pty-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  padding: 2px 24px 2px 0;
+  font: inherit;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pty-toggle-label:hover {
   color: var(--fg);
+}
+
+.pty-toggle-divider {
+  width: 1px;
+  height: 12px;
+  background: var(--border);
+  flex: 0 0 auto;
+  align-self: center;
 }
 
 .pty-toggle-chevron {
@@ -640,6 +665,7 @@ body {
   font-size: 10px;
   font-weight: 600;
   margin-left: auto;
+  align-self: center;
 }
 
 .pty-unread.hidden {
@@ -769,7 +795,8 @@ body {
   padding: 8px;
   font-family: var(--font-family);
   font-size: var(--font-size);
-  resize: vertical;
+  resize: none;
+  box-sizing: border-box;
 }
 
 #input:focus {

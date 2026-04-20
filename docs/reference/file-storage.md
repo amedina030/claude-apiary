@@ -88,6 +88,7 @@ GUI per-instance state lives under `~/.claude/apiary_gui/` (default profile). Se
 |------|------|-------------|
 | Tab state | `~/.claude/apiary_gui/tabs.json` | Open tab cwds + active index (restored on relaunch) |
 | Sidebar state | `~/.claude/apiary_gui/sidebar_state.json` | Per-group collapsed/expanded state |
+| Composer state | `~/.claude/apiary_gui/composer_state.json` | Chat input height in pixels (set by dragging the gutter above the input) |
 | Theme | `~/.claude/apiary_gui/theme.json` | CSS variable values (hot-reloads via watchdog) |
 | Launch config | `~/.claude/apiary_gui/launch.json` | Claude Code spawn args + cwd |
 | Captures | `~/.claude/apiary_gui/captures/<ts>-<label>.bin` | Raw pty-output captures (binary), populated only when `APIARY_GUI_CAPTURE_LABEL` is set |

@@ -18,6 +18,7 @@
   const ptyStripWrapEl = document.getElementById("pty-strip-wrap");
   const ptyTermEl = document.getElementById("pty-term");
   const ptyToggleEl = document.getElementById("pty-toggle");
+  const ptyToggleLabelEl = document.getElementById("pty-toggle-label");
   const ptyUnreadEl = document.getElementById("pty-unread");
   const promptBannerEl = document.getElementById("prompt-banner");
   const inputEl = document.getElementById("input");
@@ -816,7 +817,13 @@
     toast("Claude is waiting on something the GUI couldn't parse — check the terminal.", "error");
   }, UNKNOWN_PROMPT_CHECK_MS);
 
-  ptyToggleEl.addEventListener("click", () => {
+  // Click on the bordered "terminal" label toggles the terminal panel.
+  // The surrounding bar is reserved for drag-resize of the chat input
+  // (see the gutter drag handler below) -- stop propagation so a click
+  // on the label doesn't also start a drag on the bar.
+  ptyToggleLabelEl.addEventListener("mousedown", (e) => e.stopPropagation());
+  ptyToggleLabelEl.addEventListener("click", (e) => {
+    e.stopPropagation();
     if (ptyStripWrapEl.classList.contains("collapsed")) ptyExpand();
     else ptyCollapse();
   });
@@ -1228,4 +1235,65 @@
       .catch((e) => console.error("get_sidebar_collapsed failed", e));
   }
   hydrateCollapsed();
+
+  // --- chat-input resize via the pty-toggle bar ----------------------------
+  // The bar above the composer (showing the "terminal" label + chevron)
+  // doubles as the chat-input resize handle (T-2026-157). Drag anywhere on
+  // the bar (except the bordered "terminal" label, which toggles the
+  // terminal panel) to resize the textarea up/down. Persisted height is
+  // applied to the textarea itself; the composer footer grows around it.
+  const COMPOSER_MIN = 24;
+  const COMPOSER_MAX_FRAC = 0.7;  // never let the input eat more than 70% of viewport
+
+  function clampHeight(px) {
+    const max = Math.max(COMPOSER_MIN, Math.floor(window.innerHeight * COMPOSER_MAX_FRAC));
+    return Math.max(COMPOSER_MIN, Math.min(max, px));
+  }
+
+  function applyComposerHeight(px) {
+    const h = clampHeight(px);
+    inputEl.style.height = h + "px";
+  }
+
+  function hydrateComposerHeight() {
+    if (!bridgeReady()) {
+      setTimeout(hydrateComposerHeight, 100);
+      return;
+    }
+    Promise.resolve(window.pywebview.api.get_composer_height())
+      .then((px) => {
+        if (typeof px === "number" && px > 0) applyComposerHeight(px);
+      })
+      .catch((e) => console.error("get_composer_height failed", e));
+  }
+  hydrateComposerHeight();
+
+  let dragState = null;
+  ptyToggleEl.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    dragState = { startY: e.clientY, startHeight: inputEl.offsetHeight };
+    ptyToggleEl.classList.add("dragging");
+    document.body.style.cursor = "ns-resize";
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!dragState) return;
+    // Drag up (clientY decreases) -> taller input. Subtract delta so up-drag
+    // gives a positive growth.
+    const delta = dragState.startY - e.clientY;
+    applyComposerHeight(dragState.startHeight + delta);
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (!dragState) return;
+    const finalHeight = inputEl.offsetHeight;
+    dragState = null;
+    ptyToggleEl.classList.remove("dragging");
+    document.body.style.cursor = "";
+    if (bridgeReady()) {
+      Promise.resolve(window.pywebview.api.save_composer_height(finalHeight))
+        .catch((e) => console.error("save_composer_height failed", e));
+    }
+  });
 })();
