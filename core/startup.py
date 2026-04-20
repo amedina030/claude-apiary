@@ -153,12 +153,18 @@ def get_unseen_sessions(session_id, wants_role, wants_mission, project_key, *, s
     if not isinstance(history, list):
         return []
 
-    sid = SessionId(session_id)
+    # Empty session_id = no current session to exclude (GUI banner path).
+    if session_id:
+        sid = SessionId(session_id)
+        def _not_current(s):
+            return not sid.matches(s.get("session_id", ""))
+    else:
+        def _not_current(_s):
+            return True
 
-    # Filter: not current session, matches wants
     matching = [
         s for s in history
-        if not sid.matches(s.get("session_id", ""))
+        if _not_current(s)
         and s.get("role", "user") == wants_role
         and s.get("mission", "general") == wants_mission
     ]
@@ -438,6 +444,49 @@ def cmd_skip(args):
 
 
 # ---------------------------------------------------------------------------
+# unseen command — list unseen sessions with optional current-session exclusion
+# ---------------------------------------------------------------------------
+
+def run_unseen(
+    role: str,
+    mission: str,
+    repo_dir: str | None,
+    session_id: str = "",
+) -> list[dict]:
+    """Return unseen sessions for (role, mission).
+
+    *session_id* — when given, excludes that session. The GUI passes the
+    value of ``CLAUDE_CODE_SESSION_ID`` from the process that launched it
+    (so the launching claude-code session isn't surfaced in its own banner).
+    The skill path passes its own invoking session id.
+    """
+    repo_dir = repo_dir or str(PROJECT_ROOT)
+    project_key = get_project_key(repo_dir)
+    start = Path(repo_dir)
+    return get_unseen_sessions(
+        session_id,
+        role,
+        mission,
+        project_key,
+        start=start,
+    )
+
+
+def cmd_unseen(args):
+    try:
+        result = run_unseen(
+            args.role,
+            args.mission,
+            args.repo_dir,
+            session_id=args.session_id or "",
+        )
+    except Exception as e:
+        print(json.dumps({"error": str(e), "sessions": [], "count": 0}))
+        sys.exit(1)
+    print(json.dumps({"count": len(result), "sessions": result}))
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -463,9 +512,25 @@ def main():
     p_skip.add_argument("--date", default=None,
                         help="YYYY-MM-DD (default: today UTC)")
 
+    p_unseen = sub.add_parser(
+        "unseen",
+        help="list unseen sessions for role/mission as JSON",
+    )
+    p_unseen.add_argument("--repo-dir", default=None)
+    p_unseen.add_argument("--role", default="user")
+    p_unseen.add_argument("--mission", default="general")
+    p_unseen.add_argument("--session-id", default="",
+                          help="exclude this session id (usually the invoking "
+                               "session or, for the GUI, $CLAUDE_CODE_SESSION_ID)")
+
     args = parser.parse_args()
 
-    commands = {"init": cmd_init, "summary": cmd_summary, "skip": cmd_skip}
+    commands = {
+        "init": cmd_init,
+        "summary": cmd_summary,
+        "skip": cmd_skip,
+        "unseen": cmd_unseen,
+    }
     if args.command in commands:
         commands[args.command](args)
     else:

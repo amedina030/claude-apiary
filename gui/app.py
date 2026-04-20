@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -220,6 +221,58 @@ class App:
             self._push_toast(err, "error")
         self._eval(f"window.apiary.onTheme({json.dumps(vars_)});")
 
+    def _push_handoff_banner(self, count: int) -> None:
+        self._eval(f"window.apiary.onHandoffBanner({json.dumps(int(count))});")
+
+    def _check_unfilled_handoffs(self) -> int:
+        """Count handoff-less sessions via core/startup.py unseen. Returns 0 on
+        any failure (fail-open — banner is a nudge, not critical).
+
+        The launcher's CLAUDE_CODE_SESSION_ID (present when the GUI was spawned
+        from inside a claude-code session) is forwarded as --session-id so that
+        session isn't counted against itself. The GUI's own spawned subprocess
+        sessions haven't registered yet at this point, so they're naturally
+        absent from the unseen list.
+
+        Repo resolution is left to ``apiary_launch.py`` (reads
+        ``~/.claude/apiary.json``), so this works from the packaged exe and
+        from dev-mode ``python -m gui.app`` alike.
+        """
+        launcher = Path.home() / ".claude" / "apiary_launch.py"
+        if not launcher.is_file():
+            return 0
+        excluded_sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+        cmd = [
+            sys.executable,
+            str(launcher),
+            "core/startup.py",
+            "unseen",
+            "--session-id",
+            excluded_sid,
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            print(f"[gui] handoff check failed: {e}", file=sys.stderr)
+            return 0
+        if result.returncode != 0:
+            print(
+                f"[gui] handoff check exit={result.returncode} stderr={result.stderr!r}",
+                file=sys.stderr,
+            )
+            return 0
+        try:
+            data = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError:
+            return 0
+        return int(data.get("count", 0) or 0)
+
     # --- session lifecycle --------------------------------------------------------
 
     def _create_session(self, cwd: Path) -> Session:
@@ -421,6 +474,13 @@ class App:
             self._push_active_session()
             self._push_sessions()
 
+        # Unfilled-handoff nudge (T-2026-164). Runs on a worker thread so the
+        # 5s subprocess timeout can't delay the first webview paint.
+        threading.Thread(
+            target=lambda: self._push_handoff_banner(self._check_unfilled_handoffs()),
+            daemon=True,
+        ).start()
+
     def _resync_frontend_state(self) -> None:
         """Re-push current state to the webview after a page reload."""
         vars_, theme_err = load_theme()
@@ -443,6 +503,12 @@ class App:
                 sess.flush_notes()
             except Exception as e:
                 print(f"[gui] notes resync failed: {e}", file=sys.stderr)
+        # Re-check unfilled handoffs on reload — user may have just run
+        # /backfill-handoffs and the banner should reflect the new count.
+        threading.Thread(
+            target=lambda: self._push_handoff_banner(self._check_unfilled_handoffs()),
+            daemon=True,
+        ).start()
 
     def shutdown(self) -> None:
         for sess in self._sessions:

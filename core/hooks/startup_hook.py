@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-PreToolUse hook — detects unseen sessions on first tool call.
+PreToolUse hook — injects context-rules drift warnings on first tool call.
 
-Only handles unseen session detection (needs transcript_path from
-PreToolUse payload). All other startup context (identity, notes,
-learnings, CLI reference) is injected earlier via the UserPromptSubmit
-hook (startup_prompt_hook.py).
+Was also responsible for surfacing unseen-session handoffs, but that moved
+to the GUI banner (T-2026-164): the GUI queries ``core/startup.py unseen``
+on launch and prompts the user to run /backfill-handoffs. Terminal-only
+sessions no longer auto-trigger backfill — users invoke the skill by hand.
 
-Skipped entirely when ``auto-startup`` flag is off — the user triggers
-/startup manually in that mode. Also skipped for runner subprocesses
-that set ``APIARY_RUNNER_SUBPROCESS=1``.
+Skipped entirely when ``auto-startup`` flag is off and for runner
+subprocesses (``APIARY_RUNNER_SUBPROCESS=1``).
 """
 import os
 import sys
@@ -19,10 +18,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.flags import is_enabled
-from core.session import SessionId, load_identity
+from core.session import SessionId
 from core.hook_context import context_block, hook_allow, read_payload
-from core.startup import get_unseen_sessions
-from core.utils.project import get_project_key
 from core import context_rules as _ctx_rules
 
 CLAUDE_MD_PATH = Path.home() / ".claude" / "CLAUDE.md"
@@ -69,37 +66,11 @@ def _run():
         hook_allow()
         return
 
-    cwd = payload.get("cwd", str(PROJECT_ROOT))
-
-    # Load identity written by the prompt hook
-    identity = load_identity(sid)
-    wants_role = identity.get("wants_role", "user")
-    wants_mission = identity.get("wants_mission", "general")
-
-    # Detect unseen sessions
-    project_key = get_project_key(cwd)
-    try:
-        unseen = get_unseen_sessions(sid.full, wants_role, wants_mission, project_key)
-    except Exception:
-        unseen = []
-
-    lines = []
-    if unseen:
-        sids = ", ".join(u.get("session_id", "?")[:8] for u in unseen)
-        lines.append(f"unseen_sessions: {sids}")
-        for u in unseen:
-            prefix = u.get("session_id", "?")[:8]
-            path = (u.get("transcript_path") or "").replace("\\", "/")
-            if path:
-                lines.append(f"  {prefix} {path}")
-    else:
-        lines.append("unseen_sessions: none")
-
     drift_line = _context_rules_drift_line()
     if drift_line:
-        lines.append(drift_line)
-
-    hook_allow(context_block("startup", *lines))
+        hook_allow(context_block("startup", drift_line))
+    else:
+        hook_allow()
 
 
 def _context_rules_drift_line() -> str:

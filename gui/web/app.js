@@ -21,6 +21,10 @@
   const ptyToggleLabelEl = document.getElementById("pty-toggle-label");
   const ptyUnreadEl = document.getElementById("pty-unread");
   const promptBannerEl = document.getElementById("prompt-banner");
+  const handoffBannerEl = document.getElementById("handoff-banner");
+  const handoffBannerTextEl = document.getElementById("handoff-banner-text");
+  const handoffBannerBtnEl = document.getElementById("handoff-banner-btn");
+  const handoffBannerDismissEl = document.getElementById("handoff-banner-dismiss");
   const inputEl = document.getElementById("input");
   const INPUT_PLACEHOLDER_DEFAULT = inputEl.getAttribute("placeholder") || "";
   const sidebarSearchEl = document.getElementById("sidebar-search");
@@ -1089,6 +1093,34 @@
   setInterval(runDetect, PROMPT_DETECT_INTERVAL_MS);
   function scheduleDetect() { /* retained as hook point; poll now drives detection */ }
 
+  // --- handoff banner (T-2026-164) ------------------------------------------
+  // Shown on GUI start when core/startup.py reports unfilled handoffs. Button
+  // types `/backfill-handoffs` into the composer (user presses Enter to submit).
+  // 10-second auto-dismiss so it doesn't linger if ignored.
+  let handoffBannerDismissTimer = null;
+  function hideHandoffBanner() {
+    handoffBannerEl.classList.add("hidden");
+    if (handoffBannerDismissTimer !== null) {
+      clearTimeout(handoffBannerDismissTimer);
+      handoffBannerDismissTimer = null;
+    }
+  }
+  function showHandoffBanner(count) {
+    const n = Number(count) || 0;
+    if (n <= 0) { hideHandoffBanner(); return; }
+    handoffBannerTextEl.textContent =
+      `${n} previous session${n === 1 ? "" : "s"} not yet summarized.`;
+    handoffBannerEl.classList.remove("hidden");
+    if (handoffBannerDismissTimer !== null) clearTimeout(handoffBannerDismissTimer);
+    handoffBannerDismissTimer = setTimeout(hideHandoffBanner, 10000);
+  }
+  handoffBannerBtnEl.addEventListener("click", () => {
+    inputEl.value = "/backfill-handoffs";
+    inputEl.focus();
+    hideHandoffBanner();
+  });
+  handoffBannerDismissEl.addEventListener("click", hideHandoffBanner);
+
   // --- bridge surface (Python → JS) ----------------------------------------
   function bridgeReady() {
     return typeof window.pywebview !== "undefined" && window.pywebview.api;
@@ -1209,6 +1241,9 @@
       } catch (e) {
         console.error("onTheme parse error", e);
       }
+    },
+    onHandoffBanner(count) {
+      try { showHandoffBanner(count); } catch (e) { console.error("onHandoffBanner error", e); }
     },
   };
 

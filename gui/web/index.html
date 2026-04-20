@@ -9,6 +9,11 @@
   </head>
   <body>
     <div id="app">
+      <div id="handoff-banner" class="handoff-banner hidden" role="status" aria-live="polite">
+        <span id="handoff-banner-text" class="handoff-banner-text"></span>
+        <button id="handoff-banner-btn" type="button" class="handoff-banner-btn">Ask Claude to /backfill-handoffs</button>
+        <button id="handoff-banner-dismiss" type="button" class="handoff-banner-dismiss" aria-label="dismiss">×</button>
+      </div>
       <nav id="tabs" class="tabs" aria-label="open sessions"></nav>
       <header id="header">
         <div class="header-left">

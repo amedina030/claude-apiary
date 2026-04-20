@@ -4,13 +4,21 @@ description: Process unseen session transcripts into handoff notes
 user-invocable: true
 ---
 
-Process unseen session transcripts listed in the `[startup]` context block. Only run this if the `[startup]` context contains `unseen_sessions` that are NOT "none".
+Process unseen session transcripts that don't yet have a handoff note. As of T-2026-164 the unseen list is no longer injected into `[startup]` context — fetch it explicitly via the CLI below. If the list is empty, tell the user there's nothing to back-fill and stop.
 
 ## What to do
 
-### Step 0 — capture the pre-launch handoff count (for post-validation)
+### Step 0a — fetch the unseen-session list
 
-Before spawning the agent, run (from the apiary repo root):
+Run this from the apiary repo root, passing the CURRENT session's full UUID (from `[session]` context, or `[budgeter]` as fallback) so it isn't counted against itself:
+
+```bash
+python ~/.claude/apiary_launch.py core/startup.py unseen --session-id <current-session-id> --repo-dir "$(pwd)"
+```
+
+Output is JSON: `{"count": N, "sessions": [{"session_id": "...", "transcript_path": "...", "role": "...", "mission": "..."}, ...]}`. If `count == 0`, stop — nothing to do. Otherwise, the `sessions` array drives the agent loop in Step 1.
+
+### Step 0b — capture the pre-launch handoff count (for post-validation)
 
 ```bash
 find .apiary/scribe/handoffs -name index.jsonl -exec cat {} + 2>/dev/null | wc -l > /tmp/backfill_pre_count.txt
@@ -24,13 +32,23 @@ Spawn an agent with `subagent_type: "general-purpose"`, `run_in_background: true
 
 **Do not use haiku** — it has been observed to fabricate final summaries (claiming handoffs written when none were) when it encounters tool-output size errors it can't recover from. Sonnet handles the error-recovery paths reliably.
 
-Replace `<session_id>` with the current session ID from the `[session]` context (first 8 chars). If `[session]` context is not available, check `[budgeter]` context as a fallback.
+Include the full JSON list from Step 0a in the agent prompt (see "Unseen sessions" placeholder below) — the agent will not re-query the CLI. Replace `<session_id>` with the current session ID from the `[session]` context (first 8 chars). If `[session]` context is not available, check `[budgeter]` context as a fallback.
 
 ---
 
 **Agent prompt:**
 
 You are a transcript processing agent. Your job is to generate handoffs and extract missed learnings/TODOs from unseen session transcripts.
+
+### Unseen sessions (paste JSON here)
+
+The invoking session already ran `core/startup.py unseen` and captured the result. Paste the full JSON below when spawning. Do NOT re-query the CLI — the invoker already excluded its own session id.
+
+```json
+<paste {"count": N, "sessions": [...]} here>
+```
+
+Each entry in `sessions` has `session_id`, `transcript_path`, `role`, `mission`. Iterate over that list for Step 1.
 
 ### Tool-output size constraints (READ THIS FIRST)
 
@@ -57,9 +75,9 @@ Transcript paths may contain Windows backslashes (e.g. `C:\Users\...\uuid.jsonl`
 
 ### Step 1: Process unseen sessions
 
-For each unseen session from the `[startup]` context:
+Iterate over the `sessions` array in the JSON data block the invoker pasted above (under "Unseen sessions"):
 
-1. The context block lists each session as `<prefix> <transcript_path>` on its own line directly under the `unseen_sessions:` header. Use that path verbatim — do not glob. If no path is present (older context format), fall back to globbing under `C:/Users/amedi/.claude/projects/`.
+1. Each entry provides `session_id` and `transcript_path` verbatim — use that path as-is (do not glob). Convert backslashes to forward slashes before passing to bash.
 2. Run `extract_transcript.py --summary <path>` to get the overview. This now exits non-zero on a missing path — if that happens, report the session under "failed" (bad path) AND add it to the skip list (see step 3a) with reason `"failed: bad path"` so it does not re-appear on every future startup.
 3. If `total_messages < 5` or all sampled messages are the startup context-injection, treat as startup-only and skip (but **still report it as skipped in the final summary, not as "generated"**).
 3a. **After a skip decision (startup-only or unrecoverable-failure), durably record it** so the session is never re-surfaced as unseen on future startups:

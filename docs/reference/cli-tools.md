@@ -82,16 +82,20 @@ Session initialization and summary loading.
 |------------|-------|-------------|
 | `init` | `startup.py init --session-id ID --first-message "..." --repo-dir PATH` | Initialize session, detect unseen transcripts |
 | `summary` | `startup.py summary [--repo-dir PATH] [--role R] [--mission M]` | Load active notes and learnings summary |
+| `unseen` | `startup.py unseen [--repo-dir PATH] [--role R] [--mission M] [--session-id ID]` | Print JSON `{count, sessions: [...]}` of sessions without handoff notes. Used by the GUI banner and the `/backfill-handoffs` skill. |
+| `skip` | `startup.py skip --session-id ID [--reason TEXT] [--repo-dir PATH] [--date YYYY-MM-DD]` | Append a session to `backfill_skip.json` so it stops surfacing as unseen. Idempotent on 8-char prefix. |
 
 ### Flags
 
 | Flag | Applies to | Required | Description |
 |------|-----------|----------|-------------|
-| `--session-id ID` | init | yes | Current session ID (first 8 chars) |
+| `--session-id ID` | init, unseen, skip | init/skip: yes; unseen: no | Session ID. For `unseen`, the value is EXCLUDED from results (GUI passes `$CLAUDE_CODE_SESSION_ID`). |
 | `--first-message TEXT` | init | yes | User's first message |
-| `--repo-dir PATH` | init, summary | init: yes | Repository root directory |
-| `--role ROLE` | summary | no | Filter by role |
-| `--mission MISSION` | summary | no | Filter by mission |
+| `--repo-dir PATH` | init, summary, unseen, skip | init: yes | Repository root directory |
+| `--role ROLE` | summary, unseen | no | Filter by role (default: `user`) |
+| `--mission MISSION` | summary, unseen | no | Filter by mission (default: `general`) |
+| `--reason TEXT` | skip | no | Human-readable reason (default: `unspecified`) |
+| `--date YYYY-MM-DD` | skip | no | Skip-entry date (default: today UTC) |
 
 ## budgeter/report.py
 
