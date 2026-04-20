@@ -1253,6 +1253,14 @@
     if (e.key === "Escape") {
       e.preventDefault();
       window.pywebview.api.send_escape();
+      // ESC cancels claude-code's current turn, but the text from the most
+      // recent Enter can linger in its input prompt. Without clearing it,
+      // the user's next message gets concatenated onto the leftover text.
+      // Send Ctrl+U (readline kill-line) a moment later — long enough for
+      // claude-code to finish handling the interrupt and return to prompt.
+      setTimeout(() => {
+        try { window.pywebview.api.send_control("u"); } catch (_) {}
+      }, 150);
       return;
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
