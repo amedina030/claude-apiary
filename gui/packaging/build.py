@@ -23,16 +23,69 @@ REPO_ROOT = PACKAGING_DIR.parent.parent
 SPEC = PACKAGING_DIR / "apiary_gui.spec"
 
 
+def _running_gui_pids() -> list[int]:
+    """Return PIDs of any running apiary-gui.exe (Windows only; [] elsewhere).
+
+    A running exe holds handles on bundled DLLs (ClrLoader.dll, WebView2Loader.dll,
+    python3X.dll, apiary-gui.exe), so pre-cleaning and PyInstaller both silently
+    misbehave. Block the build rather than emit a frankenbuild.
+    """
+    if sys.platform != "win32":
+        return []
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq apiary-gui.exe", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (FileNotFoundError, OSError):
+        return []
+    if result.returncode != 0:
+        return []
+    pids: list[int] = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = [p.strip().strip('"') for p in line.split(",")]
+        if len(parts) < 2 or not parts[0].lower().startswith("apiary-gui"):
+            continue
+        try:
+            pids.append(int(parts[1]))
+        except ValueError:
+            continue
+    return pids
+
+
 def main() -> int:
     if not SPEC.is_file():
         print(f"spec missing: {SPEC}", file=sys.stderr)
         return 1
 
+    pids = _running_gui_pids()
+    if pids:
+        pid_list = ", ".join(str(p) for p in pids)
+        print(
+            f"error: apiary-gui.exe is running (PIDs: {pid_list}) — close it before rebuilding",
+            file=sys.stderr,
+        )
+        return 1
+
     build_dir = REPO_ROOT / "build"
     dist_dir = REPO_ROOT / "dist" / "apiary-gui"
     for stale in (build_dir, dist_dir):
-        if stale.exists():
-            shutil.rmtree(stale, ignore_errors=True)
+        if not stale.exists():
+            continue
+        try:
+            shutil.rmtree(stale)
+        except (PermissionError, OSError) as exc:
+            print(
+                f"error: failed to clean {stale}: {exc}. "
+                "A process may still hold handles on bundled DLLs.",
+                file=sys.stderr,
+            )
+            return 1
 
     cmd = [
         sys.executable,
