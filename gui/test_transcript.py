@@ -138,6 +138,34 @@ class FilterRecordTests(unittest.TestCase):
         }
         self.assertIsNone(filter_record(rec))
 
+    def test_isMeta_user_record_dropped(self):
+        """Synthetic records (ScheduleWakeup callbacks, loaded skills, slash
+        commands) carry isMeta:true and must never render as a user bubble."""
+        rec = {
+            "type": "user",
+            "promptId": "p",
+            "uuid": "u-meta",
+            "timestamp": "2026-04-20T14:15:01.038Z",
+            "isMeta": True,
+            "message": {
+                "role": "user",
+                "content": "Continue T-2026-157 — check the dev GUI startup output for errors.",
+            },
+        }
+        self.assertIsNone(filter_record(rec))
+
+    def test_isMeta_false_user_record_kept(self):
+        """isMeta is only suppressive when truthy; false/missing must not block real messages."""
+        rec = {
+            "type": "user",
+            "promptId": "p",
+            "uuid": "u-not-meta",
+            "timestamp": "2026-04-20T14:15:01.038Z",
+            "isMeta": False,
+            "message": {"role": "user", "content": "real user message"},
+        }
+        self.assertIsNotNone(filter_record(rec))
+
     def test_user_content_that_mentions_tag_inline_still_rendered(self):
         """Guard against over-filtering: tag name appearing mid-content stays."""
         rec = {

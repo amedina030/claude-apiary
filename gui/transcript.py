@@ -5,6 +5,11 @@ parse pty stdout for messages.
 
 Filter rules (from spec C-2026-32 + JSONL inspection):
 - Drop records with `type` != "user"/"assistant".
+- Drop any record with `isMeta == true`. Claude Code sets this on synthetic
+  user-role records that the user did not author -- slash-command caveats,
+  loaded skill bodies, and (the motivating case for this filter) ScheduleWakeup
+  callbacks that the model itself queued. Without this guard, those land in
+  the chat as user bubbles even though the user never typed them.
 - Keep `type=="user"` iff: `promptId` present, `attachment` absent, `message.role=="user"`,
   and `message.content` is a non-empty string. (List-form content on a user record is
   always a tool_result envelope — drop it.)
@@ -81,6 +86,11 @@ def _extract_usage(usage_obj: dict) -> TokenUsage:
 def filter_record(rec: dict) -> Optional[Message]:
     """Return a Message if `rec` should be rendered, else None."""
     if not isinstance(rec, dict):
+        return None
+    # `isMeta` flags synthetic/system-injected records (slash commands, loaded
+    # skill bodies, ScheduleWakeup callbacks). The user did not author them, so
+    # they should never appear as a user bubble in the chat.
+    if rec.get("isMeta") is True:
         return None
     rtype = rec.get("type")
     msg = rec.get("message")
