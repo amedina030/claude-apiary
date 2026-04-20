@@ -179,12 +179,19 @@
   function isAtBottom(tol = 32) {
     return messagesEl.scrollTop + messagesEl.clientHeight + tol >= messagesEl.scrollHeight;
   }
+  // When we scroll programmatically the browser still fires a scroll event,
+  // and the subsequent isAtBottom() reading can be stale (content-visibility
+  // layout hasn't settled) — causing `sticky` to flip false and block the
+  // next auto-scroll. Gate the sticky update to user-originated scrolls.
+  let programmaticScroll = false;
   function scrollToBottom() {
+    programmaticScroll = true;
     messagesEl.scrollTop = messagesEl.scrollHeight;
+    // Clear on the microtask after the scroll event drains.
+    setTimeout(() => { programmaticScroll = false; }, 0);
   }
-  // Track whether the user has scrolled away — once they have, stay sticky=false
-  // until they manually return to bottom.
   messagesEl.addEventListener("scroll", () => {
+    if (programmaticScroll) return;
     sticky = isAtBottom();
   });
   function maybeScroll() {
@@ -353,11 +360,20 @@
         ptyUnreadEl.classList.add("hidden");
         ptyUnreadEl.textContent = "";
       }
-      // The real message is now in the chat — drop the transient dots above
-      // it (if any). Don't end the turn: more assistant messages / tool output
-      // can still arrive in the same turn and should re-spawn the bubble.
-      // The 15s idle timer handles true turn-end.
-      if (typeof hideThinkingBubble === "function") hideThinkingBubble(false);
+      // Route on stop_reason. "end_turn" = claude is done → kill the bubble
+      // immediately. "tool_use" (or other mid-turn reasons) = more messages
+      // still coming → hide the current DOM node but keep waitingForAssistant
+      // true and re-spawn a fresh bubble right away so there's no visual gap
+      // between chained assistant messages. The 15s idle timer is the final
+      // safety net for sessions where stop_reason never resolves to end_turn.
+      if (typeof hideThinkingBubble === "function") {
+        if (msg.stop_reason === "end_turn") {
+          hideThinkingBubble(true);
+        } else {
+          hideThinkingBubble(false);
+          if (typeof ensureThinkingBubble === "function") ensureThinkingBubble();
+        }
+      }
     }
 
     maybeScroll();
@@ -883,13 +899,11 @@
   // We read xterm's post-render buffer (cursor movements already applied, so
   // no spinner garbage) and extract that structure. Match anywhere in the
   // buffer — prompts often live a few rows above the status line.
-  const PROMPT_DETECT_DEBOUNCE_MS = 250;
   // After the user answers or dismisses a prompt, claude takes ~300-800ms to
   // repaint the buffer (spinner frames, transition to feedback mode, etc.).
   // Suppress re-showing the same prompt during this window so the banner
   // doesn't immediately pop back for a prompt the user already dealt with.
   const DISMISS_COOLDOWN_MS = 4000;
-  let promptDetectTimer = null;
   let activePrompt = null;   // { question, options, signature }
   let awaitingFeedback = false;  // true while claude is in option-4 feedback mode
   let lastDismissedSig = null;
@@ -1041,34 +1055,39 @@
     }
   }
 
-  function scheduleDetect() {
-    if (promptDetectTimer) clearTimeout(promptDetectTimer);
-    promptDetectTimer = setTimeout(() => {
-      promptDetectTimer = null;
-      const found = detectPrompt(readScreenLines());
-      if (!found) {
-        if (activePrompt) hidePromptBanner();
-        // Also clear the dismiss cooldown — if the prompt is truly gone, a
-        // later recurrence is a NEW prompt and deserves a banner.
-        if (lastDismissedSig && (!activePrompt)) {
-          lastDismissedSig = null;
-          lastDismissedAt = 0;
-        }
-        return;
+  function runDetect() {
+    const found = detectPrompt(readScreenLines());
+    if (!found) {
+      if (activePrompt) hidePromptBanner();
+      // Also clear the dismiss cooldown — if the prompt is truly gone, a
+      // later recurrence is a NEW prompt and deserves a banner.
+      if (lastDismissedSig && (!activePrompt)) {
+        lastDismissedSig = null;
+        lastDismissedAt = 0;
       }
-      if (activePrompt && activePrompt.signature === found.signature) return;
-      // Suppress re-show if the user just dismissed this exact prompt — claude
-      // takes a moment to repaint, and the stale buffer would fire the banner
-      // right back in the user's face.
-      if (found.signature === lastDismissedSig &&
-          Date.now() - lastDismissedAt < DISMISS_COOLDOWN_MS) {
-        return;
-      }
-      activePrompt = found;
-      recordPromptAppeared(found);
-      renderPromptBanner(found);
-    }, PROMPT_DETECT_DEBOUNCE_MS);
+      return;
+    }
+    if (activePrompt && activePrompt.signature === found.signature) return;
+    // Suppress re-show if the user just dismissed this exact prompt — claude
+    // takes a moment to repaint, and the stale buffer would fire the banner
+    // right back in the user's face.
+    if (found.signature === lastDismissedSig &&
+        Date.now() - lastDismissedAt < DISMISS_COOLDOWN_MS) {
+      return;
+    }
+    activePrompt = found;
+    recordPromptAppeared(found);
+    renderPromptBanner(found);
   }
+
+  // Steady-state poll instead of chunk-triggered debounce. Claude Code's
+  // spinner repaints continuously while a prompt is waiting for input, so a
+  // debounce keyed on appendPtyChunk never quiesces and the detector never
+  // fires (T-2026-171, T-2026-172). A 500ms poll runs independently of chunk
+  // churn; detectPrompt is cheap (regex over ~200 buffer rows).
+  const PROMPT_DETECT_INTERVAL_MS = 500;
+  setInterval(runDetect, PROMPT_DETECT_INTERVAL_MS);
+  function scheduleDetect() { /* retained as hook point; poll now drives detection */ }
 
   // --- bridge surface (Python → JS) ----------------------------------------
   function bridgeReady() {

@@ -92,6 +92,34 @@ class FilterRecordTests(unittest.TestCase):
         self.assertEqual(msg.tokens.cache_read, 100)
         self.assertEqual(msg.tokens.cache_write, 20)
 
+    def test_assistant_stop_reason_propagated(self):
+        base = {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "hi"}],
+            },
+            "uuid": "a2",
+            "timestamp": "2026-04-20T19:48:00Z",
+        }
+        base["message"]["stop_reason"] = "end_turn"
+        msg = filter_record(base)
+        assert msg is not None
+        self.assertEqual(msg.stop_reason, "end_turn")
+        self.assertEqual(msg.to_dict().get("stop_reason"), "end_turn")
+
+        base["message"]["stop_reason"] = "tool_use"
+        msg = filter_record(base)
+        assert msg is not None
+        self.assertEqual(msg.stop_reason, "tool_use")
+
+        # Missing field → empty string, omitted from dict.
+        del base["message"]["stop_reason"]
+        msg = filter_record(base)
+        assert msg is not None
+        self.assertEqual(msg.stop_reason, "")
+        self.assertNotIn("stop_reason", msg.to_dict())
+
     def test_assistant_only_tool_use_dropped(self):
         rec = {
             "type": "assistant",

@@ -57,6 +57,7 @@ class Message:
     uuid: str
     tokens: Optional[TokenUsage] = None
     model: str = ""  # only set on assistant records
+    stop_reason: str = ""  # assistant only: "end_turn" | "tool_use" | ...
 
     def to_dict(self) -> dict:
         d = {
@@ -69,6 +70,8 @@ class Message:
             d["tokens"] = self.tokens.to_dict()
         if self.model:
             d["model"] = self.model
+        if self.stop_reason:
+            d["stop_reason"] = self.stop_reason
         return d
 
 
@@ -135,6 +138,7 @@ def filter_record(rec: dict) -> Optional[Message]:
             return None
         tokens = _extract_usage(msg.get("usage", {}))
         model = msg.get("model", "") if isinstance(msg.get("model", ""), str) else ""
+        stop_reason = msg.get("stop_reason", "") if isinstance(msg.get("stop_reason", ""), str) else ""
         return Message(
             role="assistant",
             text=text,
@@ -142,6 +146,7 @@ def filter_record(rec: dict) -> Optional[Message]:
             uuid=uuid,
             tokens=tokens,
             model=model,
+            stop_reason=stop_reason,
         )
 
     return None
