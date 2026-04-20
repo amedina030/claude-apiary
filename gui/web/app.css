@@ -64,9 +64,17 @@ body {
 }
 
 #app {
-  display: grid;
-  grid-template-rows: auto auto 1fr auto auto auto;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
+}
+
+#app > * {
+  flex: 0 0 auto;
+}
+
+#main {
+  flex: 1 1 auto;
 }
 
 /* Tab bar — one chip per open session + a "+" button. Sits above the header

@@ -1096,14 +1096,10 @@
   // --- handoff banner (T-2026-164) ------------------------------------------
   // Shown on GUI start when core/startup.py reports unfilled handoffs. Button
   // types `/backfill-handoffs` into the composer (user presses Enter to submit).
-  // 10-second auto-dismiss so it doesn't linger if ignored.
-  let handoffBannerDismissTimer = null;
+  // Manual dismiss only — auto-hide was aggressive if the user alt-tabbed during
+  // launch, and the × button is always available.
   function hideHandoffBanner() {
     handoffBannerEl.classList.add("hidden");
-    if (handoffBannerDismissTimer !== null) {
-      clearTimeout(handoffBannerDismissTimer);
-      handoffBannerDismissTimer = null;
-    }
   }
   function showHandoffBanner(count) {
     const n = Number(count) || 0;
@@ -1111,8 +1107,6 @@
     handoffBannerTextEl.textContent =
       `${n} previous session${n === 1 ? "" : "s"} not yet summarized.`;
     handoffBannerEl.classList.remove("hidden");
-    if (handoffBannerDismissTimer !== null) clearTimeout(handoffBannerDismissTimer);
-    handoffBannerDismissTimer = setTimeout(hideHandoffBanner, 10000);
   }
   handoffBannerBtnEl.addEventListener("click", () => {
     inputEl.value = "/backfill-handoffs";
