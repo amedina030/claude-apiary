@@ -354,9 +354,10 @@
         ptyUnreadEl.textContent = "";
       }
       // The real message is now in the chat — drop the transient dots above
-      // it (if any). The idle timer would catch it too, but this makes the
-      // transition visually clean the instant the message lands.
-      if (typeof hideThinkingBubble === "function") hideThinkingBubble();
+      // it (if any). Don't end the turn: more assistant messages / tool output
+      // can still arrive in the same turn and should re-spawn the bubble.
+      // The 15s idle timer handles true turn-end.
+      if (typeof hideThinkingBubble === "function") hideThinkingBubble(false);
     }
 
     maybeScroll();
@@ -766,10 +767,12 @@
   }
 
   // --- thinking bubble ------------------------------------------------------
-  // Three animated dots at the bottom of the chat while claude is working on
-  // a reply. Only visible between a user-sent Enter and the next assistant
-  // message landing. Startup pty noise and /clear output don't trigger it.
-  // 15s idle safety net covers the "claude crashed mid-generation" case.
+  // Three animated dots at the bottom of the chat while claude is working.
+  // The turn stays "active" (waitingForAssistant=true) from the user-sent
+  // Enter until either 15s of pty silence or a tab switch. Individual
+  // assistant messages inside that window only remove the DOM bubble —
+  // subsequent pty chunks in the same turn re-spawn it so long tool chains
+  // don't look idle.
   const THINKING_IDLE_MS = 15000;
   let thinkingEl = null;
   let waitingForAssistant = false;
@@ -787,8 +790,8 @@
     maybeScroll();
   }
 
-  function hideThinkingBubble() {
-    waitingForAssistant = false;
+  function hideThinkingBubble(endTurn) {
+    if (endTurn) waitingForAssistant = false;
     if (thinkingEl) {
       thinkingEl.remove();
       thinkingEl = null;
@@ -796,9 +799,9 @@
   }
 
   setInterval(() => {
-    if (!thinkingEl) return;
+    if (!waitingForAssistant) return;
     if (Date.now() - lastPtyChunkAt > THINKING_IDLE_MS) {
-      hideThinkingBubble();
+      hideThinkingBubble(true);
     }
   }, 1000);
 
@@ -1098,7 +1101,7 @@
       if (isFirstActivation) return;
       try { clearMessages(); } catch (_) {}
       try { term.reset(); } catch (_) {}
-      if (typeof hideThinkingBubble === "function") hideThinkingBubble();
+      if (typeof hideThinkingBubble === "function") hideThinkingBubble(true);
       if (typeof hidePromptBanner === "function") hidePromptBanner();
       try { allNotes = []; renderSidebar(); } catch (_) {}
     },

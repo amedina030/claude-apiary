@@ -138,6 +138,29 @@ class FilterRecordTests(unittest.TestCase):
         }
         self.assertIsNone(filter_record(rec))
 
+    def test_task_notification_synthetic_user_dropped(self):
+        """Harness injects <task-notification> as a user-role record when a
+        background bash finishes. It's not user-authored prose — drop it so it
+        doesn't appear as a user bubble."""
+        rec = {
+            "type": "user",
+            "promptId": "p",
+            "uuid": "u-task",
+            "timestamp": "2026-04-20T15:00:00.000Z",
+            "isMeta": False,
+            "message": {
+                "role": "user",
+                "content": (
+                    "<task-notification>\n"
+                    "<task-id>abc123</task-id>\n"
+                    "<tool-use-id>toolu_abc</tool-use-id>\n"
+                    "<status>completed</status>\n"
+                    "</task-notification>"
+                ),
+            },
+        }
+        self.assertIsNone(filter_record(rec))
+
     def test_isMeta_user_record_dropped(self):
         """Synthetic records (ScheduleWakeup callbacks, loaded skills, slash
         commands) carry isMeta:true and must never render as a user bubble."""
