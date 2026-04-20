@@ -15,10 +15,15 @@ Usage (CLI tools from skill templates)::
     python ~/.claude/apiary_launch.py scribe/notes.py list --type todo
     python ~/.claude/apiary_launch.py budgeter/report.py --since 7d
 
-The launcher resolves the apiary repo root from the pointer file, constructs
-the full script path, sets cwd to the repo root, and runs it as a subprocess
-with all remaining arguments forwarded.  Falls back to ``$CLAUDE_PROJECT_DIR``
-when the pointer file is missing (session is inside the apiary repo itself).
+The launcher resolves the apiary repo root from the pointer file and runs
+the script as a subprocess with all remaining arguments forwarded.
+
+The subprocess inherits the *caller's* cwd unchanged -- the launcher does
+NOT chdir into the apiary repo, because doing so makes tools like scribe
+(which use ``git rev-parse --show-toplevel`` to find the active repo)
+resolve to apiary instead of the session's actual repo, so notes/state
+land in the wrong place.  Apiary scripts find their own code via
+``Path(__file__)``, not cwd, so they don't need the chdir.
 """
 import json
 import os
@@ -72,11 +77,9 @@ def main() -> int:
         # Silent exit -- avoids noisy failures when apiary repo moved.
         return 0
 
-    result = subprocess.run(
-        [sys.executable, str(script)] + sys.argv[2:],
-        cwd=str(repo_path),
-        env={**os.environ, "CLAUDE_PROJECT_DIR": str(repo_path)},
-    )
+    # Inherit cwd and env from caller -- don't chdir into apiary or override
+    # CLAUDE_PROJECT_DIR.  See module docstring for why.
+    result = subprocess.run([sys.executable, str(script)] + sys.argv[2:])
     return result.returncode
 
 
