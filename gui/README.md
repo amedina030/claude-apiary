@@ -19,6 +19,27 @@ poetry install --with gui
 poetry run python -m gui.app
 ```
 
+### Working on the GUI from inside the GUI
+
+The GUI is single-instance per *profile* (Windows named mutex), so a "dev"
+source build can run alongside the main packaged build by setting a profile
+name. The profile re-roots all state (`tabs.json`, `sidebar_state.json`,
+`theme.json`, `launch.json`, `captures/`) so the two instances don't fight:
+
+```bash
+APIARY_GUI_PROFILE=dev poetry run python -m gui.app
+```
+
+State for the dev profile lives at `~/.claude/apiary_gui_dev/`. The window
+title becomes `apiary [dev]` so it's visually distinct from the main one.
+
+### Frontend hot-reload
+
+`Ctrl+R` (or `F5`) inside the window reloads `index.html` / `app.css` /
+`app.js` without restarting the Python backend — open tabs, ptys, and
+sidebar state survive. Useful for iterating on `gui/web/*`. Backend changes
+(`gui/*.py`) still need a full process restart.
+
 ## Build .exe (one-folder, Windows)
 
 V1 builds a one-folder bundle for local iteration — `dist/apiary-gui/apiary-gui.exe`

@@ -461,9 +461,13 @@ def main() -> int:
         + " --disable-cache --disable-application-cache --disk-cache-size=1"
     ).strip()
 
-    with SingleInstance() as guard:
+    # APIARY_GUI_PROFILE re-roots state, mutex, and window title — see gui/paths.py.
+    from gui.paths import mutex_name, profile, window_title
+
+    with SingleInstance(name=mutex_name()) as guard:
         if not guard.acquired:
-            print("apiary GUI is already running.", file=sys.stderr)
+            label = f" ({profile()})" if profile() else ""
+            print(f"apiary GUI is already running{label}.", file=sys.stderr)
             return 0
 
         try:
@@ -482,8 +486,9 @@ def main() -> int:
         app = App()
         bridge = GuiBridge(app)
 
+        title = window_title()
         window = webview.create_window(
-            title="apiary",
+            title=title,
             url=str(INDEX_HTML),
             js_api=bridge,
             width=1400,
@@ -496,7 +501,7 @@ def main() -> int:
         def _on_loaded() -> None:
             # Apply Win11 dark titlebar after window has rendered (HWND now exists).
             # We look up by title rather than relying on pywebview internals.
-            hwnd = find_window_by_title("apiary")
+            hwnd = find_window_by_title(title)
             apply_dark_titlebar(hwnd)
             app.start_services()
 

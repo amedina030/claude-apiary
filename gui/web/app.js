@@ -1146,6 +1146,21 @@
     },
   };
 
+  // --- dev: Ctrl+R / F5 reloads the page (frontend hot-reload) --------------
+  // WebView2 swallows the default reload shortcuts, so we wire them ourselves.
+  // Reloads re-fetch index.html / app.css / app.js; the Python backend keeps
+  // running, so tabs and pty subprocesses survive. Useful when iterating on
+  // gui/web/* without restarting the whole GUI.
+  document.addEventListener("keydown", (e) => {
+    const isReload =
+      e.key === "F5" ||
+      ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r");
+    if (isReload) {
+      e.preventDefault();
+      window.location.reload();
+    }
+  });
+
   // --- input wiring ---------------------------------------------------------
   inputEl.addEventListener("keydown", (e) => {
     if (!bridgeReady()) return;

@@ -14,8 +14,10 @@ import json
 from pathlib import Path
 from typing import Iterable
 
+from gui.paths import state_dir
 
-STATE_PATH = Path.home() / ".claude" / "apiary_gui" / "sidebar_state.json"
+
+STATE_PATH = state_dir() / "sidebar_state.json"
 
 
 def load(path: Path = STATE_PATH) -> list[str]:

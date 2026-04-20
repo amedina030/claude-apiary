@@ -16,8 +16,10 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from gui.paths import state_dir
 
-STATE_DIR = Path.home() / ".claude" / "apiary_gui"
+
+STATE_DIR = state_dir()
 TABS_PATH = STATE_DIR / "tabs.json"
 
 
