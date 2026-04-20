@@ -17,6 +17,7 @@ REPO_ROOT = GUI_DIR.parent
 
 WEB_DIR = GUI_DIR / "web"
 MANIFEST = PACKAGING_DIR / "apiary_gui.manifest"
+ICON = PACKAGING_DIR / "apiary_gui.ico"
 ENTRY = GUI_DIR / "app.py"
 
 
@@ -71,7 +72,7 @@ exe = EXE(  # noqa: F821
     codesign_identity=None,
     entitlements_file=None,
     manifest=str(MANIFEST),
-    icon=None,
+    icon=str(ICON),
 )
 
 coll = COLLECT(  # noqa: F821
