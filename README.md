@@ -165,6 +165,40 @@ python -m runner.mark_done <slug>                                            # c
 
 ---
 
+### GUI
+
+Native Windows desktop wrapper around Claude Code. **Windows-only V1; in active development, not yet polished for distribution.** Spec: scribe note `C-2026-32`. Stdlib-only deviation: `D-2026-47`.
+
+Working in Claude Code's terminal UI is painful for visibility and ergonomics: scrollback is cluttered with tool calls and system reminders, there's no per-message timestamps or token counts, and styling is fixed. The GUI spawns Claude Code as a hidden pty subprocess and presents a clean chat view, a global scribe sidebar, and a small terminal strip for interactive prompts.
+
+**What it does:**
+- **Filtered chat** — renders only user-authored prompts and assistant text from the session JSONL; drops tool_use, tool_result, system reminders, and hook context
+- **Per-message + cumulative token counts** in the header
+- **Multi-tab / multi-cwd** — each tab owns its own claude pty, transcript tail, and scribe sidebar scoped to that cwd
+- **Global scribe sidebar** — searchable per-type note groups for the active tab's repo
+- **Hot-reloadable theme** — edit `~/.claude/apiary_gui/theme.json`, watcher applies live
+- **PyInstaller one-folder build** for a single double-clickable `.exe` (with three-hex taskbar icon)
+
+**Run from source:**
+```bash
+poetry install --with gui
+poetry run python -m gui.app
+```
+
+**Build the `.exe`:**
+```bash
+poetry run pip install "pyinstaller>=6.0,<7.0"
+poetry run python gui/packaging/build.py
+# → dist/apiary-gui/apiary-gui.exe
+```
+
+**Working on the GUI from inside the GUI:**
+The GUI is single-instance per profile. Set `APIARY_GUI_PROFILE=dev` to run a second instance with isolated state (`~/.claude/apiary_gui_dev/`) alongside your main one. `Ctrl+R` / `F5` reloads the frontend without restarting the Python backend.
+
+Full details: [`gui/README.md`](gui/README.md).
+
+---
+
 ## Repository Structure
 
 ```

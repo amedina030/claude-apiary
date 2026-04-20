@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-04-17"
+last_verified: "2026-04-20"
 ---
 
 # CLI Tools
@@ -683,6 +683,55 @@ timeout = cfg("orchestrator", "stage_timeout", 3600)
 ```
 
 Falls back to defaults if `runner/config.json` is missing.
+
+## gui/app.py
+
+Native Windows desktop wrapper — spawns Claude Code as a hidden pty subprocess and presents a clean filtered chat view, multi-tab cwd switching, and a global scribe sidebar. Requires the `gui` poetry group (pywebview, pywinpty, watchdog) — explicit deviation from the stdlib-only rule (decision `D-2026-47`).
+
+Run from source:
+
+```bash
+poetry run python -m gui.app
+```
+
+### Environment variables
+
+| Var | Description |
+|-----|-------------|
+| `APIARY_GUI_PROFILE` | Re-roots state, mutex name, and window title — see `gui/paths.py`. Set to e.g. `dev` to run a second instance alongside the default one. State goes to `~/.claude/apiary_gui_<profile>/`; window title becomes `apiary [<profile>]`. |
+| `APIARY_GUI_CAPTURE_LABEL` | Enables raw pty-output capture for the session (writes to `~/.claude/apiary_gui/captures/<ts>-<label>.bin`). Used by `gui/capture_session.py`. |
+| `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` | Pass-through to WebView2; the app appends `--disable-cache` flags so frontend edits aren't masked by the static-asset cache. |
+
+## gui/capture_session.py
+
+Convenience wrapper around `gui.app` that sets `APIARY_GUI_CAPTURE_LABEL` for one launch, used to record raw pty bytes for new prompt-detector fixtures.
+
+```bash
+poetry run python -m gui.capture_session --label tool_permission   # capture one session
+poetry run python -m gui.capture_session list                       # list existing captures
+```
+
+Captures are binary (pre-decode) so ANSI escapes survive intact.
+
+## gui/packaging/build.py
+
+PyInstaller one-folder build for the GUI. Cleans `build/` and `dist/apiary-gui/` first, then invokes `pyinstaller gui/packaging/apiary_gui.spec`. Outputs `dist/apiary-gui/apiary-gui.exe` plus its `_internal/` sibling.
+
+```bash
+poetry run pip install "pyinstaller>=6.0,<7.0"   # one-time, build-only
+poetry run python gui/packaging/build.py
+```
+
+The spec bundles `gui/web/` under `_internal/gui/web/`, embeds the PerMonitorV2 HiDPI manifest, and embeds the three-hex `apiary_gui.ico` taskbar icon.
+
+## gui/packaging/make_icon.py
+
+Regenerates `gui/packaging/apiary_gui.ico` (multi-resolution 16/32/48/128/256) — three flat-top hexagons in a triangular cluster, accent-blue on transparent. Pillow-based; build-time only.
+
+```bash
+poetry run pip install "Pillow>=10,<12"          # one-time, build-only
+poetry run python gui/packaging/make_icon.py
+```
 
 ## Test scripts
 
