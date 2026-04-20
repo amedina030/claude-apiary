@@ -249,6 +249,29 @@ def _matches_role_mission(note, role, mission):
     return n_role == role and n_mission == mission
 
 
+# Threshold after which the startup banner nudges the user toward
+# `/review-learnings`. 30 days lines up with the "monthly review" decision
+# in C-2026-33 (T-2026-152). Keep the check filesystem-based — no extra
+# state file required beyond the last_review marker itself.
+_LEARNINGS_REVIEW_STALE_DAYS = 30
+
+
+def _review_staleness_marker(state_dir: Path) -> str:
+    """Return an inline suffix for the Learnings summary line when the review
+    is overdue. Returns '' when fresh, missing, or on error (fail-open)."""
+    marker_path = state_dir / "learnings" / "last_review"
+    try:
+        if not marker_path.exists():
+            return " • never reviewed — run /review-learnings"
+        mtime = datetime.fromtimestamp(marker_path.stat().st_mtime, tz=timezone.utc)
+        age = datetime.now(timezone.utc) - mtime
+        if age.days >= _LEARNINGS_REVIEW_STALE_DAYS:
+            return f" • last review {age.days}d ago — run /review-learnings"
+    except OSError:
+        pass
+    return ""
+
+
 def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> str:
     """Run summary logic and return the text output."""
     repo_dir = repo_dir or str(PROJECT_ROOT)
@@ -292,6 +315,7 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
 
     learn_entries = store.list_learnings()
     learning_count = sum(1 for l in learn_entries if _matches_role_mission(l, role, mission))
+    review_marker = _review_staleness_marker(sd)
 
     handoffs = [n for n in filtered_active if n.get("type") == "handoff"]
     latest_handoff = None
@@ -328,7 +352,7 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
     # Assemble output
     lines.append(f"**Active items:** {len(items)} notes — {', '.join(items) if items else 'None'}")
     lines.append("")
-    lines.append(f"**Learnings:** {learning_count} (loaded separately via --full)")
+    lines.append(f"**Learnings:** {learning_count} (compact index injected below){review_marker}")
     lines.append("")
     lines.extend(handoff_lines)
 

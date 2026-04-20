@@ -149,11 +149,10 @@ def _run():
         except Exception:
             parts.append("summary: failed (non-critical)")
 
-    # --- 3. Learnings (subprocess — scribe/ not importable from core/) ---
-    # In repo layout the subprocess must run from the session's repo so that
-    # its own git rev-parse resolves to <session-repo>/.apiary/scribe/, and
-    # it must inherit APIARY_STATE_LAYOUT=repo. In legacy layout both are
-    # left alone.
+    # --- 3. Learnings (compact tag-grouped index; full bodies load on-demand) ---
+    # Was `learnings --full` (~46KB of prose); now `--index` (~10KB tag-grouped).
+    # Claude fetches individual bodies via `notes.py get L-X` or via the
+    # PreToolUse learnings_inject_hook when editing a file in a tagged area.
     if not skip_notes_injection:
         try:
             learnings_env = os.environ.copy()
@@ -164,7 +163,7 @@ def _run():
                 learnings_cwd = str(PROJECT_ROOT)
             result = subprocess.run(
                 [sys.executable, str(PROJECT_ROOT / "scribe" / "notes.py"),
-                 "learnings", "--full"],
+                 "learnings", "--index"],
                 capture_output=True, text=True, timeout=5,
                 cwd=learnings_cwd,
                 env=learnings_env,
@@ -173,7 +172,7 @@ def _run():
                 scrubbed, hits = sanitize_and_report(result.stdout.strip())
                 _log_sanitizer_hits("learnings", hits, sid.full)
                 parts.append("")
-                parts.append("--- learnings ---")
+                parts.append("--- learnings index (run `python scribe/notes.py get L-X` for full body) ---")
                 parts.append(scrubbed)
         except Exception:
             pass

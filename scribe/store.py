@@ -53,6 +53,81 @@ ARCHIVE_DIRNAME = 'archive'
 # in the GUI sidebar. Lives next to summary on each index entry.
 BRIEF_SUMMARY_MAX = 120
 
+# Fields serialized into learning .md frontmatter. Order is fixed to keep
+# diffs stable across re-writes.
+_LEARNING_FRONTMATTER_FIELDS = ('tags', 'areas', 'supersedes')
+
+
+def _format_learning_content(content: str, frontmatter: dict | None = None) -> str:
+    """Prefix ``content`` with a ``---`` frontmatter block when any of the
+    supported fields are present. Returns ``content`` unchanged when the
+    frontmatter dict is empty — so legacy learnings stay legacy-shaped.
+    """
+    if not frontmatter:
+        return content
+    rendered: list[str] = []
+    for key in _LEARNING_FRONTMATTER_FIELDS:
+        value = frontmatter.get(key)
+        if value is None or value == [] or value == '':
+            continue
+        if isinstance(value, (list, tuple)):
+            rendered.append(f"{key}: [{', '.join(str(v) for v in value)}]")
+        else:
+            rendered.append(f"{key}: {value}")
+    if not rendered:
+        return content
+    return '---\n' + '\n'.join(rendered) + '\n---\n' + content
+
+
+def _parse_learning_content(text: str) -> tuple[dict, str]:
+    """Split a learning .md into ``(frontmatter_dict, body)``.
+
+    Tolerant of files without frontmatter — returns ``({}, text)`` in that
+    case so legacy 102-learning corpus keeps working. Malformed frontmatter
+    (missing closing fence, bad lines) silently falls back to the same
+    empty-fm path rather than raising, because scribe callers on the hot
+    PreToolUse path cannot afford to crash on a hand-edited .md.
+    """
+    if not text:
+        return {}, text
+    if not (text.startswith('---\n') or text.startswith('---\r\n')):
+        return {}, text
+    lines = text.splitlines()
+    if not lines or lines[0] != '---':
+        return {}, text
+    end_idx: int | None = None
+    for i in range(1, len(lines)):
+        if lines[i] == '---':
+            end_idx = i
+            break
+    if end_idx is None:
+        return {}, text
+    fm: dict = {}
+    for raw in lines[1:end_idx]:
+        line = raw.rstrip()
+        if not line or line.startswith('#'):
+            continue
+        if ':' not in line:
+            continue
+        key, _, value = line.partition(':')
+        key = key.strip()
+        value = value.strip()
+        if value == '[]':
+            fm[key] = []
+        elif value.startswith('[') and value.endswith(']'):
+            inner = value[1:-1].strip()
+            if not inner:
+                fm[key] = []
+            else:
+                fm[key] = [item.strip().strip('"').strip("'") for item in inner.split(',') if item.strip()]
+        else:
+            fm[key] = value.strip('"').strip("'")
+    body_lines = lines[end_idx + 1:]
+    body = '\n'.join(body_lines)
+    if text.endswith('\n') and body and not body.endswith('\n'):
+        body += '\n'
+    return fm, body
+
 
 def derive_brief_summary(content: str) -> str:
     """Produce a short, readable brief_summary from note content.
@@ -508,8 +583,17 @@ class ScribeStore:
 
     def add_learning(self, content: str, session_id: str,
                      summary: str = '', brief_summary: str = '',
+                     tags: list[str] | None = None,
+                     areas: list[str] | None = None,
+                     supersedes: str | None = None,
                      **metadata) -> dict:
-        """Add a new learning. Returns the created index entry dict."""
+        """Add a new learning. Returns the created index entry dict.
+
+        ``tags`` and ``areas`` are optional lists that also get mirrored
+        into the .md file's YAML-ish frontmatter (see _format_learning_content)
+        so the .md is self-contained for humans and git diffs. ``supersedes``
+        records the ID of a prior learning this one replaces.
+        """
         learn_dir = self._learning_dir()
         now = datetime.now(timezone.utc)
         year = now.year
@@ -522,6 +606,8 @@ class ScribeStore:
         if len(brief) > BRIEF_SUMMARY_MAX:
             brief = brief[:BRIEF_SUMMARY_MAX].rstrip()
         display_id = f"L-{year}-{seq}"
+        tags_list = list(tags) if tags else []
+        areas_list = list(areas) if areas else []
         entry = {
             'display_id': display_id,
             'type': 'learning',
@@ -533,43 +619,125 @@ class ScribeStore:
             'summary': summary,
             'brief_summary': brief,
             'has_body': bool(content),
+            'tags': tags_list,
+            'areas': areas_list,
+            **({'supersedes': supersedes} if supersedes else {}),
             **metadata,
         }
+        frontmatter = {
+            'tags': tags_list,
+            'areas': areas_list,
+            'supersedes': supersedes,
+        }
         self._append_index(year_dir, entry)
-        self._write_note_file(year_dir, seq, content)
+        self._write_note_file(year_dir, seq, _format_learning_content(content, frontmatter))
         return entry
 
-    def list_learnings(self, search: str | None = None) -> list[dict]:
-        """List all learnings, optionally filtered by search term.
+    def list_learnings(self, search: str | None = None, *,
+                       tag: str | None = None,
+                       area: str | None = None,
+                       status: str = 'active') -> list[dict]:
+        """List all learnings, optionally filtered by search term, tag, area,
+        and status. Scans all year subfolders under the learnings dir.
 
-        Scans all year subfolders under the learnings dir.
+        ``status`` is one of 'active' (default), 'archived', or 'all'.
+        ``tag`` matches case-insensitively against any entry in the tags list.
+        ``area`` must equal one of the globs in the entry's areas list.
         """
         learn_dir = self._learning_dir()
         entries: list[dict] = []
         if learn_dir.exists():
             for child in learn_dir.iterdir():
-                if child.is_dir() and child.name.isdigit():
+                if not (child.is_dir() and child.name.isdigit()):
+                    continue
+                if status in ('active', 'all'):
                     entries.extend(self._read_index(child))
+                if status in ('archived', 'all'):
+                    archive_dir = child / ARCHIVE_DIRNAME
+                    for entry in self._read_index(archive_dir):
+                        entries.append({**entry, '_from_archive': True})
         if search:
             search_lower = search.lower()
             entries = [e for e in entries if search_lower in e.get('summary', '').lower()]
+        if tag:
+            tag_lower = tag.lower()
+            entries = [e for e in entries
+                       if any(tag_lower in str(t).lower() for t in e.get('tags', []) or [])]
+        if area:
+            entries = [e for e in entries if area in (e.get('areas', []) or [])]
         entries.sort(key=lambda e: e.get('timestamp', ''), reverse=True)
         return entries
 
     def get_learning(self, year: int, seq: int) -> dict | None:
-        """Retrieve a single learning by year and seq."""
+        """Retrieve a single learning by year and seq. Falls back to the
+        archive when the learning is not found in the active index, so
+        superseded entries remain reachable via display ID.
+
+        When the .md body carries frontmatter (``tags``/``areas``/
+        ``supersedes``), those fields overlay the index entry on the returned
+        dict — the .md is the source of truth for frontmatter after a manual
+        edit, and the index is a mirror.
+        """
         learn_dir = self._learning_dir()
         year_dir = learn_dir / str(year)
         if not year_dir.exists():
             return None
         for entry in self._read_index(year_dir):
             if entry.get('seq') == seq:
-                content = self._read_note_file(year_dir, seq)
-                result = {**entry, 'content': content}
-                if content is None and entry.get('has_body'):
-                    result['_warning'] = 'body_file_missing'
-                return result
+                return self._build_learning_result(entry, year_dir, seq, from_archive=False)
+        archive_dir = year_dir / ARCHIVE_DIRNAME
+        for entry in self._read_index(archive_dir):
+            if entry.get('seq') == seq:
+                return self._build_learning_result(entry, archive_dir, seq, from_archive=True)
         return None
+
+    def _build_learning_result(self, entry: dict, dir_path: Path, seq: int,
+                               *, from_archive: bool) -> dict:
+        raw = self._read_note_file(dir_path, seq)
+        fm, body = _parse_learning_content(raw) if raw is not None else ({}, None)
+        result = {**entry, 'content': body}
+        for key in _LEARNING_FRONTMATTER_FIELDS:
+            if key in fm:
+                result[key] = fm[key]
+        if from_archive:
+            result['_from_archive'] = True
+        if body is None and entry.get('has_body'):
+            result['_warning'] = 'body_file_missing'
+        return result
+
+    def archive_learning(self, year: int, seq: int) -> dict | None:
+        """Move a learning to its year folder's archive.
+
+        Parallels ``archive_note``. Moves the index entry and the .md file
+        (frontmatter included) from ``learnings/<year>/`` into
+        ``learnings/<year>/archive/``, stamping ``archived_at``. Returns the
+        archived entry dict, or None if the learning was not found.
+        """
+        learn_dir = self._learning_dir()
+        year_dir = learn_dir / str(year)
+        if not year_dir.exists():
+            return None
+        entries = self._read_index(year_dir)
+        target_entry = None
+        remaining: list[dict] = []
+        for entry in entries:
+            if entry.get('seq') == seq:
+                target_entry = entry
+            else:
+                remaining.append(entry)
+        if target_entry is None:
+            return None
+        self._write_index(year_dir, remaining)
+        archive_dir = year_dir / ARCHIVE_DIRNAME
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        target_entry['archived_at'] = datetime.now(timezone.utc).isoformat()
+        self._append_index(archive_dir, target_entry)
+        src_md = year_dir / f"{seq}.md"
+        dst_md = archive_dir / f"{seq}.md"
+        if src_md.exists():
+            dst_md.write_text(src_md.read_text(encoding='utf-8'), encoding='utf-8')
+            src_md.unlink()
+        return target_entry
 
     def remove_learning(self, year: int, seq: int) -> dict | None:
         """Remove a learning by year and seq. Returns the removed entry or None."""

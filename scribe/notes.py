@@ -713,18 +713,114 @@ def cmd_learn(args):
         metadata['role'] = args.role
     if getattr(args, 'mission', ''):
         metadata['mission'] = args.mission
+
+    tags_csv = (getattr(args, 'tags', '') or '').strip()
+    tags = [t.strip() for t in tags_csv.split(',') if t.strip()] if tags_csv else []
+    areas = [a for a in (getattr(args, 'area', None) or []) if a]
+    supersedes = (getattr(args, 'supersedes', '') or '').strip() or None
+
+    if not tags and not areas:
+        inferred = _infer_learning_tags_areas(content, store)
+        tags = inferred.get('tags') or []
+        areas = inferred.get('areas') or []
+
     entry = store.add_learning(
         content=content,
         session_id=args.session_id or '',
         brief_summary=brief_summary,
+        tags=tags,
+        areas=areas,
+        supersedes=supersedes,
         **metadata,
     )
     print(f"Learned {_format_id(entry)}")
 
 
+def _infer_learning_tags_areas(content: str, store) -> dict:
+    """Call `claude -p` to infer tags and areas for a new learning.
+
+    Fail-open: any subprocess error, timeout, or parse failure returns
+    ``{}`` so the learn command still succeeds with empty lists rather
+    than blocking a user mid-task. Inherits runner's subprocess hygiene
+    (no shell, restricted env, stdin prompt).
+    """
+    try:
+        sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
+        from runner.claude_subprocess import run_claude  # lazy — avoids hot-path import cost
+    except Exception:
+        return {}
+
+    try:
+        vocab = sorted({
+            t for l in store.list_learnings()
+            for t in (l.get('tags') or [])
+        })
+    except Exception:
+        vocab = []
+
+    prompt = _build_inference_prompt(content, vocab)
+    rc, stdout, stderr = run_claude(prompt, timeout=10)
+    if rc != 0 or not stdout.strip():
+        if stderr:
+            print(f'warning: tag/area inference failed ({stderr[:200]})', file=sys.stderr)
+        else:
+            print('warning: tag/area inference failed (empty output)', file=sys.stderr)
+        return {}
+    parsed = _parse_inference_response(stdout)
+    if parsed is None:
+        print('warning: tag/area inference returned unparseable JSON', file=sys.stderr)
+        return {}
+    return {
+        'tags': [str(t).strip() for t in parsed.get('tags', []) if str(t).strip()],
+        'areas': [str(a).strip() for a in parsed.get('areas', []) if str(a).strip()],
+    }
+
+
+def _build_inference_prompt(content: str, vocab: list[str]) -> str:
+    """Return the single-turn prompt sent to `claude -p` for tag/area inference."""
+    vocab_line = ', '.join(vocab) if vocab else '(none yet)'
+    return (
+        "You are tagging a project learning so it can be auto-surfaced when I later\n"
+        "edit related files. Respond with a JSON object only — no prose, no markdown fence.\n\n"
+        f"Existing tag vocabulary: {vocab_line}\n\n"
+        'Return {"tags": [...], "areas": [...]} where:\n'
+        '- tags: 1-3 short lowercase tokens (prefer existing vocabulary; invent only if needed).\n'
+        '- areas: glob patterns matching file paths the learning applies to (e.g. "gui/**",\n'
+        '  "scribe/notes.py", "core/hooks/*.py"). Empty list if not path-specific.\n\n'
+        f"Learning content:\n{content}"
+    )
+
+
+def _parse_inference_response(stdout: str) -> dict | None:
+    """Extract the inner JSON payload from a `claude -p --output-format json`
+    envelope. Returns None when parsing fails so callers can fall back."""
+    try:
+        envelope = json.loads(stdout)
+        inner = envelope.get('result', stdout) if isinstance(envelope, dict) else stdout
+    except json.JSONDecodeError:
+        inner = stdout
+    if not isinstance(inner, str):
+        return None
+    text = inner.strip()
+    fence = re.search(r'```(?:json)?\s*\n([\s\S]*?)```', text)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
 def cmd_learnings(args):
     store = args.store
-    learnings = store.list_learnings(search=args.search)
+    learnings = store.list_learnings(
+        search=args.search,
+        tag=getattr(args, 'tag', None),
+        area=getattr(args, 'area', None),
+    )
 
     if args.role:
         learnings = [l for l in learnings if l.get('role', '').lower() == args.role.lower()]
@@ -733,6 +829,10 @@ def cmd_learnings(args):
 
     if not learnings:
         print('No learnings found.')
+        return
+
+    if getattr(args, 'index', False):
+        _print_learnings_index(learnings)
         return
 
     for l in learnings:
@@ -745,6 +845,32 @@ def cmd_learnings(args):
         else:
             short = l.get('summary', '').replace('\n', ' ')[:80]
             print(f'{_format_id(l):<12} ({age:<9}) {short}')
+
+
+def _print_learnings_index(learnings: list[dict]) -> None:
+    """Render the tag-grouped compact index consumed by the startup hook.
+
+    Primary tag = first entry in ``tags``. Missing/empty → 'untagged' bucket.
+    Each group header is followed by indented one-line summaries so Claude
+    can scan the map at startup and decide which areas warrant a deeper
+    ``notes.py get L-X`` lookup.
+    """
+    groups: dict[str, list[dict]] = {}
+    for l in learnings:
+        tags = l.get('tags') or []
+        primary = tags[0] if tags else 'untagged'
+        groups.setdefault(primary, []).append(l)
+
+    # Deterministic order: named tags alphabetically, untagged last.
+    named = sorted(k for k in groups if k != 'untagged')
+    order = named + (['untagged'] if 'untagged' in groups else [])
+
+    for tag in order:
+        items = groups[tag]
+        print(f'[{tag}] ({len(items)})')
+        for l in items:
+            short = l.get('summary', '').replace('\n', ' ')[:80]
+            print(f'  {_format_id(l):<12} {short}')
 
 
 def cmd_handoff_sessions(args):
@@ -772,6 +898,81 @@ def cmd_unlearn(args):
         print(f'Learning {args.id} not found.', file=sys.stderr)
         sys.exit(1)
     print(f'Removed learning {args.id}.')
+
+
+def cmd_archive_learning(args):
+    """Archive a learning by ID. Parallels note archival but for the L- prefix.
+
+    Exists so `/review-learnings` and hand-run cleanup can retire a stale
+    learning without writing a replacement (which is what `supersede` is for).
+    """
+    store = args.store
+    note_type, year, seq = _parse_id_arg(args.id, store)
+    if note_type != 'learning':
+        print(f'Error: {args.id} is a {note_type}, not a learning.', file=sys.stderr)
+        sys.exit(1)
+    result = store.archive_learning(year, seq)
+    if result is None:
+        print(f'Learning {args.id} not found or already archived.', file=sys.stderr)
+        sys.exit(1)
+    print(f'Archived learning {args.id}.')
+
+
+def cmd_supersede(args):
+    """Archive an old learning and write a replacement that points back at it.
+
+    Frontmatter on the new learning carries ``supersedes: L-old`` so the
+    lineage is visible when reading the .md. If ``--tags``/``--area`` are
+    omitted the learn flow infers them via `claude -p`, matching the behavior
+    of a fresh `notes.py learn` invocation.
+    """
+    store = args.store
+    note_type, year, seq = _parse_id_arg(args.id, store)
+    if note_type != 'learning':
+        print(f'Error: {args.id} is a {note_type}, not a learning.', file=sys.stderr)
+        sys.exit(1)
+
+    existing = store.get_learning(year, seq)
+    if existing is None:
+        print(f'Learning {args.id} not found.', file=sys.stderr)
+        sys.exit(1)
+    if existing.get('_from_archive'):
+        print(f'Error: {args.id} is already archived — cannot supersede.', file=sys.stderr)
+        sys.exit(1)
+
+    content = args.content
+    if len(content.encode('utf-8')) > MAX_CONTENT_LENGTH:
+        print(f'Error: content exceeds {MAX_CONTENT_LENGTH} bytes', file=sys.stderr)
+        sys.exit(1)
+
+    tags_csv = (getattr(args, 'tags', '') or '').strip()
+    tags = [t.strip() for t in tags_csv.split(',') if t.strip()] if tags_csv else []
+    areas = [a for a in (getattr(args, 'area', None) or []) if a]
+    if not tags and not areas:
+        inferred = _infer_learning_tags_areas(content, store)
+        tags = inferred.get('tags') or []
+        areas = inferred.get('areas') or []
+
+    old_display_id = _format_id(existing)
+    archived = store.archive_learning(year, seq)
+    if archived is None:
+        print(f'Error: failed to archive {args.id}.', file=sys.stderr)
+        sys.exit(1)
+
+    metadata = {}
+    if getattr(args, 'role', ''):
+        metadata['role'] = args.role
+    if getattr(args, 'mission', ''):
+        metadata['mission'] = args.mission
+    new_entry = store.add_learning(
+        content=content,
+        session_id=args.session_id or '',
+        tags=tags,
+        areas=areas,
+        supersedes=old_display_id,
+        **metadata,
+    )
+    print(f'Superseded {old_display_id} with {_format_id(new_entry)}')
 
 
 # ---------------------------------------------------------------------------
@@ -1057,6 +1258,12 @@ def main():
                           help=f"One-sentence headline (<={BRIEF_SUMMARY_MAX} chars) for GUI sidebar. Auto-derived if omitted.")
     p_learn.add_argument("--role", default="", help="Session role")
     p_learn.add_argument("--mission", default="", help="Session mission")
+    p_learn.add_argument("--tags", default="",
+                          help="Comma-separated tag list. Omit to infer via claude -p.")
+    p_learn.add_argument("--area", action="append", default=[],
+                          help="Area glob pattern (repeatable). Omit to infer via claude -p.")
+    p_learn.add_argument("--supersedes", default="",
+                          help="ID of a prior learning this one replaces (e.g. L-2026-5).")
 
     # learnings
     p_learnings = sub.add_parser("learnings")
@@ -1064,6 +1271,10 @@ def main():
     p_learnings.add_argument("--full", action="store_true", help="Print full content (not truncated)")
     p_learnings.add_argument("--role", help="Filter by session role")
     p_learnings.add_argument("--mission", help="Filter by session mission")
+    p_learnings.add_argument("--tag", help="Filter by tag (substring match, case-insensitive)")
+    p_learnings.add_argument("--area", help="Filter by area glob (exact match)")
+    p_learnings.add_argument("--index", action="store_true",
+                             help="Compact tag-grouped output for startup injection")
 
     # handoff-sessions
     sub.add_parser("handoff-sessions")
@@ -1071,6 +1282,24 @@ def main():
     # unlearn
     p_unlearn = sub.add_parser("unlearn")
     p_unlearn.add_argument("id", type=str, help="Learning ID (integer or L-prefix, e.g. L3 or 3)")
+
+    # archive-learning — move a learning to archive (parallels note archival)
+    p_archive_l = sub.add_parser("archive-learning",
+                                  help="Archive a learning by ID (move to learnings/<year>/archive/)")
+    p_archive_l.add_argument("id", type=str, help="Learning ID (e.g. L-2026-5)")
+
+    # supersede — archive old learning + write replacement
+    p_supersede = sub.add_parser("supersede",
+                                  help="Archive an existing learning and write a replacement")
+    p_supersede.add_argument("id", type=str, help="ID of the learning to supersede (e.g. L-2026-5)")
+    p_supersede.add_argument("--content", required=True, help="Content of the replacement learning")
+    p_supersede.add_argument("--session-id", default="")
+    p_supersede.add_argument("--tags", default="",
+                              help="Comma-separated tag list. Omit to infer via claude -p.")
+    p_supersede.add_argument("--area", action="append", default=[],
+                              help="Area glob pattern (repeatable). Omit to infer via claude -p.")
+    p_supersede.add_argument("--role", default="")
+    p_supersede.add_argument("--mission", default="")
 
     p_repair = sub.add_parser("repair")
     p_repair.add_argument("--dry-run", action="store_true", help="Report what would be fixed without modifying files")
@@ -1117,6 +1346,8 @@ def main():
         'unarchive': cmd_unarchive,
         'update': cmd_update, 'archive': cmd_archive,
         'learn': cmd_learn, 'learnings': cmd_learnings, 'unlearn': cmd_unlearn,
+        'archive-learning': cmd_archive_learning,
+        'supersede': cmd_supersede,
         'handoff-sessions': cmd_handoff_sessions,
         'migrate': cmd_migrate,
         'repair': cmd_repair,

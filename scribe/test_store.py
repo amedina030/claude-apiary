@@ -342,6 +342,118 @@ class TestLearnings(unittest.TestCase):
             self.assertEqual(len(results), 1)
 
 
+class TestLearningFrontmatter(unittest.TestCase):
+    """Frontmatter round-trip, filters, archive, and legacy tolerance."""
+
+    def test_add_learning_writes_frontmatter_to_md(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            year = datetime.now(timezone.utc).year
+            store = ScribeStore(Path(tmp))
+            added = store.add_learning(
+                'body text here',
+                's1',
+                tags=['windows', 'encoding'],
+                areas=['core/**', 'scripts/*'],
+                supersedes='L-2026-5',
+            )
+            md = Path(tmp) / LEARNING_FOLDER / str(year) / f"{added['seq']}.md"
+            raw = md.read_text(encoding='utf-8')
+            self.assertTrue(raw.startswith('---\n'))
+            self.assertIn('tags: [windows, encoding]', raw)
+            self.assertIn('areas: [core/**, scripts/*]', raw)
+            self.assertIn('supersedes: L-2026-5', raw)
+            self.assertTrue(raw.rstrip().endswith('body text here'))
+
+    def test_add_learning_no_frontmatter_when_fields_empty(self):
+        """Legacy-compatible: no tags/areas/supersedes → .md stays frontmatter-free."""
+        with tempfile.TemporaryDirectory() as tmp:
+            year = datetime.now(timezone.utc).year
+            store = ScribeStore(Path(tmp))
+            added = store.add_learning('plain body', 's1')
+            md = Path(tmp) / LEARNING_FOLDER / str(year) / f"{added['seq']}.md"
+            self.assertEqual(md.read_text(encoding='utf-8'), 'plain body')
+
+    def test_get_learning_returns_frontmatter_fields_and_body(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            added = store.add_learning(
+                'payload', 's1', tags=['a', 'b'], areas=['core/**'],
+            )
+            got = store.get_learning(added['year'], added['seq'])
+            self.assertEqual(got['content'], 'payload')
+            self.assertEqual(got['tags'], ['a', 'b'])
+            self.assertEqual(got['areas'], ['core/**'])
+
+    def test_get_learning_tolerates_missing_frontmatter(self):
+        """Legacy .md files (no frontmatter) still round-trip."""
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            added = store.add_learning('no-fm body', 's1')
+            got = store.get_learning(added['year'], added['seq'])
+            self.assertEqual(got['content'], 'no-fm body')
+            self.assertEqual(got.get('tags', []), [])
+
+    def test_list_learnings_filters_by_tag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            store.add_learning('a', 's1', tags=['windows', 'gui'])
+            store.add_learning('b', 's1', tags=['subprocess'])
+            store.add_learning('c', 's1')
+            win = store.list_learnings(tag='windows')
+            self.assertEqual([e['summary'] for e in win], ['a'])
+            subproc = store.list_learnings(tag='subprocess')
+            self.assertEqual([e['summary'] for e in subproc], ['b'])
+
+    def test_list_learnings_filters_by_area(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            store.add_learning('a', 's1', areas=['gui/**'])
+            store.add_learning('b', 's1', areas=['scribe/*'])
+            results = store.list_learnings(area='gui/**')
+            self.assertEqual([e['summary'] for e in results], ['a'])
+
+    def test_archive_learning_moves_index_and_md(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            year = datetime.now(timezone.utc).year
+            store = ScribeStore(Path(tmp))
+            added = store.add_learning('archive me', 's1', tags=['x'])
+            archived = store.archive_learning(added['year'], added['seq'])
+            self.assertIsNotNone(archived)
+            self.assertIn('archived_at', archived)
+            # Active index empty
+            active = store.list_learnings()
+            self.assertEqual(active, [])
+            # Archive index has it
+            from_archive = store.list_learnings(status='archived')
+            self.assertEqual(len(from_archive), 1)
+            self.assertTrue(from_archive[0].get('_from_archive'))
+            # .md moved
+            year_dir = Path(tmp) / LEARNING_FOLDER / str(year)
+            self.assertFalse((year_dir / f"{added['seq']}.md").exists())
+            self.assertTrue((year_dir / ARCHIVE_DIRNAME / f"{added['seq']}.md").exists())
+
+    def test_get_learning_falls_back_to_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            added = store.add_learning('findable after archive', 's1', tags=['t'])
+            store.archive_learning(added['year'], added['seq'])
+            got = store.get_learning(added['year'], added['seq'])
+            self.assertIsNotNone(got)
+            self.assertTrue(got.get('_from_archive'))
+            self.assertEqual(got['content'], 'findable after archive')
+            self.assertEqual(got['tags'], ['t'])
+
+    def test_list_learnings_status_all_unions_active_and_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            a = store.add_learning('alive', 's1')
+            b = store.add_learning('dead', 's1')
+            store.archive_learning(b['year'], b['seq'])
+            everything = store.list_learnings(status='all')
+            summaries = sorted(e['summary'] for e in everything)
+            self.assertEqual(summaries, ['alive', 'dead'])
+
+
 class TestEmptyContent(unittest.TestCase):
     def test_empty_content_string(self):
         with tempfile.TemporaryDirectory() as tmp:

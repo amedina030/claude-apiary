@@ -137,6 +137,7 @@ def build_core_hooks(*, use_launcher: bool = False):
     startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_hook.py", PYTHON, repo_root=root)
     stop_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install_stop.py", PYTHON, repo_root=root)
     error_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "context_rule_error_reminder.py", PYTHON, repo_root=root)
+    learnings_inject_cmd = hook_cmd(CORE_DIR / "hooks" / "learnings_inject_hook.py", PYTHON, repo_root=root)
     return {
         "UserPromptSubmit": [
             {"hooks": [{"type": "command", "command": prompt_startup_cmd}]},
@@ -145,6 +146,9 @@ def build_core_hooks(*, use_launcher: bool = False):
             {"matcher": "", "hooks": [{"type": "command", "command": install_cmd}]},
             {"matcher": "", "hooks": [{"type": "command", "command": session_cmd}]},
             {"matcher": "", "hooks": [{"type": "command", "command": startup_cmd}]},
+            {"matcher": "Edit", "hooks": [{"type": "command", "command": learnings_inject_cmd}]},
+            {"matcher": "Write", "hooks": [{"type": "command", "command": learnings_inject_cmd}]},
+            {"matcher": "Bash", "hooks": [{"type": "command", "command": learnings_inject_cmd}]},
         ],
         "PostToolUse": [
             {"matcher": "Bash", "hooks": [{"type": "command", "command": error_reminder_cmd}]},
@@ -616,6 +620,7 @@ def run_check():
         APIS_DIR / "core" / "hooks" / "check_install.py",
         APIS_DIR / "core" / "hooks" / "startup_hook.py",
         APIS_DIR / "core" / "hooks" / "startup_prompt_hook.py",
+        APIS_DIR / "core" / "hooks" / "learnings_inject_hook.py",
         APIS_DIR / "budgeter" / "hooks" / "pre_tool_use.py",
         APIS_DIR / "budgeter" / "hooks" / "post_tool_use.py",
     ]
