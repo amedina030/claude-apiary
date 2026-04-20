@@ -252,19 +252,53 @@
     // already landed between the tentative and the reconciliation, the real
     // user message would drop *below* the assistant reply.
     let insertAnchor = null;
+    let inheritedQueued = false;
     if (msg.role === "user" && msg.text) {
       const tentatives = messagesEl.querySelectorAll("li.msg.user.tentative");
+      let matched = null;
       for (const el of tentatives) {
         if (el.dataset.text === msg.text) {
-          insertAnchor = el.nextSibling;
-          el.remove();
+          matched = el;
           break;
         }
+      }
+      if (matched) {
+        insertAnchor = matched.nextSibling;
+        inheritedQueued = matched.classList.contains("queued");
+        matched.remove();
+      } else if (tentatives.length > 0) {
+        // No exact text match but outstanding tentatives exist. Something is
+        // out of sync (content normalized between optimistic render and JSONL
+        // write, or a stale tentative from a prior turn). Sweep them so we
+        // don't leave duplicates on screen. Warn so the root cause can be
+        // chased next recurrence.
+        console.warn("[apiary] tentative reconcile fallback", {
+          tentativeTexts: Array.from(tentatives, el => el.dataset.text),
+          msgText: msg.text,
+        });
+        const last = tentatives[tentatives.length - 1];
+        insertAnchor = last.nextSibling;
+        inheritedQueued = Array.from(tentatives).some(el => el.classList.contains("queued"));
+        tentatives.forEach(el => el.remove());
+      }
+    } else if (msg.role === "assistant") {
+      // Queued-message ordering: if the user sent follow-up messages while
+      // claude was still working on a prior turn, those messages are marked
+      // .queued. Insert this reply BEFORE the first queued user message so
+      // the chronology stays [user1][reply1][user2][reply2] instead of
+      // [user1][user2][reply1][reply2]. Then un-mark that user message —
+      // it's now the "current" turn, not a queued one, and the next
+      // assistant reply should land after it (before the next queued msg).
+      const firstQueued = messagesEl.querySelector("li.msg.user.queued");
+      if (firstQueued) {
+        insertAnchor = firstQueued;
+        firstQueued.classList.remove("queued");
       }
     }
 
     const li = document.createElement("li");
     li.className = `msg ${msg.role}`;
+    if (inheritedQueued) li.classList.add("queued");
     li.dataset.uuid = msg.uuid || "";
 
     const meta = document.createElement("div");
@@ -330,9 +364,12 @@
 
   // Optimistic render: synthesize a user message and append immediately on send.
   // Marked .tentative so the eventual JSONL-derived record replaces it cleanly.
-  function appendTentativeUserMessage(text) {
+  // `queued` marks messages the user sent while claude was still working on a
+  // prior turn — the marker rides through reconciliation so assistant replies
+  // land in the correct chronological position.
+  function appendTentativeUserMessage(text, queued) {
     const li = document.createElement("li");
-    li.className = "msg user tentative";
+    li.className = "msg user tentative" + (queued ? " queued" : "");
     li.dataset.text = text;
 
     const meta = document.createElement("div");
@@ -1188,7 +1225,19 @@
       // the tentative render while we're in feedback-submission mode —
       // claude treats this as input to the plan prompt, not a new user msg.
       if (text && !text.startsWith("/") && !awaitingFeedback) {
-        appendTentativeUserMessage(text);
+        if (!waitingForAssistant) {
+          // Fresh turn (not queued). Clear any stale .queued markers from
+          // prior turns: if claude bundled multiple queued messages into one
+          // reply (so not every queued msg got a dedicated response), those
+          // stragglers still carry the class. Left uncleared, the next
+          // assistant reply would wrongly insert before them.
+          messagesEl.querySelectorAll("li.msg.user.queued")
+            .forEach(el => el.classList.remove("queued"));
+        }
+        // If waitingForAssistant is already true, claude is still working on
+        // a prior turn — this message is queued, and needs the .queued marker
+        // so the assistant reply for the prior turn lands before it.
+        appendTentativeUserMessage(text, waitingForAssistant);
         // From here until the assistant message lands, the thinking bubble
         // may spawn on pty chunks. Slash commands and feedback submissions
         // don't get a normal assistant reply, so we don't arm for them.
