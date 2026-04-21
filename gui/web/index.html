@@ -23,6 +23,8 @@
           </span>
         </div>
         <div class="header-right">
+          <button id="flash-toggle" type="button" class="sidebar-toggle-btn" aria-label="toggle taskbar flash when Claude is waiting" aria-pressed="true">🔔</button>
+          <button id="sidebar-toggle" type="button" class="sidebar-toggle-btn" aria-label="toggle sidebar" aria-pressed="false">›</button>
           <span id="totals" class="totals">
             <span class="badge"><span class="k">in</span> <span id="tot-in">0</span></span>
             <span class="badge"><span class="k">out</span> <span id="tot-out">0</span></span>
@@ -35,15 +37,35 @@
       </header>
 
       <main id="main">
-        <section id="chat">
-          <div id="status" class="status hidden"></div>
-          <div id="empty-state" class="empty-state hidden">
-            <div class="empty-title">No session open</div>
-            <div class="empty-subtitle">Pick a working directory to start a claude session.</div>
-            <button id="empty-pick" type="button" class="empty-pick">Pick directory…</button>
-          </div>
-          <ol id="messages" class="messages"></ol>
-        </section>
+        <div id="left-col">
+          <section id="chat">
+            <div id="status" class="status hidden"></div>
+            <div id="empty-state" class="empty-state hidden">
+              <div class="empty-title">No session open</div>
+              <div class="empty-subtitle">Pick a working directory to start a claude session.</div>
+              <button id="empty-pick" type="button" class="empty-pick">Pick directory…</button>
+            </div>
+            <ol id="messages" class="messages"></ol>
+          </section>
+
+          <section id="pty-strip-wrap" class="pty-strip-wrap collapsed">
+            <div id="pty-toggle" class="pty-toggle" role="separator" aria-orientation="horizontal" aria-label="drag to resize chat input">
+              <button id="pty-toggle-label" type="button" class="pty-toggle-label" aria-label="toggle pty output">
+                <span class="pty-toggle-chevron"></span>
+                <span>terminal</span>
+              </button>
+              <span class="pty-toggle-divider" aria-hidden="true"></span>
+              <span id="pty-unread" class="pty-unread hidden"></span>
+            </div>
+            <div id="pty-term" class="pty-term" aria-label="pty terminal"></div>
+          </section>
+
+          <div id="prompt-banner" class="prompt-banner hidden" role="region" aria-label="claude code prompt"></div>
+
+          <footer id="composer">
+            <textarea id="input" rows="3" placeholder="message Claude Code (Enter to send · Shift+Enter for newline · Ctrl+C to interrupt · Esc to cancel)"></textarea>
+          </footer>
+        </div>
         <aside id="sidebar" class="sidebar">
           <div id="usage-meters" class="usage-meters" data-variant="bars" aria-label="quota usage">
             <div class="usage-header">
@@ -59,26 +81,22 @@
             <input type="search" id="sidebar-search" placeholder="search notes…" />
           </div>
           <div id="sidebar-list" class="sidebar-list"></div>
+          <div id="agents-panel" class="agents-panel" aria-label="active sub-agents">
+            <div class="agents-header">
+              <span id="agents-title" class="agents-title" role="button" tabindex="0" aria-expanded="true" aria-controls="agents-body">agents</span>
+              <span id="agents-badge" class="agents-badge"></span>
+              <button id="agents-clear-recent" type="button" class="usage-mini-btn agents-clear-btn hidden" aria-label="clear recent agents" title="clear all completed agents">×</button>
+            </div>
+            <div id="agents-body" class="agents-body">
+              <ol id="agents-running" class="agents-list"></ol>
+              <div id="agents-recent-wrap" class="agents-recent-wrap hidden">
+                <div class="agents-recent-header">recent</div>
+                <ol id="agents-recent" class="agents-list"></ol>
+              </div>
+            </div>
+          </div>
         </aside>
       </main>
-
-      <section id="pty-strip-wrap" class="pty-strip-wrap collapsed">
-        <div id="pty-toggle" class="pty-toggle" role="separator" aria-orientation="horizontal" aria-label="drag to resize chat input">
-          <button id="pty-toggle-label" type="button" class="pty-toggle-label" aria-label="toggle pty output">
-            <span class="pty-toggle-chevron"></span>
-            <span>terminal</span>
-          </button>
-          <span class="pty-toggle-divider" aria-hidden="true"></span>
-          <span id="pty-unread" class="pty-unread hidden"></span>
-        </div>
-        <div id="pty-term" class="pty-term" aria-label="pty terminal"></div>
-      </section>
-
-      <div id="prompt-banner" class="prompt-banner hidden" role="region" aria-label="claude code prompt"></div>
-
-      <footer id="composer">
-        <textarea id="input" rows="3" placeholder="message Claude Code (Enter to send · Shift+Enter for newline · Ctrl+C to interrupt · Esc to cancel)"></textarea>
-      </footer>
 
       <div id="toasts" class="toasts"></div>
     </div>

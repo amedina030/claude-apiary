@@ -27,6 +27,7 @@ from gui.theme import (
     load_theme,
 )
 from gui.transcript import Message, parse_jsonl_lines
+from gui.win_notify import flash_taskbar
 from gui.win_titlebar import apply_dark_titlebar, find_window_by_title
 
 def _web_dir() -> Path:
@@ -111,6 +112,13 @@ class GuiBridge:
             return False
         return composer_state.save(int(height_px))
 
+    def flash_window(self) -> bool:
+        """Flash our taskbar button — called from the frontend when Claude
+        finishes a turn or surfaces an interactive prompt. Internally skipped
+        if the window is already foreground, so safe to call unconditionally.
+        """
+        return flash_taskbar(self._app._hwnd)
+
     # --- session / tab surface ---------------------------------------------------
 
     def list_sessions(self) -> list[dict]:
@@ -151,6 +159,7 @@ class GuiBridge:
 class App:
     def __init__(self) -> None:
         self.window = None
+        self._hwnd: Optional[int] = None
         self._sessions: list[Session] = []
         self._active_idx: int = -1
         self._theme_watcher: Optional[ThemeWatcher] = None
@@ -229,6 +238,12 @@ class App:
         )
         for w in warnings:
             print(f"[scribe] {w}", file=sys.stderr)
+
+    def _push_agents(self, agents: list, session_id: str = "") -> None:
+        payload = json.dumps([a.to_dict() for a in agents])
+        self._eval(
+            f"window.apiary.onAgents({payload}, {json.dumps(session_id)});"
+        )
 
     def _push_theme(self, vars_: dict, err: Optional[str]) -> None:
         if err:
@@ -318,6 +333,7 @@ class App:
             on_pty_exit=self._push_pty_exit,
             on_toast=self._push_toast,
             on_notes=self._push_notes,
+            on_agents=self._push_agents,
             capture=self._capture,
             command=launch.get("command", "claude"),
             args=list(launch.get("args", [])),
@@ -666,7 +682,7 @@ def main() -> int:
             js_api=bridge,
             width=1400,
             height=900,
-            min_size=(800, 600),
+            min_size=(560, 480),
             background_color="#0e1116",
         )
         app.window = window
@@ -675,6 +691,7 @@ def main() -> int:
             # Apply Win11 dark titlebar after window has rendered (HWND now exists).
             # We look up by title rather than relying on pywebview internals.
             hwnd = find_window_by_title(title)
+            app._hwnd = hwnd
             apply_dark_titlebar(hwnd)
             app.start_services()
 
