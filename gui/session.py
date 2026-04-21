@@ -10,11 +10,13 @@ route them to the active tab (and later, to a specific tab id).
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import threading
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -76,6 +78,36 @@ _CLAUDE_SUBPROC_ENV = (
     "CLAUDE_CODE_SESSION",
     "CLAUDE_CODE_SESSION_ID",
 )
+
+
+def _debug_log_spawn(argv: list, cwd: Path, spawn_env: dict) -> None:
+    """T-2026-153#4 diagnostic: record what env + args `claude` is spawned
+    with so we can figure out why the GUI subprocess auto-approves tool
+    calls (L-2026-96). Remove this helper + its call site once the root
+    cause is understood."""
+    try:
+        from gui.paths import state_dir
+
+        log_path = state_dir() / "debug_spawn.log"
+        rec = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "argv": list(argv),
+            "cwd": str(cwd),
+            "parent_env_claude_vars": sorted(
+                f"{k}={os.environ[k]!r}"
+                for k in os.environ
+                if "CLAUDE" in k.upper() or "ANTHROPIC" in k.upper()
+            ),
+            "spawn_env_claude_vars": sorted(
+                f"{k}={v!r}"
+                for k, v in spawn_env.items()
+                if "CLAUDE" in k.upper() or "ANTHROPIC" in k.upper()
+            ),
+        }
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+    except Exception:
+        pass
 
 
 class Session:
@@ -201,6 +233,7 @@ class Session:
         spawn_env = os.environ.copy()
         for key in _CLAUDE_SUBPROC_ENV:
             spawn_env.pop(key, None)
+        _debug_log_spawn(argv, self.cwd, spawn_env)  # T-2026-153#4 DEBUG
 
         # Pre-spawn snapshot scoped to THIS cwd's projects dir — matches the
         # scope of our SessionDiscovery so exclude_paths semantics line up.
