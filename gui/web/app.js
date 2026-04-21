@@ -933,10 +933,42 @@
     return remH ? `${d}d ${remH}h` : `${d}d`;
   }
 
-  function thresholdClass(pct) {
+  function thresholdClass(pct, timePct) {
+    // When a time-elapsed reference is available, the main indicator is
+    // binary: "hot" when consumption is outrunning the clock (pct greater
+    // than the red bar's pct), "cool" otherwise. Ties resolve to cool —
+    // being exactly on pace is not a warning state.
+    //
+    // Fallback (no time reference — e.g. the credits bucket) preserves the
+    // original absolute thresholds: cool / warm / hot at 50% / 80%.
+    if (typeof timePct === "number") {
+      return pct > timePct ? "warm" : "cool";
+    }
     if (pct >= 80) return "hot";
     if (pct >= 50) return "warm";
     return "cool";
+  }
+
+  // Nominal reset-window length in ms, keyed by bucket.key. Drives the thin
+  // secondary indicator that tracks how far into the current window we are.
+  // Credits bucket has no time-reset cadence and is intentionally omitted.
+  const USAGE_WINDOW_MS = {
+    "5h": 5 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
+  };
+
+  // Percent of the reset window that has elapsed. Returns a number in [0, 100]
+  // or null when it cannot be computed (missing or unparseable timestamp,
+  // unknown bucket key). Null triggers the caller to skip rendering the
+  // secondary indicator rather than show a stale/guessed value.
+  function elapsedWindowPct(isoTs, windowMs) {
+    if (!isoTs || !windowMs) return null;
+    const target = Date.parse(isoTs);
+    if (!target) return null;
+    const remaining = target - Date.now();
+    const elapsed = windowMs - remaining;
+    const pct = (elapsed / windowMs) * 100;
+    return Math.max(0, Math.min(100, pct));
   }
 
   // Variant 1 — stacked horizontal bars.
@@ -945,6 +977,7 @@
     wrap.className = "usage-bars";
     for (const row of rows) {
       const pct = Math.max(0, Math.min(100, Number(row.bucket.utilization) || 0));
+      const timePct = elapsedWindowPct(row.bucket.resets_at, USAGE_WINDOW_MS[row.key]);
       const item = document.createElement("div");
       item.className = "usage-bar-row";
       const title = document.createElement("div");
@@ -958,12 +991,21 @@
       title.appendChild(right);
       item.appendChild(title);
       const track = document.createElement("div");
-      track.className = `usage-bar-track ${thresholdClass(pct)}`;
+      track.className = `usage-bar-track ${thresholdClass(pct, timePct)}`;
       const fill = document.createElement("div");
       fill.className = "usage-bar-fill";
       fill.style.width = `${pct}%`;
       track.appendChild(fill);
       item.appendChild(track);
+      if (timePct !== null) {
+        const timeTrack = document.createElement("div");
+        timeTrack.className = "usage-bar-time";
+        const timeFill = document.createElement("div");
+        timeFill.className = "usage-bar-time-fill";
+        timeFill.style.width = `${timePct}%`;
+        timeTrack.appendChild(timeFill);
+        item.appendChild(timeTrack);
+      }
       const foot = document.createElement("div");
       foot.className = "usage-bar-foot";
       const resetsIn = formatResetIn(row.bucket.resets_at);
@@ -984,8 +1026,9 @@
     wrap.className = "usage-rings";
     for (const row of rows) {
       const pct = Math.max(0, Math.min(100, Number(row.bucket.utilization) || 0));
+      const timePct = elapsedWindowPct(row.bucket.resets_at, USAGE_WINDOW_MS[row.key]);
       const cell = document.createElement("div");
-      cell.className = `usage-ring-cell ${thresholdClass(pct)}`;
+      cell.className = `usage-ring-cell ${thresholdClass(pct, timePct)}`;
       const resetsIn = formatResetIn(row.bucket.resets_at);
       cell.title = row.bucket.resets_at || "";
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -1002,6 +1045,21 @@
       fill.setAttribute("stroke-dashoffset", String(RING_CIRC * (1 - pct / 100)));
       fill.setAttribute("transform", "rotate(-90 22 22)");
       svg.appendChild(fill);
+      if (timePct !== null) {
+        const TIME_R = 21;
+        const TIME_CIRC = 2 * Math.PI * TIME_R;
+        const timeTrack = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        timeTrack.setAttribute("class", "usage-ring-time-track");
+        timeTrack.setAttribute("cx", "22"); timeTrack.setAttribute("cy", "22"); timeTrack.setAttribute("r", String(TIME_R));
+        svg.appendChild(timeTrack);
+        const timeFill = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        timeFill.setAttribute("class", "usage-ring-time-fill");
+        timeFill.setAttribute("cx", "22"); timeFill.setAttribute("cy", "22"); timeFill.setAttribute("r", String(TIME_R));
+        timeFill.setAttribute("stroke-dasharray", String(TIME_CIRC));
+        timeFill.setAttribute("stroke-dashoffset", String(TIME_CIRC * (1 - timePct / 100)));
+        timeFill.setAttribute("transform", "rotate(-90 22 22)");
+        svg.appendChild(timeFill);
+      }
       const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
       text.setAttribute("class", "usage-ring-text");
       text.setAttribute("x", "22"); text.setAttribute("y", "22");

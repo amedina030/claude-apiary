@@ -509,11 +509,20 @@ body {
   font-family: var(--font-family-ui);
   font-size: 11px;
   color: var(--muted);
-  transition: opacity 0.2s ease;
+  position: relative;
 }
 
-.usage-meters.stale {
-  opacity: 0.55;
+.usage-meters.stale::after {
+  content: "Zzz";
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: 10px;
+  font-style: italic;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  opacity: 0.8;
+  pointer-events: none;
 }
 
 .usage-header {
@@ -614,6 +623,21 @@ body {
 .usage-bar-track.warm  .usage-bar-fill { background: #d29922; }
 .usage-bar-track.hot   .usage-bar-fill { background: #f85149; }
 
+.usage-bar-time {
+  height: 2px;
+  margin-top: 2px;
+  background: color-mix(in srgb, var(--border) 40%, transparent);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.usage-bar-time-fill {
+  height: 100%;
+  background: #f85149;
+  border-radius: 1px;
+  transition: width 0.4s linear;
+}
+
 .usage-bar-foot {
   color: var(--muted);
   font-size: 10px;
@@ -656,6 +680,20 @@ body {
 .usage-ring-cell.cool .usage-ring-fill { stroke: var(--accent); }
 .usage-ring-cell.warm .usage-ring-fill { stroke: #d29922; }
 .usage-ring-cell.hot  .usage-ring-fill { stroke: #f85149; }
+
+.usage-ring-time-track {
+  fill: none;
+  stroke: color-mix(in srgb, var(--border) 40%, transparent);
+  stroke-width: 2;
+}
+
+.usage-ring-time-fill {
+  fill: none;
+  stroke: #f85149;
+  stroke-width: 2;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.4s linear;
+}
 
 .usage-ring-text {
   fill: var(--fg);
