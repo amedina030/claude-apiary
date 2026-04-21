@@ -23,7 +23,10 @@
 
   function detectPrompt(lines) {
     for (let i = lines.length - 1; i >= 0; i--) {
-      const sel = lines[i].match(/^\s*❯\s*(\d+)\.\s+(.+)$/);
+      // Selector char: claude-code historically rendered ❯ (U+276F); 2.1.116+
+      // emits a literal '>' instead. Accept either so the detector keeps
+      // working across versions.
+      const sel = lines[i].match(/^\s*[❯>]\s*(\d+)\.\s+(.+)$/);
       if (!sel) continue;
       const firstNum = parseInt(sel[1], 10);
       const options = [{

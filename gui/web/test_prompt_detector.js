@@ -67,6 +67,18 @@ Would you like to proceed?
 
 `);
 
+// Same shape as TOOL_PERMISSION_BASH but with the literal '>' selector
+// claude-code 2.1.116+ emits instead of ❯. This is the .claude/ protect-self
+// gate prompt observed during the L-2026-111 investigation.
+const PROTECT_SELF_GATE = linesOf(`
+Do you want to create test.txt?
+
+>  1. Yes
+   2. Yes, and allow Claude to edit its own settings for this session
+   3. No
+
+`);
+
 // Single ❯ with no second option → should NOT match (needs >=2 options).
 const NOT_A_PROMPT_SINGLE = linesOf(`
 Some status text
@@ -130,6 +142,20 @@ test("plan-mode: 4 options plus extracted plan body in context", () => {
     !r.context.includes("⏸ plan mode on"),
     "chrome above the top ╌-divider should not leak into context"
   );
+});
+
+test("protect-self gate: '>' selector (2.1.116+) parses same as ❯", () => {
+  const r = detectPrompt(PROTECT_SELF_GATE);
+  assert.ok(r, "should detect a prompt with '>' selector");
+  assert.equal(r.question, "Do you want to create test.txt?");
+  assert.equal(r.options.length, 3);
+  assert.equal(r.options[0].selected, true);
+  assert.equal(r.options[0].text, "Yes");
+  assert.equal(
+    r.options[1].text,
+    "Yes, and allow Claude to edit its own settings for this session"
+  );
+  assert.equal(r.options[2].text, "No");
 });
 
 test("single-option block is not treated as a prompt", () => {

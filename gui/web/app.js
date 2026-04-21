@@ -726,11 +726,12 @@
 
   function ensureTermOpen() {
     if (termOpened) return;
-    if (ptyTermEl.clientHeight < 10) {
-      // Container still collapsed / mid-transition. The ResizeObserver below
-      // will call us again once size settles.
-      return;
-    }
+    // Open immediately, even into a 0-height collapsed container. The renderer
+    // can't lay out yet, but xterm only updates buffer.active reliably AFTER
+    // open() — empirically, write()-before-open leaves buffer.active stale
+    // (despite xterm docs implying otherwise), which made the prompt detector
+    // miss prompts that fired while the pty pane was collapsed. fit() runs
+    // later via ResizeObserver once the container actually has size.
     term.open(ptyTermEl);
     termOpened = true;
     try { fitAddon.fit(); } catch (_) {}
@@ -757,6 +758,10 @@
     });
     ro.observe(ptyTermEl);
   } catch (_) { /* ResizeObserver unavailable — toggle path still works */ }
+
+  // Open immediately so the buffer starts populating from the first pty byte,
+  // even if the user never expands the terminal pane.
+  ensureTermOpen();
 
   function ptyExpand() {
     ptyStripWrapEl.classList.remove("collapsed");
@@ -865,7 +870,7 @@
     // type → reveal the terminal.
     let hasNumbered = false;
     for (let i = lines.length - 1; i >= 0 && i >= lines.length - 20; i--) {
-      if (/^\s*❯\s*\d+\.\s+/.test(lines[i])) { hasNumbered = true; break; }
+      if (/^\s*[❯>]\s*\d+\.\s+/.test(lines[i])) { hasNumbered = true; break; }
     }
     if (!hasNumbered) return;
     // Dedupe — fire exactly once per distinct stationary-with-prompt state.
@@ -908,6 +913,12 @@
   // Suppress re-showing the same prompt during this window so the banner
   // doesn't immediately pop back for a prompt the user already dealt with.
   const DISMISS_COOLDOWN_MS = 4000;
+  // Signatures the user has explicitly answered via a button click. Persists
+  // for the session — once answered, the same prompt should never re-banner
+  // even if claude leaves the rendered prompt in the xterm scrollback for
+  // longer than DISMISS_COOLDOWN_MS. (Cancel-via-× still uses the cooldown,
+  // since the user may genuinely want the prompt back.)
+  const answeredSigs = new Set();
   let activePrompt = null;   // { question, options, signature }
   let awaitingFeedback = false;  // true while claude is in option-4 feedback mode
   let lastDismissedSig = null;
@@ -1047,6 +1058,11 @@
     // mode, skip the Enter, hide the banner, and unblock the chat input so
     // the user can type their feedback and submit it with Enter as normal.
     const isFeedback = /^\s*tell\b|what to change|with this feedback/i.test(optText);
+    // Permanently mute this signature for the session — claude often leaves
+    // the answered prompt rendered in the buffer past DISMISS_COOLDOWN_MS,
+    // and we don't want the banner to re-appear after the user has already
+    // committed to a choice.
+    answeredSigs.add(activePrompt.signature);
     window.pywebview.api.send_text(String(digit));
     if (isFeedback) {
       awaitingFeedback = true;
@@ -1072,6 +1088,9 @@
       return;
     }
     if (activePrompt && activePrompt.signature === found.signature) return;
+    // Already-answered signatures stay muted for the rest of the session,
+    // independent of the dismiss-cooldown window.
+    if (answeredSigs.has(found.signature)) return;
     // Suppress re-show if the user just dismissed this exact prompt — claude
     // takes a moment to repaint, and the stale buffer would fire the banner
     // right back in the user's face.
