@@ -277,6 +277,8 @@ claude-apiary/
 │   └── test_researcher.py       # Tests
 │
 ├── runner/                      # Autonomous 6-stage orchestrator
+│   ├── commands/
+│   │   └── runner-prep.md       # /runner-prep slash command definition
 │   ├── run.py                   # End-to-end orchestrator (all 6 stages)
 │   ├── validate_intake.py       # Stage 1: schema-check intake JSON
 │   ├── auto_refine.py           # Stage 2: intake → spec

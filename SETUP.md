@@ -119,6 +119,10 @@ python scripts/install_context_rules.py --uninstall
 - Delete `~/.claude/commands/research.md`
 - Optionally delete the repo-local researcher state at `<repo-root>/.apiary/research/` (entries and `tags.yaml`)
 
+**Runner:**
+- Delete `~/.claude/commands/runner-prep.md`
+- Runner state (intake, backlog, plans, hardens, executions, reports, logs) lives inside the apiary repo under `runner/` — it is removed when the repo directory is deleted
+
 **Everything:**
 - Delete the `claude-apiary` repo directory
 

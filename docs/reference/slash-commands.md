@@ -4,7 +4,7 @@ title: Slash Commands
 scope: project
 description: All slash commands, what they do, and when to use them
 framework_version: "1.0"
-last_verified: 2026-04-17
+last_verified: 2026-04-21
 ---
 
 # Slash Commands
@@ -23,12 +23,14 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 | `/budgeter-setup` | `budgeter/commands/budgeter-setup.md` | Set up budgeter for a specific project |
 | `/note` | `scribe/commands/note.md` | Add a typed note (type auto-detected from prefix) |
 | `/notes` | `scribe/commands/notes.md` | List and query notes |
+| `/review-learnings` | `scribe/commands/review-learnings.md` | Walk through all learnings grouped by tag, archive or supersede stale entries, stamp `last_review` timestamp |
 | `/refine` | `refiner/commands/refine.md` | Refine a fuzzy idea into a structured handoff spec through value-first adversarial questioning |
 | `/harden` | `harden/commands/harden.md` | Adversarial attack-defend loop that stress-tests code or plans |
 | `/review` | `docs/commands/review.md` | Review changes against standards, then fix issues |
 | `/wrapup` | `core/commands/wrapup.md` | Commit, push, and generate a session handoff note. Also captures compass observations from the session (Step 4, non-blocking). |
 | `/compass-sync` | `compass/commands/compass-sync.md` | Manually trigger compass synthesis — regenerate `personality.md` from active observations |
 | `/research` | `researcher/commands/research.md` | Add, find, list, show, verify, or register tags for research findings stored per-repo under `.apiary/research/` |
+| `/runner-prep` | `runner/commands/runner-prep.md` | Audit active scribe todos and prepare automation-ready intake JSONs for the runner pipeline, with dependency ordering and safety classification |
 
 ## Toggles
 
