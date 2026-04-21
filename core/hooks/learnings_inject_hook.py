@@ -172,10 +172,15 @@ def _run():  # pragma: no cover — covered by integration in Step 7
     project_root = Path(__file__).resolve().parent.parent.parent
     sys.path.insert(0, str(project_root))
 
+    from core.flags import is_enabled
     from core.hook_context import context_block, hook_allow, read_payload
     from core.sanitizer import sanitize_and_report
     from scribe.notes import _git_repo_root, _use_repo_layout, scribe_state_dir
     from scribe.store import ScribeStore
+
+    if not is_enabled('learnings-inject'):
+        hook_allow()
+        return
 
     if os.environ.get('APIARY_RUNNER_SUBPROCESS') == '1':
         hook_allow()
