@@ -1011,7 +1011,6 @@
       const resetsIn = formatResetIn(row.bucket.resets_at);
       foot.textContent = row.bucket.sublabel
         || (resetsIn ? `resets in ${resetsIn}` : "");
-      if (row.bucket.resets_at) foot.title = row.bucket.resets_at;
       item.appendChild(foot);
       wrap.appendChild(item);
     }
@@ -1030,7 +1029,6 @@
       const cell = document.createElement("div");
       cell.className = `usage-ring-cell ${thresholdClass(pct, timePct)}`;
       const resetsIn = formatResetIn(row.bucket.resets_at);
-      cell.title = row.bucket.resets_at || "";
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("viewBox", "0 0 44 44");
       svg.setAttribute("class", "usage-ring-svg");
