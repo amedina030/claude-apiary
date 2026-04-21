@@ -33,6 +33,15 @@
   // --- tab bar --------------------------------------------------------------
   // Backend sends onSessions(list) whenever tabs open/close/switch. We render
   // a chip per session plus a "+" button that opens a folder picker.
+  //
+  // Also keeps a cache of each session's per-tab settings so the prompt-detector
+  // poll can read allow_self_edits without round-tripping through the bridge.
+  const sessionSettings = new Map();  // sid -> { accept_edits, allow_self_edits }
+
+  function getSessionSettings(sid) {
+    return sessionSettings.get(sid) || { accept_edits: false, allow_self_edits: false };
+  }
+
   function renderTabs(sessions) {
     if (!Array.isArray(sessions)) return;
     tabsEl.innerHTML = "";
@@ -45,16 +54,47 @@
       emptyStateEl.classList.add("hidden");
       messagesEl.style.display = "";
     }
+    // Refresh the settings cache from the full snapshot. Any missing sid has
+    // been closed; clear its entry to avoid stale reads.
+    const seenSids = new Set();
+    for (const s of sessions) {
+      seenSids.add(s.session_id);
+      sessionSettings.set(s.session_id, {
+        accept_edits: !!s.accept_edits,
+        allow_self_edits: !!s.allow_self_edits,
+      });
+    }
+    for (const sid of Array.from(sessionSettings.keys())) {
+      if (!seenSids.has(sid)) sessionSettings.delete(sid);
+    }
     for (const s of sessions) {
       const tab = document.createElement("div");
       tab.className = "tab" + (s.active ? " active" : "");
       tab.dataset.sid = s.session_id;
-      tab.title = s.cwd;
+      // Surface active per-tab permissions in the tooltip + via data flags
+      // so CSS can show a subtle dot/highlight when a tab is permissive.
+      const flags = [];
+      if (s.accept_edits) flags.push("auto-accept edits");
+      if (s.allow_self_edits) flags.push("allow self-edits");
+      tab.title = flags.length ? `${s.cwd}\n[${flags.join(", ")}]` : s.cwd;
+      if (s.accept_edits) tab.dataset.acceptEdits = "1";
+      if (s.allow_self_edits) tab.dataset.allowSelfEdits = "1";
 
       const label = document.createElement("span");
       label.className = "tab-label";
       label.textContent = s.label || s.cwd || "session";
       tab.appendChild(label);
+
+      const cog = document.createElement("button");
+      cog.className = "tab-cog";
+      cog.type = "button";
+      cog.textContent = "⚙";
+      cog.title = "per-tab permission settings";
+      cog.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openSettingsPopover(s, cog);
+      });
+      tab.appendChild(cog);
 
       const close = document.createElement("button");
       close.className = "tab-close";
@@ -81,6 +121,157 @@
     tabsEl.appendChild(addBtn);
   }
   window.renderTabs = renderTabs;
+
+  // --- per-tab settings popover --------------------------------------------
+  let settingsPopoverEl = null;
+
+  function closeSettingsPopover() {
+    if (settingsPopoverEl) {
+      settingsPopoverEl.remove();
+      settingsPopoverEl = null;
+      document.removeEventListener("click", onDocClickForPopover, true);
+    }
+  }
+
+  function onDocClickForPopover(e) {
+    if (!settingsPopoverEl) return;
+    if (settingsPopoverEl.contains(e.target)) return;
+    closeSettingsPopover();
+  }
+
+  function openSettingsPopover(session, anchorEl) {
+    closeSettingsPopover();
+    const popover = document.createElement("div");
+    popover.className = "tab-settings-popover";
+    popover.addEventListener("click", (e) => e.stopPropagation());
+
+    const title = document.createElement("div");
+    title.className = "tab-settings-title";
+    title.textContent = "Per-tab permissions";
+    popover.appendChild(title);
+
+    popover.appendChild(renderSettingRow(
+      session.session_id,
+      "accept_edits",
+      "Auto-accept edits",
+      "Cycles claude's permission mode via Shift+Tab (session history preserved). Also applied via --permission-mode acceptEdits on the next spawn.",
+      !!session.accept_edits,
+    ));
+    popover.appendChild(renderSettingRow(
+      session.session_id,
+      "allow_self_edits",
+      "Allow Claude to edit its own settings (.claude/)",
+      "Auto-click 'Yes' on the harness protect-self prompt when it appears.",
+      !!session.allow_self_edits,
+    ));
+
+    // Anchor under the cog button — relative to the tabs nav so horizontal
+    // scroll in the tab strip doesn't detach the popover.
+    const anchor = anchorEl.getBoundingClientRect();
+    popover.style.position = "fixed";
+    popover.style.top = `${Math.round(anchor.bottom + 4)}px`;
+    popover.style.left = `${Math.round(anchor.left)}px`;
+    document.body.appendChild(popover);
+    settingsPopoverEl = popover;
+
+    // Defer the document listener so this click doesn't immediately close.
+    setTimeout(() => {
+      document.addEventListener("click", onDocClickForPopover, true);
+    }, 0);
+  }
+
+  function renderSettingRow(sid, key, label, tooltip, initialValue) {
+    const row = document.createElement("label");
+    row.className = "tab-settings-row";
+    row.title = tooltip;
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !!initialValue;
+    cb.addEventListener("change", async () => {
+      if (!bridgeReady()) return;
+      try {
+        const ok = await window.pywebview.api.set_session_setting(sid, key, cb.checked);
+        if (!ok) { cb.checked = !cb.checked; return; }
+        // accept_edits flips claude's live permission mode via Shift+Tab
+        // chords so session history survives. The stored value is still
+        // consumed on the NEXT spawn (new tab / explicit restart) via
+        // --permission-mode acceptEdits.
+        if (key === "accept_edits") {
+          cyclePermissionModeToTarget(cb.checked ? "acceptEdits" : "default");
+        }
+      } catch (e) {
+        console.error("set_session_setting failed", e);
+        cb.checked = !cb.checked;
+      }
+    });
+    row.appendChild(cb);
+    const text = document.createElement("span");
+    text.textContent = label;
+    row.appendChild(text);
+    return row;
+  }
+
+  // Detect claude-code's live permission mode from the rendered TUI footer
+  // and cycle Shift+Tab (CSI Z, "\x1b[Z") to reach `target`.
+  //
+  // Claude-code 2.1.83+ has FOUR modes (https://code.claude.com/docs/en/permission-modes):
+  //   default      — no footer; classifier + normal prompts
+  //   acceptEdits  — auto-accepts edit tool calls
+  //   plan         — read-only planning mode
+  //   auto         — no prompts, classifier reviews each action. Must be
+  //                  enabled first via `claude --enable-auto-mode` (Team /
+  //                  Enterprise / API plan, Sonnet/Opus 4.6). First entry
+  //                  shows a confirmation; declining drops auto from the
+  //                  cycle.
+  //
+  // Cycle length isn't fixed (3 or 4 slots depending on whether auto is
+  // enabled + accepted), so press + re-detect + re-check iteratively rather
+  // than assume a fixed press count. Max 5 iterations caps the worst case.
+  function detectPermissionMode() {
+    const lines = readScreenLines();
+    const tail = lines.slice(-40).join("\n");
+    if (/\baccept[\s_-]*edits?\b/i.test(tail)) return "acceptEdits";
+    if (/\bplan\s*mode\b/i.test(tail)) return "plan";
+    if (/\bauto\s*mode\b/i.test(tail)) return "auto";
+    return "default";
+  }
+
+  function labelForMode(mode) {
+    if (mode === "acceptEdits") return "accept-edits";
+    if (mode === "plan") return "plan";
+    if (mode === "auto") return "auto";
+    return "default";
+  }
+
+  const SHIFT_TAB_WAIT_MS = 200;
+
+  async function cyclePermissionModeToTarget(target) {
+    if (!bridgeReady()) return;
+    const start = detectPermissionMode();
+    if (start === target) {
+      toast(`Permission mode already ${labelForMode(target)}`, "");
+      return;
+    }
+    let current = start;
+    let presses = 0;
+    for (let i = 0; i < 5 && current !== target; i++) {
+      try { window.pywebview.api.send_text("\x1b[Z"); } catch (_) {}
+      presses += 1;
+      await new Promise(r => setTimeout(r, SHIFT_TAB_WAIT_MS));
+      current = detectPermissionMode();
+    }
+    if (current === target) {
+      toast(
+        `Permission mode: ${labelForMode(start)} → ${labelForMode(target)} (${presses}× Shift+Tab)`,
+        "",
+      );
+    } else {
+      toast(
+        `Couldn't reach ${labelForMode(target)} after ${presses}× Shift+Tab (now ${labelForMode(current)})`,
+        "error",
+      );
+    }
+  }
 
   async function switchTab(sid) {
     if (!bridgeReady()) return;
@@ -1075,6 +1266,30 @@
     }
   }
 
+  // Per-tab "allow Claude to edit its own settings" toggle (T-2026-176 #1):
+  // when ON and the detected prompt is the harness protect-self gate for
+  // .claude/ writes, auto-click option 1 ("Yes, and allow Claude to edit its
+  // own settings for this session") without rendering the banner.
+  function isSelfEditPrompt(prompt) {
+    const hay = `${prompt.question || ""}\n${prompt.context || ""}\n` +
+                (prompt.options || []).map(o => o.text || "").join("\n");
+    return /\.claude[\\/]/.test(hay) || /edit its own settings/i.test(hay);
+  }
+
+  function autoAckSelfEdit(found) {
+    const opt = (found.options || []).find(o => /^yes/i.test(o.text || "")) ||
+                (found.options || [])[0];
+    if (!opt) return false;
+    answeredSigs.add(found.signature);
+    recordPromptAppeared(found);
+    recordPromptResolution(found, opt);
+    try { window.pywebview.api.send_text(String(opt.number)); } catch (_) {}
+    setTimeout(() => {
+      try { window.pywebview.api.send_control("m"); } catch (_) {}
+    }, 30);
+    return true;
+  }
+
   function runDetect() {
     const found = detectPrompt(readScreenLines());
     if (!found) {
@@ -1097,6 +1312,10 @@
     if (found.signature === lastDismissedSig &&
         Date.now() - lastDismissedAt < DISMISS_COOLDOWN_MS) {
       return;
+    }
+    const settings = getSessionSettings(activeSessionId);
+    if (settings.allow_self_edits && isSelfEditPrompt(found)) {
+      if (autoAckSelfEdit(found)) return;
     }
     activePrompt = found;
     recordPromptAppeared(found);

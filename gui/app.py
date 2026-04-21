@@ -19,6 +19,7 @@ from gui import composer_state, pty_capture, sidebar_state, tabs_state
 from gui.scribe_aggregator import NoteEntry, read_body
 from gui.session import Session
 from gui.single_instance import SingleInstance
+from gui.tabs_state import TabEntry
 from gui.theme import (
     ThemeWatcher,
     ensure_defaults as ensure_theme_defaults,
@@ -134,6 +135,17 @@ class GuiBridge:
         if not isinstance(session_id, str):
             return False
         return self._app.close_session(session_id)
+
+    def set_session_setting(self, session_id: str, key: str, value) -> bool:
+        """Per-tab permission toggles (T-2026-176).
+
+        key='accept_edits'  -> restarts the pty so --permission-mode acceptEdits
+                               takes effect on the next claude invocation.
+        key='allow_self_edits' -> frontend-only state; no restart needed.
+        """
+        if not isinstance(session_id, str) or not isinstance(key, str):
+            return False
+        return self._app.set_session_setting(session_id, key, bool(value))
 
 
 class App:
@@ -275,7 +287,12 @@ class App:
 
     # --- session lifecycle --------------------------------------------------------
 
-    def _create_session(self, cwd: Path) -> Session:
+    def _create_session(
+        self,
+        cwd: Path,
+        accept_edits: bool = False,
+        allow_self_edits: bool = False,
+    ) -> Session:
         """Build a Session wired to push UI events through App callbacks."""
         launch = load_launch()
         return Session(
@@ -293,6 +310,8 @@ class App:
             args=list(launch.get("args", [])),
             rows=int(launch.get("rows", 40) or 40),
             cols=int(launch.get("cols", 120) or 120),
+            accept_edits=accept_edits,
+            allow_self_edits=allow_self_edits,
         )
 
     def _sessions_descriptor(self) -> list[dict]:
@@ -303,6 +322,8 @@ class App:
                 "cwd": str(s.cwd),
                 "label": s.cwd.name or str(s.cwd),
                 "active": (i == self._active_idx),
+                "accept_edits": bool(s.accept_edits),
+                "allow_self_edits": bool(s.allow_self_edits),
             }
             for i, s in enumerate(self._sessions)
         ]
@@ -317,7 +338,45 @@ class App:
         self._eval(f"window.apiary.setActiveSession({sid});")
 
     def _persist_tabs(self) -> None:
-        tabs_state.save([s.cwd for s in self._sessions], self._active_idx)
+        tabs_state.save(
+            [
+                TabEntry(
+                    cwd=s.cwd,
+                    accept_edits=s.accept_edits,
+                    allow_self_edits=s.allow_self_edits,
+                )
+                for s in self._sessions
+            ],
+            self._active_idx,
+        )
+
+    def set_session_setting(self, session_id: str, key: str, value: bool) -> bool:
+        """Update a per-tab permission toggle.
+
+        Mid-session behavior:
+        - ``accept_edits``: stored only. Applied to the pty lazily — the
+          frontend sends Shift+Tab chord(s) to cycle claude's live permission
+          mode (no pty restart, session history preserved). The stored value
+          is ALSO consumed on the NEXT spawn of this tab (new-tab creation or
+          explicit restart) via --permission-mode acceptEdits.
+        - ``allow_self_edits``: stored only; purely frontend — the prompt
+          detector reads it to auto-ack .claude/ protect-self prompts.
+        """
+        for s in self._sessions:
+            if s.session_id != session_id:
+                continue
+            if key == "accept_edits":
+                if s.accept_edits == value:
+                    return True
+                s.accept_edits = value
+            elif key == "allow_self_edits":
+                s.allow_self_edits = value
+            else:
+                return False
+            self._push_sessions()
+            self._persist_tabs()
+            return True
+        return False
 
     def open_session(self, cwd: str) -> Optional[str]:
         """Create a new Session at ``cwd`` and make it active. Returns the new
@@ -447,16 +506,20 @@ class App:
         # prefer launch.json's explicit cwd (useful for devs and repeat users
         # who configured the GUI). Otherwise show the empty-state picker so
         # first-time users aren't dropped into an arbitrary cwd like C:\.
-        cwds, active_idx = tabs_state.load()
-        if not cwds:
+        entries, active_idx = tabs_state.load()
+        if not entries:
             launch = load_launch()
             launch_cwd = launch.get("cwd") or ""
             if launch_cwd:
-                cwds = [Path(launch_cwd)]
+                entries = [TabEntry(cwd=Path(launch_cwd))]
                 active_idx = 0
 
-        for cwd in cwds:
-            sess = self._create_session(cwd)
+        for entry in entries:
+            sess = self._create_session(
+                entry.cwd,
+                accept_edits=entry.accept_edits,
+                allow_self_edits=entry.allow_self_edits,
+            )
             if sess.start():
                 self._sessions.append(sess)
         if self._sessions:

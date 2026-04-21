@@ -129,7 +129,8 @@ body {
   max-width: 180px;
 }
 
-.tab-close {
+.tab-close,
+.tab-cog {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -145,9 +146,57 @@ body {
   padding: 0;
 }
 
-.tab-close:hover {
+.tab-cog {
+  font-size: 11px;
+}
+
+.tab-close:hover,
+.tab-cog:hover {
   background: var(--border);
   color: var(--fg);
+}
+
+/* Subtle visual cue when either permission toggle is on. */
+.tab[data-accept-edits="1"] .tab-cog,
+.tab[data-allow-self-edits="1"] .tab-cog {
+  color: var(--accent);
+}
+
+.tab-settings-popover {
+  z-index: 1000;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  padding: 10px 12px;
+  min-width: 280px;
+  font-family: var(--font-family-ui);
+  font-size: 12px;
+}
+
+.tab-settings-title {
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+
+.tab-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tab-settings-row input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
 }
 
 .tab-new {

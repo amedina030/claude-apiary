@@ -97,6 +97,8 @@ class Session:
         args: Optional[list] = None,
         rows: int = 40,
         cols: int = 120,
+        accept_edits: bool = False,
+        allow_self_edits: bool = False,
     ) -> None:
         # Callbacks receive (payload, session_id) so App can route UI pushes
         # to the right tab. session_id is the first field assigned so the
@@ -117,6 +119,12 @@ class Session:
         self._args = list(args or [])
         self._rows = rows
         self._cols = cols
+        # Per-tab permission toggles (T-2026-176). `accept_edits` is a spawn-time
+        # flag (prepends --permission-mode acceptEdits); flipping it requires a
+        # pty restart. `allow_self_edits` is pure frontend state — the prompt
+        # detector reads it to auto-ack .claude/ protect-self prompts.
+        self.accept_edits = bool(accept_edits)
+        self.allow_self_edits = bool(allow_self_edits)
 
         self.pty: Optional[PtyWrapper] = None
         self.discovery: Optional[SessionDiscovery] = None
@@ -197,7 +205,11 @@ class Session:
                 pass
             self.pty = None
 
-        argv = [self._command] + self._args
+        # Prepend --permission-mode acceptEdits when the per-tab "auto-accept
+        # edits" toggle is on. Spawn-time only: flipping the toggle mid-session
+        # requires a pty restart (App.set_session_accept_edits handles that).
+        extra = ["--permission-mode", "acceptEdits"] if self.accept_edits else []
+        argv = [self._command] + extra + self._args
         spawn_env = os.environ.copy()
         for key in _CLAUDE_SUBPROC_ENV:
             spawn_env.pop(key, None)

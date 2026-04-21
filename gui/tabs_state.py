@@ -2,8 +2,16 @@
 
 State file: ``~/.claude/apiary_gui/tabs.json``. Schema::
 
-    {"tabs": ["D:/Professional/claude-apiary", "C:/Users/user/other-repo"],
+    {"tabs": [
+        {"cwd": "D:/Professional/claude-apiary",
+         "accept_edits": false,
+         "allow_self_edits": false},
+        ...
+     ],
      "active_idx": 0}
+
+Legacy string-only entries (``"tabs": ["D:/...", "C:/..."]``) are still
+accepted on load and upgraded to the object form with default settings.
 
 Missing / malformed / empty file -> returns default state (no tabs, idx=-1).
 Non-existent cwds are silently dropped on load so a deleted project folder
@@ -13,6 +21,7 @@ can't block the GUI from starting.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Optional
 
@@ -23,12 +32,20 @@ STATE_DIR = state_dir()
 TABS_PATH = STATE_DIR / "tabs.json"
 
 
-def load(path: Optional[Path] = None) -> tuple[list[Path], int]:
-    """Read tabs state from disk. Returns (cwds, active_idx).
+@dataclass
+class TabEntry:
+    cwd: Path
+    accept_edits: bool = False
+    allow_self_edits: bool = False
+
+
+def load(path: Optional[Path] = None) -> tuple[list[TabEntry], int]:
+    """Read tabs state from disk. Returns (entries, active_idx).
 
     - Missing/malformed file -> ([], -1).
     - Entries whose cwd is not an existing directory are filtered out.
     - active_idx is clamped into range after filtering.
+    - Legacy string entries upgrade to TabEntry with default settings.
     """
     p = path or TABS_PATH
     if not p.is_file():
@@ -42,31 +59,50 @@ def load(path: Optional[Path] = None) -> tuple[list[Path], int]:
     raw_tabs = data.get("tabs", [])
     if not isinstance(raw_tabs, list):
         return [], -1
-    cwds: list[Path] = []
-    for entry in raw_tabs:
-        if not isinstance(entry, str) or not entry:
+    entries: list[TabEntry] = []
+    for raw in raw_tabs:
+        if isinstance(raw, str) and raw:
+            cand = Path(raw)
+            if cand.is_dir():
+                entries.append(TabEntry(cwd=cand))
             continue
-        cand = Path(entry)
-        if cand.is_dir():
-            cwds.append(cand)
-    if not cwds:
+        if isinstance(raw, dict):
+            cwd_str = raw.get("cwd")
+            if not isinstance(cwd_str, str) or not cwd_str:
+                continue
+            cand = Path(cwd_str)
+            if not cand.is_dir():
+                continue
+            entries.append(TabEntry(
+                cwd=cand,
+                accept_edits=bool(raw.get("accept_edits", False)),
+                allow_self_edits=bool(raw.get("allow_self_edits", False)),
+            ))
+    if not entries:
         return [], -1
     try:
         idx = int(data.get("active_idx", 0))
     except (TypeError, ValueError):
         idx = 0
-    if idx < 0 or idx >= len(cwds):
+    if idx < 0 or idx >= len(entries):
         idx = 0
-    return cwds, idx
+    return entries, idx
 
 
-def save(cwds: list[Path], active_idx: int, path: Optional[Path] = None) -> None:
+def save(entries: list[TabEntry], active_idx: int, path: Optional[Path] = None) -> None:
     """Atomic-enough write: temp file + rename. Silent on error."""
     p = path or TABS_PATH
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "tabs": [str(c) for c in cwds],
+            "tabs": [
+                {
+                    "cwd": str(e.cwd),
+                    "accept_edits": bool(e.accept_edits),
+                    "allow_self_edits": bool(e.allow_self_edits),
+                }
+                for e in entries
+            ],
             "active_idx": int(active_idx),
         }
         tmp = p.with_suffix(p.suffix + ".tmp")
