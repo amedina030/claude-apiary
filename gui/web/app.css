@@ -528,7 +528,16 @@ body {
   letter-spacing: 0.08em;
   font-size: 10px;
   color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  flex: 1 1 auto;
 }
+
+.usage-title:hover { color: var(--fg); }
+.usage-title:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+.usage-meters.collapsed .usage-body { display: none; }
+.usage-meters.collapsed .usage-header { margin-bottom: 0; }
 
 .usage-header-btns {
   display: inline-flex;

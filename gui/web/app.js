@@ -803,6 +803,7 @@
   const usageBodyEl = document.getElementById("usage-body");
   const usageVariantToggleEl = document.getElementById("usage-variant-toggle");
   const usageCreditsToggleEl = document.getElementById("usage-credits-toggle");
+  const usageTitleEl = document.getElementById("usage-title");
   let lastUsagePayload = null;
   let usageStale = false;
   // Credits visibility is purely a view preference — persist in localStorage
@@ -810,6 +811,10 @@
   let showCredits = (() => {
     try { return localStorage.getItem("apiary.usage.showCredits") !== "0"; }
     catch (_) { return true; }
+  })();
+  let usageCollapsed = (() => {
+    try { return localStorage.getItem("apiary.usage.collapsed") === "1"; }
+    catch (_) { return false; }
   })();
 
   function reflectCreditsToggle() {
@@ -820,6 +825,28 @@
     );
   }
   reflectCreditsToggle();
+
+  function reflectUsageCollapsed() {
+    if (usageMetersEl) usageMetersEl.classList.toggle("collapsed", usageCollapsed);
+    if (usageTitleEl) usageTitleEl.setAttribute("aria-expanded", usageCollapsed ? "false" : "true");
+  }
+  reflectUsageCollapsed();
+
+  if (usageTitleEl) {
+    const toggleCollapsed = () => {
+      usageCollapsed = !usageCollapsed;
+      try { localStorage.setItem("apiary.usage.collapsed", usageCollapsed ? "1" : "0"); }
+      catch (_) {}
+      reflectUsageCollapsed();
+    };
+    usageTitleEl.addEventListener("click", toggleCollapsed);
+    usageTitleEl.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        toggleCollapsed();
+      }
+    });
+  }
 
   if (usageVariantToggleEl) {
     usageVariantToggleEl.addEventListener("click", () => {
