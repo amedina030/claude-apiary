@@ -790,6 +790,216 @@
     sidebarListEl.appendChild(frag);
   }
 
+  // --- usage meters (T-2026-25) --------------------------------------------
+  // Backend (gui/usage_fetcher.UsagePoller) hits the undocumented
+  // /api/oauth/usage endpoint every 60s and pushes the payload here via
+  // window.apiary.onUsage. Payload shape:
+  //   { five_hour: {utilization, resets_at},
+  //     seven_day: {utilization, resets_at},
+  //     extra_usage: {used_credits, monthly_limit, utilization, currency}, ... }
+  // Null means the fetch failed (missing creds / 429 / timeout); we show
+  // stale numbers with a "stale" tint rather than flashing empty.
+  const usageMetersEl = document.getElementById("usage-meters");
+  const usageBodyEl = document.getElementById("usage-body");
+  const usageVariantToggleEl = document.getElementById("usage-variant-toggle");
+  const usageCreditsToggleEl = document.getElementById("usage-credits-toggle");
+  let lastUsagePayload = null;
+  let usageStale = false;
+  // Credits visibility is purely a view preference — persist in localStorage
+  // so it survives reload without needing a backend round-trip. Default ON.
+  let showCredits = (() => {
+    try { return localStorage.getItem("apiary.usage.showCredits") !== "0"; }
+    catch (_) { return true; }
+  })();
+
+  function reflectCreditsToggle() {
+    if (!usageCreditsToggleEl) return;
+    usageCreditsToggleEl.classList.toggle("active", showCredits);
+    usageCreditsToggleEl.setAttribute(
+      "aria-pressed", showCredits ? "true" : "false"
+    );
+  }
+  reflectCreditsToggle();
+
+  if (usageVariantToggleEl) {
+    usageVariantToggleEl.addEventListener("click", () => {
+      const cur = usageMetersEl.dataset.variant === "rings" ? "rings" : "bars";
+      usageMetersEl.dataset.variant = cur === "bars" ? "rings" : "bars";
+      renderUsage(lastUsagePayload);  // re-render with the same data
+    });
+  }
+  if (usageCreditsToggleEl) {
+    usageCreditsToggleEl.addEventListener("click", () => {
+      showCredits = !showCredits;
+      try { localStorage.setItem("apiary.usage.showCredits", showCredits ? "1" : "0"); }
+      catch (_) {}
+      reflectCreditsToggle();
+      renderUsage(lastUsagePayload);
+    });
+  }
+
+  function renderUsage(payload) {
+    if (payload !== null && payload !== undefined) {
+      lastUsagePayload = payload;
+      usageStale = false;
+    } else {
+      usageStale = true;
+    }
+    usageMetersEl.classList.toggle("stale", usageStale);
+    if (lastUsagePayload === null) {
+      usageBodyEl.textContent = "—";
+      return;
+    }
+    const variant = usageMetersEl.dataset.variant === "rings" ? "rings" : "bars";
+    const buckets = bucketsFromPayload(lastUsagePayload);
+    usageBodyEl.innerHTML = "";
+    if (variant === "rings") {
+      usageBodyEl.appendChild(renderUsageRings(buckets));
+    } else {
+      usageBodyEl.appendChild(renderUsageBars(buckets));
+    }
+  }
+
+  function bucketsFromPayload(p) {
+    const rows = [
+      { key: "5h", label: "5-hour", bucket: p.five_hour },
+      { key: "7d", label: "7-day",  bucket: p.seven_day },
+    ];
+    const extra = p.extra_usage;
+    if (extra && extra.is_enabled && showCredits) {
+      const used = (extra.used_credits || 0) / 100;
+      const limit = (extra.monthly_limit || 0) / 100;
+      const cur = extra.currency || "USD";
+      rows.push({
+        key: "credits",
+        label: "credits",
+        bucket: {
+          utilization: extra.utilization || 0,
+          resets_at: null,
+          sublabel: `${formatMoney(used, cur)} / ${formatMoney(limit, cur)}`,
+        },
+      });
+    }
+    return rows;
+  }
+
+  function formatMoney(amount, currency) {
+    const sign = currency === "USD" ? "$" : "";
+    return sign + amount.toFixed(2);
+  }
+
+  // "4h 52m", "2d 3h", "<1m", or "expired" for negative deltas.
+  function formatResetIn(isoTs) {
+    if (!isoTs) return "";
+    const target = Date.parse(isoTs);
+    if (!target) return "";
+    const delta = target - Date.now();
+    if (delta <= 0) return "reset due";
+    const m = Math.floor(delta / 60000);
+    if (m < 1) return "<1m";
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    const remM = m % 60;
+    if (h < 24) return remM ? `${h}h ${remM}m` : `${h}h`;
+    const d = Math.floor(h / 24);
+    const remH = h % 24;
+    return remH ? `${d}d ${remH}h` : `${d}d`;
+  }
+
+  function thresholdClass(pct) {
+    if (pct >= 80) return "hot";
+    if (pct >= 50) return "warm";
+    return "cool";
+  }
+
+  // Variant 1 — stacked horizontal bars.
+  function renderUsageBars(rows) {
+    const wrap = document.createElement("div");
+    wrap.className = "usage-bars";
+    for (const row of rows) {
+      const pct = Math.max(0, Math.min(100, Number(row.bucket.utilization) || 0));
+      const item = document.createElement("div");
+      item.className = "usage-bar-row";
+      const title = document.createElement("div");
+      title.className = "usage-bar-title";
+      const left = document.createElement("span");
+      left.textContent = row.label;
+      const right = document.createElement("span");
+      right.className = "usage-bar-pct";
+      right.textContent = `${pct.toFixed(0)}%`;
+      title.appendChild(left);
+      title.appendChild(right);
+      item.appendChild(title);
+      const track = document.createElement("div");
+      track.className = `usage-bar-track ${thresholdClass(pct)}`;
+      const fill = document.createElement("div");
+      fill.className = "usage-bar-fill";
+      fill.style.width = `${pct}%`;
+      track.appendChild(fill);
+      item.appendChild(track);
+      const foot = document.createElement("div");
+      foot.className = "usage-bar-foot";
+      const resetsIn = formatResetIn(row.bucket.resets_at);
+      foot.textContent = row.bucket.sublabel
+        || (resetsIn ? `resets in ${resetsIn}` : "");
+      if (row.bucket.resets_at) foot.title = row.bucket.resets_at;
+      item.appendChild(foot);
+      wrap.appendChild(item);
+    }
+    return wrap;
+  }
+
+  // Variant 2 — side-by-side SVG donut rings.
+  const RING_R = 18;
+  const RING_CIRC = 2 * Math.PI * RING_R;
+  function renderUsageRings(rows) {
+    const wrap = document.createElement("div");
+    wrap.className = "usage-rings";
+    for (const row of rows) {
+      const pct = Math.max(0, Math.min(100, Number(row.bucket.utilization) || 0));
+      const cell = document.createElement("div");
+      cell.className = `usage-ring-cell ${thresholdClass(pct)}`;
+      const resetsIn = formatResetIn(row.bucket.resets_at);
+      cell.title = row.bucket.resets_at || "";
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 44 44");
+      svg.setAttribute("class", "usage-ring-svg");
+      const track = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      track.setAttribute("class", "usage-ring-track");
+      track.setAttribute("cx", "22"); track.setAttribute("cy", "22"); track.setAttribute("r", String(RING_R));
+      svg.appendChild(track);
+      const fill = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      fill.setAttribute("class", "usage-ring-fill");
+      fill.setAttribute("cx", "22"); fill.setAttribute("cy", "22"); fill.setAttribute("r", String(RING_R));
+      fill.setAttribute("stroke-dasharray", String(RING_CIRC));
+      fill.setAttribute("stroke-dashoffset", String(RING_CIRC * (1 - pct / 100)));
+      fill.setAttribute("transform", "rotate(-90 22 22)");
+      svg.appendChild(fill);
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("class", "usage-ring-text");
+      text.setAttribute("x", "22"); text.setAttribute("y", "22");
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("dominant-baseline", "central");
+      text.textContent = `${pct.toFixed(0)}%`;
+      svg.appendChild(text);
+      cell.appendChild(svg);
+      const label = document.createElement("div");
+      label.className = "usage-ring-label";
+      label.textContent = row.label;
+      cell.appendChild(label);
+      const sub = document.createElement("div");
+      sub.className = "usage-ring-sub";
+      sub.textContent = row.bucket.sublabel || (resetsIn ? `in ${resetsIn}` : "");
+      cell.appendChild(sub);
+      wrap.appendChild(cell);
+    }
+    return wrap;
+  }
+
+  // Re-tick every 30s so the "resets in Nh Mm" countdown stays current even
+  // between backend pushes.
+  setInterval(() => { if (lastUsagePayload) renderUsage(lastUsagePayload); }, 30000);
+
   async function loadNoteBody(note, bodyEl) {
     if (!note.body_path || !bridgeReady()) {
       bodyEl.textContent = note.summary || "(no body)";
@@ -1476,6 +1686,9 @@
     },
     onHandoffBanner(count) {
       try { showHandoffBanner(count); } catch (e) { console.error("onHandoffBanner error", e); }
+    },
+    onUsage(payload) {
+      try { renderUsage(payload); } catch (e) { console.error("onUsage error", e); }
     },
   };
 

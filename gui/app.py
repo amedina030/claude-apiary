@@ -15,7 +15,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from gui import composer_state, pty_capture, sidebar_state, tabs_state
+from gui import composer_state, pty_capture, sidebar_state, tabs_state, usage_fetcher
 from gui.scribe_aggregator import NoteEntry, read_body
 from gui.session import Session
 from gui.single_instance import SingleInstance
@@ -154,6 +154,8 @@ class App:
         self._sessions: list[Session] = []
         self._active_idx: int = -1
         self._theme_watcher: Optional[ThemeWatcher] = None
+        self._usage_poller: Optional[usage_fetcher.UsagePoller] = None
+        self._last_usage: Optional[dict] = None
         self._js_lock = threading.Lock()
         self._services_started = False
         # Pty capture is opt-in via APIARY_GUI_CAPTURE_LABEL. One CaptureWriter
@@ -235,6 +237,17 @@ class App:
 
     def _push_handoff_banner(self, count: int) -> None:
         self._eval(f"window.apiary.onHandoffBanner({json.dumps(int(count))});")
+
+    def _push_usage(self, payload: Optional[dict]) -> None:
+        """Push the /api/oauth/usage response (or None on failure) to the
+        frontend. ``null`` tells the UI to show a "—" / stale indicator.
+
+        Caches the last successful payload so page reloads (Ctrl+R) can
+        re-render immediately instead of waiting for the next 60s tick.
+        """
+        if payload is not None:
+            self._last_usage = payload
+        self._eval(f"window.apiary.onUsage({json.dumps(payload)});")
 
     def _check_unfilled_handoffs(self) -> int:
         """Count handoff-less sessions via core/startup.py unseen. Returns 0 on
@@ -544,6 +557,19 @@ class App:
             daemon=True,
         ).start()
 
+        # Live quota meter poller (T-2026-25). 60s interval — the 5-hour
+        # bucket barely moves faster than that, and the endpoint is flaky
+        # enough (GH issue #31021 / L-2026-114) that we don't want to hammer
+        # it. One-shot fetch first so the sidebar populates before the first
+        # timer tick.
+        self._usage_poller = usage_fetcher.UsagePoller(
+            on_update=self._push_usage, interval=60.0
+        )
+        threading.Thread(
+            target=self._usage_poller.fetch_now, daemon=True
+        ).start()
+        self._usage_poller.start()
+
     def _resync_frontend_state(self) -> None:
         """Re-push current state to the webview after a page reload."""
         vars_, theme_err = load_theme()
@@ -572,6 +598,10 @@ class App:
             target=lambda: self._push_handoff_banner(self._check_unfilled_handoffs()),
             daemon=True,
         ).start()
+        # Re-push the cached usage payload immediately so meters don't flash
+        # empty while waiting for the next poll tick.
+        if self._last_usage is not None:
+            self._push_usage(self._last_usage)
 
     def shutdown(self) -> None:
         for sess in self._sessions:
@@ -583,6 +613,12 @@ class App:
         self._active_idx = -1
         if self._theme_watcher is not None:
             self._theme_watcher.stop()
+        if self._usage_poller is not None:
+            try:
+                self._usage_poller.stop()
+            except Exception:
+                pass
+            self._usage_poller = None
         if self._capture is not None:
             self._capture.close()
 

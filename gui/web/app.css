@@ -501,6 +501,180 @@ body {
   min-height: 0;
 }
 
+/* --- usage meters (T-2026-25) ------------------------------------------- */
+.usage-meters {
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  font-family: var(--font-family-ui);
+  font-size: 11px;
+  color: var(--muted);
+  transition: opacity 0.2s ease;
+}
+
+.usage-meters.stale {
+  opacity: 0.55;
+}
+
+.usage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.usage-title {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.usage-header-btns {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.usage-mini-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  padding: 0;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.usage-mini-btn:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+.usage-mini-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Bars variant */
+.usage-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.usage-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.usage-bar-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  color: var(--fg);
+  font-size: 11px;
+}
+
+.usage-bar-pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.usage-bar-track {
+  height: 6px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.usage-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.usage-bar-track.cool  .usage-bar-fill { background: var(--accent); }
+.usage-bar-track.warm  .usage-bar-fill { background: #d29922; }
+.usage-bar-track.hot   .usage-bar-fill { background: #f85149; }
+
+.usage-bar-foot {
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Rings variant */
+.usage-rings {
+  display: flex;
+  justify-content: space-around;
+  gap: 4px;
+}
+
+.usage-ring-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.usage-ring-svg {
+  width: 48px;
+  height: 48px;
+}
+
+.usage-ring-track {
+  fill: none;
+  stroke: color-mix(in srgb, var(--border) 70%, transparent);
+  stroke-width: 4;
+}
+
+.usage-ring-fill {
+  fill: none;
+  stroke-width: 4;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.4s ease;
+}
+
+.usage-ring-cell.cool .usage-ring-fill { stroke: var(--accent); }
+.usage-ring-cell.warm .usage-ring-fill { stroke: #d29922; }
+.usage-ring-cell.hot  .usage-ring-fill { stroke: #f85149; }
+
+.usage-ring-text {
+  fill: var(--fg);
+  font-family: var(--font-family-ui);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.usage-ring-label {
+  margin-top: 3px;
+  color: var(--fg);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.usage-ring-sub {
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 .sidebar-search {
   padding: 8px;
   border-bottom: 1px solid var(--border);
