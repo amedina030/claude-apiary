@@ -61,10 +61,6 @@
           </section>
 
           <div id="prompt-banner" class="prompt-banner hidden" role="region" aria-label="claude code prompt"></div>
-
-          <footer id="composer">
-            <textarea id="input" rows="3" placeholder="message Claude Code (Enter to send · Shift+Enter for newline · Ctrl+C to interrupt · Esc to cancel)"></textarea>
-          </footer>
         </div>
         <aside id="sidebar" class="sidebar">
           <div id="usage-meters" class="usage-meters" data-variant="bars" aria-label="quota usage">
@@ -77,10 +73,6 @@
             </div>
             <div id="usage-body" class="usage-body"></div>
           </div>
-          <div class="sidebar-search">
-            <input type="search" id="sidebar-search" placeholder="search notes…" />
-          </div>
-          <div id="sidebar-list" class="sidebar-list"></div>
           <div id="agents-panel" class="agents-panel" aria-label="active sub-agents">
             <div class="agents-header">
               <span id="agents-title" class="agents-title" role="button" tabindex="0" aria-expanded="true" aria-controls="agents-body">agents</span>
@@ -95,7 +87,14 @@
               </div>
             </div>
           </div>
+          <div class="sidebar-search">
+            <input type="search" id="sidebar-search" placeholder="search notes…" />
+          </div>
+          <div id="sidebar-list" class="sidebar-list"></div>
         </aside>
+        <footer id="composer">
+          <textarea id="input" rows="3" placeholder="message Claude Code (Enter to send · Shift+Enter for newline · Ctrl+C to interrupt · Esc to cancel)"></textarea>
+        </footer>
       </main>
 
       <div id="toasts" class="toasts"></div>

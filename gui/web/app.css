@@ -284,6 +284,7 @@ body {
 #main {
   display: grid;
   grid-template-columns: 1fr 320px;
+  grid-template-rows: 1fr auto;
   min-height: 0;
 }
 
@@ -292,6 +293,18 @@ body {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  grid-column: 1;
+  grid-row: 1;
+}
+
+#sidebar {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+#composer {
+  grid-column: 1 / -1;
+  grid-row: 2;
 }
 
 #chat {
@@ -305,8 +318,7 @@ body {
 /* Keep the row-height elements below chat from being squished by flex in
    narrow windows — otherwise the pty-toggle label gets its text clipped. */
 #left-col > #pty-strip-wrap,
-#left-col > #prompt-banner,
-#left-col > #composer {
+#left-col > #prompt-banner {
   flex: 0 0 auto;
 }
 
@@ -915,7 +927,7 @@ body.sidebar-hidden #totals {
 /* --- agents panel (T-2026-181) ------------------------------------------- */
 .agents-panel {
   flex: 0 0 auto;
-  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   background: var(--sidebar-bg);
   display: flex;
   flex-direction: column;
