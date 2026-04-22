@@ -54,8 +54,10 @@
       // so CSS can show a subtle dot/highlight when a tab is permissive.
       const flags = [];
       if (s.accept_edits) flags.push("auto-accept edits");
+      if (s.pending_permission) flags.push("permission prompt waiting");
       tab.title = flags.length ? `${s.cwd}\n[${flags.join(", ")}]` : s.cwd;
       if (s.accept_edits) tab.dataset.acceptEdits = "1";
+      if (s.pending_permission) tab.dataset.pendingPermission = "1";
 
       const label = document.createElement("span");
       label.className = "tab-label";
@@ -1340,6 +1342,136 @@
     flashWindowIfBackground();
   }
 
+  // Per-tool banner body renderers. Each takes the tool's `input` object
+  // and an `edited` object to mutate, and returns a DocumentFragment. The
+  // user can tweak the editable fields before clicking Allow; on allow,
+  // `edited` is sent as the MCP `updatedInput`. A tool with no bespoke
+  // renderer falls through to renderGenericInput (read-only JSON).
+  const WRITE_CONTENT_PREVIEW_LINES = 20;
+
+  function makeFilepathInput(edited, initial) {
+    const el = document.createElement("input");
+    el.type = "text";
+    el.className = "prompt-filepath-input";
+    el.value = initial || "";
+    el.spellcheck = false;
+    el.addEventListener("input", () => { edited.file_path = el.value; });
+    return el;
+  }
+
+  function makeEditableTextarea(edited, key, initial, extraClass = "") {
+    const ta = document.createElement("textarea");
+    ta.className = "prompt-code prompt-editable" + (extraClass ? " " + extraClass : "");
+    ta.value = initial || "";
+    ta.spellcheck = false;
+    ta.rows = Math.min(20, Math.max(1, (initial || "").split("\n").length));
+    ta.addEventListener("input", () => { edited[key] = ta.value; });
+    return ta;
+  }
+
+  function renderBashInput(input, edited) {
+    const frag = document.createDocumentFragment();
+    if (input.description) {
+      const d = document.createElement("div");
+      d.className = "prompt-subhead";
+      d.textContent = input.description;
+      frag.appendChild(d);
+    }
+    frag.appendChild(makeEditableTextarea(
+      edited, "command",
+      typeof input.command === "string" ? input.command : "",
+      "prompt-bash-cmd",
+    ));
+    if (input.timeout) {
+      const t = document.createElement("div");
+      t.className = "prompt-meta";
+      t.textContent = `timeout: ${input.timeout}ms`;
+      frag.appendChild(t);
+    }
+    return frag;
+  }
+
+  function renderEditInput(input, edited) {
+    const frag = document.createDocumentFragment();
+    frag.appendChild(makeFilepathInput(edited, input.file_path));
+    if (input.replace_all) {
+      const badge = document.createElement("span");
+      badge.className = "prompt-badge";
+      badge.textContent = "replace_all";
+      frag.appendChild(badge);
+    }
+    const grid = document.createElement("div");
+    grid.className = "prompt-diff-grid";
+    const oldCol = document.createElement("div");
+    oldCol.className = "prompt-diff-col prompt-diff-old";
+    const oldLbl = document.createElement("div");
+    oldLbl.className = "prompt-diff-label";
+    oldLbl.textContent = "− old";
+    oldCol.appendChild(oldLbl);
+    oldCol.appendChild(makeEditableTextarea(edited, "old_string", input.old_string || ""));
+    const newCol = document.createElement("div");
+    newCol.className = "prompt-diff-col prompt-diff-new";
+    const newLbl = document.createElement("div");
+    newLbl.className = "prompt-diff-label";
+    newLbl.textContent = "+ new";
+    newCol.appendChild(newLbl);
+    newCol.appendChild(makeEditableTextarea(edited, "new_string", input.new_string || ""));
+    grid.appendChild(oldCol);
+    grid.appendChild(newCol);
+    frag.appendChild(grid);
+    return frag;
+  }
+
+  function renderWriteInput(input, edited) {
+    const frag = document.createDocumentFragment();
+    frag.appendChild(makeFilepathInput(edited, input.file_path));
+    const content = typeof input.content === "string" ? input.content : "";
+    const lines = content.split("\n");
+    const truncated = lines.length > WRITE_CONTENT_PREVIEW_LINES;
+    const ta = makeEditableTextarea(
+      edited, "content",
+      truncated ? lines.slice(0, WRITE_CONTENT_PREVIEW_LINES).join("\n") : content,
+    );
+    frag.appendChild(ta);
+    if (truncated) {
+      const hidden = lines.length - WRITE_CONTENT_PREVIEW_LINES;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "prompt-showmore";
+      btn.textContent = `show ${hidden} more line${hidden === 1 ? "" : "s"}`;
+      btn.addEventListener("click", () => {
+        ta.value = content;
+        edited.content = content;
+        ta.rows = Math.min(30, lines.length);
+        btn.remove();
+      });
+      frag.appendChild(btn);
+    }
+    return frag;
+  }
+
+  function renderGenericInput(input) {
+    // Unknown tool shape — render read-only to avoid shipping malformed
+    // JSON back as updatedInput. Known-shape tools above are editable.
+    const frag = document.createDocumentFragment();
+    const pre = document.createElement("pre");
+    pre.className = "prompt-code";
+    try { pre.textContent = JSON.stringify(input, null, 2); } catch (_) { pre.textContent = ""; }
+    frag.appendChild(pre);
+    return frag;
+  }
+
+  function renderToolInput(toolName, input, edited) {
+    switch (toolName) {
+      case "Bash": return renderBashInput(input, edited);
+      case "Edit": return renderEditInput(input, edited);
+      case "Write": return renderWriteInput(input, edited);
+      default: return renderGenericInput(input);
+    }
+  }
+
+  const TOOL_EDITABLE = new Set(["Bash", "Edit", "Write"]);
+
   function renderMcpPromptBanner(pendingId, payload) {
     // Structured permission request from the MCP bridge. Does NOT go
     // through prompt_detector — no TUI scraping involved.
@@ -1361,15 +1493,15 @@
     q.textContent = `Claude wants to use ${toolName}`;
     promptBannerEl.appendChild(q);
 
-    // Dump the tool input as pretty JSON for the prototype. Polish the
-    // per-tool rendering (Edit diffs, Bash command highlighting) later.
     const input = (payload && payload.input) || {};
-    try {
-      const pre = document.createElement("pre");
-      pre.className = "prompt-context";
-      pre.textContent = JSON.stringify(input, null, 2);
-      promptBannerEl.appendChild(pre);
-    } catch (_) { /* noop */ }
+    // `edited` mirrors `input`. Per-field renderers mutate it as the user
+    // types; on allow, it becomes the MCP `updatedInput` (so claude sees
+    // the tweaked command / file path / etc. instead of the original).
+    mcpPrompt.edited = { ...input };
+    const body = document.createElement("div");
+    body.className = "prompt-toolbody";
+    body.appendChild(renderToolInput(toolName, input, mcpPrompt.edited));
+    promptBannerEl.appendChild(body);
 
     const row = document.createElement("div");
     row.className = "prompt-options";
@@ -1400,9 +1532,18 @@
     inputEl.classList.remove("input-blocked");
     inputEl.placeholder = INPUT_PLACEHOLDER_DEFAULT;
     if (!bridgeReady()) return;
+    // On allow with an editable tool, forward the user's edits as
+    // updatedInput so claude sees the tweaked args. Deny ignores edits.
+    let updatedInput = null;
+    if (behavior === "allow") {
+      const toolName = (current.payload && current.payload.tool_name) || "";
+      if (TOOL_EDITABLE.has(toolName) && current.edited) {
+        updatedInput = current.edited;
+      }
+    }
     try {
       window.pywebview.api.resolve_permission(
-        current.pendingId, behavior, message, null,
+        current.pendingId, behavior, message, updatedInput,
       );
     } catch (e) {
       console.error("resolve_permission failed", e);
@@ -1966,9 +2107,17 @@
       // APIARY_PERMISSION_MCP=1 the TUI-scraping path does not fire for
       // permission prompts (claude routes through MCP); the scraper stays
       // compiled in as a fallback for the env-off case.
+      //
+      // Per-tab routing: payload.session_id tags the owning tab. Only
+      // render the banner if that tab is the active one — otherwise the
+      // Python side is already holding the prompt on the Session and
+      // will re-push it when the user switches tabs, and the tab chip
+      // gets a pending badge via renderTabs.
       try {
         const payload = typeof payloadJson === "string"
           ? JSON.parse(payloadJson) : payloadJson;
+        const promptSid = (payload && payload.session_id) || "";
+        if (promptSid && !pushIsForActive(promptSid)) return;
         // Drop any stale scraped prompt so the two paths don't stack.
         if (activePrompt) hidePromptBanner();
         mcpPrompt = { pendingId: String(pendingId || ""), payload: payload || {} };

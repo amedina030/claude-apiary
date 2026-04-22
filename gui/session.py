@@ -18,7 +18,7 @@ import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
-from gui.permission_mcp import permission_tool_arg, write_mcp_config
+from gui.permission_mcp import SESSION_ID_ENV, permission_tool_arg, write_mcp_config
 from gui.pty_capture import CaptureWriter
 from gui.pty_wrapper import PtySpawnError, PtyWrapper
 from gui.scribe_aggregator import ScribeAggregatorService, aggregate
@@ -228,7 +228,8 @@ class Session:
         # of scraping the TUI banner. Enable with APIARY_PERMISSION_MCP=1; the
         # GUI starts a loopback HTTP bridge so claude's spawned MCP subprocess
         # can round-trip decisions back to the webview. See scribe C-2026-36.
-        if os.environ.get("APIARY_PERMISSION_MCP") == "1":
+        mcp_on = os.environ.get("APIARY_PERMISSION_MCP") == "1"
+        if mcp_on:
             cfg_path = write_mcp_config()
             extra += [
                 "--mcp-config", str(cfg_path),
@@ -238,6 +239,11 @@ class Session:
         spawn_env = os.environ.copy()
         for key in _CLAUDE_SUBPROC_ENV:
             spawn_env.pop(key, None)
+        # Tag the MCP subprocess (spawned by claude, inherits this env) with
+        # the owning session_id so the GUI can route incoming permission
+        # prompts to the correct tab. See scribe C-2026-36 follow-up #4.
+        if mcp_on:
+            spawn_env[SESSION_ID_ENV] = self.session_id
 
         # Pre-spawn snapshot scoped to THIS cwd's projects dir — matches the
         # scope of our SessionDiscovery so exclude_paths semantics line up.

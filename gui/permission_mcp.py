@@ -35,6 +35,10 @@ PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "apiary"
 SERVER_VERSION = "0.1.0"
 TOOL_NAME = "permission_prompt"
+# CLI flag the frozen GUI exe recognizes to dispatch into `serve()` instead
+# of booting the webview. Used only in PyInstaller builds — dev-mode runs
+# `python permission_mcp.py` directly and this flag is irrelevant.
+MCP_SERVER_FLAG = "--mcp-server"
 
 LOG_PATH = Path.home() / ".claude" / "apiary_gui" / "permission_mcp.log"
 CONFIG_PATH = Path.home() / ".claude" / "apiary_gui" / "permission_mcp_config.json"
@@ -45,6 +49,11 @@ CONFIG_PATH = Path.home() / ".claude" / "apiary_gui" / "permission_mcp_config.js
 # auto-allowing every request — useful for headless testing of the MCP
 # plumbing without a GUI attached.
 BRIDGE_URL_ENV = "APIARY_PERMISSION_MCP_URL"
+# Per-tab env var: session.py sets this to the owning Session.session_id so
+# the GUI can route an incoming prompt to the correct tab's banner instead
+# of always landing it on the active tab. Empty/unset falls through to
+# "no tab attribution" and the GUI treats the prompt as active-tab local.
+SESSION_ID_ENV = "APIARY_SESSION_ID"
 BRIDGE_HTTP_TIMEOUT_SECONDS = 300.0
 
 
@@ -72,18 +81,31 @@ def write_mcp_config(
     *,
     python: str | None = None,
     script: Path | None = None,
+    frozen: bool | None = None,
 ) -> Path:
     """Write a claude-code mcp-config file pointing at this server. Returns
-    the destination path. `python` / `script` are test hooks; production
-    callers pass neither."""
+    the destination path. `python` / `script` / `frozen` are test hooks;
+    production callers pass none.
+
+    In a PyInstaller bundle `sys.executable` is the frozen GUI exe, which
+    can't run an arbitrary .py. The config instead invokes the exe with
+    ``MCP_SERVER_FLAG`` so ``gui.app.main`` dispatches into ``serve()``
+    rather than booting the webview.
+    """
     dest_path = Path(dest) if dest is not None else CONFIG_PATH
     dest_path.parent.mkdir(parents=True, exist_ok=True)
-    script_path = script if script is not None else Path(__file__)
+    is_frozen = getattr(sys, "frozen", False) if frozen is None else frozen
+    command = python or sys.executable
+    if is_frozen:
+        args = [MCP_SERVER_FLAG]
+    else:
+        script_path = script if script is not None else Path(__file__)
+        args = [str(Path(script_path).resolve())]
     config = {
         "mcpServers": {
             SERVER_NAME: {
-                "command": python or sys.executable,
-                "args": [str(Path(script_path).resolve())],
+                "command": command,
+                "args": args,
             }
         }
     }
@@ -174,12 +196,20 @@ def decide(payload: dict[str, Any]) -> dict[str, Any]:
     the payload there and return the GUI's decision. Otherwise auto-allow
     — keeps standalone/unit-test use working, and gives a safe default if
     the bridge fails to boot.
+
+    The payload sent to the bridge is enriched with ``session_id`` (from
+    ``APIARY_SESSION_ID``) so the GUI can route the prompt to the owning
+    tab's banner instead of always landing on the active tab.
     """
     url = os.environ.get(BRIDGE_URL_ENV)
     if not url:
         return _auto_allow(payload)
+    enriched = dict(payload)
+    session_id = os.environ.get(SESSION_ID_ENV, "")
+    if session_id:
+        enriched["session_id"] = session_id
     try:
-        return _ask_bridge(url, payload)
+        return _ask_bridge(url, enriched)
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
         _log(f"BRIDGE_ERR {e!r}; falling back to deny")
         return {"behavior": "deny", "message": f"permission bridge unreachable: {e}"}

@@ -123,6 +123,20 @@ body {
   z-index: 1;
 }
 
+/* Non-active tab with a permission prompt waiting. Subtle amber ring so
+   the user knows to switch tabs. Follow-up #4 on scribe C-2026-36. */
+.tab[data-pending-permission]:not(.active) {
+  border-color: #d29922;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #d29922 60%, transparent);
+  color: var(--fg);
+}
+
+.tab[data-pending-permission]:not(.active) .tab-label::before {
+  content: "● ";
+  color: #d29922;
+  font-size: 10px;
+}
+
 .tab-label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1236,6 +1250,149 @@ body.sidebar-hidden #totals {
 }
 .prompt-banner .prompt-dismiss:hover { color: var(--fg); }
 .prompt-banner { position: relative; }
+
+/* Per-tool banner body (MCP permission-prompt path). See renderToolInput
+   in app.js — Bash / Edit / Write have bespoke renderers; other tools
+   fall back to a JSON code block. */
+.prompt-banner .prompt-toolbody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prompt-banner .prompt-subhead {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--font-family-ui);
+}
+
+.prompt-banner .prompt-filepath {
+  color: var(--accent);
+  font-family: var(--font-family);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.prompt-banner .prompt-filepath-input {
+  background: var(--bg);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-family);
+  font-size: 12px;
+  padding: 5px 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.prompt-banner .prompt-filepath-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.prompt-banner .prompt-editable {
+  resize: vertical;
+  min-height: 2em;
+  max-height: 28vh;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.prompt-banner .prompt-editable:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.prompt-banner .prompt-meta {
+  color: var(--muted);
+  font-size: 11px;
+  font-family: var(--font-family-ui);
+}
+
+.prompt-banner .prompt-badge {
+  align-self: flex-start;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-family-ui);
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+.prompt-banner .prompt-code {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font-family: var(--font-family);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 28vh;
+  overflow-y: auto;
+}
+
+.prompt-banner .prompt-bash-cmd {
+  color: var(--fg);
+}
+
+.prompt-banner .prompt-diff-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  align-items: start;
+}
+
+.prompt-banner .prompt-diff-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.prompt-banner .prompt-diff-label {
+  font-family: var(--font-family-ui);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.prompt-banner .prompt-diff-old .prompt-code {
+  border-color: color-mix(in srgb, #f85149 45%, var(--border));
+  background: color-mix(in srgb, #f85149 8%, var(--bg));
+}
+
+.prompt-banner .prompt-diff-new .prompt-code {
+  border-color: color-mix(in srgb, #3fb950 45%, var(--border));
+  background: color-mix(in srgb, #3fb950 8%, var(--bg));
+}
+
+.prompt-banner .prompt-diff-old .prompt-diff-label {
+  color: #f85149;
+}
+
+.prompt-banner .prompt-diff-new .prompt-diff-label {
+  color: #3fb950;
+}
+
+.prompt-banner .prompt-showmore {
+  align-self: flex-start;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--font-family-ui);
+  font-size: 11px;
+  padding: 3px 10px;
+}
+
+.prompt-banner .prompt-showmore:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
 
 .handoff-banner {
   display: flex;

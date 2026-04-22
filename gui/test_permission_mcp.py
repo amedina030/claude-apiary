@@ -119,6 +119,31 @@ class PermissionMcpTests(unittest.TestCase):
         self.assertEqual(decision["behavior"], "deny")
         self.assertEqual(decision["message"], "policy")
 
+    def test_decide_enriches_payload_with_session_id(self):
+        # When APIARY_SESSION_ID is set, decide() should forward it in the
+        # POST body so the GUI can route the prompt to the owning tab.
+        from gui.permission_bridge import PermissionBridge
+        captured: list[dict] = []
+        def on_request(pid, payload):
+            captured.append(payload)
+            bridge.resolve(pid, {"behavior": "allow", "updatedInput": {}})
+        bridge = PermissionBridge(on_request, timeout_seconds=5.0)
+        url = bridge.start()
+        try:
+            os.environ[self.mod.BRIDGE_URL_ENV] = url
+            os.environ[self.mod.SESSION_ID_ENV] = "sess-abc123"
+            self.mod.decide({
+                "tool_use_id": "t1",
+                "tool_name": "Bash",
+                "input": {"command": "ls"},
+            })
+        finally:
+            os.environ.pop(self.mod.BRIDGE_URL_ENV, None)
+            os.environ.pop(self.mod.SESSION_ID_ENV, None)
+            bridge.stop()
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0].get("session_id"), "sess-abc123")
+
     def test_decide_denies_when_bridge_unreachable(self):
         # Point the env var at a closed port → decide() returns a deny.
         os.environ[self.mod.BRIDGE_URL_ENV] = "http://127.0.0.1:1/permission"
@@ -168,6 +193,22 @@ class PermissionMcpTests(unittest.TestCase):
         self.assertEqual(entry["command"], "/fake/python")
         self.assertEqual(len(entry["args"]), 1)
         self.assertTrue(entry["args"][0].endswith("script.py"))
+
+    def test_write_mcp_config_frozen_uses_mcp_server_flag(self):
+        # In a PyInstaller bundle sys.executable is the frozen GUI exe, which
+        # can't run an arbitrary .py. Config must invoke the exe with
+        # MCP_SERVER_FLAG so the bundled main() routes into serve().
+        dest = Path(self._tmp.name) / "mcp.json"
+        self.mod.write_mcp_config(
+            dest=dest,
+            python="C:/dist/apiary-gui/apiary-gui.exe",
+            frozen=True,
+        )
+        entry = json.loads(dest.read_text(encoding="utf-8"))["mcpServers"][
+            self.mod.SERVER_NAME
+        ]
+        self.assertEqual(entry["command"], "C:/dist/apiary-gui/apiary-gui.exe")
+        self.assertEqual(entry["args"], [self.mod.MCP_SERVER_FLAG])
 
     def test_permission_tool_arg_format(self):
         arg = self.mod.permission_tool_arg()

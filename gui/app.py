@@ -203,6 +203,14 @@ class App:
         # in start_services so the port env var is set before the first pty
         # spawn. None when APIARY_PERMISSION_MCP is off.
         self._permission_bridge: Optional[PermissionBridge] = None
+        # Per-session pending permission prompt — (pending_id, payload) keyed
+        # by session_id. Used to route a non-active tab's prompt to the tab
+        # when the user switches to it, and to flag the tab chip as pending
+        # via _sessions_descriptor. Follow-up #4 on scribe C-2026-36.
+        self._pending_permission_by_session: dict[str, tuple[str, dict]] = {}
+        # pending_id → session_id reverse lookup so resolve_permission can
+        # clear the per-session entry without scanning.
+        self._session_by_pending_id: dict[str, str] = {}
 
     @property
     def active(self) -> Optional[Session]:
@@ -283,7 +291,21 @@ class App:
     def _push_permission_prompt(self, pending_id: str, payload: dict) -> None:
         """Surface a permission request from the MCP bridge to the frontend.
         Called from the bridge's HTTP handler thread; returns immediately —
-        the decision arrives later via GuiBridge.resolve_permission."""
+        the decision arrives later via GuiBridge.resolve_permission.
+
+        The prompt is stored keyed by ``session_id`` (from the payload) so
+        the GUI can badge a non-active tab and surface the banner when the
+        user switches to that tab. If session_id is missing (older MCP
+        subprocess, test harness, etc.) the prompt is still pushed to the
+        webview but without per-tab routing.
+        """
+        session_id = payload.get("session_id") or ""
+        if session_id:
+            self._pending_permission_by_session[session_id] = (pending_id, payload)
+            self._session_by_pending_id[pending_id] = session_id
+            # Refresh the tabs descriptor so the non-active tab gets its
+            # pending-permission badge. (No-op on the banner itself.)
+            self._push_sessions()
         self._eval(
             "window.apiary.onPermissionPrompt("
             f"{json.dumps(pending_id)}, {json.dumps(payload)}"
@@ -326,7 +348,17 @@ class App:
             decision["updatedInput"] = updated_input or {}
         elif message:
             decision["message"] = message
-        return self._permission_bridge.resolve(pending_id, decision)
+        ok = self._permission_bridge.resolve(pending_id, decision)
+        # Clear per-tab pending regardless of resolve outcome — a stale
+        # pending that can't be delivered (bridge closed, timed out) should
+        # not keep the tab chip badged forever.
+        session_id = self._session_by_pending_id.pop(pending_id, "")
+        if session_id and session_id in self._pending_permission_by_session:
+            stored_pending_id, _ = self._pending_permission_by_session[session_id]
+            if stored_pending_id == pending_id:
+                self._pending_permission_by_session.pop(session_id, None)
+                self._push_sessions()
+        return ok
 
     def _push_usage(self, payload: Optional[dict]) -> None:
         """Push the /api/oauth/usage response (or None on failure) to the
@@ -425,11 +457,31 @@ class App:
                 "label": s.cwd.name or str(s.cwd),
                 "active": (i == self._active_idx),
                 "accept_edits": bool(s.accept_edits),
+                "pending_permission": s.session_id in self._pending_permission_by_session,
             }
             for i, s in enumerate(self._sessions)
         ]
 
+    def _sweep_stale_pending_permissions(self) -> None:
+        """Drop per-tab pending entries whose pending_id is no longer tracked
+        by the bridge — either because it resolved internally (5-min timeout
+        deny) or the MCP subprocess crashed before the bridge registered it.
+
+        Called reactively from ``_push_sessions`` so badges clear the next
+        time any tab state is refreshed. Cheap: the bridge's pending set is
+        bounded by the number of concurrent permission requests in flight.
+        """
+        if self._permission_bridge is None:
+            return
+        live = set(self._permission_bridge.pending_ids())
+        for sid in list(self._pending_permission_by_session.keys()):
+            pending_id, _ = self._pending_permission_by_session[sid]
+            if pending_id not in live:
+                self._pending_permission_by_session.pop(sid, None)
+                self._session_by_pending_id.pop(pending_id, None)
+
     def _push_sessions(self) -> None:
+        self._sweep_stale_pending_permissions()
         payload = json.dumps(self._sessions_descriptor())
         self._eval(f"window.apiary.onSessions({payload});")
 
@@ -518,6 +570,17 @@ class App:
                 # Push this tab's scribe notes immediately so sidebar doesn't
                 # flash empty while waiting on the next aggregator tick.
                 s.flush_notes()
+                # If this tab has a pending permission prompt, surface it now
+                # that the tab is active (onSessionsSwitch on the JS side
+                # drops any banner from the previous tab).
+                pending = self._pending_permission_by_session.get(s.session_id)
+                if pending is not None:
+                    pending_id, payload = pending
+                    self._eval(
+                        "window.apiary.onPermissionPrompt("
+                        f"{json.dumps(pending_id)}, {json.dumps(payload)}"
+                        ");"
+                    )
                 self._persist_tabs()
                 return True
         return False
@@ -526,6 +589,20 @@ class App:
         """Stop and remove a session. If it was active, promote the next tab."""
         for i, s in enumerate(self._sessions):
             if s.session_id == session_id:
+                # Deny any pending permission prompt for this tab before
+                # tearing down — unblocks the MCP subprocess so it can exit
+                # cleanly instead of waiting on the 5-min bridge timeout.
+                pending = self._pending_permission_by_session.pop(session_id, None)
+                if pending is not None and self._permission_bridge is not None:
+                    pending_id, _ = pending
+                    self._session_by_pending_id.pop(pending_id, None)
+                    try:
+                        self._permission_bridge.resolve(
+                            pending_id,
+                            {"behavior": "deny", "message": "tab closed"},
+                        )
+                    except Exception:
+                        pass
                 try:
                     s.stop()
                 except Exception:
@@ -726,6 +803,15 @@ class App:
 
 
 def main() -> int:
+    # Frozen-bundle MCP dispatch: claude-code spawns the MCP server via the
+    # config written by `write_mcp_config()`, which in a PyInstaller build
+    # points at this same exe with `--mcp-server`. Route straight into the
+    # stdio server and skip the webview + SingleInstance mutex so multiple
+    # MCP subprocesses can coexist with the main GUI.
+    if len(sys.argv) >= 2 and sys.argv[1] == permission_mcp.MCP_SERVER_FLAG:
+        permission_mcp.serve()
+        return 0
+
     # WebView2 aggressively caches app.js / app.css / vendored assets across
     # launches, which makes iterating on the frontend painful — edits don't
     # appear until a manual Ctrl+F5. Disable disk cache for our WebView2
