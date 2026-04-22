@@ -35,6 +35,6 @@ def mutex_name() -> str:
 
 
 def window_title() -> str:
-    """Per-profile window title (``apiary`` or ``apiary [<profile>]``)."""
+    """Per-profile window title (empty default, or ``[<profile>]`` when profiled)."""
     p = profile()
-    return f"apiary [{p}]" if p else "apiary"
+    return f"[{p}]" if p else ""
