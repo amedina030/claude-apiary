@@ -27,6 +27,7 @@ from gui.transcript import (
     Message,
     SessionDiscovery,
     TranscriptTail,
+    iter_jsonl_records,
     parse_jsonl_lines,
     snapshot_existing_jsonls,
 )
@@ -292,7 +293,21 @@ class Session:
         history = parse_jsonl_lines(text)
         self._on_status("")
         self._on_messages(history)
-        tail = TranscriptTail(path, on_message=self._on_message, poll_interval=0.1)
+        # Replay raw history into the subagent tracker so it learns about
+        # Agent spawns and tool_results that happened before the GUI attached.
+        # The fast-forward below means new records otherwise miss everything
+        # prior to now.
+        tracker = self.subagent_tracker
+        if tracker is not None:
+            for rec in iter_jsonl_records(text):
+                tracker.note_parent_record(rec)
+        on_record = tracker.note_parent_record if tracker is not None else None
+        tail = TranscriptTail(
+            path,
+            on_message=self._on_message,
+            poll_interval=0.1,
+            on_record=on_record,
+        )
         try:
             tail._pos = path.stat().st_size  # private but intentional fast-forward
         except OSError:

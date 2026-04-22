@@ -173,6 +173,25 @@ def parse_jsonl_lines(text: str) -> list[Message]:
     return out
 
 
+def iter_jsonl_records(text: str):
+    """Yield every well-formed raw record dict from ``text``.
+
+    Unlike ``parse_jsonl_lines``, this does NOT filter to renderable
+    Messages — callers that need to observe ``tool_use`` / ``tool_result``
+    blocks use this to replay history into e.g. the subagent tracker.
+    """
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(rec, dict):
+            yield rec
+
+
 class TranscriptTail:
     """Replay-then-tail a single JSONL transcript file.
 
@@ -188,10 +207,12 @@ class TranscriptTail:
         on_message: Callable[[Message], None],
         on_skip: Optional[Callable[[int], None]] = None,
         poll_interval: float = 0.5,
+        on_record: Optional[Callable[[dict], None]] = None,
     ) -> None:
         self.path = path
         self.on_message = on_message
         self.on_skip = on_skip or (lambda _n: None)
+        self.on_record = on_record
         self.poll_interval = poll_interval
         self._pos = 0
         self._buf = ""
@@ -247,6 +268,12 @@ class TranscriptTail:
                 self._skipped += 1
                 self.on_skip(self._skipped)
                 continue
+            if self.on_record is not None and isinstance(rec, dict):
+                try:
+                    self.on_record(rec)
+                except Exception:
+                    # Raw-record subscribers must not crash the tail thread.
+                    pass
             msg = filter_record(rec)
             if msg is not None:
                 self.on_message(msg)

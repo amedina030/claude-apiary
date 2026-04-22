@@ -35,6 +35,14 @@ from typing import Callable, Optional
 # passed with no further JSONL growth.
 IDLE_DONE_TIMEOUT_S = 10.0
 
+# Safety net for the case where neither the primary signal (parent's
+# Agent tool_result — see note_parent_record) nor the ends-in-text fast
+# path fires. Covers e.g. a manually-deleted parent JSONL or a runaway
+# process whose parent never wrote the tool_result. Generous so it
+# doesn't false-positive long legitimate tool calls with no intermediate
+# writes. A subagent that resumes writing flips back to running.
+STALE_DONE_TIMEOUT_S = 120.0
+
 
 @dataclass
 class TokenTotals:
@@ -99,9 +107,24 @@ class SubagentTracker:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._last_parent: Optional[Path] = None
-        # {agent_id: {"pos": int, "buf": str, "state": AgentState}}
+        # {agent_id: {"pos": int, "buf": str, "state": AgentState, "ends_in_text": bool,
+        #             "resolved_by_parent": bool}}
         self._agents: dict[str, dict] = {}
         self._last_snapshot_key: Optional[str] = None
+        # Serialises access to _agents and _parent_agent_calls. The scan loop
+        # owns _agents; note_parent_record is called from the TranscriptTail
+        # thread and mutates the same dict when it resolves an Agent call.
+        self._lock = threading.RLock()
+        # Parent Agent tool_use records keyed by tool_use_id. Populated when
+        # the parent's assistant message spawns an Agent and cleared when the
+        # corresponding tool_result arrives. Entry shape:
+        #   {"description": str, "prompt": str, "spawn_ts": float, "resolved": bool}
+        # Bounded in practice by the count of Agent spawns per session.
+        self._parent_agent_calls: dict[str, dict] = {}
+        # tool_result resolutions that arrived before the matching subagent
+        # JSONL appeared in _agents. Drained on each scan_once. Entries:
+        #   {"description": str, "parent_spawn_ts": float, "seen_ts": float}
+        self._pending_resolutions: list[dict] = []
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name="subagent-tracker", daemon=True)
@@ -125,72 +148,212 @@ class SubagentTracker:
 
     def _scan_once(self) -> None:
         parent = self._session_jsonl_fn()
-        # Parent switched (e.g. /clear) → drop prior state but keep scanning.
-        if parent != self._last_parent:
-            self._last_parent = parent
-            if self._agents:
-                self._agents.clear()
-            self._last_snapshot_key = None
+        with self._lock:
+            # Parent switched (e.g. /clear) → drop prior state but keep scanning.
+            if parent != self._last_parent:
+                self._last_parent = parent
+                if self._agents:
+                    self._agents.clear()
+                self._parent_agent_calls.clear()
+                self._pending_resolutions.clear()
+                self._last_snapshot_key = None
 
-        if parent is None or not parent.exists():
-            if self._agents:
-                self._agents.clear()
-                self._emit([])
-            return
+            if parent is None or not parent.exists():
+                if self._agents:
+                    self._agents.clear()
+                    self._emit([])
+                return
 
-        subagents_dir = parent.parent / parent.stem / "subagents"
-        if not subagents_dir.is_dir():
-            if self._agents:
-                self._agents.clear()
-                self._emit([])
-            return
+            subagents_dir = parent.parent / parent.stem / "subagents"
+            if not subagents_dir.is_dir():
+                if self._agents:
+                    self._agents.clear()
+                    self._emit([])
+                return
 
-        seen_ids: set[str] = set()
-        for jsonl in subagents_dir.glob("agent-*.jsonl"):
-            agent_id = jsonl.stem[len("agent-"):]
-            if not agent_id:
-                continue
-            seen_ids.add(agent_id)
-            entry = self._agents.get(agent_id)
-            if entry is None:
-                entry = self._init_agent(agent_id, jsonl)
-                if entry is None:
+            seen_ids: set[str] = set()
+            for jsonl in subagents_dir.glob("agent-*.jsonl"):
+                agent_id = jsonl.stem[len("agent-"):]
+                if not agent_id:
                     continue
-                self._agents[agent_id] = entry
-            self._tail_agent(entry, jsonl)
+                seen_ids.add(agent_id)
+                entry = self._agents.get(agent_id)
+                if entry is None:
+                    entry = self._init_agent(agent_id, jsonl)
+                    if entry is None:
+                        continue
+                    self._agents[agent_id] = entry
+                self._tail_agent(entry, jsonl)
 
-        # Agents whose files disappeared — rare.
-        for gone in list(self._agents.keys() - seen_ids):
-            del self._agents[gone]
+            # Agents whose files disappeared — rare.
+            for gone in list(self._agents.keys() - seen_ids):
+                del self._agents[gone]
 
-        # Idle-timeout fallback: if the last assistant record ended with a
-        # text block and no further growth has happened in IDLE_DONE_TIMEOUT_S
-        # seconds, treat the agent as done. Covers the case where Claude Code
-        # writes a terminal assistant record with a null stop_reason.
-        now = time.time()
-        for entry in self._agents.values():
-            state = entry["state"]
-            if state.status != "running":
-                continue
-            if not entry.get("ends_in_text"):
-                continue
-            if now - state.last_activity_at > IDLE_DONE_TIMEOUT_S:
-                state.status = "done"
-                state.current_tool = ""
+            # Drain pending parent-resolved resolutions that arrived before the
+            # matching subagent file was tracked. Typical when the tail thread
+            # races ahead of the 2s scan cadence. Entries older than 60s with
+            # no match are dropped — the matching subagent was either never
+            # tracked (rejected before spawn) or finished via another path.
+            now_wall = time.time()
+            if self._pending_resolutions:
+                unresolved: list[dict] = []
+                for pr in self._pending_resolutions:
+                    if self._apply_resolution_locked(pr):
+                        continue
+                    if now_wall - pr.get("queued_at", now_wall) > 60.0:
+                        continue
+                    unresolved.append(pr)
+                self._pending_resolutions = unresolved
 
-        agents = [e["state"] for e in self._agents.values()]
-        # Running (most recent activity first), then done (most recent first).
-        agents.sort(key=lambda a: (a.status != "running", -a.last_activity_at))
-        self._emit(agents)
+            # Fast-path idle fallback: a running agent whose final assistant
+            # record ended with a text block and has been quiet for
+            # IDLE_DONE_TIMEOUT_S seconds. Covers the null-stop_reason case
+            # from L-2026-121.
+            now = time.time()
+            for entry in self._agents.values():
+                state = entry["state"]
+                if state.status != "running":
+                    continue
+                if not entry.get("ends_in_text"):
+                    continue
+                if now - state.last_activity_at > IDLE_DONE_TIMEOUT_S:
+                    state.status = "done"
+                    state.current_tool = ""
+
+            # Safety-net idle fallback: any running agent quiet far longer
+            # than STALE_DONE_TIMEOUT_S is assumed dead. Primary signal is the
+            # parent tool_result (see note_parent_record); this catches the
+            # corner cases where that signal never arrives.
+            for entry in self._agents.values():
+                state = entry["state"]
+                if state.status != "running":
+                    continue
+                if now - state.last_activity_at > STALE_DONE_TIMEOUT_S:
+                    state.status = "done"
+                    state.current_tool = ""
+
+            agents = [e["state"] for e in self._agents.values()]
+            # Running (most recent activity first), then done (most recent first).
+            agents.sort(key=lambda a: (a.status != "running", -a.last_activity_at))
+            self._emit(agents)
 
     def snapshot(self) -> list[AgentState]:
         """Return the current agent list without going through dedup. Used
         by the app to re-push state after a frontend reload (Ctrl+R) so the
         chip strip doesn't go blank."""
-        items = list(self._agents.values())
-        agents = [e["state"] for e in items]
-        agents.sort(key=lambda a: (a.status != "running", -a.last_activity_at))
-        return agents
+        with self._lock:
+            items = list(self._agents.values())
+            agents = [e["state"] for e in items]
+            agents.sort(key=lambda a: (a.status != "running", -a.last_activity_at))
+            return agents
+
+    # --- parent-JSONL signals ------------------------------------------------
+
+    def note_parent_record(self, rec: dict) -> None:
+        """Observe a record from the parent session JSONL.
+
+        Called from the TranscriptTail thread for every parsed record (tail
+        and replay). The two things we care about:
+
+        1. An assistant `tool_use` block with `name="Agent"` — cache it by
+           `tool_use_id`. This is what spawns a subagent.
+        2. A user `tool_result` block whose `tool_use_id` matches a cached
+           Agent spawn — the subagent has terminated (clean exit, rejection,
+           or cancel). Mark the corresponding running subagent done.
+
+        The subagent's own JSONL doesn't record the parent's tool_use_id, so
+        we correlate by description + spawn-time proximity (oldest running
+        agent with matching description wins).
+        """
+        if not isinstance(rec, dict):
+            return
+        msg = rec.get("message")
+        if not isinstance(msg, dict):
+            return
+        content = msg.get("content")
+        if not isinstance(content, list):
+            return
+
+        rts = _parse_ts(rec.get("timestamp")) or time.time()
+        role = msg.get("role")
+        with self._lock:
+            if role == "assistant":
+                for b in content:
+                    if not isinstance(b, dict):
+                        continue
+                    if b.get("type") != "tool_use":
+                        continue
+                    if b.get("name") != "Agent":
+                        continue
+                    tuid = b.get("id")
+                    if not isinstance(tuid, str) or not tuid:
+                        continue
+                    if tuid in self._parent_agent_calls:
+                        continue
+                    inp = b.get("input") or {}
+                    desc = inp.get("description") if isinstance(inp, dict) else ""
+                    prompt = inp.get("prompt") if isinstance(inp, dict) else ""
+                    self._parent_agent_calls[tuid] = {
+                        "description": str(desc or ""),
+                        "prompt": str(prompt or ""),
+                        "spawn_ts": rts,
+                        "resolved": False,
+                    }
+            elif role == "user":
+                for b in content:
+                    if not isinstance(b, dict):
+                        continue
+                    if b.get("type") != "tool_result":
+                        continue
+                    tuid = b.get("tool_use_id")
+                    if not isinstance(tuid, str) or not tuid:
+                        continue
+                    call = self._parent_agent_calls.get(tuid)
+                    if call is None or call.get("resolved"):
+                        continue
+                    call["resolved"] = True
+                    resolution = {
+                        "description": call["description"],
+                        "parent_spawn_ts": call["spawn_ts"],
+                        "seen_ts": rts,
+                        "queued_at": time.time(),
+                    }
+                    if not self._apply_resolution_locked(resolution):
+                        self._pending_resolutions.append(resolution)
+
+    def _apply_resolution_locked(self, resolution: dict) -> bool:
+        """Mark the best-matching running subagent done. Caller holds _lock.
+
+        Returns True if a matching subagent was found and marked, False if
+        no match exists yet (queue it in _pending_resolutions for next scan).
+        """
+        desc = resolution["description"]
+        parent_ts = resolution["parent_spawn_ts"]
+        best_id: Optional[str] = None
+        best_key: Optional[tuple[float, float]] = None
+        for agent_id, entry in self._agents.items():
+            state = entry["state"]
+            if state.status != "running":
+                continue
+            if entry.get("resolved_by_parent"):
+                continue
+            # Prefer exact description match; fall back to empty-description
+            # agents (not yet init'd with meta) only if no desc match exists.
+            if desc and state.description and state.description != desc:
+                continue
+            # Rank candidates: closest spawn_ts to parent_spawn_ts wins.
+            key = (abs(state.started_at - parent_ts), state.started_at)
+            if best_key is None or key < best_key:
+                best_key = key
+                best_id = agent_id
+        if best_id is None:
+            return False
+        entry = self._agents[best_id]
+        entry["resolved_by_parent"] = True
+        state = entry["state"]
+        state.status = "done"
+        state.current_tool = ""
+        return True
 
     def _emit(self, agents: list[AgentState]) -> None:
         # Deduplicate emits: only push if something actually changed.
@@ -232,7 +395,13 @@ class SubagentTracker:
             current_tool="",
             tokens=TokenTotals(),
         )
-        return {"pos": 0, "buf": "", "state": state, "ends_in_text": False}
+        return {
+            "pos": 0,
+            "buf": "",
+            "state": state,
+            "ends_in_text": False,
+            "resolved_by_parent": False,
+        }
 
     def _tail_agent(self, entry: dict, jsonl: Path) -> None:
         try:
