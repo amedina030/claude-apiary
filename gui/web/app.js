@@ -1997,10 +1997,15 @@
   }
   if (agentsCancelBtnEl) {
     // Claude Code runs subagents in-process, so there's no per-agent kill.
-    // Interrupting the pty cancels the whole turn (every subagent + parent).
+    // ESC is claude-code's "cancel current turn" — Ctrl+C quits the program
+    // on double-press and must never be used here. Mirrors the composer's
+    // ESC handler: send_escape, then Ctrl+U to flush any lingering prompt.
     agentsCancelBtnEl.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      try { window.pywebview.api.send_control("c"); } catch (_) {}
+      try { window.pywebview.api.send_escape(); } catch (_) {}
+      setTimeout(() => {
+        try { window.pywebview.api.send_control("u"); } catch (_) {}
+      }, 150);
     });
   }
   // Live clock: update elapsed text in-place on running chips every second.
@@ -2265,8 +2270,14 @@
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
       const sel = inputEl.value.substring(inputEl.selectionStart, inputEl.selectionEnd);
       if (!sel) {
+        // Must never send raw Ctrl+C to the pty — double-press quits
+        // claude-code and kills the session. Route to the same interrupt
+        // path as the ESC key above.
         e.preventDefault();
-        window.pywebview.api.send_control("c");
+        window.pywebview.api.send_escape();
+        setTimeout(() => {
+          try { window.pywebview.api.send_control("u"); } catch (_) {}
+        }, 150);
       }
     }
   });
