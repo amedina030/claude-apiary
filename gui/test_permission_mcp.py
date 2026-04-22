@@ -7,6 +7,7 @@ a log file as a side effect; tests redirect it to a tempdir.
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import io
 import json
@@ -14,6 +15,25 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+
+
+@contextlib.contextmanager
+def _env(overrides: dict[str, str | None]):
+    """Set/unset env vars for the duration of a block; restore originals."""
+    originals = {k: os.environ.get(k) for k in overrides}
+    try:
+        for k, v in overrides.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        yield
+    finally:
+        for k, v in originals.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 class PermissionMcpTests(unittest.TestCase):
@@ -154,6 +174,26 @@ class PermissionMcpTests(unittest.TestCase):
         self.assertEqual(
             arg, f"mcp__{self.mod.SERVER_NAME}__{self.mod.TOOL_NAME}",
         )
+
+    def test_mcp_enabled_env_var_on(self):
+        with _env({"APIARY_PERMISSION_MCP": "1"}):
+            self.assertTrue(self.mod.mcp_enabled({}))
+            self.assertTrue(self.mod.mcp_enabled({"permission_mcp": False}))
+
+    def test_mcp_enabled_env_var_explicit_off_overrides_launch(self):
+        with _env({"APIARY_PERMISSION_MCP": "0"}):
+            self.assertFalse(self.mod.mcp_enabled({"permission_mcp": True}))
+
+    def test_mcp_enabled_env_unset_falls_back_to_launch(self):
+        with _env({"APIARY_PERMISSION_MCP": None}):
+            self.assertFalse(self.mod.mcp_enabled({}))
+            self.assertFalse(self.mod.mcp_enabled({"permission_mcp": False}))
+            self.assertTrue(self.mod.mcp_enabled({"permission_mcp": True}))
+
+    def test_mcp_enabled_no_args_defaults_to_off(self):
+        with _env({"APIARY_PERMISSION_MCP": None}):
+            self.assertFalse(self.mod.mcp_enabled())
+            self.assertFalse(self.mod.mcp_enabled(None))
 
     def test_bad_json_is_skipped_not_fatal(self):
         # Feed one garbage line between two valid messages. The server

@@ -4,7 +4,7 @@ title: Config Files
 scope: project
 description: All configuration files, their location, format, and editable fields
 framework_version: "1.0"
-last_verified: 2026-04-17
+last_verified: 2026-04-22
 ---
 
 # Config Files
@@ -66,6 +66,21 @@ Canonical list of scheduled OS-scheduler entries that apiary owns. Located in th
 | `command` | list of strings | yes | List-form command; rendered with backend-specific quoting at register time |
 | `cwd` | string | no | Working directory; supports the `<apiary_repo>` placeholder |
 | `disabled` | bool | no | `true` means the entry must NOT exist in the scheduler; `repair --apply` deletes any matching entry |
+
+## ~/.claude/apiary_gui/launch.json
+
+Claude Code spawn configuration for the GUI. Auto-created on first run from `DEFAULT_LAUNCH` in `gui/theme.py`; hand-edit to persist non-default values.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `command` | string | `"claude"` | Executable spawned as the pty subprocess. Typically `claude`; override only to point at a vendored binary |
+| `args` | list of strings | `[]` | Extra flags appended to the spawn argv (before any flags the GUI adds itself, e.g. `--permission-mode acceptEdits` or `--mcp-config`) |
+| `cwd` | string | `""` | Default working directory used when no saved tabs exist. Empty string shows the first-run picker |
+| `rows` | int | `40` | Pty rows |
+| `cols` | int | `120` | Pty cols |
+| `permission_mcp` | bool | `false` | Route permission prompts through the structured MCP path (`gui/permission_mcp.py` + loopback HTTP bridge) instead of the TUI-banner scraper. Env `APIARY_PERMISSION_MCP` overrides this when set. See scribe `C-2026-36` |
+
+Unknown top-level keys are dropped on load (whitelist, see `gui/theme.py::load_launch`). To add a field, update `DEFAULT_LAUNCH` first.
 
 ## compass/dimensions.json
 

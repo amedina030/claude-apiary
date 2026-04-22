@@ -53,6 +53,20 @@ def permission_tool_arg() -> str:
     return f"mcp__{SERVER_NAME}__{TOOL_NAME}"
 
 
+def mcp_enabled(launch: dict | None = None) -> bool:
+    """Resolve whether the permission-prompt MCP path is on.
+
+    `APIARY_PERMISSION_MCP` wins when set — `"1"` enables, anything else
+    disables (so `APIARY_PERMISSION_MCP=0` explicitly overrides a launch.json
+    that has the flag on). When the env var is unset, fall back to
+    `launch["permission_mcp"]` (defaults to False).
+    """
+    env = os.environ.get("APIARY_PERMISSION_MCP")
+    if env is not None:
+        return env == "1"
+    return bool((launch or {}).get("permission_mcp", False))
+
+
 def write_mcp_config(
     dest: Path | None = None,
     *,

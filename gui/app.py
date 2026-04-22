@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from gui import composer_state, pty_capture, sidebar_state, tabs_state, usage_fetcher
+from gui import permission_mcp
 from gui.permission_bridge import PermissionBridge
 from gui.permission_mcp import BRIDGE_URL_ENV as _PERMISSION_MCP_BRIDGE_URL_ENV
 from gui.scribe_aggregator import NoteEntry, read_body
@@ -290,10 +291,14 @@ class App:
         )
 
     def _start_permission_bridge(self) -> None:
-        if os.environ.get("APIARY_PERMISSION_MCP") != "1":
+        if not permission_mcp.mcp_enabled(load_launch()):
             return
         if self._permission_bridge is not None:
             return
+        # Pin the env var to "1" so session.py (and anything else that reads
+        # it downstream) sees a consistent source of truth regardless of
+        # whether the flag came from env or launch.json.
+        os.environ["APIARY_PERMISSION_MCP"] = "1"
         bridge = PermissionBridge(on_request=self._push_permission_prompt)
         try:
             url = bridge.start()

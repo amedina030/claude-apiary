@@ -49,6 +49,10 @@ DEFAULT_LAUNCH: dict = {
     "cwd": "",
     "rows": 40,
     "cols": 120,
+    # Route permission prompts through the structured MCP path instead of the
+    # TUI-banner scraper. See `gui/permission_mcp.py` and scribe `C-2026-36`.
+    # Env var `APIARY_PERMISSION_MCP` (if set) overrides this.
+    "permission_mcp": False,
 }
 
 

@@ -90,7 +90,7 @@ GUI per-instance state lives under `~/.claude/apiary_gui/` (default profile). Se
 | Sidebar state | `~/.claude/apiary_gui/sidebar_state.json` | Per-group collapsed/expanded state |
 | Composer state | `~/.claude/apiary_gui/composer_state.json` | Chat input height in pixels (set by dragging the gutter above the input) |
 | Theme | `~/.claude/apiary_gui/theme.json` | CSS variable values (hot-reloads via watchdog) |
-| Launch config | `~/.claude/apiary_gui/launch.json` | Claude Code spawn args + cwd |
+| Launch config | `~/.claude/apiary_gui/launch.json` | Claude Code spawn args + cwd + feature flags (schema in `docs/reference/config-files.md`) |
 | Captures | `~/.claude/apiary_gui/captures/<ts>-<label>.bin` | Raw pty-output captures (binary), populated only when `APIARY_GUI_CAPTURE_LABEL` is set |
 | Permission-MCP config | `~/.claude/apiary_gui/permission_mcp_config.json` | `--mcp-config` file handed to claude when `APIARY_PERMISSION_MCP=1` (points at `gui/permission_mcp.py`). Rewritten each session start |
 | Permission-MCP log | `~/.claude/apiary_gui/permission_mcp.log` | Append-only log of START/REQUEST/DECISION/EXIT events from the permission-prompt MCP stdio server |
