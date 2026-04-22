@@ -249,12 +249,14 @@
   function scrollToBottom() {
     programmaticScroll = true;
     messagesEl.scrollTop = messagesEl.scrollHeight;
+    messagesEl.classList.remove("user-scrolled");
     // Clear on the microtask after the scroll event drains.
     setTimeout(() => { programmaticScroll = false; }, 0);
   }
   messagesEl.addEventListener("scroll", () => {
     if (programmaticScroll) return;
     sticky = isAtBottom();
+    messagesEl.classList.toggle("user-scrolled", !sticky);
   });
   function maybeScroll() {
     if (!sticky) return;
@@ -1196,18 +1198,57 @@
   }
 
   // --- thinking bubble ------------------------------------------------------
-  // Three animated dots at the bottom of the chat while claude is working.
-  // The turn stays "active" (waitingForAssistant=true) from the user-sent
-  // Enter until either 15s of pty silence or a tab switch. Individual
-  // assistant messages inside that window only remove the DOM bubble —
-  // subsequent pty chunks in the same turn re-spawn it so long tool chains
-  // don't look idle.
+  // Inline chat spinner + label while claude is working. Label flips between
+  // "Thinking…" (no recent pty activity → waiting on API) and "Working…"
+  // (pty chunks within PTY_ACTIVE_MS → mid tool-call). "esc to cancel" hint
+  // mirrors the CLI affordance. Sticky-bottom when the user scrolls up (see
+  // .messages.user-scrolled rule in app.css).
+  //
+  // Turn stays "active" (waitingForAssistant=true) from the user-sent Enter
+  // until stop_reason=end_turn or THINKING_IDLE_MS of pty silence. State is
+  // preserved per-session via sessionThinkingState so tab switches don't
+  // kill the bubble on the tab that's still working.
   const THINKING_IDLE_MS = 15000;
+  const PTY_ACTIVE_MS = 2000;
   let thinkingEl = null;
   let waitingForAssistant = false;
-  // Wall-clock ms when the current turn's Enter landed; 0 while idle. Replaces
-  // the old pty-unread chunk counter in the same DOM slot (T-2026-198).
+  // Wall-clock ms when the current turn's Enter landed; 0 while idle.
   let thinkingStartTs = 0;
+  // Per-session snapshots so a tab switch doesn't end the turn on tabs that
+  // are still working. Active tab's vars above are the live view; snapshot
+  // is taken on switch-out, restored on switch-in.
+  const sessionThinkingState = new Map();
+
+  function saveThinkingStateForSession(sid) {
+    if (!sid) return;
+    sessionThinkingState.set(sid, {
+      waitingForAssistant,
+      thinkingStartTs,
+      lastPtyChunkAt,
+    });
+  }
+
+  function loadThinkingStateForSession(sid) {
+    const state = sid ? sessionThinkingState.get(sid) : null;
+    if (state) {
+      waitingForAssistant = state.waitingForAssistant;
+      thinkingStartTs = state.thinkingStartTs;
+      lastPtyChunkAt = state.lastPtyChunkAt;
+    } else {
+      waitingForAssistant = false;
+      thinkingStartTs = 0;
+      lastPtyChunkAt = 0;
+    }
+    if (waitingForAssistant && thinkingStartTs > 0) {
+      const secs = Math.floor((Date.now() - thinkingStartTs) / 1000);
+      thinkingSecondsEl.textContent = secs + "s";
+      thinkingSecondsEl.classList.remove("hidden");
+    } else {
+      thinkingSecondsEl.classList.add("hidden");
+      thinkingSecondsEl.textContent = "";
+    }
+    if (waitingForAssistant) ensureThinkingBubble();
+  }
 
   function startThinkingCounter() {
     thinkingStartTs = Date.now();
@@ -1221,6 +1262,14 @@
     thinkingSecondsEl.textContent = "";
   }
 
+  function updateThinkingLabel() {
+    if (!thinkingEl) return;
+    const labelEl = thinkingEl.querySelector(".thinking-label");
+    if (!labelEl) return;
+    const ptyActive = lastPtyChunkAt > 0 && (Date.now() - lastPtyChunkAt) < PTY_ACTIVE_MS;
+    labelEl.textContent = ptyActive ? "Working…" : "Thinking…";
+  }
+
   function ensureThinkingBubble() {
     if (!waitingForAssistant) return;
     if (thinkingEl && thinkingEl.isConnected) return;
@@ -1228,9 +1277,12 @@
     thinkingEl.className = "msg thinking";
     thinkingEl.innerHTML =
       '<div class="thinking-body">' +
-        '<span class="dot"></span><span class="dot"></span><span class="dot"></span>' +
+        '<span class="spinner"></span>' +
+        '<span class="thinking-label">Thinking…</span>' +
+        '<span class="thinking-hint">esc to cancel</span>' +
       '</div>';
     messagesEl.appendChild(thinkingEl);
+    updateThinkingLabel();
     maybeScroll();
   }
 
@@ -1250,6 +1302,13 @@
     if (thinkingStartTs > 0) {
       const secs = Math.floor((Date.now() - thinkingStartTs) / 1000);
       thinkingSecondsEl.textContent = secs + "s";
+    }
+    updateThinkingLabel();
+    // Keep the bubble at the end of the list. Covers the switch-back case
+    // where history re-render from the backend can deposit late messages
+    // AFTER a just-respawned bubble, leaving it stranded mid-chat.
+    if (thinkingEl && thinkingEl.isConnected && thinkingEl !== messagesEl.lastElementChild) {
+      messagesEl.appendChild(thinkingEl);
     }
     if (Date.now() - lastPtyChunkAt > THINKING_IDLE_MS) {
       hideThinkingBubble(true);
@@ -2099,6 +2158,7 @@
       const nextSid = String(sid || "");
       if (nextSid === activeSessionId) return;
       const isFirstActivation = !activeSessionId;
+      const prevSid = activeSessionId;
       activeSessionId = nextSid;
       // On a real tab SWITCH we reset UI state so the outgoing tab's messages,
       // xterm scrollback, prompt banner, and sidebar don't leak into the new
@@ -2107,15 +2167,28 @@
       // already pushed the active session's history before setActiveSession
       // arrives — clearing would wipe that history.
       if (isFirstActivation) return;
+      // Snapshot outgoing tab's thinking state BEFORE clearing the DOM, so a
+      // tab still working keeps its bubble when the user returns. The DOM
+      // node itself is torn down (it'll re-render from backend history on
+      // switch-back), but waitingForAssistant / counter state is preserved.
+      if (typeof saveThinkingStateForSession === "function") {
+        saveThinkingStateForSession(prevSid);
+      }
       try { clearMessages(); } catch (_) {}
       try { term.reset(); } catch (_) {}
-      if (typeof hideThinkingBubble === "function") hideThinkingBubble(true);
+      if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
       if (typeof hidePromptBanner === "function") hidePromptBanner();
       // Drop any active MCP prompt from the outgoing tab. The bridge will
       // time out and deny; a fresh request from the new tab will re-banner.
       mcpPrompt = null;
       try { allNotes = []; renderSidebar(); } catch (_) {}
       try { resetAgentsStripState(); } catch (_) {}
+      // Restore incoming tab's thinking state (re-spawns the bubble if that
+      // tab is still mid-turn). Must run AFTER the DOM teardown above so the
+      // re-spawned bubble doesn't get wiped.
+      if (typeof loadThinkingStateForSession === "function") {
+        loadThinkingStateForSession(nextSid);
+      }
     },
     onMessage(msgJson, sessionId) {
       if (!pushIsForActive(sessionId)) return;
