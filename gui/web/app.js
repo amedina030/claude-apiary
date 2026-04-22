@@ -1711,6 +1711,7 @@
   const agentsStripEl = document.getElementById("agents-strip");
   const agentsChipsEl = document.getElementById("agents-chips");
   const agentsClearBtnEl = document.getElementById("agents-clear-btn");
+  const agentsCancelBtnEl = document.getElementById("agents-cancel-btn");
   const agentsDrawerEl = document.getElementById("agents-drawer");
   let lastAgentsPayload = [];
   let selectedAgentId = "";
@@ -1893,11 +1894,13 @@
     if (running.length === 0 && recent.length === 0) {
       if (agentsStripEl) agentsStripEl.classList.add("hidden");
       if (agentsClearBtnEl) agentsClearBtnEl.classList.add("hidden");
+      if (agentsCancelBtnEl) agentsCancelBtnEl.classList.add("hidden");
       if (selectedAgentId) { selectedAgentId = ""; renderAgentDrawer(); }
       return;
     }
     if (agentsStripEl) agentsStripEl.classList.remove("hidden");
     if (agentsClearBtnEl) agentsClearBtnEl.classList.toggle("hidden", recent.length === 0);
+    if (agentsCancelBtnEl) agentsCancelBtnEl.classList.toggle("hidden", running.length === 0);
     if (agentsChipsEl) {
       agentsChipsEl.innerHTML = "";
       for (const a of running) agentsChipsEl.appendChild(buildAgentChip(a));
@@ -1940,6 +1943,14 @@
       }
       persistAgentsDismissed();
       renderAgentsStrip(lastAgentsPayload);
+    });
+  }
+  if (agentsCancelBtnEl) {
+    // Claude Code runs subagents in-process, so there's no per-agent kill.
+    // Interrupting the pty cancels the whole turn (every subagent + parent).
+    agentsCancelBtnEl.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      try { window.pywebview.api.send_control("c"); } catch (_) {}
     });
   }
   // Live clock: update elapsed text in-place on running chips every second.

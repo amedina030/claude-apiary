@@ -1091,6 +1091,20 @@ body.sidebar-hidden #totals {
   color: var(--fg);
   background: color-mix(in srgb, var(--muted) 18%, transparent);
 }
+.agents-strip .strip-btn.danger:hover {
+  color: #e5484d;
+  background: color-mix(in srgb, #e5484d 12%, transparent);
+}
+.agents-strip .strip-btn .strip-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 3px;
+}
+.agents-strip .strip-btn .strip-btn-icon svg {
+  width: 10px;
+  height: 10px;
+  display: block;
+}
 .agents-strip .strip-btn.hidden { display: none; }
 
 .agents-drawer {
