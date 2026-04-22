@@ -12,7 +12,7 @@ All apiary CLI tools must be invoked via the launcher, which resolves the apiary
 python ~/.claude/apiary_launch.py <relative-script-path> [args...]
 ```
 
-The launcher reads `~/.claude/apiary.json`, sets cwd to the apiary repo, and forwards all arguments. This works from any directory — no `<repo_dir>` substitution needed.
+The launcher reads `~/.claude/apiary.json` to locate the apiary repo, then runs the target script with its arguments forwarded. **The subprocess inherits the caller's cwd unchanged** — the launcher does NOT chdir into the apiary repo, so tools like scribe that use `git rev-parse --show-toplevel` resolve to the session's actual repo (where operational state should land). Apiary scripts find their own code via `Path(__file__)`, not cwd, so they don't need the chdir. This works from any directory — no `<repo_dir>` substitution needed.
 
 To resolve the apiary repo path for Read tool targets (not CLI invocations), use:
 
