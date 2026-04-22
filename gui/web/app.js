@@ -1997,15 +1997,12 @@
   }
   if (agentsCancelBtnEl) {
     // Claude Code runs subagents in-process, so there's no per-agent kill.
-    // ESC is claude-code's "cancel current turn" — Ctrl+C quits the program
-    // on double-press and must never be used here. Mirrors the composer's
-    // ESC handler: send_escape, then Ctrl+U to flush any lingering prompt.
+    // Route through interruptClaudeSession() — a multi-ESC burst that
+    // mirrors manual spam-clicking (single ESC lands unreliably when
+    // tool calls are in flight; see claude-code issues #3455/#17466).
     agentsCancelBtnEl.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      try { window.pywebview.api.send_escape(); } catch (_) {}
-      setTimeout(() => {
-        try { window.pywebview.api.send_control("u"); } catch (_) {}
-      }, 150);
+      interruptClaudeSession(agentsCancelBtnEl);
     });
   }
   // Live clock: update elapsed text in-place on running chips every second.
@@ -2031,6 +2028,39 @@
   // --- bridge surface (Python → JS) ----------------------------------------
   function bridgeReady() {
     return typeof window.pywebview !== "undefined" && window.pywebview.api;
+  }
+
+  // Interrupt helper — the ONLY way GUI features may cancel claude-code.
+  //
+  // SAFETY INVARIANT: this helper must never call send_control("c"). Ctrl+C
+  // pressed twice quits claude-code and kills the whole pty session. Only
+  // ESC (0x1b, "cancel current turn") and Ctrl+U (0x15, readline kill-line)
+  // are used. If you add a new cancel surface, route it through here.
+  //
+  // Why a burst: single ESC lands unreliably when tool calls are in flight
+  // (claude-code issues #3455, #17466, #21895). Empirically, spam-clicking
+  // 3–4 times is what actually interrupts — this mirrors that cadence.
+  let _interruptInFlight = false;
+  function interruptClaudeSession(button) {
+    if (_interruptInFlight) return;
+    _interruptInFlight = true;
+    if (button) button.classList.add("cancelling");
+    const ESC_COUNT = 4;
+    const ESC_INTERVAL_MS = 120;
+    for (let i = 0; i < ESC_COUNT; i++) {
+      setTimeout(() => {
+        try { window.pywebview.api.send_escape(); } catch (_) {}
+      }, i * ESC_INTERVAL_MS);
+    }
+    // Flush any lingering prompt text so the next input isn't concatenated.
+    setTimeout(() => {
+      try { window.pywebview.api.send_control("u"); } catch (_) {}
+    }, ESC_COUNT * ESC_INTERVAL_MS + 50);
+    // Release the debounce + visual state after the burst completes.
+    setTimeout(() => {
+      _interruptInFlight = false;
+      if (button) button.classList.remove("cancelling");
+    }, ESC_COUNT * ESC_INTERVAL_MS + 200);
   }
 
   // Tab-aware routing: each push from the backend carries the session_id
@@ -2256,28 +2286,14 @@
     }
     if (e.key === "Escape") {
       e.preventDefault();
-      window.pywebview.api.send_escape();
-      // ESC cancels claude-code's current turn, but the text from the most
-      // recent Enter can linger in its input prompt. Without clearing it,
-      // the user's next message gets concatenated onto the leftover text.
-      // Send Ctrl+U (readline kill-line) a moment later — long enough for
-      // claude-code to finish handling the interrupt and return to prompt.
-      setTimeout(() => {
-        try { window.pywebview.api.send_control("u"); } catch (_) {}
-      }, 150);
+      interruptClaudeSession();
       return;
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
       const sel = inputEl.value.substring(inputEl.selectionStart, inputEl.selectionEnd);
       if (!sel) {
-        // Must never send raw Ctrl+C to the pty — double-press quits
-        // claude-code and kills the session. Route to the same interrupt
-        // path as the ESC key above.
         e.preventDefault();
-        window.pywebview.api.send_escape();
-        setTimeout(() => {
-          try { window.pywebview.api.send_control("u"); } catch (_) {}
-        }, 150);
+        interruptClaudeSession();
       }
     }
   });

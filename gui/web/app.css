@@ -1127,6 +1127,18 @@ body.sidebar-hidden #totals {
   display: block;
 }
 .agents-strip .strip-btn.hidden { display: none; }
+.agents-strip .strip-btn.cancelling {
+  pointer-events: none;
+  color: #e5484d;
+  opacity: 0.75;
+}
+.agents-strip .strip-btn.cancelling .strip-btn-icon svg {
+  animation: cancel-pulse 0.25s ease-in-out infinite alternate;
+}
+@keyframes cancel-pulse {
+  from { transform: scale(1); opacity: 1; }
+  to { transform: scale(0.55); opacity: 0.4; }
+}
 
 .agents-drawer {
   padding: 8px 12px;
