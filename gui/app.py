@@ -149,7 +149,6 @@ class GuiBridge:
 
         key='accept_edits'  -> restarts the pty so --permission-mode acceptEdits
                                takes effect on the next claude invocation.
-        key='allow_self_edits' -> frontend-only state; no restart needed.
         """
         if not isinstance(session_id, str) or not isinstance(key, str):
             return False
@@ -319,7 +318,6 @@ class App:
         self,
         cwd: Path,
         accept_edits: bool = False,
-        allow_self_edits: bool = False,
     ) -> Session:
         """Build a Session wired to push UI events through App callbacks."""
         launch = load_launch()
@@ -340,7 +338,6 @@ class App:
             rows=int(launch.get("rows", 40) or 40),
             cols=int(launch.get("cols", 120) or 120),
             accept_edits=accept_edits,
-            allow_self_edits=allow_self_edits,
         )
 
     def _sessions_descriptor(self) -> list[dict]:
@@ -352,7 +349,6 @@ class App:
                 "label": s.cwd.name or str(s.cwd),
                 "active": (i == self._active_idx),
                 "accept_edits": bool(s.accept_edits),
-                "allow_self_edits": bool(s.allow_self_edits),
             }
             for i, s in enumerate(self._sessions)
         ]
@@ -372,7 +368,6 @@ class App:
                 TabEntry(
                     cwd=s.cwd,
                     accept_edits=s.accept_edits,
-                    allow_self_edits=s.allow_self_edits,
                 )
                 for s in self._sessions
             ],
@@ -388,8 +383,6 @@ class App:
           mode (no pty restart, session history preserved). The stored value
           is ALSO consumed on the NEXT spawn of this tab (new-tab creation or
           explicit restart) via --permission-mode acceptEdits.
-        - ``allow_self_edits``: stored only; purely frontend — the prompt
-          detector reads it to auto-ack .claude/ protect-self prompts.
         """
         for s in self._sessions:
             if s.session_id != session_id:
@@ -398,8 +391,6 @@ class App:
                 if s.accept_edits == value:
                     return True
                 s.accept_edits = value
-            elif key == "allow_self_edits":
-                s.allow_self_edits = value
             else:
                 return False
             self._push_sessions()
@@ -547,7 +538,6 @@ class App:
             sess = self._create_session(
                 entry.cwd,
                 accept_edits=entry.accept_edits,
-                allow_self_edits=entry.allow_self_edits,
             )
             if sess.start():
                 self._sessions.append(sess)

@@ -4,8 +4,7 @@ State file: ``~/.claude/apiary_gui/tabs.json``. Schema::
 
     {"tabs": [
         {"cwd": "D:/Professional/claude-apiary",
-         "accept_edits": false,
-         "allow_self_edits": false},
+         "accept_edits": false},
         ...
      ],
      "active_idx": 0}
@@ -36,7 +35,6 @@ TABS_PATH = STATE_DIR / "tabs.json"
 class TabEntry:
     cwd: Path
     accept_edits: bool = False
-    allow_self_edits: bool = False
 
 
 def load(path: Optional[Path] = None) -> tuple[list[TabEntry], int]:
@@ -76,7 +74,6 @@ def load(path: Optional[Path] = None) -> tuple[list[TabEntry], int]:
             entries.append(TabEntry(
                 cwd=cand,
                 accept_edits=bool(raw.get("accept_edits", False)),
-                allow_self_edits=bool(raw.get("allow_self_edits", False)),
             ))
     if not entries:
         return [], -1
@@ -99,7 +96,6 @@ def save(entries: list[TabEntry], active_idx: int, path: Optional[Path] = None) 
                 {
                     "cwd": str(e.cwd),
                     "accept_edits": bool(e.accept_edits),
-                    "allow_self_edits": bool(e.allow_self_edits),
                 }
                 for e in entries
             ],

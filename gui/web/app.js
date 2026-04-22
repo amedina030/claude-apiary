@@ -33,14 +33,6 @@
   // --- tab bar --------------------------------------------------------------
   // Backend sends onSessions(list) whenever tabs open/close/switch. We render
   // a chip per session plus a "+" button that opens a folder picker.
-  //
-  // Also keeps a cache of each session's per-tab settings so the prompt-detector
-  // poll can read allow_self_edits without round-tripping through the bridge.
-  const sessionSettings = new Map();  // sid -> { accept_edits, allow_self_edits }
-
-  function getSessionSettings(sid) {
-    return sessionSettings.get(sid) || { accept_edits: false, allow_self_edits: false };
-  }
 
   function renderTabs(sessions) {
     if (!Array.isArray(sessions)) return;
@@ -54,19 +46,6 @@
       emptyStateEl.classList.add("hidden");
       messagesEl.style.display = "";
     }
-    // Refresh the settings cache from the full snapshot. Any missing sid has
-    // been closed; clear its entry to avoid stale reads.
-    const seenSids = new Set();
-    for (const s of sessions) {
-      seenSids.add(s.session_id);
-      sessionSettings.set(s.session_id, {
-        accept_edits: !!s.accept_edits,
-        allow_self_edits: !!s.allow_self_edits,
-      });
-    }
-    for (const sid of Array.from(sessionSettings.keys())) {
-      if (!seenSids.has(sid)) sessionSettings.delete(sid);
-    }
     for (const s of sessions) {
       const tab = document.createElement("div");
       tab.className = "tab" + (s.active ? " active" : "");
@@ -75,10 +54,8 @@
       // so CSS can show a subtle dot/highlight when a tab is permissive.
       const flags = [];
       if (s.accept_edits) flags.push("auto-accept edits");
-      if (s.allow_self_edits) flags.push("allow self-edits");
       tab.title = flags.length ? `${s.cwd}\n[${flags.join(", ")}]` : s.cwd;
       if (s.accept_edits) tab.dataset.acceptEdits = "1";
-      if (s.allow_self_edits) tab.dataset.allowSelfEdits = "1";
 
       const label = document.createElement("span");
       label.className = "tab-label";
@@ -1452,30 +1429,6 @@
     }
   }
 
-  // Per-tab "allow Claude to edit its own settings" toggle (T-2026-176 #1):
-  // when ON and the detected prompt is the harness protect-self gate for
-  // .claude/ writes, auto-click option 1 ("Yes, and allow Claude to edit its
-  // own settings for this session") without rendering the banner.
-  function isSelfEditPrompt(prompt) {
-    const hay = `${prompt.question || ""}\n${prompt.context || ""}\n` +
-                (prompt.options || []).map(o => o.text || "").join("\n");
-    return /\.claude[\\/]/.test(hay) || /edit its own settings/i.test(hay);
-  }
-
-  function autoAckSelfEdit(found) {
-    const opt = (found.options || []).find(o => /^yes/i.test(o.text || "")) ||
-                (found.options || [])[0];
-    if (!opt) return false;
-    answeredSigs.add(found.signature);
-    recordPromptAppeared(found);
-    recordPromptResolution(found, opt);
-    try { window.pywebview.api.send_text(String(opt.number)); } catch (_) {}
-    setTimeout(() => {
-      try { window.pywebview.api.send_control("m"); } catch (_) {}
-    }, 30);
-    return true;
-  }
-
   function runDetect() {
     const found = detectPrompt(readScreenLines());
     if (!found) {
@@ -1498,10 +1451,6 @@
     if (found.signature === lastDismissedSig &&
         Date.now() - lastDismissedAt < DISMISS_COOLDOWN_MS) {
       return;
-    }
-    const settings = getSessionSettings(activeSessionId);
-    if (settings.allow_self_edits && isSelfEditPrompt(found)) {
-      if (autoAckSelfEdit(found)) return;
     }
     activePrompt = found;
     recordPromptAppeared(found);

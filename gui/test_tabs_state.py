@@ -28,8 +28,8 @@ class TabsStateTests(unittest.TestCase):
             cwd_b.mkdir()
             tabs_state.save(
                 [
-                    TabEntry(cwd=cwd_a, accept_edits=True, allow_self_edits=False),
-                    TabEntry(cwd=cwd_b, accept_edits=False, allow_self_edits=True),
+                    TabEntry(cwd=cwd_a, accept_edits=True),
+                    TabEntry(cwd=cwd_b, accept_edits=False),
                 ],
                 1,
                 state_file,
@@ -37,9 +37,7 @@ class TabsStateTests(unittest.TestCase):
             entries, idx = tabs_state.load(state_file)
             self.assertEqual([e.cwd for e in entries], [cwd_a, cwd_b])
             self.assertEqual(entries[0].accept_edits, True)
-            self.assertEqual(entries[0].allow_self_edits, False)
             self.assertEqual(entries[1].accept_edits, False)
-            self.assertEqual(entries[1].allow_self_edits, True)
             self.assertEqual(idx, 1)
 
     def test_malformed_json_returns_empty(self):
@@ -108,7 +106,6 @@ class TabsStateTests(unittest.TestCase):
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0].cwd, d)
             self.assertFalse(entries[0].accept_edits)
-            self.assertFalse(entries[0].allow_self_edits)
             self.assertEqual(idx, 0)
 
     def test_save_survives_unwritable_parent(self):
