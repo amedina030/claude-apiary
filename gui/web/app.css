@@ -551,17 +551,15 @@ body.sidebar-hidden #totals {
   font-family: var(--font-family-ui);
   font-size: 11px;
   color: var(--muted);
-  position: relative;
 }
 
-.usage-meters.stale::after {
+.usage-meters.stale .usage-title::after {
   content: "Zzz";
-  position: absolute;
-  right: 8px;
-  bottom: 6px;
+  margin-left: 6px;
   font-size: 10px;
   font-style: italic;
   letter-spacing: 0.5px;
+  text-transform: none;
   color: var(--muted);
   opacity: 0.8;
   pointer-events: none;
