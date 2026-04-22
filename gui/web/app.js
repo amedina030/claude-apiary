@@ -1637,39 +1637,77 @@
     if (!selectedAgentId) {
       agentsDrawerEl.classList.add("hidden");
       agentsDrawerEl.innerHTML = "";
+      agentsDrawerEl.dataset.agentId = "";
       return;
     }
     const agent = lastAgentsPayload.find((a) => a && a.agent_id === selectedAgentId);
     if (!agent) {
       agentsDrawerEl.classList.add("hidden");
       agentsDrawerEl.innerHTML = "";
+      agentsDrawerEl.dataset.agentId = "";
       return;
     }
     agentsDrawerEl.classList.remove("hidden");
+
+    const hist = agent.tool_histogram || {};
+    const histEntries = Object.entries(hist).sort((a, b) => b[1] - a[1]);
+    const toolsStr = histEntries.map(([n, c]) => c + " " + n).join(" · ");
+    const fields = [
+      ["desc",     agent.description ? '"' + agent.description + '"' : ""],
+      ["model",    shortModel(agent.model)],
+      ["tools",    toolsStr],
+      ["in",       fmtAgentTokens(agent.tokens?.input)],
+      ["out",      fmtAgentTokens(agent.tokens?.output)],
+      ["cache r",  fmtAgentTokens(agent.tokens?.cache_read)],
+      ["cache w",  fmtAgentTokens(agent.tokens?.cache_write)],
+      ["prompt",   agent.prompt_preview],
+    ];
+
+    // In-place update: if the drawer already renders this agent, only patch
+    // the value spans whose text has changed. Full rebuild would kill any
+    // in-progress text selection when backend pushes arrive (every ~2s while
+    // an agent is burning tokens).
+    const sameAgent = agentsDrawerEl.dataset.agentId === selectedAgentId;
+    const existingRows = sameAgent ? agentsDrawerEl.querySelectorAll(".kv") : null;
+
+    if (sameAgent && existingRows && existingRows.length === fields.filter(([, v]) => v !== "" && v !== null && v !== undefined).length) {
+      // Row count matches — patch in place.
+      let i = 0;
+      for (const [, val] of fields) {
+        if (val === "" || val === null || val === undefined) continue;
+        const row = existingRows[i++];
+        if (!row) break;
+        const v = row.querySelector(".v");
+        if (v && v.textContent !== String(val)) v.textContent = String(val);
+      }
+      const finEl = agentsDrawerEl.querySelector(".final");
+      if (agent.final_text && agent.status !== "running") {
+        if (finEl) {
+          if (finEl.textContent !== agent.final_text) finEl.textContent = agent.final_text;
+        } else {
+          const fin = document.createElement("div");
+          fin.className = "final";
+          fin.textContent = agent.final_text;
+          agentsDrawerEl.appendChild(fin);
+        }
+      } else if (finEl) {
+        finEl.remove();
+      }
+      return;
+    }
+
+    // Different agent, or row count changed — full rebuild.
     agentsDrawerEl.innerHTML = "";
-    const mk = (label, val) => {
-      if (val === undefined || val === null || val === "") return null;
+    agentsDrawerEl.dataset.agentId = selectedAgentId;
+    for (const [label, val] of fields) {
+      if (val === "" || val === null || val === undefined) continue;
       const r = document.createElement("div");
       r.className = "kv";
       const k = document.createElement("span"); k.className = "k"; k.textContent = label;
       const v = document.createElement("span"); v.className = "v"; v.textContent = String(val);
       r.appendChild(k); r.appendChild(v);
-      return r;
-    };
-    const hist = agent.tool_histogram || {};
-    const histEntries = Object.entries(hist).sort((a, b) => b[1] - a[1]);
-    const toolsStr = histEntries.map(([n, c]) => c + " " + n).join(" · ");
-    const rows = [
-      mk("desc", agent.description ? '"' + agent.description + '"' : ""),
-      mk("model", shortModel(agent.model)),
-      mk("tools", toolsStr),
-      mk("in",       fmtAgentTokens(agent.tokens?.input)),
-      mk("out",      fmtAgentTokens(agent.tokens?.output)),
-      mk("cache r",  fmtAgentTokens(agent.tokens?.cache_read)),
-      mk("cache w",  fmtAgentTokens(agent.tokens?.cache_write)),
-      mk("prompt",   agent.prompt_preview),
-    ];
-    for (const r of rows) if (r) agentsDrawerEl.appendChild(r);
+      agentsDrawerEl.appendChild(r);
+    }
     if (agent.final_text && agent.status !== "running") {
       const fin = document.createElement("div");
       fin.className = "final";
@@ -1740,11 +1778,24 @@
       renderAgentsStrip(lastAgentsPayload);
     });
   }
-  // Live clock: re-render every second so elapsed strings tick while any
-  // agent is running. Skip entirely when idle — no DOM work, no wakeups.
+  // Live clock: update elapsed text in-place on running chips every second.
+  // Must NOT rebuild DOM — that would nuke any in-progress text selection in
+  // the expanded drawer (kept breaking copy-paste of final_text).
   setInterval(() => {
+    if (!agentsChipsEl) return;
     if (!lastAgentsPayload.some((a) => a && a.status === "running")) return;
-    renderAgentsStrip(lastAgentsPayload);
+    const byId = new Map();
+    for (const a of lastAgentsPayload) {
+      if (a && a.agent_id) byId.set(a.agent_id, a);
+    }
+    const now = Date.now();
+    for (const chip of agentsChipsEl.querySelectorAll(".chip")) {
+      const a = byId.get(chip.dataset.agentId);
+      if (!a || a.status !== "running") continue;
+      const meta = chip.querySelector(".meta");
+      if (!meta) continue;
+      meta.textContent = fmtAgentElapsed(a.started_at, now) + " · " + fmtAgentTokens(agentTokenTotal(a));
+    }
   }, 1000);
 
   // --- bridge surface (Python → JS) ----------------------------------------

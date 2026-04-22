@@ -1018,12 +1018,19 @@ body.sidebar-hidden #totals {
 .agents-strip .chip.done  { opacity: .65; }
 .agents-strip .chip.done .type { font-weight: 500; }
 .agents-strip .chip .chip-dismiss {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
   background: transparent;
   color: var(--muted);
   border: none;
-  padding: 0 2px;
+  padding: 0;
   margin-left: 2px;
-  font-size: 13px;
+  font-family: inherit;
+  font-size: 14px;
   line-height: 1;
   cursor: pointer;
   border-radius: 3px;
