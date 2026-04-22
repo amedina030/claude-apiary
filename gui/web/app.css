@@ -292,6 +292,34 @@ body.sidebar-hidden #totals {
   border-color: var(--accent);
 }
 
+.bell-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 22px;
+}
+.bell-btn .bell-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.bell-btn .bell-wrap svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.bell-btn[aria-pressed="false"] .bell-wrap::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1.5px;
+  background: currentColor;
+  transform: rotate(-35deg);
+  transform-origin: center;
+}
+
 .status {
   padding: 8px 14px;
   color: var(--muted);

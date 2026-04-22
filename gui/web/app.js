@@ -700,7 +700,6 @@
   function reflectFlashToggle() {
     if (!flashToggleEl) return;
     flashToggleEl.setAttribute("aria-pressed", flashEnabled ? "true" : "false");
-    flashToggleEl.textContent = flashEnabled ? "🔔" : "🔕";
   }
   reflectFlashToggle();
   if (flashToggleEl) {
