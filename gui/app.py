@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Optional
 
 from gui import composer_state, pty_capture, sidebar_state, tabs_state, usage_fetcher
+from gui.permission_bridge import PermissionBridge
+from gui.permission_mcp import BRIDGE_URL_ENV as _PERMISSION_MCP_BRIDGE_URL_ENV
 from gui.scribe_aggregator import NoteEntry, read_body
 from gui.session import Session
 from gui.single_instance import SingleInstance
@@ -154,6 +156,27 @@ class GuiBridge:
             return False
         return self._app.set_session_setting(session_id, key, bool(value))
 
+    def resolve_permission(
+        self,
+        pending_id: str,
+        behavior: str,
+        message: str = "",
+        updated_input: Optional[dict] = None,
+    ) -> bool:
+        """Send a user decision back to a pending MCP permission request.
+
+        `behavior` must be "allow" or "deny". `updated_input` is optional on
+        allow and ignored on deny. Returns False if the pending_id is
+        unknown (already resolved or timed out)."""
+        if not isinstance(pending_id, str) or behavior not in ("allow", "deny"):
+            return False
+        return self._app.resolve_permission(
+            pending_id,
+            behavior,
+            updated_input=updated_input if isinstance(updated_input, dict) else None,
+            message=message if isinstance(message, str) else "",
+        )
+
 
 class App:
     def __init__(self) -> None:
@@ -175,6 +198,10 @@ class App:
             path = pty_capture.next_capture_path(capture_env or None)
             self._capture = pty_capture.CaptureWriter(path)
             print(f"[gui] pty capture → {path}", file=sys.stderr)
+        # Permission-prompt MCP bridge (see scribe C-2026-36). Booted lazily
+        # in start_services so the port env var is set before the first pty
+        # spawn. None when APIARY_PERMISSION_MCP is off.
+        self._permission_bridge: Optional[PermissionBridge] = None
 
     @property
     def active(self) -> Optional[Session]:
@@ -251,6 +278,50 @@ class App:
 
     def _push_handoff_banner(self, count: int) -> None:
         self._eval(f"window.apiary.onHandoffBanner({json.dumps(int(count))});")
+
+    def _push_permission_prompt(self, pending_id: str, payload: dict) -> None:
+        """Surface a permission request from the MCP bridge to the frontend.
+        Called from the bridge's HTTP handler thread; returns immediately —
+        the decision arrives later via GuiBridge.resolve_permission."""
+        self._eval(
+            "window.apiary.onPermissionPrompt("
+            f"{json.dumps(pending_id)}, {json.dumps(payload)}"
+            ");"
+        )
+
+    def _start_permission_bridge(self) -> None:
+        if os.environ.get("APIARY_PERMISSION_MCP") != "1":
+            return
+        if self._permission_bridge is not None:
+            return
+        bridge = PermissionBridge(on_request=self._push_permission_prompt)
+        try:
+            url = bridge.start()
+        except OSError as e:
+            print(f"[gui] permission bridge failed to boot: {e}", file=sys.stderr)
+            return
+        self._permission_bridge = bridge
+        # Exported via process env so the claude subprocess (and, downstream,
+        # the MCP stdio server spawned by claude) can POST decisions here.
+        os.environ[_PERMISSION_MCP_BRIDGE_URL_ENV] = url
+        print(f"[gui] permission bridge listening at {url}", file=sys.stderr)
+
+    def resolve_permission(
+        self,
+        pending_id: str,
+        behavior: str,
+        *,
+        updated_input: Optional[dict] = None,
+        message: str = "",
+    ) -> bool:
+        if self._permission_bridge is None:
+            return False
+        decision: dict = {"behavior": behavior}
+        if behavior == "allow":
+            decision["updatedInput"] = updated_input or {}
+        elif message:
+            decision["message"] = message
+        return self._permission_bridge.resolve(pending_id, decision)
 
     def _push_usage(self, payload: Optional[dict]) -> None:
         """Push the /api/oauth/usage response (or None on failure) to the
@@ -516,6 +587,10 @@ class App:
             return
         self._services_started = True
 
+        # Boot the permission bridge before any session spawn so the URL env
+        # is set when session.py copies os.environ into the pty subprocess.
+        self._start_permission_bridge()
+
         ensure_theme_defaults()
         vars_, theme_err = load_theme()
         self._push_theme(vars_, theme_err)
@@ -636,6 +711,13 @@ class App:
             self._usage_poller = None
         if self._capture is not None:
             self._capture.close()
+        if self._permission_bridge is not None:
+            try:
+                self._permission_bridge.stop()
+            except Exception:
+                pass
+            self._permission_bridge = None
+            os.environ.pop(_PERMISSION_MCP_BRIDGE_URL_ENV, None)
 
 
 def main() -> int:

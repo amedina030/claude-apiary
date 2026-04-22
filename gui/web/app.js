@@ -1276,6 +1276,12 @@
   let awaitingFeedback = false;  // true while claude is in option-4 feedback mode
   let lastDismissedSig = null;
   let lastDismissedAt = 0;
+  // MCP permission-prompt path (see scribe C-2026-36). When claude is
+  // spawned with --permission-prompt-tool, prompts arrive here as
+  // structured { pending_id, tool_name, input, tool_use_id } instead of
+  // being scraped from the xterm buffer. Kept in its own state slot so
+  // the two paths can't fight over promptBannerEl.
+  let mcpPrompt = null;   // { pendingId, payload }
   // Parser lives in prompt_detector.js so it can be Node-tested. If the bundle
   // failed to load, fall back to a no-op stub so the rest of the UI still works.
   const detectPrompt = (window.apiaryPromptDetector && window.apiaryPromptDetector.detectPrompt) || (() => null);
@@ -1332,6 +1338,75 @@
     promptBannerEl.appendChild(row);
     promptBannerEl.classList.remove("hidden");
     flashWindowIfBackground();
+  }
+
+  function renderMcpPromptBanner(pendingId, payload) {
+    // Structured permission request from the MCP bridge. Does NOT go
+    // through prompt_detector — no TUI scraping involved.
+    promptBannerEl.innerHTML = "";
+    inputEl.classList.add("input-blocked");
+    inputEl.placeholder = "Claude is waiting on a permission decision — Allow or Deny";
+
+    const close = document.createElement("button");
+    close.className = "prompt-dismiss";
+    close.type = "button";
+    close.textContent = "✕";
+    close.title = "deny and hide this banner";
+    close.addEventListener("click", () => resolveMcpPrompt("deny", "user dismissed"));
+    promptBannerEl.appendChild(close);
+
+    const q = document.createElement("div");
+    q.className = "prompt-question";
+    const toolName = (payload && payload.tool_name) || "unknown";
+    q.textContent = `Claude wants to use ${toolName}`;
+    promptBannerEl.appendChild(q);
+
+    // Dump the tool input as pretty JSON for the prototype. Polish the
+    // per-tool rendering (Edit diffs, Bash command highlighting) later.
+    const input = (payload && payload.input) || {};
+    try {
+      const pre = document.createElement("pre");
+      pre.className = "prompt-context";
+      pre.textContent = JSON.stringify(input, null, 2);
+      promptBannerEl.appendChild(pre);
+    } catch (_) { /* noop */ }
+
+    const row = document.createElement("div");
+    row.className = "prompt-options";
+    const allow = document.createElement("button");
+    allow.className = "prompt-option selected";
+    allow.type = "button";
+    allow.textContent = "Allow";
+    allow.addEventListener("click", () => resolveMcpPrompt("allow"));
+    row.appendChild(allow);
+    const deny = document.createElement("button");
+    deny.className = "prompt-option";
+    deny.type = "button";
+    deny.textContent = "Deny";
+    deny.addEventListener("click", () => resolveMcpPrompt("deny"));
+    row.appendChild(deny);
+    promptBannerEl.appendChild(row);
+
+    promptBannerEl.classList.remove("hidden");
+    flashWindowIfBackground();
+  }
+
+  function resolveMcpPrompt(behavior, message = "") {
+    const current = mcpPrompt;
+    if (!current) return;
+    mcpPrompt = null;
+    promptBannerEl.classList.add("hidden");
+    promptBannerEl.innerHTML = "";
+    inputEl.classList.remove("input-blocked");
+    inputEl.placeholder = INPUT_PLACEHOLDER_DEFAULT;
+    if (!bridgeReady()) return;
+    try {
+      window.pywebview.api.resolve_permission(
+        current.pendingId, behavior, message, null,
+      );
+    } catch (e) {
+      console.error("resolve_permission failed", e);
+    }
   }
 
   function hidePromptBanner({ cancel = false } = {}) {
@@ -1779,6 +1854,9 @@
       try { term.reset(); } catch (_) {}
       if (typeof hideThinkingBubble === "function") hideThinkingBubble(true);
       if (typeof hidePromptBanner === "function") hidePromptBanner();
+      // Drop any active MCP prompt from the outgoing tab. The bridge will
+      // time out and deny; a fresh request from the new tab will re-banner.
+      mcpPrompt = null;
       try { allNotes = []; renderSidebar(); } catch (_) {}
       try { resetAgentsStripState(); } catch (_) {}
     },
@@ -1881,6 +1959,22 @@
         renderAgentsStrip(Array.isArray(arr) ? arr : []);
       } catch (e) {
         console.error("onAgents parse error", e);
+      }
+    },
+    onPermissionPrompt(pendingId, payloadJson) {
+      // Structured permission request arriving from the MCP bridge. When
+      // APIARY_PERMISSION_MCP=1 the TUI-scraping path does not fire for
+      // permission prompts (claude routes through MCP); the scraper stays
+      // compiled in as a fallback for the env-off case.
+      try {
+        const payload = typeof payloadJson === "string"
+          ? JSON.parse(payloadJson) : payloadJson;
+        // Drop any stale scraped prompt so the two paths don't stack.
+        if (activePrompt) hidePromptBanner();
+        mcpPrompt = { pendingId: String(pendingId || ""), payload: payload || {} };
+        renderMcpPromptBanner(mcpPrompt.pendingId, mcpPrompt.payload);
+      } catch (e) {
+        console.error("onPermissionPrompt parse error", e);
       }
     },
   };

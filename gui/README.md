@@ -8,7 +8,8 @@ A PyWebView + PyInstaller desktop app that wraps Claude Code as a hidden pty sub
 - per-message timestamps and per-message + cumulative token counts
 - a global scribe sidebar across all registered apiary repos (read-only in V1)
 - a hot-reloadable theme via `~/.claude/apiary_gui/theme.json`
-- a small pty output strip for interactive Claude Code UI (permission prompts, plan-mode banners)
+- a small pty output strip for interactive Claude Code UI (plan-mode banners, legacy permission prompts when the MCP path is off)
+- a structured permission-prompt banner wired through a local MCP server (opt-in via `APIARY_PERMISSION_MCP=1`) — see scribe `C-2026-36`
 
 Windows V1 only (pywinpty). Code stays portability-clean (`pathlib`, `os.devnull`, list-form subprocess) so a V2 cross-platform port is a small delta.
 
@@ -70,9 +71,11 @@ Auto-created on first run under `~/.claude/apiary_gui/`:
 
 ## Capturing pty output for new prompt handlers
 
-When Claude Code shows an interactive UI we haven't parsed yet (permission
-prompt variant, plan-mode, MCP OAuth, etc.), capture the raw pty stream so it
-can be added as a fixture to `gui/test_prompt_detector.py`.
+When Claude Code shows an interactive UI we haven't parsed yet (plan-mode
+variant, MCP OAuth, etc.), capture the raw pty stream so it can be added as
+a fixture to `gui/web/test_prompt_detector.js`. Permission prompts should
+now come through the structured MCP path (`APIARY_PERMISSION_MCP=1`), not
+the TUI scraper — only capture them here if reproducing a scraper-mode bug.
 
 ```bash
 # Launch GUI with capture on (writes ~/.claude/apiary_gui/captures/<ts>-<label>.bin)

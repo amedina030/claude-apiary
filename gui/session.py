@@ -18,6 +18,7 @@ import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
+from gui.permission_mcp import permission_tool_arg, write_mcp_config
 from gui.pty_capture import CaptureWriter
 from gui.pty_wrapper import PtySpawnError, PtyWrapper
 from gui.scribe_aggregator import ScribeAggregatorService, aggregate
@@ -223,6 +224,16 @@ class Session:
         # edits" toggle is on. Spawn-time only: flipping the toggle mid-session
         # requires a pty restart (App.set_session_accept_edits handles that).
         extra = ["--permission-mode", "acceptEdits"] if self.accept_edits else []
+        # Opt-in: route permission prompts through a local MCP server instead
+        # of scraping the TUI banner. Enable with APIARY_PERMISSION_MCP=1; the
+        # GUI starts a loopback HTTP bridge so claude's spawned MCP subprocess
+        # can round-trip decisions back to the webview. See scribe C-2026-36.
+        if os.environ.get("APIARY_PERMISSION_MCP") == "1":
+            cfg_path = write_mcp_config()
+            extra += [
+                "--mcp-config", str(cfg_path),
+                "--permission-prompt-tool", permission_tool_arg(),
+            ]
         argv = [self._command] + extra + self._args
         spawn_env = os.environ.copy()
         for key in _CLAUDE_SUBPROC_ENV:
