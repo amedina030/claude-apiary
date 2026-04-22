@@ -173,17 +173,67 @@
   function renderInline(text) {
     return escapeHtml(text).replace(/`([^`\n]+)`/g, "<code>$1</code>");
   }
+  // GFM-ish table: leading + trailing pipe on every row (strict), so ambiguous
+  // prose like "a | b" doesn't accidentally match. Separator row encodes per-
+  // column alignment via :--- / ---: / :---:.
+  const TABLE_RE = /(?:^|\n)(\|[^\n]+\|[ \t]*\n\|[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)+\|[ \t]*\n(?:\|[^\n]+\|[ \t]*(?:\n|$))+)/g;
+  function splitTableRow(row) {
+    return row.replace(/^\s*\|/, "").replace(/\|[ \t]*$/, "").split("|").map((c) => c.trim());
+  }
+  function tableAlign(sep) {
+    const s = sep.trim();
+    const l = s.startsWith(":"), r = s.endsWith(":");
+    if (l && r) return "center";
+    if (r) return "right";
+    if (l) return "left";
+    return "";
+  }
+  function renderTable(block) {
+    const lines = block.replace(/\n$/, "").split("\n");
+    const header = splitTableRow(lines[0]);
+    const aligns = splitTableRow(lines[1]).map(tableAlign);
+    const body = lines.slice(2).map(splitTableRow);
+    const cell = (text, align, tag) => {
+      const style = align ? ` style="text-align:${align}"` : "";
+      return `<${tag}${style}>${renderInline(text)}</${tag}>`;
+    };
+    let html = '<div class="md-table-wrap"><table class="md-table"><thead><tr>';
+    for (let i = 0; i < header.length; i++) html += cell(header[i] || "", aligns[i] || "", "th");
+    html += "</tr></thead><tbody>";
+    for (const row of body) {
+      html += "<tr>";
+      for (let i = 0; i < header.length; i++) html += cell(row[i] || "", aligns[i] || "", "td");
+      html += "</tr>";
+    }
+    html += "</tbody></table></div>";
+    return html;
+  }
+  function renderBlocks(text) {
+    let html = "";
+    let last = 0;
+    let m;
+    TABLE_RE.lastIndex = 0;
+    while ((m = TABLE_RE.exec(text)) !== null) {
+      // The regex's leading \n (if any) belongs to the pre-table segment.
+      const tableStart = m.index + (text[m.index] === "\n" ? 1 : 0);
+      html += renderInline(text.slice(last, tableStart));
+      html += renderTable(m[1]);
+      last = m.index + m[0].length;
+    }
+    html += renderInline(text.slice(last));
+    return html;
+  }
   function renderBody(text) {
     const fence = /```([\w-]*)\n([\s\S]*?)```/g;
     let html = "";
     let last = 0;
     let m;
     while ((m = fence.exec(text)) !== null) {
-      html += renderInline(text.slice(last, m.index));
+      html += renderBlocks(text.slice(last, m.index));
       html += `<pre><code class="lang-${escapeHtml(m[1] || "")}">${escapeHtml(m[2])}</code></pre>`;
       last = m.index + m[0].length;
     }
-    html += renderInline(text.slice(last));
+    html += renderBlocks(text.slice(last));
     return html;
   }
 

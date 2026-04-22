@@ -534,6 +534,27 @@ body.sidebar-hidden #totals {
   border: 1px solid var(--border);
 }
 
+.msg-body .md-table-wrap {
+  overflow-x: auto;
+  margin: 6px 0;
+}
+.msg-body .md-table {
+  border-collapse: collapse;
+  white-space: normal;
+  font-size: calc(var(--font-size) - 0.5px);
+}
+.msg-body .md-table th,
+.msg-body .md-table td {
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+  vertical-align: top;
+}
+.msg-body .md-table th {
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
+  font-weight: 600;
+  text-align: left;
+}
+
 .sidebar {
   background: var(--sidebar-bg);
   border-left: 1px solid var(--border);
