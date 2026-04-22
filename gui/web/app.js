@@ -1540,6 +1540,197 @@
   });
   handoffBannerDismissEl.addEventListener("click", hideHandoffBanner);
 
+  // --- agents strip (ephemeral) --------------------------------------------
+  // Thin row between tabs and header. Only renders when there's ≥1 running
+  // or ≥1 recently-finished agent; stays gone otherwise. Data shape matches
+  // SubagentTracker's AgentState.to_dict() (see gui/subagent_tracker.py).
+  const agentsStripEl = document.getElementById("agents-strip");
+  const agentsChipsEl = document.getElementById("agents-chips");
+  const agentsClearBtnEl = document.getElementById("agents-clear-btn");
+  const agentsDrawerEl = document.getElementById("agents-drawer");
+  let lastAgentsPayload = [];
+  let selectedAgentId = "";
+  const agentsDismissed = (() => {
+    try {
+      const raw = localStorage.getItem("apiary.agents.dismissed");
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch (_) { return new Set(); }
+  })();
+  function persistAgentsDismissed() {
+    try { localStorage.setItem("apiary.agents.dismissed", JSON.stringify(Array.from(agentsDismissed))); }
+    catch (_) {}
+  }
+
+  function fmtAgentTokens(n) {
+    if (!Number.isFinite(n) || n <= 0) return "0";
+    if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
+    return String(n);
+  }
+  function fmtAgentElapsed(startedAtEpoch, nowMs) {
+    const secs = Math.max(0, Math.floor((nowMs - startedAtEpoch * 1000) / 1000));
+    if (secs < 60) return secs + "s";
+    if (secs < 3600) return Math.floor(secs / 60) + "m" + (secs % 60) + "s";
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    return h + "h" + m + "m";
+  }
+  function fmtAgentDuration(startedAt, lastActivity) {
+    const secs = Math.max(0, Math.floor(lastActivity - startedAt));
+    if (secs < 60) return secs + "s";
+    if (secs < 3600) return Math.floor(secs / 60) + "m" + (secs % 60) + "s";
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    return h + "h" + m + "m";
+  }
+  function shortModel(model) {
+    const m = /claude-(opus|sonnet|haiku)/i.exec(model || "");
+    return m ? m[1].toLowerCase() : (model || "").slice(0, 8);
+  }
+  function agentTokenTotal(a) {
+    const t = a.tokens || {};
+    return (t.input | 0) + (t.output | 0) + (t.cache_read | 0) + (t.cache_write | 0);
+  }
+  function buildAgentChip(agent) {
+    const chip = document.createElement("span");
+    chip.className = "chip" + (agent.status === "running" ? "" : " done");
+    if (agent.agent_id === selectedAgentId) chip.classList.add("selected");
+    chip.dataset.agentId = agent.agent_id;
+
+    const dot = document.createElement("span");
+    dot.className = "dot " + (agent.status || "running");
+    chip.appendChild(dot);
+
+    const type = document.createElement("span");
+    type.className = "type";
+    type.textContent = agent.subagent_type || "(agent)";
+    chip.appendChild(type);
+
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    const tot = agentTokenTotal(agent);
+    meta.textContent = (agent.status === "running"
+      ? fmtAgentElapsed(agent.started_at, Date.now())
+      : fmtAgentDuration(agent.started_at, agent.last_activity_at)
+    ) + " · " + fmtAgentTokens(tot);
+    chip.appendChild(meta);
+
+    if (agent.status === "running" && agent.current_tool) {
+      const cur = document.createElement("span");
+      cur.className = "cur";
+      cur.textContent = "· " + agent.current_tool;
+      chip.appendChild(cur);
+    }
+    return chip;
+  }
+  function renderAgentDrawer() {
+    if (!agentsDrawerEl) return;
+    if (!selectedAgentId) {
+      agentsDrawerEl.classList.add("hidden");
+      agentsDrawerEl.innerHTML = "";
+      return;
+    }
+    const agent = lastAgentsPayload.find((a) => a && a.agent_id === selectedAgentId);
+    if (!agent) {
+      agentsDrawerEl.classList.add("hidden");
+      agentsDrawerEl.innerHTML = "";
+      return;
+    }
+    agentsDrawerEl.classList.remove("hidden");
+    agentsDrawerEl.innerHTML = "";
+    const mk = (label, val) => {
+      if (val === undefined || val === null || val === "") return null;
+      const r = document.createElement("div");
+      r.className = "kv";
+      const k = document.createElement("span"); k.className = "k"; k.textContent = label;
+      const v = document.createElement("span"); v.className = "v"; v.textContent = String(val);
+      r.appendChild(k); r.appendChild(v);
+      return r;
+    };
+    const hist = agent.tool_histogram || {};
+    const histEntries = Object.entries(hist).sort((a, b) => b[1] - a[1]);
+    const toolsStr = histEntries.map(([n, c]) => c + " " + n).join(" · ");
+    const rows = [
+      mk("desc", agent.description ? '"' + agent.description + '"' : ""),
+      mk("model", shortModel(agent.model)),
+      mk("tools", toolsStr),
+      mk("in",       fmtAgentTokens(agent.tokens?.input)),
+      mk("out",      fmtAgentTokens(agent.tokens?.output)),
+      mk("cache r",  fmtAgentTokens(agent.tokens?.cache_read)),
+      mk("cache w",  fmtAgentTokens(agent.tokens?.cache_write)),
+      mk("prompt",   agent.prompt_preview),
+    ];
+    for (const r of rows) if (r) agentsDrawerEl.appendChild(r);
+    if (agent.final_text && agent.status !== "running") {
+      const fin = document.createElement("div");
+      fin.className = "final";
+      fin.textContent = agent.final_text;
+      agentsDrawerEl.appendChild(fin);
+    }
+  }
+  function renderAgentsStrip(payload) {
+    lastAgentsPayload = Array.isArray(payload) ? payload : [];
+    const running = [];
+    const recent = [];
+    for (const a of lastAgentsPayload) {
+      if (!a || typeof a !== "object") continue;
+      if (a.status === "running") running.push(a);
+      else if (!agentsDismissed.has(a.agent_id)) recent.push(a);
+    }
+    recent.sort((a, b) => (b.last_activity_at || 0) - (a.last_activity_at || 0));
+
+    if (running.length === 0 && recent.length === 0) {
+      if (agentsStripEl) agentsStripEl.classList.add("hidden");
+      if (agentsClearBtnEl) agentsClearBtnEl.classList.add("hidden");
+      if (selectedAgentId) { selectedAgentId = ""; renderAgentDrawer(); }
+      return;
+    }
+    if (agentsStripEl) agentsStripEl.classList.remove("hidden");
+    if (agentsClearBtnEl) agentsClearBtnEl.classList.toggle("hidden", recent.length === 0);
+    if (agentsChipsEl) {
+      agentsChipsEl.innerHTML = "";
+      for (const a of running) agentsChipsEl.appendChild(buildAgentChip(a));
+      for (const a of recent)  agentsChipsEl.appendChild(buildAgentChip(a));
+    }
+    // If the selected chip vanished (e.g. dismissed), drop the drawer.
+    if (selectedAgentId && !lastAgentsPayload.some((a) => a && a.agent_id === selectedAgentId)) {
+      selectedAgentId = "";
+    }
+    renderAgentDrawer();
+  }
+  function resetAgentsStripState() {
+    lastAgentsPayload = [];
+    selectedAgentId = "";
+    renderAgentsStrip([]);
+  }
+  if (agentsChipsEl) {
+    agentsChipsEl.addEventListener("click", (ev) => {
+      const chip = ev.target.closest(".chip");
+      if (!chip) return;
+      const id = chip.dataset.agentId;
+      if (!id) return;
+      selectedAgentId = (selectedAgentId === id) ? "" : id;
+      renderAgentsStrip(lastAgentsPayload);
+    });
+  }
+  if (agentsClearBtnEl) {
+    agentsClearBtnEl.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      for (const a of lastAgentsPayload) {
+        if (a && a.status !== "running") agentsDismissed.add(a.agent_id);
+      }
+      persistAgentsDismissed();
+      renderAgentsStrip(lastAgentsPayload);
+    });
+  }
+  // Live clock: re-render every second so elapsed strings tick while any
+  // agent is running. Skip entirely when idle — no DOM work, no wakeups.
+  setInterval(() => {
+    if (!lastAgentsPayload.some((a) => a && a.status === "running")) return;
+    renderAgentsStrip(lastAgentsPayload);
+  }, 1000);
+
   // --- bridge surface (Python → JS) ----------------------------------------
   function bridgeReady() {
     return typeof window.pywebview !== "undefined" && window.pywebview.api;
@@ -1574,6 +1765,7 @@
       if (typeof hideThinkingBubble === "function") hideThinkingBubble(true);
       if (typeof hidePromptBanner === "function") hidePromptBanner();
       try { allNotes = []; renderSidebar(); } catch (_) {}
+      try { resetAgentsStripState(); } catch (_) {}
     },
     onMessage(msgJson, sessionId) {
       if (!pushIsForActive(sessionId)) return;
@@ -1666,6 +1858,15 @@
     },
     onUsage(payload) {
       try { renderUsage(payload); } catch (e) { console.error("onUsage error", e); }
+    },
+    onAgents(arrJson, sessionId) {
+      if (!pushIsForActive(sessionId)) return;
+      try {
+        const arr = typeof arrJson === "string" ? JSON.parse(arrJson) : arrJson;
+        renderAgentsStrip(Array.isArray(arr) ? arr : []);
+      } catch (e) {
+        console.error("onAgents parse error", e);
+      }
     },
   };
 

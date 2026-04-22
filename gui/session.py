@@ -21,6 +21,7 @@ from typing import Callable, Optional
 from gui.pty_capture import CaptureWriter
 from gui.pty_wrapper import PtySpawnError, PtyWrapper
 from gui.scribe_aggregator import ScribeAggregatorService, aggregate
+from gui.subagent_tracker import SubagentTracker
 from gui.transcript import (
     Message,
     SessionDiscovery,
@@ -92,6 +93,7 @@ class Session:
         on_pty_exit: Callable,
         on_toast: Callable,
         on_notes: Callable,
+        on_agents: Callable,
         capture: Optional[CaptureWriter] = None,
         command: str = "claude",
         args: Optional[list] = None,
@@ -114,6 +116,7 @@ class Session:
         self._on_pty_exit = lambda code: on_pty_exit(code, sid)
         self._on_toast = lambda text, kind="": on_toast(text, kind, sid)
         self._on_notes = lambda notes, warnings: on_notes(notes, warnings, sid)
+        self._on_agents = lambda agents: on_agents(agents, sid)
         self._capture = capture
         self._command = command
         self._args = list(args or [])
@@ -131,6 +134,7 @@ class Session:
         self.tail: Optional[TranscriptTail] = None
         self.current_path: Optional[Path] = None
         self.aggregator: Optional[ScribeAggregatorService] = None
+        self.subagent_tracker: Optional[SubagentTracker] = None
 
     # --- lifecycle ------------------------------------------------------------
 
@@ -153,6 +157,13 @@ class Session:
             interval=5.0,
         )
         self.aggregator.start()
+        self.subagent_tracker = SubagentTracker(
+            session_jsonl_fn=lambda: self.current_path,
+            session_id_fn=lambda: self.session_id,
+            on_update=lambda agents, _sid: self._on_agents(agents),
+            poll_interval=2.0,
+        )
+        self.subagent_tracker.start()
         return True
 
     def flush_notes(self) -> None:
@@ -168,6 +179,12 @@ class Session:
         return self._start_pty(restart=True)
 
     def stop(self) -> None:
+        if self.subagent_tracker is not None:
+            try:
+                self.subagent_tracker.stop()
+            except Exception:
+                pass
+            self.subagent_tracker = None
         if self.aggregator is not None:
             try:
                 self.aggregator.stop()
