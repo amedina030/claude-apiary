@@ -1017,6 +1017,21 @@ body.sidebar-hidden #totals {
 .agents-strip .chip .cur  { color: var(--accent); }
 .agents-strip .chip.done  { opacity: .65; }
 .agents-strip .chip.done .type { font-weight: 500; }
+.agents-strip .chip .chip-dismiss {
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  padding: 0 2px;
+  margin-left: 2px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.agents-strip .chip .chip-dismiss:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
+}
 .agents-strip .strip-actions {
   flex: 0 0 auto;
   display: flex;
@@ -1045,6 +1060,9 @@ body.sidebar-hidden #totals {
   font-family: var(--font-family);
   font-size: 11px;
   color: var(--fg);
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 .agents-drawer.hidden { display: none; }
 .agents-drawer .kv { display: flex; gap: 8px; margin: 2px 0; }

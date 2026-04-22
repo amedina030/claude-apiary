@@ -1622,6 +1622,14 @@
       cur.textContent = "· " + agent.current_tool;
       chip.appendChild(cur);
     }
+    if (agent.status !== "running") {
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "chip-dismiss";
+      x.setAttribute("aria-label", "dismiss agent");
+      x.textContent = "×";
+      chip.appendChild(x);
+    }
     return chip;
   }
   function renderAgentDrawer() {
@@ -1710,6 +1718,14 @@
       if (!chip) return;
       const id = chip.dataset.agentId;
       if (!id) return;
+      if (ev.target.closest(".chip-dismiss")) {
+        ev.stopPropagation();
+        agentsDismissed.add(id);
+        persistAgentsDismissed();
+        if (selectedAgentId === id) selectedAgentId = "";
+        renderAgentsStrip(lastAgentsPayload);
+        return;
+      }
       selectedAgentId = (selectedAgentId === id) ? "" : id;
       renderAgentsStrip(lastAgentsPayload);
     });

@@ -23,10 +23,17 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
+
+# If a subagent's final assistant record ends with a text block but no
+# `stop_reason` field (intermittent Claude Code behavior — observed in
+# practice), we fall back to marking it done once this many seconds have
+# passed with no further JSONL growth.
+IDLE_DONE_TIMEOUT_S = 10.0
 
 
 @dataclass
@@ -156,10 +163,34 @@ class SubagentTracker:
         for gone in list(self._agents.keys() - seen_ids):
             del self._agents[gone]
 
+        # Idle-timeout fallback: if the last assistant record ended with a
+        # text block and no further growth has happened in IDLE_DONE_TIMEOUT_S
+        # seconds, treat the agent as done. Covers the case where Claude Code
+        # writes a terminal assistant record with a null stop_reason.
+        now = time.time()
+        for entry in self._agents.values():
+            state = entry["state"]
+            if state.status != "running":
+                continue
+            if not entry.get("ends_in_text"):
+                continue
+            if now - state.last_activity_at > IDLE_DONE_TIMEOUT_S:
+                state.status = "done"
+                state.current_tool = ""
+
         agents = [e["state"] for e in self._agents.values()]
         # Running (most recent activity first), then done (most recent first).
         agents.sort(key=lambda a: (a.status != "running", -a.last_activity_at))
         self._emit(agents)
+
+    def snapshot(self) -> list[AgentState]:
+        """Return the current agent list without going through dedup. Used
+        by the app to re-push state after a frontend reload (Ctrl+R) so the
+        chip strip doesn't go blank."""
+        items = list(self._agents.values())
+        agents = [e["state"] for e in items]
+        agents.sort(key=lambda a: (a.status != "running", -a.last_activity_at))
+        return agents
 
     def _emit(self, agents: list[AgentState]) -> None:
         # Deduplicate emits: only push if something actually changed.
@@ -201,7 +232,7 @@ class SubagentTracker:
             current_tool="",
             tokens=TokenTotals(),
         )
-        return {"pos": 0, "buf": "", "state": state}
+        return {"pos": 0, "buf": "", "state": state, "ends_in_text": False}
 
     def _tail_agent(self, entry: dict, jsonl: Path) -> None:
         try:
@@ -232,9 +263,10 @@ class SubagentTracker:
                 rec = json.loads(line)
             except ValueError:
                 continue
-            self._apply_record(entry["state"], rec)
+            self._apply_record(entry, rec)
 
-    def _apply_record(self, state: AgentState, rec: dict) -> None:
+    def _apply_record(self, entry: dict, rec: dict) -> None:
+        state = entry["state"]
         ts = _parse_ts(rec.get("timestamp"))
         if ts is not None:
             state.last_activity_at = ts
@@ -249,6 +281,11 @@ class SubagentTracker:
         if role == "user" and isinstance(content, str) and not state.prompt_preview:
             state.prompt_preview = content.strip()[:300]
 
+        if role == "user":
+            # A new user/tool_result turn means the model will respond again,
+            # so any prior "ends in text" marker is no longer the last state.
+            entry["ends_in_text"] = False
+
         if role == "assistant":
             model = msg.get("model")
             if isinstance(model, str) and not state.model:
@@ -261,12 +298,15 @@ class SubagentTracker:
                 state.tokens.cache_read += int(usage.get("cache_read_input_tokens") or 0)
                 state.tokens.cache_write += int(usage.get("cache_creation_input_tokens") or 0)
 
+            saw_tool_use = False
+            saw_text = False
             if isinstance(content, list):
                 for b in content:
                     if not isinstance(b, dict):
                         continue
                     btype = b.get("type")
                     if btype == "tool_use":
+                        saw_tool_use = True
                         name = b.get("name")
                         if isinstance(name, str) and name:
                             state.current_tool = name
@@ -275,7 +315,14 @@ class SubagentTracker:
                         txt = b.get("text")
                         if isinstance(txt, str) and txt.strip():
                             state.final_text = txt.strip()[:400]
+                            saw_text = True
 
-            if msg.get("stop_reason") == "end_turn":
+            entry["ends_in_text"] = saw_text and not saw_tool_use
+
+            # Any terminal stop_reason flips to done. "tool_use" is the only
+            # non-terminal value; null (missing) is handled by the idle-timeout
+            # fallback in _scan_once.
+            sr = msg.get("stop_reason")
+            if isinstance(sr, str) and sr and sr != "tool_use":
                 state.status = "done"
                 state.current_tool = ""

@@ -608,6 +608,15 @@ class App:
                 sess.flush_notes()
             except Exception as e:
                 print(f"[gui] notes resync failed: {e}", file=sys.stderr)
+            # Re-push current agent snapshot. The tracker dedups by payload
+            # key and won't re-emit on its own after a reload.
+            if sess.subagent_tracker is not None:
+                try:
+                    self._push_agents(
+                        sess.subagent_tracker.snapshot(), sess.session_id
+                    )
+                except Exception as e:
+                    print(f"[gui] agents resync failed: {e}", file=sys.stderr)
         # Re-check unfilled handoffs on reload — user may have just run
         # /backfill-handoffs and the banner should reflect the new count.
         threading.Thread(
