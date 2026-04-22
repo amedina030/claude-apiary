@@ -122,6 +122,25 @@ class GuiBridge:
         """
         return flash_taskbar(self._app._hwnd)
 
+    def refresh_usage(self) -> bool:
+        """Force an immediate /api/oauth/usage fetch + push (T-2026-196).
+
+        Runs synchronously on the pywebview js-api worker thread; the frontend
+        awaits the returned promise, so the refresh button can show a spinner
+        for the exact duration of the HTTP call (capped by the 5s urlopen
+        timeout inside usage_fetcher). ``on_update`` fires inline before we
+        return, so by the time JS resumes, the new payload is already rendered.
+        """
+        poller = self._app._usage_poller
+        if poller is None:
+            return False
+        try:
+            poller.fetch_now()
+        except Exception as e:
+            print(f"[gui] refresh_usage failed: {e}", file=sys.stderr)
+            return False
+        return True
+
     # --- session / tab surface ---------------------------------------------------
 
     def list_sessions(self) -> list[dict]:

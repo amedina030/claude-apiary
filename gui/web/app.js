@@ -673,6 +673,7 @@
   const usageBodyEl = document.getElementById("usage-body");
   const usageVariantToggleEl = document.getElementById("usage-variant-toggle");
   const usageCreditsToggleEl = document.getElementById("usage-credits-toggle");
+  const usageRefreshBtnEl = document.getElementById("usage-refresh-btn");
   const usageTitleEl = document.getElementById("usage-title");
   let lastUsagePayload = null;
   let usageStale = false;
@@ -783,6 +784,19 @@
       catch (_) {}
       reflectCreditsToggle();
       renderUsage(lastUsagePayload);
+    });
+  }
+  if (usageRefreshBtnEl) {
+    usageRefreshBtnEl.addEventListener("click", async () => {
+      if (usageRefreshBtnEl.classList.contains("spinning")) return;
+      usageRefreshBtnEl.classList.add("spinning");
+      try {
+        await window.pywebview.api.refresh_usage();
+      } catch (e) {
+        console.error("refresh_usage failed", e);
+      } finally {
+        usageRefreshBtnEl.classList.remove("spinning");
+      }
     });
   }
 

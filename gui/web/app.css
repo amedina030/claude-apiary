@@ -640,6 +640,17 @@ body.sidebar-hidden #totals {
   border-color: var(--accent);
 }
 
+.usage-mini-btn.spinning {
+  color: var(--accent);
+  border-color: var(--accent);
+  animation: usage-refresh-spin 0.8s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes usage-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Bars variant */
 .usage-bars {
   display: flex;
