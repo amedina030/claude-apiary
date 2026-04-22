@@ -878,7 +878,7 @@ def main() -> int:
         window.events.loaded += _on_loaded
         window.events.closed += _on_closed
 
-        webview.start()
+        webview.start(debug=True)
         return 0
 
 
