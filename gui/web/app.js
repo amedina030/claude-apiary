@@ -19,7 +19,7 @@
   const ptyTermEl = document.getElementById("pty-term");
   const ptyToggleEl = document.getElementById("pty-toggle");
   const ptyToggleLabelEl = document.getElementById("pty-toggle-label");
-  const ptyUnreadEl = document.getElementById("pty-unread");
+  const thinkingSecondsEl = document.getElementById("thinking-seconds");
   const promptBannerEl = document.getElementById("prompt-banner");
   const handoffBannerEl = document.getElementById("handoff-banner");
   const handoffBannerTextEl = document.getElementById("handoff-banner-text");
@@ -415,13 +415,6 @@
       if (msg.tokens) addTokens(msg.tokens);
       if (msg.model) setModel(msg.model);
       lastAsstMsgAt = Date.now();
-      // Claude finished talking — clear the unread badge so the auto-expand
-      // heuristic doesn't fire on stale pty activity that preceded the response.
-      if (ptyStripWrapEl.classList.contains("collapsed")) {
-        unreadCount = 0;
-        ptyUnreadEl.classList.add("hidden");
-        ptyUnreadEl.textContent = "";
-      }
       // Route on stop_reason. "end_turn" = claude is done → kill the bubble
       // immediately. "tool_use" (or other mid-turn reasons) = more messages
       // still coming → hide the current DOM node but keep waitingForAssistant
@@ -1069,10 +1062,10 @@
   // garbage like the previous "stripAnsi-then-show-last-N-lines" approach.
   //
   // After an assistant message lands, claude repaints its status line, spinner
-  // cleanup, tool result boxes, footer hints, etc. Suppress unread counting
-  // during this window so trailing repaints don't fake an "awaiting input" signal.
+  // cleanup, tool result boxes, footer hints, etc. Don't treat those chunks as
+  // real pty activity for purposes of the 15s thinking-idle timeout — otherwise
+  // turn-end detection gets extended by trailing repaints.
   const PTY_POST_MSG_GRACE_MS = 3000;
-  let unreadCount = 0;
   let lastPtyChunkAt = 0;
   let lastAsstMsgAt = 0;
 
@@ -1184,9 +1177,6 @@
 
   function ptyExpand() {
     ptyStripWrapEl.classList.remove("collapsed");
-    unreadCount = 0;
-    ptyUnreadEl.classList.add("hidden");
-    ptyUnreadEl.textContent = "";
     // ResizeObserver will catch the height change and call ensureTermOpen. As
     // a safety net, retry a few times across the CSS transition window too.
     const retryUntil = Date.now() + 400;
@@ -1199,11 +1189,6 @@
   }
   function ptyCollapse() {
     ptyStripWrapEl.classList.add("collapsed");
-  }
-  function bumpUnread() {
-    unreadCount += 1;
-    ptyUnreadEl.classList.remove("hidden");
-    ptyUnreadEl.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
   }
 
   function inPostMessageGrace() {
@@ -1220,6 +1205,21 @@
   const THINKING_IDLE_MS = 15000;
   let thinkingEl = null;
   let waitingForAssistant = false;
+  // Wall-clock ms when the current turn's Enter landed; 0 while idle. Replaces
+  // the old pty-unread chunk counter in the same DOM slot (T-2026-198).
+  let thinkingStartTs = 0;
+
+  function startThinkingCounter() {
+    thinkingStartTs = Date.now();
+    thinkingSecondsEl.textContent = "0s";
+    thinkingSecondsEl.classList.remove("hidden");
+  }
+
+  function stopThinkingCounter() {
+    thinkingStartTs = 0;
+    thinkingSecondsEl.classList.add("hidden");
+    thinkingSecondsEl.textContent = "";
+  }
 
   function ensureThinkingBubble() {
     if (!waitingForAssistant) return;
@@ -1235,7 +1235,10 @@
   }
 
   function hideThinkingBubble(endTurn) {
-    if (endTurn) waitingForAssistant = false;
+    if (endTurn) {
+      waitingForAssistant = false;
+      stopThinkingCounter();
+    }
     if (thinkingEl) {
       thinkingEl.remove();
       thinkingEl = null;
@@ -1244,6 +1247,10 @@
 
   setInterval(() => {
     if (!waitingForAssistant) return;
+    if (thinkingStartTs > 0) {
+      const secs = Math.floor((Date.now() - thinkingStartTs) / 1000);
+      thinkingSecondsEl.textContent = secs + "s";
+    }
     if (Date.now() - lastPtyChunkAt > THINKING_IDLE_MS) {
       hideThinkingBubble(true);
     }
@@ -1261,7 +1268,6 @@
     unknownPromptNotifiedSig = null;
     if (inPostMessageGrace()) return;
     lastPtyChunkAt = Date.now();
-    if (ptyStripWrapEl.classList.contains("collapsed")) bumpUnread();
   }
 
   // Fallback auto-expand: if the pty has been stationary for a while AND the
@@ -2281,6 +2287,7 @@
           // assistant reply would wrongly insert before them.
           messagesEl.querySelectorAll("li.msg.user.queued")
             .forEach(el => el.classList.remove("queued"));
+          startThinkingCounter();
         }
         // If waitingForAssistant is already true, claude is still working on
         // a prior turn — this message is queued, and needs the .queued marker
