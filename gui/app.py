@@ -685,8 +685,12 @@ def main() -> int:
         bridge = GuiBridge(app)
 
         title = window_title()
+        # Boot-time title used only for HWND lookup — window_title() may be empty
+        # (unbranded), which FindWindowW can't match. Reset to the real title
+        # after the DWM dark-mode attribute is applied; the attribute persists.
+        boot_title = f"apiary-gui-boot-{os.getpid()}"
         window = webview.create_window(
-            title=title,
+            title=boot_title,
             url=str(INDEX_HTML),
             js_api=bridge,
             width=1400,
@@ -699,9 +703,10 @@ def main() -> int:
         def _on_loaded() -> None:
             # Apply Win11 dark titlebar after window has rendered (HWND now exists).
             # We look up by title rather than relying on pywebview internals.
-            hwnd = find_window_by_title(title)
+            hwnd = find_window_by_title(boot_title)
             app._hwnd = hwnd
             apply_dark_titlebar(hwnd)
+            window.set_title(title)
             app.start_services()
 
         def _on_closed() -> None:
