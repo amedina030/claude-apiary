@@ -249,14 +249,12 @@
   function scrollToBottom() {
     programmaticScroll = true;
     messagesEl.scrollTop = messagesEl.scrollHeight;
-    messagesEl.classList.remove("user-scrolled");
     // Clear on the microtask after the scroll event drains.
     setTimeout(() => { programmaticScroll = false; }, 0);
   }
   messagesEl.addEventListener("scroll", () => {
     if (programmaticScroll) return;
     sticky = isAtBottom();
-    messagesEl.classList.toggle("user-scrolled", !sticky);
   });
   function maybeScroll() {
     if (!sticky) return;
@@ -1198,11 +1196,12 @@
   }
 
   // --- thinking bubble ------------------------------------------------------
-  // Inline chat spinner + label while claude is working. Label flips between
-  // "Thinking…" (no recent pty activity → waiting on API) and "Working…"
-  // (pty chunks within PTY_ACTIVE_MS → mid tool-call). "esc to cancel" hint
-  // mirrors the CLI affordance. Sticky-bottom when the user scrolls up (see
-  // .messages.user-scrolled rule in app.css).
+  // Inline 3-dot bubble while claude is working. Dots pulse in place when
+  // idle (no recent pty activity → waiting on API) and switch to a wave
+  // cascade when pty chunks arrive within PTY_ACTIVE_MS (mid tool-call).
+  // Motion quality alone signals the state — no text label. Bubble is
+  // position:sticky so it pins to the viewport bottom when the user scrolls
+  // up (iMessage-style typing indicator) — see .msg.thinking in app.css.
   //
   // Turn stays "active" (waitingForAssistant=true) from the user-sent Enter
   // until stop_reason=end_turn or THINKING_IDLE_MS of pty silence. State is
@@ -1233,7 +1232,12 @@
     if (state) {
       waitingForAssistant = state.waitingForAssistant;
       thinkingStartTs = state.thinkingStartTs;
-      lastPtyChunkAt = state.lastPtyChunkAt;
+      // The saved lastPtyChunkAt is frozen at switch-out time (background tab
+      // pty chunks are dropped by pushIsForActive), so it would be stale by
+      // the time we switch back. Re-baseline to now so the 15s idle-kill tick
+      // doesn't instantly murder a bubble we just re-spawned. The real pty
+      // activity will overwrite this as soon as fresh chunks arrive.
+      lastPtyChunkAt = waitingForAssistant ? Date.now() : state.lastPtyChunkAt;
     } else {
       waitingForAssistant = false;
       thinkingStartTs = 0;
@@ -1262,12 +1266,12 @@
     thinkingSecondsEl.textContent = "";
   }
 
-  function updateThinkingLabel() {
+  function updateThinkingState() {
     if (!thinkingEl) return;
-    const labelEl = thinkingEl.querySelector(".thinking-label");
-    if (!labelEl) return;
+    const body = thinkingEl.querySelector(".thinking-body");
+    if (!body) return;
     const ptyActive = lastPtyChunkAt > 0 && (Date.now() - lastPtyChunkAt) < PTY_ACTIVE_MS;
-    labelEl.textContent = ptyActive ? "Working…" : "Thinking…";
+    body.classList.toggle("working", ptyActive);
   }
 
   function ensureThinkingBubble() {
@@ -1277,12 +1281,12 @@
     thinkingEl.className = "msg thinking";
     thinkingEl.innerHTML =
       '<div class="thinking-body">' +
-        '<span class="spinner"></span>' +
-        '<span class="thinking-label">Thinking…</span>' +
-        '<span class="thinking-hint">esc to cancel</span>' +
+        '<span class="dot"></span>' +
+        '<span class="dot"></span>' +
+        '<span class="dot"></span>' +
       '</div>';
     messagesEl.appendChild(thinkingEl);
-    updateThinkingLabel();
+    updateThinkingState();
     maybeScroll();
   }
 
@@ -1303,7 +1307,7 @@
       const secs = Math.floor((Date.now() - thinkingStartTs) / 1000);
       thinkingSecondsEl.textContent = secs + "s";
     }
-    updateThinkingLabel();
+    updateThinkingState();
     // Keep the bubble at the end of the list. Covers the switch-back case
     // where history re-render from the backend can deposit late messages
     // AFTER a just-respawned bubble, leaving it stranded mid-chat.

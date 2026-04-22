@@ -434,49 +434,51 @@ body.sidebar-hidden #totals {
 .thinking-body {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 4px;
+  padding: 8px 12px;
   background: var(--asst-msg-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   width: fit-content;
 }
 
-.thinking-body .spinner {
-  width: 10px;
-  height: 10px;
+.thinking-body .dot {
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  border: 1.5px solid var(--border);
-  border-top-color: var(--accent);
+  background: var(--muted);
   display: inline-block;
-  animation: thinking-spin 0.9s linear infinite;
   flex-shrink: 0;
+  animation: thinking-pulse 1.4s ease-in-out infinite;
 }
 
-@keyframes thinking-spin {
-  to { transform: rotate(360deg); }
+/* Working state: same three dots, but a traveling wave (staggered) instead
+   of a synchronized pulse. Motion-quality alone signals the state change. */
+.thinking-body.working .dot {
+  animation: thinking-wave 0.9s ease-in-out infinite;
+}
+.thinking-body.working .dot:nth-child(2) { animation-delay: 0.15s; }
+.thinking-body.working .dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50%     { opacity: 1;    transform: scale(1.1); }
 }
 
-.thinking-body .thinking-label {
-  color: var(--muted);
-  font-size: 13px;
+@keyframes thinking-wave {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30%           { opacity: 1;    transform: translateY(-3px); }
 }
 
-.thinking-body .thinking-hint {
-  color: var(--muted);
-  opacity: 0.55;
-  font-size: 11px;
-  margin-left: 2px;
-}
-
-/* Sticky-bottom: when the user has scrolled up, pin the bubble to the
-   bottom edge of the chat viewport so it stays visible instead of being
-   lost below the fold. */
-.messages.user-scrolled .msg.thinking {
+/* Sticky-bottom: pin the bubble to the bottom edge of the chat viewport
+   at all times. When the user is scrolled to the bottom the bubble sits
+   in natural flow (sticky is a no-op); when they scroll up it stays
+   pinned to the viewport bottom — like the "typing" indicator in
+   iMessage. No user-scrolled gate needed. */
+.msg.thinking {
   position: sticky;
   bottom: 6px;
   z-index: 2;
-  align-self: flex-start;
 }
 
 .msg.prompt .prompt-choice {
