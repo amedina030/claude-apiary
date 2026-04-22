@@ -239,12 +239,6 @@ class App:
         for w in warnings:
             print(f"[scribe] {w}", file=sys.stderr)
 
-    def _push_agents(self, agents: list, session_id: str = "") -> None:
-        payload = json.dumps([a.to_dict() for a in agents])
-        self._eval(
-            f"window.apiary.onAgents({payload}, {json.dumps(session_id)});"
-        )
-
     def _push_theme(self, vars_: dict, err: Optional[str]) -> None:
         if err:
             self._push_toast(err, "error")
@@ -333,7 +327,6 @@ class App:
             on_pty_exit=self._push_pty_exit,
             on_toast=self._push_toast,
             on_notes=self._push_notes,
-            on_agents=self._push_agents,
             capture=self._capture,
             command=launch.get("command", "claude"),
             args=list(launch.get("args", [])),
