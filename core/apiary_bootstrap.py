@@ -135,10 +135,12 @@ def _run(args: argparse.Namespace) -> int:
     resolved = resolve(args.profile, profiles_dir)
 
     existing_settings = _load_existing_settings(target_repo)
-    merged_settings, owned_keys = _merge_profile_into_settings(existing_settings, resolved.merged)
-
     state_path = target_repo / ".apiary" / _STATE_FILENAME
     prior_state = _read_state(state_path)
+    prior_owned_keys = prior_state.get("applied_apiary_keys", []) if prior_state else []
+    merged_settings, owned_keys = _merge_profile_into_settings(
+        existing_settings, resolved.merged, prior_owned_keys
+    )
 
     if prior_state is None:
         wipes = _detect_wipe_candidates(existing_settings, resolved.merged)
@@ -187,7 +189,7 @@ def _load_existing_settings(target_repo: Path) -> dict:
 
 
 def _merge_profile_into_settings(
-    existing: dict, profile_merged: dict
+    existing: dict, profile_merged: dict, prior_owned_keys: list[str] | None = None
 ) -> tuple[dict, list[str]]:
     """Return (new_settings, apiary_owned_top_level_keys).
 
@@ -198,11 +200,20 @@ def _merge_profile_into_settings(
     verbatim. Users who want to add permissions / hooks alongside an
     apiary-managed config should extend via a custom profile or a
     settings.local.json layer, not by hand-editing the managed file.
+
+    ``prior_owned_keys`` is the ``applied_apiary_keys`` from the last
+    bootstrap, if any. Keys that used to be apiary-owned but are no
+    longer declared by the profile are removed from the output — without
+    this, a profile edit that drops a key (say ``hooks``) would leave
+    the old value in place forever.
     """
     owned_keys = sorted(profile_merged.keys())
     out = dict(existing)
     for key in owned_keys:
         out[key] = profile_merged[key]
+    if prior_owned_keys:
+        for removed in set(prior_owned_keys) - set(owned_keys):
+            out.pop(removed, None)
     return out, owned_keys
 
 

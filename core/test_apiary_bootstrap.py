@@ -179,6 +179,78 @@ class TestReRunDrift(_BootstrapHarness):
         self.assertEqual(rc, 0)
 
 
+class TestKeyEviction(_BootstrapHarness):
+    """T-2026-207: profile edits that drop a key should remove it from settings.json."""
+
+    def test_removed_key_evicted_on_rerun(self):
+        _write_profile(
+            self.apiary,
+            "base",
+            json.dumps(
+                {
+                    "$schema_version": 1,
+                    "permissions": {"allow": ["X"]},
+                    "hooks": {"PostToolUse": [{"matcher": "Grep", "hooks": []}]},
+                }
+            ),
+        )
+        rc = self._cli("base")
+        self.assertEqual(rc, 0)
+        self.assertIn("hooks", self._settings())
+
+        _write_profile(
+            self.apiary,
+            "base",
+            '{"$schema_version": 1, "permissions": {"allow": ["X"]}}',
+        )
+        rc = self._cli("base", "--force")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("hooks", self._settings())
+        self.assertEqual(self._settings()["permissions"], {"allow": ["X"]})
+        self.assertEqual(self._state()["applied_apiary_keys"], ["permissions"])
+
+    def test_eviction_drift_triggers_prompt(self):
+        _write_profile(
+            self.apiary,
+            "base",
+            json.dumps(
+                {
+                    "$schema_version": 1,
+                    "permissions": {"allow": ["X"]},
+                    "hooks": {"PostToolUse": [{"matcher": "Grep", "hooks": []}]},
+                }
+            ),
+        )
+        self._cli("base")
+
+        _write_profile(
+            self.apiary,
+            "base",
+            '{"$schema_version": 1, "permissions": {"allow": ["X"]}}',
+        )
+        rc = self._cli("base", stdin_tty=True, stdin_answer="n\n")
+        self.assertEqual(rc, 1)
+        self.assertIn("hooks", self._settings())
+
+    def test_user_added_top_level_key_not_evicted(self):
+        _write_profile(
+            self.apiary,
+            "base",
+            '{"$schema_version": 1, "permissions": {"allow": ["X"]}}',
+        )
+        self._cli("base")
+
+        settings = self._settings()
+        settings["theme"] = "dark"
+        (self.target / ".claude" / "settings.json").write_text(
+            json.dumps(settings, indent=2), encoding="utf-8"
+        )
+
+        rc = self._cli("base")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self._settings()["theme"], "dark")
+
+
 class TestReplaceDeepMerge(_BootstrapHarness):
 
     def test_replace_wrapper_replaces_list(self):
