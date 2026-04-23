@@ -1,0 +1,20 @@
+// Baseline apiary profile — the minimum set of permissions every
+// apiary-managed repo needs. Child profiles should `extends: ["base"]`
+// rather than duplicate these entries.
+//
+// Permissions here cover: scribe CLI (notes.py), transcript extraction
+// hook, session-identity probes, and the session registry / history
+// files written by core hooks.
+{
+  "$schema_version": 1,
+  "permissions": {
+    "allow": [
+      "Bash(python *scribe/notes.py *)",
+      "Bash(python *core/hooks/extract_transcript.py *)",
+      "Bash(python -c *session-identity*)",
+      "Read(*/.claude/.session-history.json)",
+      "Read(*/.claude/.session-identity-*)",
+      "Read(*/core/config/session-registry.json)"
+    ]
+  }
+}

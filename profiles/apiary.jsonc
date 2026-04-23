@@ -1,0 +1,37 @@
+// Apiary self-dogfood profile — what the apiary repo itself bootstraps
+// from. Adds the two reference observers on top of the base permissions
+// so the Phase 1 pipeline fires live in every apiary session.
+//
+//   dogfood     — catches Grep calls; noisy by design, throttle later.
+//   ue_llm_toolkit — reference observer; dormant in apiary repos (the
+//                    tool-name prefix only matches in Unreal sessions).
+//
+// Downstream apiary-managed repos should use `base` directly, or a
+// domain-specific profile like `unreal`. This profile is specifically
+// for apiary itself.
+{
+  "$schema_version": 1,
+  "extends": ["base"],
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python ~/.claude/apiary_launch.py observers/dogfood.py"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__ue_llm_toolkit__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python ~/.claude/apiary_launch.py observers/ue_llm_toolkit.py"
+          }
+        ]
+      }
+    ]
+  }
+}
