@@ -148,8 +148,6 @@ def _run(args: argparse.Namespace) -> int:
             ):
                 raise BootstrapError("aborted by user")
 
-    _warn_missing_observer_scripts(resolved.merged, apiary_repo)
-
     _write_settings(target_repo, merged_settings)
     _write_state(state_path, resolved, owned_keys)
 
@@ -234,44 +232,6 @@ def _write_lf(path: Path, text: str) -> None:
     stays byte-identical across Windows/macOS/Linux re-runs."""
     with path.open("w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
-
-
-def _warn_missing_observer_scripts(profile_merged: dict, apiary_repo: Path) -> None:
-    """AC-9: warn if a profile references an observer script that doesn't exist."""
-    hooks = profile_merged.get("hooks")
-    if not isinstance(hooks, dict):
-        return
-    missing: list[str] = []
-    for event_name, entries in hooks.items():
-        if not isinstance(entries, list):
-            continue
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            for hook in entry.get("hooks", []) or []:
-                if not isinstance(hook, dict):
-                    continue
-                cmd = hook.get("command", "")
-                if not isinstance(cmd, str):
-                    continue
-                rel = _extract_observer_relpath(cmd)
-                if rel and not (apiary_repo / rel).is_file():
-                    missing.append(rel)
-    for rel in sorted(set(missing)):
-        print(
-            f"warning: profile references observer script '{rel}' which is missing "
-            f"from {apiary_repo}. Hook entry written anyway.",
-            file=sys.stderr,
-        )
-
-
-def _extract_observer_relpath(command: str) -> str | None:
-    """Pull a trailing ``observers/<file>.py`` token out of a hook command string."""
-    tokens = command.split()
-    for tok in reversed(tokens):
-        if tok.startswith("observers/") and tok.endswith(".py"):
-            return tok
-    return None
 
 
 def _print_diff(existing: dict, new: dict, owned_keys: list[str]) -> None:

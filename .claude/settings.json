@@ -8,27 +8,5 @@
       "Read(*/.claude/.session-identity-*)",
       "Read(*/core/config/session-registry.json)"
     ]
-  },
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Grep",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python ~/.claude/apiary_launch.py observers/dogfood.py"
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__ue_llm_toolkit__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python ~/.claude/apiary_launch.py observers/ue_llm_toolkit.py"
-          }
-        ]
-      }
-    ]
   }
 }

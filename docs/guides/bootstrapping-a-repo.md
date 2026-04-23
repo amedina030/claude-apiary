@@ -37,22 +37,12 @@ The installer at `~/.claude/apiary_bootstrap.py` finds the apiary repo via `~/.c
 Profiles live at `<apiary-repo>/profiles/<name>.jsonc`. JSONC (JSON + `//` and `/* */` comments + trailing commas) so manifests can explain themselves.
 
 ```jsonc
-// profiles/unreal.jsonc
+// profiles/my-project.jsonc
 {
   "$schema_version": 1,
   "extends": ["base"],
   "permissions": {
-    "allow": ["Bash(ue-editor --headless *)"]
-  },
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "mcp__ue_llm_toolkit__.*",
-        "hooks": [
-          {"type": "command", "command": "python ~/.claude/apiary_launch.py observers/ue_llm_toolkit.py"}
-        ]
-      }
-    ]
+    "allow": ["Bash(poetry run pytest *)"]
   }
 }
 ```
@@ -63,12 +53,19 @@ Profiles live at `<apiary-repo>/profiles/<name>.jsonc`. JSONC (JSON + `//` and `
 |------|------|-------------|
 | `$schema_version` | int | Must be `1` for the current loader |
 
-### Optional fields
+### Supported keys
+
+Apiary writes to `.claude/settings.json` only. The profile keys that correspond to this file are:
 
 | Field | Type | Description |
 |------|------|-------------|
 | `extends` | list of strings | Parent profile names merged left-to-right before this profile |
-| anything else | any | Carried through verbatim and merged into `.claude/settings.json` |
+| `permissions` | object | Claude Code permissions object (`allow`, `deny`, `ask` lists) |
+| `hooks` | object | Claude Code hooks config (`PostToolUse`, `PreToolUse`, etc.) |
+
+**Unknown keys pass through unchanged** — the profile loader doesn't validate key names — but Claude Code ignores keys it doesn't recognize. Keep profiles tight to the supported set.
+
+**Not in scope for profiles.** MCP servers live in `.mcp.json` (Claude Code's domain — use `claude mcp add`). User-specific customizations go in `.claude/settings.local.json` (Claude Code merges it natively on top of `settings.json`).
 
 ## Merge semantics
 
@@ -80,7 +77,10 @@ Profiles live at `<apiary-repo>/profiles/<name>.jsonc`. JSONC (JSON + `//` and `
 
 Between the resolved profile and the target repo's existing `.claude/settings.json`: **apiary-owned top-level keys are fully replaced**, non-apiary top-level keys pass through verbatim. Replace (not merge) at the top-level boundary keeps re-runs idempotent — a re-run with an unchanged profile is a content-level no-op.
 
-If you want to extend an apiary-managed key (e.g. add a custom permission alongside the profile's), author a local profile that extends the apiary one rather than hand-editing the managed file.
+**Customizing alongside the managed file.** Don't hand-edit `.claude/settings.json` — the next bootstrap run wipes your changes. Two clean options:
+
+- **Personal customizations** — put them in `.claude/settings.local.json` (gitignored by default). Claude Code reads both files and merges them natively: lists like `permissions.allow` concatenate and dedupe across the two, scalars take the higher-precedence value, and `deny` always beats `allow`. No apiary involvement required.
+- **Shared project customizations** — author a custom profile that extends a built-in one (e.g. `my-project.jsonc` extending `base`) and bootstrap with that. Commit the profile to apiary so teammates can use it too.
 
 ## Adding a new profile
 
@@ -98,8 +98,7 @@ The ship-set profiles are:
 | Profile | Extends | Scope |
 |---------|---------|-------|
 | `base.jsonc` | — | Minimum permissions every apiary-managed repo needs (scribe CLI, transcript hook, session identity) |
-| `apiary.jsonc` | `base` | Apiary's self-dogfood — adds the dogfood + ue_llm_toolkit observer hooks |
-| `unreal.jsonc` | `base` | Unreal Engine projects — adds the ue_llm_toolkit observer hook only |
+| `apiary.jsonc` | `base` | Apiary's self-dogfood — extends `base` with no additions today, a hook for repo-specific additions later |
 
 ## Re-run drift
 
@@ -120,13 +119,12 @@ On any run after the first, the bootstrap:
 | `extends` cycle | 2 | Prints the cycle path (`a -> b -> a`) |
 | `$schema_version` missing or unsupported | 2 | Asks the user to upgrade apiary |
 | JSONC parse error | 2 | Carries the file path + line number |
-| Observer script referenced by a hook command but missing from `observers/` | 0 | Warns on stderr; the hook entry is written anyway (AC-9) |
 | Aborted at drift prompt | 1 | State and settings unchanged |
 | Non-TTY re-run without `--force` | 1 | Says "re-run with --force to apply non-interactively" |
 
 ## Pre-existing `.apiary/` directories
 
-If the target already has `.apiary/scribe/` or other subsystems in place but no `bootstrap_state.json`, the bootstrap treats the run as fresh. Existing scribe, research, compass, and observer state are left untouched (AC-21).
+If the target already has `.apiary/scribe/` or other subsystems in place but no `bootstrap_state.json`, the bootstrap treats the run as fresh. Existing scribe, research, and compass state are left untouched.
 
 ## Related
 

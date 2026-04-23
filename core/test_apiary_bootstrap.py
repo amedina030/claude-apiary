@@ -16,7 +16,6 @@ from core import apiary_bootstrap
 def _make_apiary_repo(tmp: Path) -> Path:
     apiary = tmp / "apiary"
     (apiary / "profiles").mkdir(parents=True)
-    (apiary / "observers").mkdir(parents=True)
     return apiary
 
 
@@ -224,73 +223,6 @@ class TestErrors(_BootstrapHarness):
         self.assertEqual(rc, 2)
         err_text = stderr.getvalue()
         self.assertIn("broken.jsonc", err_text)
-
-
-class TestMissingObserverWarning(_BootstrapHarness):
-
-    def test_ac9_missing_observer_warns_but_writes_hook(self):
-        _write_profile(
-            self.apiary,
-            "obs",
-            json.dumps(
-                {
-                    "$schema_version": 1,
-                    "hooks": {
-                        "PostToolUse": [
-                            {
-                                "matcher": "Grep",
-                                "hooks": [
-                                    {
-                                        "type": "command",
-                                        "command": "python ~/.claude/apiary_launch.py observers/ghost.py",
-                                    }
-                                ],
-                            }
-                        ]
-                    },
-                }
-            ),
-        )
-        stderr = io.StringIO()
-        with mock.patch("sys.stderr", stderr):
-            rc = self._cli("obs")
-        self.assertEqual(rc, 0)
-        err_text = stderr.getvalue()
-        self.assertIn("warning", err_text.lower())
-        self.assertIn("observers/ghost.py", err_text)
-        # Hook entry still written.
-        hooks = self._settings()["hooks"]
-        self.assertEqual(hooks["PostToolUse"][0]["matcher"], "Grep")
-
-    def test_existing_observer_produces_no_warning(self):
-        (self.apiary / "observers" / "real.py").write_text("", encoding="utf-8")
-        _write_profile(
-            self.apiary,
-            "obs",
-            json.dumps(
-                {
-                    "$schema_version": 1,
-                    "hooks": {
-                        "PostToolUse": [
-                            {
-                                "matcher": "Grep",
-                                "hooks": [
-                                    {
-                                        "type": "command",
-                                        "command": "python ~/.claude/apiary_launch.py observers/real.py",
-                                    }
-                                ],
-                            }
-                        ]
-                    },
-                }
-            ),
-        )
-        stderr = io.StringIO()
-        with mock.patch("sys.stderr", stderr):
-            rc = self._cli("obs")
-        self.assertEqual(rc, 0)
-        self.assertNotIn("warning", stderr.getvalue().lower())
 
 
 class TestPreExistingApiaryDir(_BootstrapHarness):

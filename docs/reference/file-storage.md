@@ -132,18 +132,6 @@ The state file is the signal that re-run drift-detection fires against. Absent s
 
 Profile manifests themselves live at `<apiary-repo>/profiles/<name>.jsonc` (not target-repo state). See [Bootstrapping a repo](../guides/bootstrapping-a-repo.md).
 
-## Observer data
-
-Observer state lives at `<repo-root>/.apiary/observer/` under the umbrella `.apiary/` directory. All git-ignored.
-
-| Path | Description |
-|------|-------------|
-| `observer/<YYYY-MM-DD>/<session-id>.jsonl` | One JSONL line per successful PostToolUse dispatch — fields: `timestamp`, `observer`, `schema_version`, `event` (full `ObservationEvent`), `summary` (handler's observer-specific dict). Appended under `FileLock` |
-| `observer/<YYYY-MM-DD>/<session-id>.jsonl.lock` | Sidecar lock file from `core/utils/filelock.FileLock`. Benign; left on disk after writes |
-| `observer.log` | Failure log (file, sibling to the `observer/` directory). Written only when an observer handler raises — stack trace + raw payload per entry |
-
-Observer failures also file a scribe blocker note via `scribe/notes.py add --type blocker` so silent observer breakage surfaces at next session startup.
-
 ## Transcripts
 
 | File | Path | Description |
