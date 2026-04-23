@@ -16,7 +16,6 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 | Command | Source | Description |
 |---------|--------|-------------|
 | `/apiary-context` | `core/commands/apiary-context.md` | Load apiary toolkit context (scribe, budgeter, runner, portability rules) |
-| `/backfill-handoffs` | `core/commands/backfill-handoffs.md` | Process unseen session transcripts into handoff notes |
 | `/budgeter-log` | `budgeter/commands/budgeter-log.md` | Toggle token logging on/off |
 | `/budgeter-warn` | `budgeter/commands/budgeter-warn.md` | Toggle cost estimation warnings on/off |
 | `/budgeter-session-warn` | `budgeter/commands/budgeter-session-warn.md` | Toggle session-length wrap-up nudge on/off |
@@ -49,6 +48,6 @@ Toggles persist across sessions.
 These features have no toggle — they're always on:
 
 - **Scribe** (notes, learnings, handoffs) — `/note`, `/notes`
-- **Session startup** — context injected automatically via `UserPromptSubmit` hook (toggled by `auto-startup` flag); `/backfill-handoffs` processes unseen transcripts
+- **Session startup** — context injected automatically via `UserPromptSubmit` hook (toggled by `auto-startup` flag)
 - **Install checker** — verifies installed files match repo on first tool call
 - **Transcript saver** — saves session transcript on session end

@@ -54,7 +54,6 @@ All scribe data lives inside the repo checkout at `<repo-root>/.apiary/scribe/`,
 | `notes.jsonl` | Active notes (TODOs, handoffs, decisions, etc.) |
 | `notes_archive.jsonl` | Archived notes (older than 30 days) |
 | `learnings.jsonl` | Project-specific learnings (no auto-archive) |
-| `backfill_skip.json` | Session IDs skipped from unseen-session detection |
 | `memory/` | Permanent memory files, indexed via `MEMORY.md` |
 
 **Layout gate.** Scribe's path resolution is selected by the `APIARY_STATE_LAYOUT` environment variable. When set to `repo`, the helpers in `scribe.notes` run `git rev-parse --show-toplevel` on the session's cwd and resolve state under `<repo-root>/.apiary/scribe/`. When unset (current default), they fall back to the legacy per-project location `~/.claude/projects/<project-key>/{notes,notes_archive,learnings}.jsonl` where `<project-key>` comes from the `.claude-project-key` marker file. Todo #268 flips the default; decision #269 tracks the migration.

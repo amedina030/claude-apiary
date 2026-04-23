@@ -368,7 +368,7 @@ class TestPathAllowlist(unittest.TestCase):
         # ~/.claude/projects/<key>/ used to be allowlisted; the design
         # was reversed to keep the runner inside the worktree. Such
         # tickets must be hand-fixed.
-        bad = str(Path.home() / ".claude" / "projects" / "claude-apiary" / "backfill_skip.json")
+        bad = str(Path.home() / ".claude" / "projects" / "claude-apiary" / "state.json")
         steps = [_step(1, "create", "x", files=[bad])]
         errors = _check_path_allowlist(steps)
         self.assertEqual(len(errors), 1)

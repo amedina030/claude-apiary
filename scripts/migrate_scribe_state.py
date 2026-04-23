@@ -15,7 +15,6 @@ Files migrated:
   - notes.jsonl
   - notes_archive.jsonl
   - learnings.jsonl
-  - backfill_skip.json
   - memory/                 (recursive)
 
 Files skipped:
@@ -47,7 +46,6 @@ STATE_FILES = (
     "notes.jsonl",
     "notes_archive.jsonl",
     "learnings.jsonl",
-    "backfill_skip.json",
 )
 SKIP_SUFFIXES = (".lock",)
 

@@ -8,12 +8,10 @@ Covers two layers:
   2. core.hooks.startup_prompt_hook._run() skips summary/learnings injection
      when the session's cwd is not inside a git repo (fallback behavior).
 """
-import json
 import os
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -208,103 +206,6 @@ class StartupPromptHookSkipTests(unittest.TestCase):
         kwargs = mock_subproc.call_args.kwargs
         self.assertEqual(kwargs["cwd"], str(fake_repo))
         self.assertEqual(kwargs["env"].get(notes.STATE_LAYOUT_ENV), "repo")
-
-
-class BackfillSkipPathResolverTests(unittest.TestCase):
-    """_resolve_backfill_skip_path picks the right path under each layout
-    (todo #265). Legacy callers that monkey-patch BACKFILL_SKIP_PATH keep
-    working because the resolver still reads that global in legacy mode.
-    """
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.tmp_path = Path(self._tmp.name).resolve()
-
-    def tearDown(self):
-        self._tmp.cleanup()
-
-    def test_legacy_returns_module_global(self):
-        fake_legacy = self.tmp_path / "legacy_skip.json"
-        with mock.patch.dict(os.environ, {notes.STATE_LAYOUT_ENV: "legacy"}):
-            with mock.patch.object(startup, "BACKFILL_SKIP_PATH", fake_legacy):
-                resolved = startup._resolve_backfill_skip_path()
-        self.assertEqual(resolved, fake_legacy)
-
-    def test_repo_layout_resolves_under_scribe_state_dir(self):
-        fake_repo = self.tmp_path / "session-repo"
-        fake_repo.mkdir()
-        with mock.patch.dict(os.environ, {notes.STATE_LAYOUT_ENV: "repo"}), \
-                mock.patch.object(notes, "_git_repo_root", return_value=fake_repo):
-            resolved = startup._resolve_backfill_skip_path(start=fake_repo)
-        self.assertEqual(
-            resolved,
-            fake_repo / ".apiary" / "scribe" / "backfill_skip.json",
-        )
-
-    def test_repo_layout_without_git_repo_returns_none(self):
-        non_repo = self.tmp_path / "not-a-repo"
-        non_repo.mkdir()
-        with mock.patch.dict(os.environ, {notes.STATE_LAYOUT_ENV: "repo"}), \
-                mock.patch.object(notes, "_git_repo_root", return_value=None):
-            resolved = startup._resolve_backfill_skip_path(start=non_repo)
-        self.assertIsNone(resolved)
-
-
-class LoadSkipPrefixesRepoLayoutTests(unittest.TestCase):
-    """load_skip_prefixes reads from the repo-layout path when the env var
-    is set and the session's cwd is inside a git repo.
-    """
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.tmp_path = Path(self._tmp.name).resolve()
-        self.fake_repo = self.tmp_path / "session-repo"
-        self.fake_repo.mkdir()
-        self.state_dir = self.fake_repo / ".apiary" / "scribe"
-        self.state_dir.mkdir(parents=True)
-
-    def tearDown(self):
-        self._tmp.cleanup()
-
-    def test_reads_from_repo_state_dir(self):
-        skip_file = self.state_dir / "backfill_skip.json"
-        skip_file.write_text(
-            json.dumps({"skipped": [{"session_id": "deadbeef" + "0" * 28}]}),
-            encoding="utf-8",
-        )
-        with mock.patch.dict(os.environ, {notes.STATE_LAYOUT_ENV: "repo"}), \
-                mock.patch.object(notes, "_git_repo_root", return_value=self.fake_repo):
-            result = startup.load_skip_prefixes(start=self.fake_repo)
-        self.assertEqual(result, {"deadbeef"})
-
-    def test_missing_repo_skip_file_returns_empty(self):
-        with mock.patch.dict(os.environ, {notes.STATE_LAYOUT_ENV: "repo"}), \
-                mock.patch.object(notes, "_git_repo_root", return_value=self.fake_repo):
-            result = startup.load_skip_prefixes(start=self.fake_repo)
-        self.assertEqual(result, set())
-
-    def test_repo_layout_without_git_repo_returns_empty(self):
-        with mock.patch.dict(os.environ, {notes.STATE_LAYOUT_ENV: "repo"}), \
-                mock.patch.object(notes, "_git_repo_root", return_value=None):
-            result = startup.load_skip_prefixes(start=self.tmp_path)
-        self.assertEqual(result, set())
-
-    def test_legacy_layout_ignores_repo_state_dir(self):
-        """APIARY_STATE_LAYOUT=legacy must route to the module-global path."""
-        legacy_skip = self.tmp_path / "legacy-skip.json"
-        legacy_skip.write_text(
-            json.dumps({"skipped": [{"session_id": "aaaabbbb" + "0" * 28}]}),
-            encoding="utf-8",
-        )
-        repo_skip = self.state_dir / "backfill_skip.json"
-        repo_skip.write_text(
-            json.dumps({"skipped": [{"session_id": "cccc" + "0" * 32}]}),
-            encoding="utf-8",
-        )
-        with mock.patch.dict(os.environ, {notes.STATE_LAYOUT_ENV: "legacy"}):
-            with mock.patch.object(startup, "BACKFILL_SKIP_PATH", legacy_skip):
-                result = startup.load_skip_prefixes(start=self.fake_repo)
-        self.assertEqual(result, {"aaaabbbb"})
 
 
 if __name__ == "__main__":

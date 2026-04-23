@@ -28,9 +28,6 @@ class MigrateHappyPathTests(unittest.TestCase):
         (self.source / "learnings.jsonl").write_text(
             '{"id":1}\n', encoding="utf-8"
         )
-        (self.source / "backfill_skip.json").write_text(
-            '{"skipped": []}', encoding="utf-8"
-        )
         # Lock siblings that must be skipped
         (self.source / "notes.jsonl.lock").write_text("", encoding="utf-8")
         (self.source / "learnings.jsonl.lock").write_text("", encoding="utf-8")
@@ -51,7 +48,6 @@ class MigrateHappyPathTests(unittest.TestCase):
         self.assertTrue((self.target / "notes.jsonl").is_file())
         self.assertTrue((self.target / "notes_archive.jsonl").is_file())
         self.assertTrue((self.target / "learnings.jsonl").is_file())
-        self.assertTrue((self.target / "backfill_skip.json").is_file())
         for name in migrate.STATE_FILES:
             self.assertEqual(report["files"][name], "copied")
 
@@ -191,7 +187,6 @@ class MissingSourceTests(unittest.TestCase):
             self.assertEqual(report["files"]["notes.jsonl"], "copied")
             self.assertEqual(report["files"]["notes_archive.jsonl"], "missing")
             self.assertEqual(report["files"]["learnings.jsonl"], "missing")
-            self.assertEqual(report["files"]["backfill_skip.json"], "missing")
 
 
 if __name__ == "__main__":

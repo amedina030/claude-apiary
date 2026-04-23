@@ -74,27 +74,18 @@ Tool call N starts
 ```
 Session starts
   → /startup runs (first message)
-    → startup.py init: registers session, detects unseen transcripts
-    → Startup agent: generates handoffs from unseen transcripts
+    → startup.py init: registers session identity
     → startup.py summary: loads active notes + learnings
   → ... normal work ...
   → Session ends
     → stop_session.py: logs final tool cost, cleans temp files
     → check_install_stop.py: no-op (session-scoped flags persist)
-    → save_transcript.py: saves transcript for next session's handoff
+    → save_transcript.py: saves transcript for the archive
 ```
 
 ### Cross-session continuity
 
-```
-Session N ends
-  → save_transcript.py saves transcript
-Session N+1 starts
-  → /startup detects Session N's transcript is unseen
-  → Startup agent reads transcript, generates handoff note
-  → Summary loads handoff + all active notes/learnings
-  → Claude has full context of what happened in Session N
-```
+Handoffs are authored by the user at wrap-up time (`/wrapup`) and stored via scribe. The next session reads the latest handoff through `startup.py summary`, which injects it into the opening context block alongside active notes and learnings.
 
 ## Shared core
 

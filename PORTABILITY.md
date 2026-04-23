@@ -59,7 +59,6 @@ Scribe state lives in the repo checkout under the umbrella `.apiary/` directory,
 - `<repo-root>/.apiary/scribe/<type>/<year>/archive/` — auto-archived old notes (moved after 30 days)
 - `<repo-root>/.apiary/scribe/learnings/<year>/` — accumulated project learnings (same typed-year layout)
 - `<repo-root>/.apiary/scribe/migration_id_map.json` — legacy bare-int to typed-year ID map for CLI lookups
-- `<repo-root>/.apiary/scribe/backfill_skip.json` — sessions skipped from unseen-session detection
 - `<repo-root>/.apiary/scribe/memory/` — long-lived memory facts loaded at session start
 - `<repo-root>/.apiary/hooks/` — hook runtime state (sanitizer hit log, etc.)
 

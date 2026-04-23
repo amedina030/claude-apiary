@@ -4,9 +4,6 @@ UserPromptSubmit hook — injects startup context on the first user message.
 
 Always injects: identity, notes summary, learnings, CLI reference.
 
-Unseen session detection (and automatic handoff backfilling) stays in
-the PreToolUse startup_hook.py — gated by the ``auto-startup`` flag.
-
 Runner subprocesses (auto_refine, auto_plan, auto_harden, executor,
 approval) set ``APIARY_RUNNER_SUBPROCESS=1`` to skip injection — they
 are one-shot workers that don't use any of this context, and the

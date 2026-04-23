@@ -38,7 +38,7 @@ Hooks are Python scripts registered in `~/.claude/settings.json` that fire at Cl
 | Session injector | PreToolUse | `core/hooks/inject_session.py` | Injects session identity (session_id, role, mission) into hook context |
 | Transcript saver | Stop | `core/hooks/save_transcript.py` | Saves a stripped copy of the session transcript for handoff generation |
 | Startup context injector | UserPromptSubmit | `core/hooks/startup_prompt_hook.py` | Injects identity, notes summary, learnings, and CLI reference on the first user message |
-| Unseen session detector | PreToolUse | `core/hooks/startup_hook.py` | Detects unseen session transcripts on first tool call (gated by `auto-startup` flag). Also reports context-rules drift if `~/.claude/CLAUDE.md` has an installed managed zone whose rule hashes diverge from source. |
+| Context-rules drift detector | PreToolUse | `core/hooks/startup_hook.py` | Reports context-rules drift if `~/.claude/CLAUDE.md` has an installed managed zone whose rule hashes diverge from source. Gated by `auto-startup` flag. |
 | Context-rule error reminder | PostToolUse | `core/hooks/context_rule_error_reminder.py` | On Bash failure (non-zero exit, traceback, interrupted, is_error), injects the `recover_from_trivial_errors` behavioral rule and the `Errors Signal Doc Gaps` principle. Skips successes and hook denials. |
 | Learnings injector | PreToolUse | `core/hooks/learnings_inject_hook.py` | Injects the top-3 most-relevant learnings before Edit/Write/Bash, scored against the tool call payload (file paths, command text, tags). Fail-open on any error path — tool call still proceeds. |
 

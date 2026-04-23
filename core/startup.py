@@ -17,7 +17,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.session import CLAUDE_DIR, SessionId, load_identity
+from core.session import CLAUDE_DIR, SessionId
 from core.utils.project import get_project_key
 from scribe.notes import (
     format_age, run_auto_archive, scribe_state_dir, _use_repo_layout,
@@ -27,29 +27,6 @@ from scribe.store import ScribeStore, TYPE_FOLDERS
 
 HISTORY_PATH = CLAUDE_DIR / ".session-history.json"
 REGISTRY_PATH = PROJECT_ROOT / "core" / "config" / "session-registry.json"
-# Legacy backfill_skip.json location. Repo layout (APIARY_STATE_LAYOUT=repo,
-# decision #269 / todo #265) resolves it under the session's repo root
-# instead via _resolve_backfill_skip_path(). Existing tests that monkey-patch
-# this module global continue to exercise the legacy code path.
-BACKFILL_SKIP_PATH = CLAUDE_DIR / "projects" / "claude-apiary" / "backfill_skip.json"
-
-
-def _resolve_backfill_skip_path(start=None):
-    """Return the backfill_skip.json path under the active state layout.
-
-    Repo layout: ``<scribe_state_dir(start)>/backfill_skip.json`` when the
-    session's cwd (*start*) is inside a git repo; ``None`` when it is not
-    — callers must treat None as "no skip list" (empty set).
-
-    Legacy layout: returns the module-level ``BACKFILL_SKIP_PATH`` so that
-    existing monkey-patches on that global keep working verbatim.
-    """
-    if _use_repo_layout():
-        state_dir = scribe_state_dir(start)
-        if state_dir is None:
-            return None
-        return state_dir / "backfill_skip.json"
-    return BACKFILL_SKIP_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -101,113 +78,11 @@ def validate_registry(role, mission):
         return False
 
 
-def load_skip_prefixes(start=None):
-    """Load 8-char lowercase session-id prefixes from backfill_skip.json.
-
-    *start* optionally points resolution at a specific session's repo
-    (repo layout, todo #265). When omitted, the active layout decides
-    whether to read from the legacy ~/.claude/projects/ path or the
-    in-repo .apiary/scribe/ path via _resolve_backfill_skip_path().
-
-    Tolerates missing/empty/malformed file by returning an empty set.
-    """
-    path = _resolve_backfill_skip_path(start)
-    if path is None:
-        return set()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return set()
-    if not isinstance(data, dict):
-        return set()
-    skipped = data.get("skipped")
-    if not isinstance(skipped, list):
-        return set()
-    prefixes = set()
-    for entry in skipped:
-        if not isinstance(entry, dict):
-            continue
-        sid = entry.get("session_id", "")
-        if not isinstance(sid, str) or not sid:
-            continue
-        prefix = sid.strip()[:8].lower()
-        if prefix:
-            prefixes.add(prefix)
-    return prefixes
-
-
-def get_unseen_sessions(session_id, wants_role, wants_mission, project_key, *, start=None):
-    """Find sessions that match wants and don't have handoff notes yet.
-
-    *start* optionally points path resolution at the session's repo (used by
-    the repo-layout code path in startup_prompt_hook — decision #269, todo #264).
-    """
-    # Read session history
-    if not HISTORY_PATH.exists():
-        return []
-    try:
-        history = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
-
-    if not isinstance(history, list):
-        return []
-
-    # Empty session_id = no current session to exclude (GUI banner path).
-    if session_id:
-        sid = SessionId(session_id)
-        def _not_current(s):
-            return not sid.matches(s.get("session_id", ""))
-    else:
-        def _not_current(_s):
-            return True
-
-    matching = [
-        s for s in history
-        if _not_current(s)
-        and s.get("role", "user") == wants_role
-        and s.get("mission", "general") == wants_mission
-    ]
-
-    # Get existing handoff session IDs from the v2 scribe store (active AND
-    # archived). The auto-archive rule "keep only the latest handoff per
-    # role/mission" means prior handoffs land in the archive almost
-    # immediately — without scanning archived, they'd reappear as "unseen".
-    # Also union in legacy flat-jsonl reads so pre-v2 layouts still resolve.
-    state_dir = scribe_state_dir(start) if _use_repo_layout() else None
-    if state_dir is None:
-        state_dir = PROJECTS_DIR / project_key
-    handoff_sids: set[str] = set()
-    try:
-        store = ScribeStore(state_dir)
-        for h in store.list_notes(note_type="handoff", status="all"):
-            sid_val = (h.get("session") or h.get("session_id") or "").strip()
-            if sid_val:
-                handoff_sids.add(sid_val[:8].lower())
-    except (OSError, KeyError):
-        pass
-    handoff_sids |= load_skip_prefixes(start=start)
-
-    unseen = []
-    for s in matching:
-        s_short = s.get("session_id", "")[:8].lower()
-        if s_short and s_short not in handoff_sids:
-            unseen.append({
-                "session_id": s.get("session_id", ""),
-                "transcript_path": s.get("transcript_path", ""),
-                "role": s.get("role", "user"),
-                "mission": s.get("mission", "general"),
-            })
-
-    return unseen
-
-
 def run_init(session_id: str, first_message: str, repo_dir: str) -> dict:
-    """Run init logic and return result dict (identity + unseen_sessions)."""
+    """Run init logic and return result dict with identity."""
     identity = parse_identity(first_message)
     registered = validate_registry(identity["role"], identity["mission"])
 
-    # Write identity file
     sid = SessionId(session_id)
     identity_file = sid.identity_path()
     identity_data = {
@@ -219,24 +94,7 @@ def run_init(session_id: str, first_message: str, repo_dir: str) -> dict:
     }
     identity_file.write_text(json.dumps(identity_data), encoding="utf-8")
 
-    # Find unseen sessions. In repo layout (APIARY_STATE_LAYOUT=repo) path
-    # helpers resolve state under <git-root(repo_dir)>/.apiary/scribe/; the
-    # legacy layout keeps using the project key. Passing start=repo_dir makes
-    # the resolution work even when the hook process's cwd differs from the
-    # session's cwd.
-    project_key = get_project_key(repo_dir)
-    unseen = get_unseen_sessions(
-        session_id,
-        identity["wants_role"],
-        identity["wants_mission"],
-        project_key,
-        start=Path(repo_dir) if repo_dir else None,
-    )
-
-    return {
-        "identity": {**identity_data, "registered": registered},
-        "unseen_sessions": unseen,
-    }
+    return {"identity": {**identity_data, "registered": registered}}
 
 
 def cmd_init(args):
@@ -385,108 +243,6 @@ def cmd_summary(args):
 
 
 # ---------------------------------------------------------------------------
-# skip command — append a session to backfill_skip.json
-# ---------------------------------------------------------------------------
-
-def run_skip(session_id: str, reason: str, repo_dir: str | None = None,
-             date: str | None = None) -> tuple[str, Path]:
-    """Append *session_id* to backfill_skip.json. Idempotent on 8-char prefix.
-
-    Returns ("added"|"exists", path). Raises FileNotFoundError when the path
-    cannot be resolved (repo layout with no git repo at *repo_dir*).
-    """
-    start = Path(repo_dir) if repo_dir else None
-    path = _resolve_backfill_skip_path(start)
-    if path is None:
-        raise FileNotFoundError(
-            "cannot resolve backfill_skip.json path (not inside a git repo)"
-        )
-
-    sid = session_id.strip()
-    if not sid:
-        raise ValueError("session_id required")
-
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            data = {"skipped": []}
-    else:
-        data = {"skipped": []}
-    if not isinstance(data, dict) or not isinstance(data.get("skipped"), list):
-        data = {"skipped": []}
-
-    prefix = sid[:8].lower()
-    for entry in data["skipped"]:
-        if isinstance(entry, dict) and entry.get("session_id", "")[:8].lower() == prefix:
-            return "exists", path
-
-    date_str = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    data["skipped"].append({
-        "session_id": sid,
-        "reason": reason or "unspecified",
-        "date": date_str,
-    })
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    return "added", path
-
-
-def cmd_skip(args):
-    try:
-        status, path = run_skip(args.session_id, args.reason, args.repo_dir, args.date)
-    except (FileNotFoundError, ValueError) as e:
-        print(f"error: {e}", file=sys.stderr)
-        sys.exit(1)
-    prefix = args.session_id.strip()[:8].lower()
-    print(f"{status}: {prefix} ({path})")
-
-
-# ---------------------------------------------------------------------------
-# unseen command — list unseen sessions with optional current-session exclusion
-# ---------------------------------------------------------------------------
-
-def run_unseen(
-    role: str,
-    mission: str,
-    repo_dir: str | None,
-    session_id: str = "",
-) -> list[dict]:
-    """Return unseen sessions for (role, mission).
-
-    *session_id* — when given, excludes that session. The GUI passes the
-    value of ``CLAUDE_CODE_SESSION_ID`` from the process that launched it
-    (so the launching claude-code session isn't surfaced in its own banner).
-    The skill path passes its own invoking session id.
-    """
-    repo_dir = repo_dir or str(PROJECT_ROOT)
-    project_key = get_project_key(repo_dir)
-    start = Path(repo_dir)
-    return get_unseen_sessions(
-        session_id,
-        role,
-        mission,
-        project_key,
-        start=start,
-    )
-
-
-def cmd_unseen(args):
-    try:
-        result = run_unseen(
-            args.role,
-            args.mission,
-            args.repo_dir,
-            session_id=args.session_id or "",
-        )
-    except Exception as e:
-        print(json.dumps({"error": str(e), "sessions": [], "count": 0}))
-        sys.exit(1)
-    print(json.dumps({"count": len(result), "sessions": result}))
-
-
-# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -504,32 +260,11 @@ def main():
     p_summary.add_argument("--role", default="user")
     p_summary.add_argument("--mission", default="general")
 
-    p_skip = sub.add_parser("skip", help="append a session to backfill_skip.json")
-    p_skip.add_argument("--session-id", required=True)
-    p_skip.add_argument("--reason", default="unspecified")
-    p_skip.add_argument("--repo-dir", default=None,
-                        help="session's repo root (default: cwd)")
-    p_skip.add_argument("--date", default=None,
-                        help="YYYY-MM-DD (default: today UTC)")
-
-    p_unseen = sub.add_parser(
-        "unseen",
-        help="list unseen sessions for role/mission as JSON",
-    )
-    p_unseen.add_argument("--repo-dir", default=None)
-    p_unseen.add_argument("--role", default="user")
-    p_unseen.add_argument("--mission", default="general")
-    p_unseen.add_argument("--session-id", default="",
-                          help="exclude this session id (usually the invoking "
-                               "session or, for the GUI, $CLAUDE_CODE_SESSION_ID)")
-
     args = parser.parse_args()
 
     commands = {
         "init": cmd_init,
         "summary": cmd_summary,
-        "skip": cmd_skip,
-        "unseen": cmd_unseen,
     }
     if args.command in commands:
         commands[args.command](args)

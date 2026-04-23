@@ -2,11 +2,6 @@
 """
 PreToolUse hook — injects context-rules drift warnings on first tool call.
 
-Was also responsible for surfacing unseen-session handoffs, but that moved
-to the GUI banner (T-2026-164): the GUI queries ``core/startup.py unseen``
-on launch and prompts the user to run /backfill-handoffs. Terminal-only
-sessions no longer auto-trigger backfill — users invoke the skill by hand.
-
 Skipped entirely when ``auto-startup`` flag is off and for runner
 subprocesses (``APIARY_RUNNER_SUBPROCESS=1``).
 """

@@ -65,9 +65,7 @@ def _append_to_history(session_id, transcript_path):
 
 def main():
     # Runner stage subprocesses are not real user sessions — never log them
-    # to .session-history.json or .last-session.json. They would otherwise
-    # appear permanently in the unseen-sessions list every time a fresh
-    # session starts (#223).
+    # to .session-history.json or .last-session.json (#223).
     if os.environ.get(RUNNER_SUBPROCESS_ENV_VAR) == "1":
         sys.exit(0)
 
