@@ -207,6 +207,10 @@ body {
   gap: 6px;
 }
 
+.header-left {
+  position: relative;
+}
+
 .totals {
   display: inline-flex;
   flex-wrap: wrap;
@@ -237,6 +241,60 @@ body {
 
 .badge.model {
   border-color: color-mix(in srgb, var(--accent) 60%, var(--border) 40%);
+}
+
+button.badge.model {
+  cursor: pointer;
+  font: inherit;
+  line-height: inherit;
+}
+
+button.badge.model:hover,
+button.badge.model[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, var(--badge-bg));
+}
+
+.model-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--badge-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  min-width: 120px;
+}
+
+.model-menu.hidden {
+  display: none;
+}
+
+.model-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--fg);
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  font-family: var(--font-family);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.model-menu-item:hover,
+.model-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--accent) 22%, var(--badge-bg));
+  outline: none;
+}
+
+.model-menu-item[aria-current="true"] {
+  color: var(--accent);
 }
 
 #main {
@@ -1461,48 +1519,6 @@ body.sidebar-hidden #totals {
   color: var(--fg);
   border-color: var(--accent);
 }
-
-.handoff-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  background: var(--accent-dim, rgba(88, 166, 255, 0.12));
-  border-bottom: 1px solid var(--border);
-  color: var(--fg);
-  font-size: 13px;
-}
-
-.handoff-banner.hidden { display: none; }
-
-.handoff-banner-text {
-  flex: 1 1 auto;
-}
-
-.handoff-banner-btn {
-  background: var(--accent);
-  color: var(--bg);
-  border: none;
-  padding: 4px 10px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: 12px;
-  font-family: var(--font-family);
-}
-
-.handoff-banner-btn:hover { filter: brightness(1.15); }
-
-.handoff-banner-dismiss {
-  background: none;
-  border: none;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-  padding: 0 4px;
-}
-
-.handoff-banner-dismiss:hover { color: var(--fg); }
 
 #input {
   width: 100%;

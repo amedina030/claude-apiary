@@ -15,6 +15,8 @@
   const totWeighted = document.getElementById("tot-weighted");
   const totCtx = document.getElementById("tot-ctx");
   const modelNameEl = document.getElementById("model-name");
+  const modelBadgeEl = document.getElementById("model-badge");
+  const modelMenuEl = document.getElementById("model-menu");
   const toastsEl = document.getElementById("toasts");
   const ptyStripWrapEl = document.getElementById("pty-strip-wrap");
   const ptyTermEl = document.getElementById("pty-term");
@@ -22,10 +24,6 @@
   const ptyToggleLabelEl = document.getElementById("pty-toggle-label");
   const thinkingSecondsEl = document.getElementById("thinking-seconds");
   const promptBannerEl = document.getElementById("prompt-banner");
-  const handoffBannerEl = document.getElementById("handoff-banner");
-  const handoffBannerTextEl = document.getElementById("handoff-banner-text");
-  const handoffBannerBtnEl = document.getElementById("handoff-banner-btn");
-  const handoffBannerDismissEl = document.getElementById("handoff-banner-dismiss");
   const inputEl = document.getElementById("input");
   const INPUT_PLACEHOLDER_DEFAULT = inputEl.getAttribute("placeholder") || "";
   const sidebarSearchEl = document.getElementById("sidebar-search");
@@ -166,7 +164,67 @@
     if (!model || model === currentModel) return;
     currentModel = model;
     modelNameEl.textContent = humanizeModel(model);
+    refreshModelMenuActive();
   }
+
+  function refreshModelMenuActive() {
+    const id = (currentModel || "").toLowerCase();
+    modelMenuEl.querySelectorAll(".model-menu-item").forEach((btn) => {
+      const alias = btn.dataset.modelAlias;
+      const active = alias && alias !== "default" && id.includes(alias);
+      if (active) btn.setAttribute("aria-current", "true");
+      else btn.removeAttribute("aria-current");
+    });
+  }
+
+  function openModelMenu() {
+    modelMenuEl.classList.remove("hidden");
+    modelBadgeEl.setAttribute("aria-expanded", "true");
+  }
+  function closeModelMenu() {
+    modelMenuEl.classList.add("hidden");
+    modelBadgeEl.setAttribute("aria-expanded", "false");
+  }
+  function toggleModelMenu() {
+    if (modelMenuEl.classList.contains("hidden")) openModelMenu();
+    else closeModelMenu();
+  }
+
+  modelBadgeEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleModelMenu();
+  });
+  modelMenuEl.addEventListener("click", (e) => {
+    const target = e.target.closest(".model-menu-item");
+    if (!target) return;
+    const alias = target.dataset.modelAlias;
+    if (!alias) return;
+    closeModelMenu();
+    if (!bridgeReady()) return;
+    // Don't fire while a prompt banner is waiting for input — the slash
+    // command would land inside claude's numbered-option prompt instead.
+    if (activePrompt) {
+      toast("Resolve the prompt banner above first.", "error");
+      return;
+    }
+    // Slash commands go straight through send_input — no tentative user
+    // bubble (matches the composer's own /-command path).
+    window.pywebview.api.send_input(`/model ${alias}`);
+  });
+  document.addEventListener("click", (e) => {
+    if (modelMenuEl.classList.contains("hidden")) return;
+    if (modelMenuEl.contains(e.target) || modelBadgeEl.contains(e.target)) return;
+    closeModelMenu();
+  });
+  // Capture phase so Escape intercepts before the composer's inputEl handler
+  // runs — otherwise "Esc to close menu" would also interrupt claude.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (modelMenuEl.classList.contains("hidden")) return;
+    e.stopPropagation();
+    closeModelMenu();
+    modelBadgeEl.focus();
+  }, true);
 
   // --- markdown render (Phase 1 minimal — markdown-it lands later) ---------
   function escapeHtml(s) {
@@ -1171,6 +1229,13 @@
     // later via ResizeObserver once the container actually has size.
     term.open(ptyTermEl);
     termOpened = true;
+    // Skip fit()/pty_resize when the pane is collapsed. fit() against a
+    // 0-height container shrinks the grid to 0 rows/cols, making buffer.active
+    // unreadable so the prompt detector stops seeing "Do you want to proceed?"
+    // until the user manually opens the terminal. Constructor defaults
+    // (cols:120, rows:30) keep the buffer usable; ptyExpand/ResizeObserver
+    // refit once the container actually has size.
+    if (ptyStripWrapEl.classList.contains("collapsed")) return;
     try { fitAddon.fit(); } catch (_) {}
     if (bridgeReady() && typeof window.pywebview.api.pty_resize === "function") {
       window.pywebview.api.pty_resize(term.rows, term.cols);
@@ -1842,28 +1907,6 @@
   setInterval(runDetect, PROMPT_DETECT_INTERVAL_MS);
   function scheduleDetect() { /* retained as hook point; poll now drives detection */ }
 
-  // --- handoff banner (T-2026-164) ------------------------------------------
-  // Shown on GUI start when core/startup.py reports unfilled handoffs. Button
-  // types `/backfill-handoffs` into the composer (user presses Enter to submit).
-  // Manual dismiss only — auto-hide was aggressive if the user alt-tabbed during
-  // launch, and the × button is always available.
-  function hideHandoffBanner() {
-    handoffBannerEl.classList.add("hidden");
-  }
-  function showHandoffBanner(count) {
-    const n = Number(count) || 0;
-    if (n <= 0) { hideHandoffBanner(); return; }
-    handoffBannerTextEl.textContent =
-      `${n} previous session${n === 1 ? "" : "s"} not yet summarized.`;
-    handoffBannerEl.classList.remove("hidden");
-  }
-  handoffBannerBtnEl.addEventListener("click", () => {
-    inputEl.value = "/backfill-handoffs";
-    inputEl.focus();
-    hideHandoffBanner();
-  });
-  handoffBannerDismissEl.addEventListener("click", hideHandoffBanner);
-
   // --- agents strip (ephemeral) --------------------------------------------
   // Thin row between tabs and header. Only renders when there's ≥1 running
   // or ≥1 recently-finished agent; stays gone otherwise. Data shape matches
@@ -2328,9 +2371,6 @@
       } catch (e) {
         console.error("onTheme parse error", e);
       }
-    },
-    onHandoffBanner(count) {
-      try { showHandoffBanner(count); } catch (e) { console.error("onHandoffBanner error", e); }
     },
     onUsage(payload) {
       try { renderUsage(payload); } catch (e) { console.error("onUsage error", e); }

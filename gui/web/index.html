@@ -9,11 +9,6 @@
   </head>
   <body>
     <div id="app">
-      <div id="handoff-banner" class="handoff-banner hidden" role="status" aria-live="polite">
-        <span id="handoff-banner-text" class="handoff-banner-text"></span>
-        <button id="handoff-banner-btn" type="button" class="handoff-banner-btn">Ask Claude to /backfill-handoffs</button>
-        <button id="handoff-banner-dismiss" type="button" class="handoff-banner-dismiss" aria-label="dismiss">×</button>
-      </div>
       <nav id="tabs" class="tabs" aria-label="open sessions"></nav>
       <div id="agents-strip" class="agents-strip hidden" aria-label="active sub-agents">
         <span class="strip-label">agents</span>
@@ -33,9 +28,15 @@
       <div id="agents-drawer" class="agents-drawer hidden" aria-live="polite"></div>
       <header id="header">
         <div class="header-left">
-          <span id="model-badge" class="badge model" title="Active model (most recent assistant record)">
+          <button id="model-badge" type="button" class="badge model" aria-haspopup="menu" aria-expanded="false">
             <span class="k">model</span> <span id="model-name">—</span>
-          </span>
+          </button>
+          <ul id="model-menu" class="model-menu hidden" role="menu" aria-labelledby="model-badge">
+            <li role="none"><button type="button" role="menuitem" class="model-menu-item" data-model-alias="default">default</button></li>
+            <li role="none"><button type="button" role="menuitem" class="model-menu-item" data-model-alias="opus">opus</button></li>
+            <li role="none"><button type="button" role="menuitem" class="model-menu-item" data-model-alias="sonnet">sonnet</button></li>
+            <li role="none"><button type="button" role="menuitem" class="model-menu-item" data-model-alias="haiku">haiku</button></li>
+          </ul>
         </div>
         <div class="header-right">
           <button id="flash-toggle" type="button" class="sidebar-toggle-btn bell-btn" aria-label="toggle taskbar flash when Claude is waiting" aria-pressed="true">
