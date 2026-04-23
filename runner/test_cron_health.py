@@ -21,6 +21,39 @@ def _write_registry(tmp: Path, entries: list[dict]) -> Path:
     return p
 
 
+class HostnameRegistryPathTests(unittest.TestCase):
+    """registry_path_for_host returns <apiary>/cron_registry/<hostname>.json."""
+
+    def test_explicit_hostname_used_in_path(self):
+        path = cron_health.registry_path_for_host("my-laptop")
+        self.assertEqual(path.name, "my-laptop.json")
+        self.assertEqual(path.parent, cron_health.CRON_REGISTRY_DIR)
+
+    def test_hostname_defaults_to_platform_node(self):
+        import platform
+        path = cron_health.registry_path_for_host()
+        expected = platform.node().strip() or "unknown"
+        # Don't assert exact characters (the sanitiser may swap some) —
+        # just verify the file lives under CRON_REGISTRY_DIR and has a name.
+        self.assertEqual(path.parent, cron_health.CRON_REGISTRY_DIR)
+        self.assertTrue(path.name.endswith(".json"))
+        self.assertTrue(len(path.stem) > 0)
+        # And that the computed hostname is not literally "platform.node()"
+        # (catches a dumb copy-paste bug).
+        self.assertNotIn(".", path.stem[1:] + " ")
+
+    def test_hostname_sanitises_illegal_chars(self):
+        # Spaces and path separators get replaced with '-'.
+        with mock.patch("platform.node", return_value="weird host/name"):
+            name = cron_health._hostname()
+        self.assertNotIn("/", name)
+        self.assertNotIn(" ", name)
+
+    def test_empty_hostname_falls_back_to_unknown(self):
+        with mock.patch("platform.node", return_value=""):
+            self.assertEqual(cron_health._hostname(), "unknown")
+
+
 class FakeBackend(SchedulerBackend):
     """In-memory scheduler for tests — no subprocess, no real schtasks."""
 

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 import shutil
 import sys
 from dataclasses import dataclass
@@ -43,7 +44,28 @@ from .schedulers.base import (
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 APIARY_REPO_ROOT = SCRIPT_DIR.parent
-REGISTRY_PATH = SCRIPT_DIR / "cron_registry.json"
+CRON_REGISTRY_DIR = APIARY_REPO_ROOT / "cron_registry"
+
+
+def _hostname() -> str:
+    """Sanitized hostname for use as a filename. Falls back to 'unknown'."""
+    raw = platform.node().strip()
+    if not raw:
+        return "unknown"
+    # Strip characters that can be ugly or illegal in paths on any OS.
+    safe = "".join(c if c.isalnum() or c in "-_." else "-" for c in raw)
+    return safe or "unknown"
+
+
+def registry_path_for_host(hostname: Optional[str] = None) -> Path:
+    """Return the per-host registry path. Defaults to the current hostname."""
+    return CRON_REGISTRY_DIR / f"{hostname or _hostname()}.json"
+
+
+# Kept at module scope so tests can still ``mock.patch.object(cron_health,
+# "REGISTRY_PATH", tempfile)``. Recomputed per-hostname at load time when not
+# explicitly overridden.
+REGISTRY_PATH = registry_path_for_host()
 PREFIX = "\\apiary\\"
 
 EXIT_OK = 0

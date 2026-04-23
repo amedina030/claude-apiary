@@ -645,7 +645,7 @@ Silent on any failure — cost logging never breaks a stage. Sums all numeric fi
 
 ## runner/cron_health.py
 
-Check or repair the host OS scheduler against apiary's canonical scheduled-entry registry (`runner/cron_registry.json`). Detects drift when the repo moves, files rename, or the registered command points at a path that no longer exists — the trigger case was the `pipeline` → `runner` rename silently breaking an overnight cron entry.
+Check or repair the host OS scheduler against apiary's canonical scheduled-entry registry (`cron_registry/<hostname>.json` at the apiary repo root). Each machine maintains its own file — named after `platform.node()` — so multi-machine setups don't fight over a single shared registry. Detects drift when the repo moves, files rename, or the registered command points at a path that no longer exists.
 
 ```bash
 python ~/.claude/apiary_launch.py runner/cron_health.py check

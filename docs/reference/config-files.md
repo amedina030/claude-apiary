@@ -32,9 +32,9 @@ Runner stage settings. Located in the repo at `runner/config.json`. All values h
 
 Loaded by `runner/config_loader.py`: `get(section, key, default)`.
 
-## runner/cron_registry.json
+## cron_registry/&lt;hostname&gt;.json
 
-Canonical list of scheduled OS-scheduler entries that apiary owns. Located in the repo at `runner/cron_registry.json`. Read by `runner/cron_health.py` (`check` and `repair` subcommands) and by `scripts/bootstrap.py`'s tail-end drift report.
+Canonical list of scheduled OS-scheduler entries that apiary owns on a given machine. Located at `<apiary-repo>/cron_registry/<hostname>.json` where `<hostname>` is `platform.node()` (sanitised for filesystem use). Each machine has its own file so multi-machine git-sync setups don't collide. Read by `runner/cron_health.py` (`check` and `repair` subcommands) and by `scripts/bootstrap.py`'s tail-end drift report.
 
 ```json
 {
