@@ -1,23 +1,20 @@
-"""Resolve which repo a runner pass operates on (multi-repo support, phase 1).
-
-The runner historically operated only on the apiary checkout it ships with.
-Phase 1 of the multi-repo rearchitecture introduces the *concept* of a
-configurable target repo without changing default behavior. Subsequent
-phases plumb the resolver into git_worktree_create (phase 1, here),
-the stage subprocess loader (phase 2), the CLI / intake schema
-(phase 3), and the auto_plan prompt (phase 4).
+"""Resolve which repo a runner pass operates on (multi-repo support).
 
 Resolution precedence (highest first):
-  1. Explicit ``cli_override`` argument (set by phase 3's --target-repo flag).
-  2. Intake dict's ``target_repo`` field, if present and non-empty (phase 3).
-  3. Config default ``runner.target_repo`` from runner/config.json (phase 3).
-  4. Fallback: apiary REPO_ROOT — preserves all current behavior when nothing
-     else is configured.
+  1. Explicit ``cli_override`` argument (set by --target-repo flags).
+  2. Intake dict's ``target_repo`` field, if present and non-empty.
+  3. ``APIARY_TARGET_REPO`` environment variable — set by run.py after it
+     resolves the target so spawned subprocesses inherit the choice.
+  4. Config default ``runner.target_repo`` from runner/config.json.
+  5. Fallback: apiary repo root — preserves all single-repo behavior when
+     nothing else is configured.
 
-Phase 1 wires only the fallback path, so existing callers see no behavior
-change. Phase 3 lights up the higher-priority sources.
+The path helpers (intake_dir, plans_dir, etc.) check the env var on each
+call so subprocess chains (run.py → auto_refine → ...) stay target-aware
+without every call site passing the target explicitly.
 """
 from __future__ import annotations
+import os
 from pathlib import Path
 from typing import Optional, Union
 
@@ -26,7 +23,27 @@ from .config_loader import get as cfg
 SCRIPT_DIR = Path(__file__).resolve().parent
 APIARY_REPO_ROOT = SCRIPT_DIR.parent
 
+ACTIVE_TARGET_ENV = "APIARY_TARGET_REPO"
+
 PathLike = Union[str, Path]
+
+
+def set_active_target(target: PathLike) -> None:
+    """Publish the resolved target into the environment so subprocesses and
+    helper calls in the same process inherit it. Called by the orchestrator
+    after ``resolve_target_repo`` so every downstream stage / path helper
+    sees the same value without having to plumb an argument through."""
+    os.environ[ACTIVE_TARGET_ENV] = str(Path(target).resolve())
+
+
+def clear_active_target() -> None:
+    """Remove the env var. Tests use this to isolate between cases."""
+    os.environ.pop(ACTIVE_TARGET_ENV, None)
+
+
+def _env_target() -> Optional[Path]:
+    value = os.environ.get(ACTIVE_TARGET_ENV, "").strip()
+    return Path(value) if value else None
 
 
 def choose_target_repo(
@@ -48,6 +65,9 @@ def choose_target_repo(
         field = intake.get("target_repo")
         if isinstance(field, str) and field.strip():
             return Path(field.strip())
+    env = _env_target()
+    if env is not None:
+        return env
     cfg_default = cfg("runner", "target_repo", None)
     if isinstance(cfg_default, str) and cfg_default.strip():
         return Path(cfg_default.strip())
@@ -95,7 +115,12 @@ _RUNNER_STATE_DIR = ".apiary/runner"
 
 
 def _default_target(target: Optional[Path]) -> Path:
-    return Path(target).resolve() if target is not None else APIARY_REPO_ROOT
+    if target is not None:
+        return Path(target).resolve()
+    env = _env_target()
+    if env is not None:
+        return env.resolve()
+    return APIARY_REPO_ROOT
 
 
 def artifacts_root(target: Optional[Path] = None) -> Path:

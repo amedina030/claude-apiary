@@ -76,6 +76,7 @@ class TestGetResumeStage(unittest.TestCase):
     backwards compatibility but is ignored by the implementation."""
 
     def setUp(self):
+        import os
         self.tmp = tempfile.TemporaryDirectory()
         self.fake_apiary = Path(self.tmp.name)
         # Artifacts live under <apiary>/.apiary/runner/<subdir>/ — mirror that here.
@@ -86,12 +87,20 @@ class TestGetResumeStage(unittest.TestCase):
         from runner import target_repo
         self._patcher = patch.object(target_repo, "APIARY_REPO_ROOT", self.fake_apiary)
         self._patcher.start()
+        # Env var check in _default_target beats APIARY_REPO_ROOT — clear it
+        # so patched APIARY_REPO_ROOT actually takes effect.
+        self._prior_env = os.environ.pop("APIARY_TARGET_REPO", None)
         # wt arg is still accepted for compat; pass an arbitrary path to confirm
         # it doesn't influence lookups.
         self.wt = Path(self.tmp.name) / "ignored-worktree"
 
     def tearDown(self):
+        import os
         self._patcher.stop()
+        if self._prior_env is None:
+            os.environ.pop("APIARY_TARGET_REPO", None)
+        else:
+            os.environ["APIARY_TARGET_REPO"] = self._prior_env
         self.tmp.cleanup()
 
     def test_no_artifacts_returns_none(self):

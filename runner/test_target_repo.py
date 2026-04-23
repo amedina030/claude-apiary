@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for runner/target_repo.py."""
+import os
 import subprocess
 import tempfile
 import unittest
@@ -17,7 +18,26 @@ def _git_init(path: Path) -> None:
     )
 
 
-class TestChooseTargetRepo(unittest.TestCase):
+class _EnvIsolation(unittest.TestCase):
+    """Clear APIARY_TARGET_REPO before each test and restore it after.
+
+    Tests that probe the precedence chain ``choose_target_repo`` /
+    ``_default_target`` must not leak env-var state across the unittest
+    runner's single process — otherwise a prior test that exercises
+    ``set_active_target`` would silently change this class's fallback path.
+    """
+
+    def setUp(self):
+        self.__prior = os.environ.pop("APIARY_TARGET_REPO", None)
+
+    def tearDown(self):
+        if self.__prior is None:
+            os.environ.pop("APIARY_TARGET_REPO", None)
+        else:
+            os.environ["APIARY_TARGET_REPO"] = self.__prior
+
+
+class TestChooseTargetRepo(_EnvIsolation):
     """Pure precedence picker — no I/O, no validation."""
 
     def test_default_is_apiary_repo_root(self):
@@ -86,7 +106,7 @@ class TestChooseTargetRepo(unittest.TestCase):
         self.assertEqual(chosen, Path("/padded/path"))
 
 
-class TestResolveTargetRepo(unittest.TestCase):
+class TestResolveTargetRepo(_EnvIsolation):
     """Validating resolver — checks existence, dir-ness, and .git presence."""
 
     def test_resolves_real_git_repo(self):
@@ -137,7 +157,66 @@ class TestResolveTargetRepo(unittest.TestCase):
             self.assertEqual(resolved, d.resolve())
 
 
-class TestArtifactPathHelpers(unittest.TestCase):
+class TestActiveTargetEnv(unittest.TestCase):
+    """APIARY_TARGET_REPO env var propagation."""
+
+    def setUp(self):
+        self._old = os.environ.pop(target_repo.ACTIVE_TARGET_ENV, None)
+
+    def tearDown(self):
+        if self._old is not None:
+            os.environ[target_repo.ACTIVE_TARGET_ENV] = self._old
+        else:
+            os.environ.pop(target_repo.ACTIVE_TARGET_ENV, None)
+
+    def test_set_active_target_publishes_env(self):
+        target_repo.set_active_target(Path("/tmp/x"))
+        self.assertEqual(
+            os.environ[target_repo.ACTIVE_TARGET_ENV],
+            str(Path("/tmp/x").resolve()),
+        )
+
+    def test_clear_active_target_removes_env(self):
+        target_repo.set_active_target(Path("/tmp/x"))
+        target_repo.clear_active_target()
+        self.assertNotIn(target_repo.ACTIVE_TARGET_ENV, os.environ)
+
+    def test_env_var_feeds_choose_target_repo(self):
+        with tempfile.TemporaryDirectory() as td:
+            target_repo.set_active_target(Path(td))
+            with mock.patch.object(target_repo, "cfg", return_value=None):
+                chosen = target_repo.choose_target_repo()
+            self.assertEqual(chosen, Path(td).resolve())
+
+    def test_env_var_feeds_path_helpers(self):
+        with tempfile.TemporaryDirectory() as td:
+            target_repo.set_active_target(Path(td))
+            self.assertEqual(
+                target_repo.intake_dir(),
+                Path(td).resolve() / ".apiary" / "runner" / "intake",
+            )
+            self.assertEqual(
+                target_repo.artifacts_root(),
+                Path(td).resolve() / ".apiary" / "runner",
+            )
+
+    def test_explicit_target_overrides_env(self):
+        target_repo.set_active_target(Path("/tmp/env"))
+        explicit = Path("/tmp/explicit")
+        self.assertEqual(
+            target_repo.intake_dir(explicit),
+            explicit.resolve() / ".apiary" / "runner" / "intake",
+        )
+
+    def test_cli_override_beats_env(self):
+        with tempfile.TemporaryDirectory() as td_env, tempfile.TemporaryDirectory() as td_cli:
+            target_repo.set_active_target(Path(td_env))
+            with mock.patch.object(target_repo, "cfg", return_value=None):
+                chosen = target_repo.choose_target_repo(cli_override=Path(td_cli))
+            self.assertEqual(chosen, Path(td_cli))
+
+
+class TestArtifactPathHelpers(_EnvIsolation):
     """Path-construction helpers for the target-rooted runner layout."""
 
     def test_artifacts_root_under_target(self):

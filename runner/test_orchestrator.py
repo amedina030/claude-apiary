@@ -50,9 +50,21 @@ class _RunnerTestCase(unittest.TestCase):
     """Base TestCase that supplies a tmp dir, intake fixtures, and stdout/stderr capture."""
 
     def setUp(self):
+        import os
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.tmp_path = Path(self._tmp.name)
+        # run.main()'s target_repo resolution sets APIARY_TARGET_REPO; don't let
+        # it leak across test methods or between test classes.
+        self._prior_active_target = os.environ.pop("APIARY_TARGET_REPO", None)
+        self.addCleanup(self._restore_active_target)
+
+    def _restore_active_target(self):
+        import os
+        if self._prior_active_target is None:
+            os.environ.pop("APIARY_TARGET_REPO", None)
+        else:
+            os.environ["APIARY_TARGET_REPO"] = self._prior_active_target
 
     def make_intake_data(self):
         return {

@@ -47,6 +47,7 @@ from .target_repo import (
     plans_dir,
     reports_dir,
     resolve_target_repo,
+    set_active_target,
     specs_dir,
 )
 
@@ -446,10 +447,18 @@ def run_detached(cli_args) -> int:
     if _kill_on_close_job is None:
         _kill_on_close_job = _install_kill_on_job_close()
     _install_signal_handlers()
+    # Preserve APIARY_TARGET_REPO across the run — whatever we set inside
+    # shouldn't leak back to the caller (especially the unittest process).
+    from .target_repo import ACTIVE_TARGET_ENV, clear_active_target
+    _prior_env = os.environ.get(ACTIVE_TARGET_ENV)
     try:
         return _run_detached_impl(cli_args)
     finally:
         _restore_signal_handlers()
+        if _prior_env is None:
+            clear_active_target()
+        else:
+            os.environ[ACTIVE_TARGET_ENV] = _prior_env
 
 
 def _run_detached_impl(cli_args) -> int:
@@ -658,12 +667,15 @@ def _run_detached_impl(cli_args) -> int:
 
     # Resolve target repo (phase 3): CLI flag > intake field > config > apiary.
     # Validation ensures the resolved path exists and is a git repo. The
-    # worktree is then created inside THAT repo's git tree.
+    # worktree is then created inside THAT repo's git tree, and the resolved
+    # path is published via APIARY_TARGET_REPO so every stage subprocess
+    # this run spawns sees the same target when calling the path helpers.
     try:
         target_repo_path = resolve_target_repo(
             cli_override=getattr(cli_args, 'target_repo', None),
             intake=intake,
         )
+        set_active_target(target_repo_path)
     except ValueError as e:
         print(f'ERROR: target_repo invalid: {e}', file=sys.stderr)
         history_append({
@@ -1339,15 +1351,17 @@ def main():
               f'subsystems={usher_metrics["subsystem_count"]}, '
               f'desc_chars={usher_metrics["description_chars"]}')
 
-    # Resolve target repo (phase 3). Interactive mode runs stages directly
-    # against the resolved target's checkout (no worktree — that's detached's
-    # concern). When nothing is configured this resolves to apiary REPO_ROOT
-    # and matches the pre-phase-3 behavior exactly.
+    # Resolve target repo. Interactive mode runs stages directly against the
+    # resolved target's checkout (no worktree — that's detached's concern).
+    # When nothing is configured this resolves to apiary REPO_ROOT and matches
+    # the single-repo behavior exactly. set_active_target publishes the path
+    # into APIARY_TARGET_REPO so spawned stage subprocesses see it.
     try:
         target_repo_path = resolve_target_repo(
             cli_override=getattr(cli_args, 'target_repo', None),
             intake=intake,
         )
+        set_active_target(target_repo_path)
     except ValueError as e:
         print(f'Target repo invalid: {e}', file=sys.stderr)
         sys.exit(1)
