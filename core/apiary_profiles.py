@@ -137,10 +137,10 @@ def _resolve_recursive(
             applied_order=applied_order,
             hashes=hashes,
         )
-        accumulated = _deep_merge(accumulated, parent_merged)
+        accumulated = deep_merge(accumulated, parent_merged)
 
     own = {k: v for k, v in raw.items() if k not in ("$schema_version", "extends")}
-    merged = _deep_merge(accumulated, own)
+    merged = deep_merge(accumulated, own)
     applied_order.append(name)
     return merged
 
@@ -164,7 +164,7 @@ def _hash_file(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _deep_merge(base: Any, overlay: Any) -> Any:
+def deep_merge(base: Any, overlay: Any) -> Any:
     """Merge ``overlay`` into ``base``. Non-mutating — returns a new value.
 
     - If overlay is a ``$replace`` wrapper, the wrapped value replaces base.
@@ -180,7 +180,7 @@ def _deep_merge(base: Any, overlay: Any) -> Any:
             if _is_replace_wrapper(ov_val):
                 out[key] = _strip_replace_wrappers(_unwrap_replace(ov_val))
             elif key in out:
-                out[key] = _deep_merge(out[key], ov_val)
+                out[key] = deep_merge(out[key], ov_val)
             else:
                 out[key] = _strip_replace_wrappers(ov_val)
         return out

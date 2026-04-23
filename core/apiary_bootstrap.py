@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""Apiary bootstrap CLI — apply a profile to a target repo's .claude/settings.json.
+
+Source of truth: ``core/apiary_bootstrap.py`` in the apiary repo. Installed
+to ``~/.claude/apiary_bootstrap.py`` by ``setup.py --global``.
+
+Usage::
+
+    python ~/.claude/apiary_bootstrap.py --profile unreal [--target PATH] [--force]
+
+Resolves ``<profile>`` via ``<apiary-repo>/profiles/<name>.jsonc`` (walking
+``extends`` chains and deep-merging), loads the target's existing
+``.claude/settings.json`` (if any), merges apiary-owned top-level keys
+preserving non-apiary keys, writes ``.claude/settings.json`` and
+``.apiary/bootstrap_state.json``. Re-runs show a diff and prompt before
+overwriting unless ``--force``.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from core.apiary_profiles import (
+    ProfileCycleError,
+    ProfileError,
+    ProfileNotFoundError,
+    ProfileSchemaError,
+    ResolvedProfile,
+    list_available,
+    resolve,
+)
+from core.utils.apiary_pointer import get_repo_path
+from core.utils.jsonc import JsoncParseError
+
+STATE_SCHEMA_VERSION = 1
+_STATE_FILENAME = "bootstrap_state.json"
+_SETTINGS_PATH = ".claude/settings.json"
+_PROFILES_SUBDIR = "profiles"
+
+
+class BootstrapError(Exception):
+    """Raised for user-facing bootstrap failures (bad arguments, drift abort)."""
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv if argv is not None else sys.argv[1:])
+    try:
+        return _run(args)
+    except ProfileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except ProfileCycleError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except ProfileSchemaError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except JsoncParseError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except ProfileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except BootstrapError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="apiary_bootstrap.py",
+        description="Bootstrap a target repo's .claude/settings.json from an apiary profile.",
+    )
+    p.add_argument("--profile", required=True, help="profile name under <apiary>/profiles/")
+    p.add_argument("--target", type=Path, default=None, help="target repo root (default: cwd)")
+    p.add_argument("--force", action="store_true", help="skip drift prompt on re-run")
+    p.add_argument(
+        "--apiary-repo",
+        type=Path,
+        default=None,
+        help="override apiary repo root (default: via ~/.claude/apiary.json pointer)",
+    )
+    return p.parse_args(argv)
+
+
+def _run(args: argparse.Namespace) -> int:
+    target_repo = (args.target or Path.cwd()).resolve()
+    apiary_repo = _resolve_apiary_repo(args.apiary_repo)
+    profiles_dir = apiary_repo / _PROFILES_SUBDIR
+    if not profiles_dir.is_dir():
+        raise BootstrapError(f"apiary profiles dir not found: {profiles_dir}")
+
+    resolved = resolve(args.profile, profiles_dir)
+
+    existing_settings = _load_existing_settings(target_repo)
+    merged_settings, owned_keys = _merge_profile_into_settings(existing_settings, resolved.merged)
+
+    state_path = target_repo / ".apiary" / _STATE_FILENAME
+    prior_state = _read_state(state_path)
+
+    if prior_state is not None and existing_settings != merged_settings:
+        if not args.force:
+            _print_diff(existing_settings, merged_settings, owned_keys)
+            if not _prompt_yes_no(
+                "Apply these changes to .claude/settings.json? [y/N] "
+            ):
+                raise BootstrapError("aborted by user")
+
+    _warn_missing_observer_scripts(resolved.merged, apiary_repo)
+
+    _write_settings(target_repo, merged_settings)
+    _write_state(state_path, resolved, owned_keys)
+
+    _print_summary(target_repo, resolved, owned_keys, merged_settings)
+    return 0
+
+
+def _resolve_apiary_repo(override: Path | None) -> Path:
+    if override is not None:
+        if not override.is_dir():
+            raise BootstrapError(f"--apiary-repo {override} is not a directory")
+        return override.resolve()
+    candidate = get_repo_path()
+    if candidate is None:
+        raise BootstrapError(
+            "cannot locate apiary repo. Run apiary's setup.py --global first, "
+            "or pass --apiary-repo explicitly."
+        )
+    return candidate
+
+
+def _load_existing_settings(target_repo: Path) -> dict:
+    path = target_repo / _SETTINGS_PATH
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise BootstrapError(f"{path}: not valid JSON ({exc.msg} at line {exc.lineno})")
+
+
+def _merge_profile_into_settings(
+    existing: dict, profile_merged: dict
+) -> tuple[dict, list[str]]:
+    """Return (new_settings, apiary_owned_top_level_keys).
+
+    Apiary-owned = any top-level key present in the resolved profile. The
+    profile's value fully replaces whatever was previously at that key,
+    keeping the write idempotent (re-runs without profile changes are a
+    no-op). Top-level keys the profile doesn't mention pass through
+    verbatim. Users who want to add permissions / hooks alongside an
+    apiary-managed config should extend via a custom profile or a
+    settings.local.json layer, not by hand-editing the managed file.
+    """
+    owned_keys = sorted(profile_merged.keys())
+    out = dict(existing)
+    for key in owned_keys:
+        out[key] = profile_merged[key]
+    return out, owned_keys
+
+
+def _read_state(state_path: Path) -> dict | None:
+    if not state_path.is_file():
+        return None
+    try:
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def _write_settings(target_repo: Path, merged: dict) -> None:
+    path = target_repo / _SETTINGS_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_state(state_path: Path, resolved: ResolvedProfile, owned_keys: list[str]) -> None:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": STATE_SCHEMA_VERSION,
+        "profile": resolved.name,
+        "profiles_applied": resolved.profiles_applied,
+        "profile_content_hashes": resolved.content_hashes,
+        "applied_apiary_keys": owned_keys,
+        "last_bootstrap_ts": datetime.now(timezone.utc).isoformat(),
+    }
+    state_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _warn_missing_observer_scripts(profile_merged: dict, apiary_repo: Path) -> None:
+    """AC-9: warn if a profile references an observer script that doesn't exist."""
+    hooks = profile_merged.get("hooks")
+    if not isinstance(hooks, dict):
+        return
+    missing: list[str] = []
+    for event_name, entries in hooks.items():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            for hook in entry.get("hooks", []) or []:
+                if not isinstance(hook, dict):
+                    continue
+                cmd = hook.get("command", "")
+                if not isinstance(cmd, str):
+                    continue
+                rel = _extract_observer_relpath(cmd)
+                if rel and not (apiary_repo / rel).is_file():
+                    missing.append(rel)
+    for rel in sorted(set(missing)):
+        print(
+            f"warning: profile references observer script '{rel}' which is missing "
+            f"from {apiary_repo}. Hook entry written anyway.",
+            file=sys.stderr,
+        )
+
+
+def _extract_observer_relpath(command: str) -> str | None:
+    """Pull a trailing ``observers/<file>.py`` token out of a hook command string."""
+    tokens = command.split()
+    for tok in reversed(tokens):
+        if tok.startswith("observers/") and tok.endswith(".py"):
+            return tok
+    return None
+
+
+def _print_diff(existing: dict, new: dict, owned_keys: list[str]) -> None:
+    print("\nChanges to apiary-owned keys in .claude/settings.json:\n", file=sys.stderr)
+    for key in owned_keys:
+        before = existing.get(key)
+        after = new.get(key)
+        if before == after:
+            continue
+        print(f"  {key}:", file=sys.stderr)
+        print(f"    before: {_oneline(before)}", file=sys.stderr)
+        print(f"    after:  {_oneline(after)}", file=sys.stderr)
+    print("", file=sys.stderr)
+
+
+def _oneline(value: Any, limit: int = 120) -> str:
+    text = json.dumps(value, ensure_ascii=False)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _prompt_yes_no(prompt: str) -> bool:
+    if not sys.stdin.isatty():
+        raise BootstrapError(
+            "re-run would overwrite existing settings and stdin is not a TTY. "
+            "Pass --force to apply non-interactively."
+        )
+    answer = input(prompt).strip().lower()
+    return answer in ("y", "yes")
+
+
+def _print_summary(
+    target_repo: Path,
+    resolved: ResolvedProfile,
+    owned_keys: list[str],
+    merged: dict,
+) -> None:
+    settings_path = target_repo / _SETTINGS_PATH
+    state_path = target_repo / ".apiary" / _STATE_FILENAME
+    print(f"Applied profile chain: {' → '.join(resolved.profiles_applied)}")
+    print(f"Wrote {settings_path}")
+    print(f"Wrote {state_path}")
+    print(f"Apiary-owned top-level keys: {', '.join(owned_keys) if owned_keys else '(none)'}")
+    for key in owned_keys:
+        print(f"  {key}: {_count_summary(merged.get(key))}")
+
+
+def _count_summary(value: Any) -> str:
+    if isinstance(value, dict):
+        return f"{len(value)} sub-key(s): {', '.join(sorted(value.keys()))}"
+    if isinstance(value, list):
+        return f"{len(value)} item(s)"
+    return type(value).__name__
+
+
+if __name__ == "__main__":
+    sys.exit(main())
