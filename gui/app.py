@@ -897,7 +897,7 @@ def main() -> int:
         window.events.loaded += _on_loaded
         window.events.closed += _on_closed
 
-        webview.start(debug=True)
+        webview.start(debug=bool(os.environ.get("APIARY_GUI_DEBUG")))
         return 0
 
 

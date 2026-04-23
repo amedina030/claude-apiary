@@ -13,6 +13,7 @@
   const totCacheW = document.getElementById("tot-cache-w");
   const totRaw = document.getElementById("tot-raw");
   const totWeighted = document.getElementById("tot-weighted");
+  const totCtx = document.getElementById("tot-ctx");
   const modelNameEl = document.getElementById("model-name");
   const toastsEl = document.getElementById("toasts");
   const ptyStripWrapEl = document.getElementById("pty-strip-wrap");
@@ -114,6 +115,12 @@
 
   // --- chat state -----------------------------------------------------------
   const totals = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
+  // Context-size counter: input-side of the LATEST assistant turn only
+  // (input + cache_read + cache_creation). This mirrors what Claude Code's
+  // /context command reports — the size of what's currently in context for
+  // the next turn. Distinct from the cumulative `totals` above, which sum
+  // across every turn in the session.
+  let contextTokens = 0;
   const seen = new Set();
   // Sticky-bottom semantics: once the user scrolls up, we stop auto-scrolling
   // until they manually scroll back to bottom. This survives smooth-scroll
@@ -287,6 +294,7 @@
     totCacheW.textContent = totals.cache_write.toLocaleString();
     totRaw.textContent = fmtNum(rawTotal(totals));
     totWeighted.textContent = fmtNum(weightedTotal(totals));
+    totCtx.textContent = fmtNum(contextTokens);
   }
   function addTokens(t) {
     if (!t) return;
@@ -294,10 +302,16 @@
     totals.output += t.output || 0;
     totals.cache_read += t.cache_read || 0;
     totals.cache_write += t.cache_write || 0;
+    // Overwrite (not accumulate): we want the latest turn's input side.
+    // During history replay this loops over every assistant msg in order,
+    // so the final value reflects the most recent turn — which is the
+    // authoritative "currently in context" figure.
+    contextTokens = (t.input || 0) + (t.cache_read || 0) + (t.cache_write || 0);
     refreshTotalsBadges();
   }
   function resetTotals() {
     totals.input = totals.output = totals.cache_read = totals.cache_write = 0;
+    contextTokens = 0;
     refreshTotalsBadges();
   }
   function clearMessages() {
@@ -2141,6 +2155,12 @@
     if (_interruptInFlight) return;
     _interruptInFlight = true;
     if (button) button.classList.add("cancelling");
+    // Clear the thinking bubble immediately — the user explicitly asked to
+    // stop, so the "claude is working" signal should vanish without waiting
+    // for the 15s idle timeout. Setting waitingForAssistant=false also
+    // prevents any still-arriving pty chunks from respawning the bubble via
+    // ensureThinkingBubble.
+    hideThinkingBubble(true);
     const ESC_COUNT = 4;
     const ESC_INTERVAL_MS = 120;
     for (let i = 0; i < ESC_COUNT; i++) {
