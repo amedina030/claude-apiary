@@ -137,5 +137,61 @@ class TestResolveTargetRepo(unittest.TestCase):
             self.assertEqual(resolved, d.resolve())
 
 
+class TestArtifactPathHelpers(unittest.TestCase):
+    """Path-construction helpers for the target-rooted runner layout."""
+
+    def test_artifacts_root_under_target(self):
+        t = Path("/tmp/some-target")
+        self.assertEqual(
+            target_repo.artifacts_root(t),
+            t.resolve() / ".apiary" / "runner",
+        )
+
+    def test_artifacts_root_falls_back_to_apiary_root(self):
+        self.assertEqual(
+            target_repo.artifacts_root(None),
+            target_repo.APIARY_REPO_ROOT / ".apiary" / "runner",
+        )
+
+    def test_named_subdirs_nest_under_artifacts_root(self):
+        t = Path("/tmp/some-target").resolve()
+        root = target_repo.artifacts_root(t)
+        cases = [
+            ("intake_dir", "intake"),
+            ("backlog_dir", "backlog"),
+            ("specs_dir", "specs"),
+            ("plans_dir", "plans"),
+            ("executions_dir", "executions"),
+            ("hardens_dir", "hardens"),
+            ("reports_dir", "reports"),
+            ("locks_dir", "locks"),
+            ("runs_dir", "runs"),
+            ("logs_dir", "logs"),
+        ]
+        for fn_name, subdir in cases:
+            with self.subTest(helper=fn_name):
+                self.assertEqual(
+                    getattr(target_repo, fn_name)(t),
+                    root / subdir,
+                )
+
+    def test_run_history_and_overnight_are_files(self):
+        t = Path("/tmp/some-target").resolve()
+        root = target_repo.artifacts_root(t)
+        self.assertEqual(target_repo.run_history_path(t), root / "run_history.jsonl")
+        self.assertEqual(target_repo.overnight_log_path(t), root / "overnight.jsonl")
+
+    def test_worktrees_dir_sibling_of_runner(self):
+        t = Path("/tmp/some-target").resolve()
+        self.assertEqual(
+            target_repo.worktrees_dir(t),
+            t / ".apiary" / "runner-worktrees",
+        )
+        self.assertNotEqual(
+            target_repo.worktrees_dir(t).parent,
+            target_repo.artifacts_root(t),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

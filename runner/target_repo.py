@@ -82,3 +82,80 @@ def resolve_target_repo(
             f"target_repo path is not a git repository (no .git entry): {chosen}"
         )
     return chosen
+
+
+# -----------------------------------------------------------------------------
+# Artifact path helpers — return per-target-repo paths under .apiary/runner/.
+# Callers resolve the target once (via resolve_target_repo / choose_target_repo
+# or a direct Path) and pass it to these helpers. Passing None falls back to
+# the apiary repo root so legacy call sites continue working unchanged until
+# they're plumbed with a resolved target.
+
+_RUNNER_STATE_DIR = ".apiary/runner"
+
+
+def _default_target(target: Optional[Path]) -> Path:
+    return Path(target).resolve() if target is not None else APIARY_REPO_ROOT
+
+
+def artifacts_root(target: Optional[Path] = None) -> Path:
+    """Return ``<target>/.apiary/runner/`` (the umbrella for runner state)."""
+    return _default_target(target) / _RUNNER_STATE_DIR
+
+
+def intake_dir(target: Optional[Path] = None) -> Path:
+    return artifacts_root(target) / "intake"
+
+
+def backlog_dir(target: Optional[Path] = None) -> Path:
+    return artifacts_root(target) / "backlog"
+
+
+def specs_dir(target: Optional[Path] = None) -> Path:
+    return artifacts_root(target) / "specs"
+
+
+def plans_dir(target: Optional[Path] = None) -> Path:
+    return artifacts_root(target) / "plans"
+
+
+def executions_dir(target: Optional[Path] = None) -> Path:
+    return artifacts_root(target) / "executions"
+
+
+def hardens_dir(target: Optional[Path] = None) -> Path:
+    return artifacts_root(target) / "hardens"
+
+
+def reports_dir(target: Optional[Path] = None) -> Path:
+    return artifacts_root(target) / "reports"
+
+
+def locks_dir(target: Optional[Path] = None) -> Path:
+    return artifacts_root(target) / "locks"
+
+
+def runs_dir(target: Optional[Path] = None) -> Path:
+    return artifacts_root(target) / "runs"
+
+
+def logs_dir(target: Optional[Path] = None) -> Path:
+    return artifacts_root(target) / "logs"
+
+
+def run_history_path(target: Optional[Path] = None) -> Path:
+    return artifacts_root(target) / "run_history.jsonl"
+
+
+def overnight_log_path(target: Optional[Path] = None) -> Path:
+    return artifacts_root(target) / "overnight.jsonl"
+
+
+def worktrees_dir(target: Optional[Path] = None) -> Path:
+    """Live git worktrees under the target repo.
+
+    Note the path is ``<target>/.apiary/runner-worktrees/`` (sibling to
+    ``.apiary/runner/``) so live checkouts don't collide with state
+    artifacts.
+    """
+    return _default_target(target) / ".apiary" / "runner-worktrees"
