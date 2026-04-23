@@ -490,6 +490,16 @@ def run_check():
         fail(f"Launcher: {launcher_installed} differs from source (re-run setup.py --global)")
     else:
         ok(f"Launcher: {launcher_installed}")
+    bootstrap_installed = claude_dir / "apiary_bootstrap.py"
+    bootstrap_source = CORE_DIR / "apiary_bootstrap.py"
+    if not bootstrap_installed.exists():
+        fail(f"Bootstrap: {bootstrap_installed} not found (run setup.py --global)")
+    elif not bootstrap_source.exists():
+        fail(f"Bootstrap source: {bootstrap_source} not found in repo")
+    elif file_hash(bootstrap_installed) != file_hash(bootstrap_source):
+        fail(f"Bootstrap: {bootstrap_installed} differs from source (re-run setup.py --global)")
+    else:
+        ok(f"Bootstrap: {bootstrap_installed}")
     print()
 
     # 6. Apiary pointer file (todo #263 — lets hooks locate the repo)
@@ -735,6 +745,14 @@ def main():
         launcher_dst = claude_dir / "apiary_launch.py"
         shutil.copy2(launcher_src, launcher_dst)
         print(f"  Hook launcher    : {launcher_dst}")
+
+        # Copy the bootstrap CLI so target repos can apply apiary profiles
+        # via `python ~/.claude/apiary_bootstrap.py --profile <name>`.
+        # Source of truth: core/apiary_bootstrap.py.
+        bootstrap_src = CORE_DIR / "apiary_bootstrap.py"
+        bootstrap_dst = claude_dir / "apiary_bootstrap.py"
+        shutil.copy2(bootstrap_src, bootstrap_dst)
+        print(f"  Bootstrap CLI    : {bootstrap_dst}")
 
         install_commands(claude_dir)
         check_claude_md(claude_dir)
