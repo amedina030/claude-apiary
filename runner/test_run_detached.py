@@ -139,26 +139,31 @@ class TestDetachedRun(unittest.TestCase):
             self.assertEqual(entries[0]['stages_completed'], 6)
 
     def test_artifacts_land_in_apiary_not_worktree(self):
-        """Phase 2: intake/artifacts are rooted at SCRIPT_DIR (apiary), not
-        the worktree. Proves the worktree's runner/ subtree is no longer
-        touched by the orchestrator during detached runs.
+        """Runner artifacts live under <apiary>/.apiary/runner/, never in the
+        worktree. Proves the worktree's runner/ subtree is not touched by
+        the orchestrator during detached runs.
 
         Asserts both:
-          1. After a successful run, the intake exists at SCRIPT_DIR/intake/
+          1. After a successful run, intake exists at <apiary>/.apiary/runner/intake/
              and the backlog source file has been removed.
-          2. The artifact paths passed to run_stage are SCRIPT_DIR-rooted,
-             not worktree-rooted.
+          2. The artifact paths passed to run_stage are rooted under the apiary
+             state dir, not the worktree.
         """
+        from runner import target_repo
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            backlog = td / 'backlog'
-            backlog.mkdir()
-            intake_dir = td / 'intake'
-            intake_dir.mkdir()
+            # Make td resolvable as a git repo so resolve_target_repo accepts it.
+            subprocess.run(['git', 'init', '-q', '-b', 'master'], cwd=str(td), check=True)
+            # Simulate apiary at td: runner artifacts will land under td/.apiary/runner/
+            apiary_runner = td / '.apiary' / 'runner'
+            backlog = apiary_runner / 'backlog'
+            backlog.mkdir(parents=True)
+            intake_dir_path = apiary_runner / 'intake'
+            intake_dir_path.mkdir(parents=True)
             uid = 'phase2-abcd-ef01-2345-6789abcdef01'
             intake_file = self._make_intake_file(backlog, uid=uid)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = td / 'overnight.jsonl'
+            log_path = apiary_runner / 'overnight.jsonl'
 
             captured_input_paths = []
 
@@ -167,9 +172,9 @@ class TestDetachedRun(unittest.TestCase):
                 return (True, _make_fake_usage(50), '', 0.1)
 
             with (
+                mock.patch.object(target_repo, 'APIARY_REPO_ROOT', td),
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', intake_dir),
-                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.INTAKE_DIR', intake_dir_path),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -182,8 +187,8 @@ class TestDetachedRun(unittest.TestCase):
                 rc = run.run_detached(_make_cli_args())
 
             self.assertEqual(rc, 0)
-            # intake landed in apiary (td), not worktree
-            apiary_intake = td / 'intake' / f'{uid}.json'
+            # intake landed under <apiary>/.apiary/runner/intake/, not the worktree.
+            apiary_intake = apiary_runner / 'intake' / f'{uid}.json'
             self.assertTrue(apiary_intake.exists(),
                             f'expected apiary intake at {apiary_intake}')
             self.assertFalse(intake_file.exists(),
@@ -192,13 +197,14 @@ class TestDetachedRun(unittest.TestCase):
             wt_intake = wt_path / 'runner' / 'intake' / f'{uid}.json'
             self.assertFalse(wt_intake.exists(),
                              'worktree runner/intake must not be written to')
-            # every artifact path passed to stages must be rooted under td (apiary)
+            # every artifact path passed to stages must be rooted under the
+            # apiary-runner state dir.
             self.assertTrue(captured_input_paths, 'expected >=1 stage invocation')
-            td_resolved = td.resolve()
+            runner_root_resolved = apiary_runner.resolve()
             wt_resolved = wt_path.resolve()
             for p in captured_input_paths:
-                self.assertTrue(str(p.resolve()).startswith(str(td_resolved)),
-                                f'artifact path {p} not rooted in apiary SCRIPT_DIR {td}')
+                self.assertTrue(str(p.resolve()).startswith(str(runner_root_resolved)),
+                                f'artifact path {p} not rooted in apiary runner state {apiary_runner}')
                 self.assertFalse(str(p.resolve()).startswith(str(wt_resolved) + os.sep),
                                  f'artifact path {p} incorrectly rooted in worktree')
 

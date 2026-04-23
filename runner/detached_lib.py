@@ -5,12 +5,19 @@ import json, os, re, shutil, subprocess, sys, uuid as uuid_mod
 from pathlib import Path
 from typing import Optional
 
+from .target_repo import (
+    backlog_dir,
+    intake_dir,
+    overnight_log_path,
+    worktrees_dir,
+)
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
-BACKLOG_DIR = SCRIPT_DIR / 'backlog'
-INTAKE_DIR = SCRIPT_DIR / 'intake'
-OVERNIGHT_LOG = SCRIPT_DIR / 'overnight.jsonl'
-WORKTREES_DIR = REPO_ROOT / '.runner-worktrees'
+BACKLOG_DIR = backlog_dir()
+INTAKE_DIR = intake_dir()
+OVERNIGHT_LOG = overnight_log_path()
+WORKTREES_DIR = worktrees_dir()
 
 _DEFAULT_OVERNIGHT_LOG = OVERNIGHT_LOG
 

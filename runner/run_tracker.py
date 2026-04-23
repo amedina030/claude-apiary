@@ -9,8 +9,18 @@ import datetime
 import json
 from pathlib import Path
 
+from .target_repo import (
+    artifacts_root,
+    executions_dir,
+    hardens_dir,
+    plans_dir,
+    reports_dir,
+    runs_dir,
+    specs_dir,
+)
+
 SCRIPT_DIR = Path(__file__).resolve().parent
-RUNS_DIR = SCRIPT_DIR / "runs"
+RUNS_DIR = runs_dir()
 
 
 def _path(uuid: str) -> Path:
@@ -64,32 +74,25 @@ def record_attempt(
     return tracker
 
 
-# Maps each artifact key to the stage that PRODUCES it and the stage
-# that should be resumed (the next one after the producer).
-# Order matters: check from latest to earliest so we resume as late
-# as possible.
+# Maps each artifact key to the dir-returning helper and the stage to
+# resume from. Latest-to-earliest order so we resume as late as possible.
 _ARTIFACT_RESUME_MAP = [
-    # (artifact_key, file_pattern, resume_from_stage)
-    ("harden",    "hardens/{uuid}.json",    "approval"),
-    ("execution", "executions/{uuid}.json", "auto_harden"),
-    ("plan",      "plans/{uuid}.json",      "executor"),
-    ("spec",      "specs/{uuid}.json",      "auto_plan"),
+    (hardens_dir,    "approval"),
+    (executions_dir, "auto_harden"),
+    (plans_dir,      "executor"),
+    (specs_dir,      "auto_plan"),
 ]
 
 
 def get_resume_stage(uuid: str, worktree_path: Path | None = None) -> str | None:
-    """Determine which stage to resume from based on apiary-rooted artifacts.
+    """Determine which stage to resume from based on produced artifacts.
 
-    Review artifacts (specs/plans/executions/hardens/reports) now live under
-    apiary/runner/ regardless of the target worktree (Phase 2 multi-repo).
-    The ``worktree_path`` parameter is retained for backwards compatibility
-    with existing callers but is ignored.
-
-    Returns the stage name to resume from, or ``None`` if no artifacts
-    exist (= start from the beginning).
+    Review artifacts (specs/plans/executions/hardens/reports) live under
+    ``<apiary>/.apiary/runner/`` today. ``worktree_path`` is retained for
+    backward compatibility but ignored.
     """
-    for _key, pattern, resume_stage in _ARTIFACT_RESUME_MAP:
-        artifact = SCRIPT_DIR / pattern.format(uuid=uuid)
+    for dir_fn, resume_stage in _ARTIFACT_RESUME_MAP:
+        artifact = dir_fn() / f"{uuid}.json"
         if artifact.exists():
             return resume_stage
     return None

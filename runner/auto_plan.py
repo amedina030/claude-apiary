@@ -26,8 +26,10 @@ from .schema_versions import (
     assert_schema_version,
 )
 
+from .target_repo import plans_dir
+
 SCRIPT_DIR = Path(__file__).resolve().parent
-PLANS_DIR = SCRIPT_DIR / "plans"
+PLANS_DIR = plans_dir()
 REPO_ROOT = SCRIPT_DIR.parent
 
 MAX_RETRIES = cfg("plan", "max_retries", 3)

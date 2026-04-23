@@ -14,8 +14,9 @@ import time
 from pathlib import Path
 
 from .config_loader import get as cfg
+from .target_repo import locks_dir
 
-LOCKS_DIR = Path(__file__).resolve().parent / "locks"
+LOCKS_DIR = locks_dir()
 
 _FIELDS = ("pid", "hostname", "stage", "step_number", "started_at", "worktree_path")
 

@@ -24,8 +24,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from runner.target_repo import run_history_path
+
 SCRIPT_DIR = Path(__file__).resolve().parent
-RUN_HISTORY_FILE = SCRIPT_DIR / "run_history.jsonl"
+RUN_HISTORY_FILE = run_history_path()
 NOTES_SCRIPT = SCRIPT_DIR.parent / "scribe" / "notes.py"
 
 # Scribe note id pattern: T-YYYY-N+, H-YYYY-N+, etc. We only auto-close

@@ -21,8 +21,10 @@ from pathlib import Path
 from .config_loader import get as cfg
 from .schema_versions import SPEC_SCHEMA_VERSION
 
+from .target_repo import specs_dir
+
 SCRIPT_DIR = Path(__file__).resolve().parent
-SPECS_DIR = SCRIPT_DIR / "specs"
+SPECS_DIR = specs_dir()
 REPO_ROOT = SCRIPT_DIR.parent
 
 MAX_RETRIES = cfg("refine", "max_retries", 3)

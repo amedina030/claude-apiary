@@ -23,9 +23,11 @@ from pathlib import Path
 
 from .config_loader import get as cfg
 
+from .target_repo import hardens_dir, plans_dir
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_DIR = SCRIPT_DIR.parent
-HARDENS_DIR = SCRIPT_DIR / "hardens"
+HARDENS_DIR = hardens_dir()
 HARDEN_DIR = REPO_DIR / "harden"
 
 VALIDATE_FINDINGS = HARDEN_DIR / "validate_findings.py"
@@ -385,7 +387,7 @@ def main():
         sys.exit(1)
 
     # Read spec from plan if available
-    plan_path = SCRIPT_DIR / "plans" / f"{uuid}.json"
+    plan_path = plans_dir() / f"{uuid}.json"
     spec = {}
     if plan_path.exists():
         try:

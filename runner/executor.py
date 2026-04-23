@@ -37,8 +37,10 @@ from .schema_versions import (
     assert_schema_version,
 )
 
+from .target_repo import executions_dir
+
 SCRIPT_DIR = Path(__file__).resolve().parent
-EXECUTIONS_DIR = SCRIPT_DIR / "executions"
+EXECUTIONS_DIR = executions_dir()
 
 MAX_STEP_RETRIES = cfg("executor", "max_retries_per_step", 2)
 MAX_NO_CHANGE_RETRIES = cfg("executor", "max_no_change_retries", 2)

@@ -39,7 +39,16 @@ from .detached_lib import (
     prune_stale_worktrees,
     OVERNIGHT_LOG, BACKLOG_DIR, INTAKE_DIR,
 )
-from .target_repo import resolve_target_repo
+from .target_repo import (
+    executions_dir,
+    hardens_dir,
+    intake_dir,
+    logs_dir,
+    plans_dir,
+    reports_dir,
+    resolve_target_repo,
+    specs_dir,
+)
 
 # Stages that legitimately make no Claude calls and so always emit zero
 # <usage> blocks. Used by run_detached's no_usage safety check (ATK-010):
@@ -700,10 +709,10 @@ def _run_detached_impl(cli_args) -> int:
         order_update_status(order_ticket["uuid"], "running")
 
     # Open per-run debug log
-    logs_dir = SCRIPT_DIR / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
+    run_logs_dir = logs_dir()
+    run_logs_dir.mkdir(parents=True, exist_ok=True)
     run_log_name = f'runner_log_{datetime.datetime.now(datetime.timezone.utc).strftime("%Y_%m_%d_%H%M%S")}.log'
-    run_log_path = logs_dir / run_log_name
+    run_log_path = run_logs_dir / run_log_name
 
     stage_costs: list[dict] = []
     # Seed historical token spend so cumulative_tokens() includes prior
@@ -734,7 +743,7 @@ def _run_detached_impl(cli_args) -> int:
         # not the worktree, so a single apiary history spans runs against
         # multiple target repos. The worktree carries only the executor's
         # code-change diff.
-        intake_dest = SCRIPT_DIR / 'intake' / f'{uuid}.json'
+        intake_dest = intake_dir() / f'{uuid}.json'
         intake_dest.parent.mkdir(parents=True, exist_ok=True)
         if from_backlog:
             # picked_path already lives in apiary/runner/backlog/. Copy into
@@ -751,15 +760,15 @@ def _run_detached_impl(cli_args) -> int:
             if picked_path.resolve() != intake_dest.resolve():
                 shutil.copy2(str(picked_path), str(intake_dest))
 
-        # Artifact paths are apiary-rooted (SCRIPT_DIR) so stages find them
-        # regardless of which target repo's worktree is the cwd.
+        # Artifact paths are rooted under the runner-state root so stages
+        # find them regardless of which target repo's worktree is the cwd.
         artifacts = {
-            'intake':    SCRIPT_DIR / 'intake'     / f'{uuid}.json',
-            'spec':      SCRIPT_DIR / 'specs'      / f'{uuid}.json',
-            'plan':      SCRIPT_DIR / 'plans'      / f'{uuid}.json',
-            'execution': SCRIPT_DIR / 'executions' / f'{uuid}.json',
-            'harden':    SCRIPT_DIR / 'hardens'    / f'{uuid}.json',
-            'report':    SCRIPT_DIR / 'reports'    / f'{uuid}.json',
+            'intake':    intake_dir()     / f'{uuid}.json',
+            'spec':      specs_dir()      / f'{uuid}.json',
+            'plan':      plans_dir()      / f'{uuid}.json',
+            'execution': executions_dir() / f'{uuid}.json',
+            'harden':    hardens_dir()    / f'{uuid}.json',
+            'report':    reports_dir()    / f'{uuid}.json',
         }
 
         reached_resume = (resume_from is None)
@@ -1055,7 +1064,7 @@ def run_prune_failed(days: int, dry_run: bool = False) -> int:
     when the branch was already deleted (log still gets archived) and
     we skip runs whose log no longer exists (hand-cleaned already).
     """
-    executions = SCRIPT_DIR / "executions"
+    executions = executions_dir()
     if not executions.exists():
         print("No executions directory — nothing to prune.")
         return 0
@@ -1190,7 +1199,7 @@ def run_cleanup(uuid: str) -> int:
             )
 
     # Archive the execution log if present.
-    archived = _archive_execution_log(SCRIPT_DIR / "executions", uuid)
+    archived = _archive_execution_log(executions_dir(), uuid)
     if archived is not None:
         print(f"Archived execution log to {archived}")
     else:
@@ -1345,12 +1354,12 @@ def main():
 
     # Derive artifact paths
     artifacts = {
-        "intake":    SCRIPT_DIR / "intake"     / f"{uuid}.json",
-        "spec":      SCRIPT_DIR / "specs"      / f"{uuid}.json",
-        "plan":      SCRIPT_DIR / "plans"      / f"{uuid}.json",
-        "execution": SCRIPT_DIR / "executions" / f"{uuid}.json",
-        "harden":    SCRIPT_DIR / "hardens"    / f"{uuid}.json",
-        "report":    SCRIPT_DIR / "reports"    / f"{uuid}.json",
+        "intake":    intake_dir()     / f"{uuid}.json",
+        "spec":      specs_dir()      / f"{uuid}.json",
+        "plan":      plans_dir()      / f"{uuid}.json",
+        "execution": executions_dir() / f"{uuid}.json",
+        "harden":    hardens_dir()    / f"{uuid}.json",
+        "report":    reports_dir()    / f"{uuid}.json",
     }
 
     # Verify intake path matches expected

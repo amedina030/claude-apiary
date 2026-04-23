@@ -13,8 +13,10 @@ import argparse
 import sys
 from pathlib import Path
 
+from runner.target_repo import backlog_dir
+
 SCRIPT_DIR = Path(__file__).resolve().parent
-BACKLOG_DIR = SCRIPT_DIR / "backlog"
+BACKLOG_DIR = backlog_dir()
 
 
 def _slug_is_safe(slug: str) -> bool:

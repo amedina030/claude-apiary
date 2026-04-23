@@ -13,9 +13,10 @@ from pathlib import Path
 from typing import Optional
 
 from .detached_lib import append_overnight_log
+from .target_repo import run_history_path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-RUN_HISTORY_FILE = SCRIPT_DIR / "run_history.jsonl"
+RUN_HISTORY_FILE = run_history_path()
 
 _DEFAULT_RUN_HISTORY_FILE = RUN_HISTORY_FILE
 

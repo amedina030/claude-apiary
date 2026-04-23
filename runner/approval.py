@@ -22,9 +22,17 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .target_repo import (
+    executions_dir,
+    intake_dir,
+    plans_dir,
+    reports_dir,
+    specs_dir,
+)
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_DIR = SCRIPT_DIR.parent
-REPORTS_DIR = SCRIPT_DIR / "reports"
+REPORTS_DIR = reports_dir()
 NOTES_SCRIPT = REPO_DIR / "scribe" / "notes.py"
 
 
@@ -259,10 +267,10 @@ def main():
     unresolved = harden.get("unresolved", [])
 
     # Load all prior artifacts
-    intake_path = SCRIPT_DIR / "intake" / f"{uuid}.json"
-    spec_path = SCRIPT_DIR / "specs" / f"{uuid}.json"
-    plan_path = SCRIPT_DIR / "plans" / f"{uuid}.json"
-    exec_path = SCRIPT_DIR / "executions" / f"{uuid}.json"
+    intake_path = intake_dir() / f"{uuid}.json"
+    spec_path = specs_dir() / f"{uuid}.json"
+    plan_path = plans_dir() / f"{uuid}.json"
+    exec_path = executions_dir() / f"{uuid}.json"
 
     intake = load_artifact(intake_path, "Intake")
     spec = load_artifact(spec_path, "Spec", SPEC_SCHEMA_VERSION)

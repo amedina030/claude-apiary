@@ -349,11 +349,18 @@ class TestMainHappyPath(_RunnerTestCase):
         uid = intake_data["id"]
         mock_run_stage.return_value = (True, "ok", "", 0.5)
         # Verify the override condition is exercised: intake_file must not be
-        # in SCRIPT_DIR/intake/
-        default_intake = orchestrator.SCRIPT_DIR / "intake" / f"{uid}.json"
+        # in the default intake_dir().
+        from runner.target_repo import (
+            executions_dir,
+            hardens_dir,
+            intake_dir,
+            plans_dir,
+            specs_dir,
+        )
+        default_intake = intake_dir() / f"{uid}.json"
         self.assertNotEqual(
             intake_file.resolve(), default_intake.resolve(),
-            "Test setup error: intake_file must not be in runner/intake/ or the override path is never taken",
+            "Test setup error: intake_file must not be in the default intake dir or the override path is never taken",
         )
         code, _, _ = self._run_main_capture(["run.py", str(intake_file)])
         self.assertIn(code, (None, 0))
@@ -362,13 +369,13 @@ class TestMainHappyPath(_RunnerTestCase):
         self.assertEqual(calls[0].args[2], intake_file.resolve())
         self.assertEqual(calls[1].args[2], intake_file.resolve())
         # Stage 3: specs/{uuid}.json
-        self.assertEqual(calls[2].args[2], orchestrator.SCRIPT_DIR / "specs" / f"{uid}.json")
+        self.assertEqual(calls[2].args[2], specs_dir() / f"{uid}.json")
         # Stage 4: plans/{uuid}.json
-        self.assertEqual(calls[3].args[2], orchestrator.SCRIPT_DIR / "plans" / f"{uid}.json")
+        self.assertEqual(calls[3].args[2], plans_dir() / f"{uid}.json")
         # Stage 5: executions/{uuid}.json
-        self.assertEqual(calls[4].args[2], orchestrator.SCRIPT_DIR / "executions" / f"{uid}.json")
+        self.assertEqual(calls[4].args[2], executions_dir() / f"{uid}.json")
         # Stage 6: hardens/{uuid}.json
-        self.assertEqual(calls[5].args[2], orchestrator.SCRIPT_DIR / "hardens" / f"{uid}.json")
+        self.assertEqual(calls[5].args[2], hardens_dir() / f"{uid}.json")
 
     @patch("runner.run.run_stage")
     def test_empty_stdout_no_arrow_line(self, mock_run_stage):

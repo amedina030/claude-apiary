@@ -4,10 +4,11 @@ from __future__ import annotations
 import json, sys
 from pathlib import Path
 from .detached_lib import list_unmerged_runner_branches, OVERNIGHT_LOG, SCRIPT_DIR
+from .target_repo import backlog_dir, hardens_dir, intake_dir
 
-INTAKE_DIR = SCRIPT_DIR / 'intake'
-BACKLOG_DIR = SCRIPT_DIR / 'backlog'
-HARDENS_DIR = SCRIPT_DIR / 'hardens'
+INTAKE_DIR = intake_dir()
+BACKLOG_DIR = backlog_dir()
+HARDENS_DIR = hardens_dir()
 
 
 def load_harden_verdict(uuid: str) -> str:

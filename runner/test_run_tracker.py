@@ -78,11 +78,13 @@ class TestGetResumeStage(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.fake_apiary = Path(self.tmp.name)
-        # Create apiary artifact directories (what SCRIPT_DIR now points at)
+        # Artifacts live under <apiary>/.apiary/runner/<subdir>/ — mirror that here.
+        self.fake_runner_root = self.fake_apiary / ".apiary" / "runner"
         for d in ("intake", "specs", "plans", "executions", "hardens", "reports"):
-            (self.fake_apiary / d).mkdir(parents=True)
-        # Point SCRIPT_DIR at our temp apiary for the duration of each test
-        self._patcher = patch.object(run_tracker, "SCRIPT_DIR", self.fake_apiary)
+            (self.fake_runner_root / d).mkdir(parents=True)
+        # Point APIARY_REPO_ROOT at the fake for the duration of each test.
+        from runner import target_repo
+        self._patcher = patch.object(target_repo, "APIARY_REPO_ROOT", self.fake_apiary)
         self._patcher.start()
         # wt arg is still accepted for compat; pass an arbitrary path to confirm
         # it doesn't influence lookups.
@@ -96,27 +98,27 @@ class TestGetResumeStage(unittest.TestCase):
         self.assertIsNone(run_tracker.get_resume_stage("uuid1", self.wt))
 
     def test_spec_exists_resumes_from_auto_plan(self):
-        (self.fake_apiary / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_runner_root / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
         self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "auto_plan")
 
     def test_plan_exists_resumes_from_executor(self):
-        (self.fake_apiary / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
-        (self.fake_apiary / "plans" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_runner_root / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_runner_root / "plans" / "uuid1.json").write_text("{}", encoding="utf-8")
         self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "executor")
 
     def test_execution_exists_resumes_from_auto_harden(self):
         for d in ("specs", "plans", "executions"):
-            (self.fake_apiary / d / "uuid1.json").write_text("{}", encoding="utf-8")
+            (self.fake_runner_root / d / "uuid1.json").write_text("{}", encoding="utf-8")
         self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "auto_harden")
 
     def test_harden_exists_resumes_from_approval(self):
         for d in ("specs", "plans", "executions", "hardens"):
-            (self.fake_apiary / d / "uuid1.json").write_text("{}", encoding="utf-8")
+            (self.fake_runner_root / d / "uuid1.json").write_text("{}", encoding="utf-8")
         self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "approval")
 
     def test_picks_latest_artifact(self):
         """When only a plan exists (no execution), should resume from executor."""
-        (self.fake_apiary / "plans" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_runner_root / "plans" / "uuid1.json").write_text("{}", encoding="utf-8")
         self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "executor")
 
     def test_worktree_path_arg_is_ignored(self):

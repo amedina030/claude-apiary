@@ -13,9 +13,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from runner.target_repo import backlog_dir, intake_dir
+
 SCRIPT_DIR = Path(__file__).resolve().parent
-BACKLOG_DIR = SCRIPT_DIR / "backlog"
-INTAKE_DIR = SCRIPT_DIR / "intake"
+BACKLOG_DIR = backlog_dir()
+INTAKE_DIR = intake_dir()
 REPO_ROOT = SCRIPT_DIR.parent
 
 

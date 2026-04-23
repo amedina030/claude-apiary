@@ -26,8 +26,10 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from runner.target_repo import intake_dir
+
 SCRIPT_DIR = Path(__file__).resolve().parent
-INTAKE_DIR = SCRIPT_DIR / "intake"
+INTAKE_DIR = intake_dir()
 REPO_ROOT = SCRIPT_DIR.parent
 NOTES_SCRIPT = SCRIPT_DIR.parent / "scribe" / "notes.py"
 
