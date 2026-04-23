@@ -441,6 +441,8 @@
 
     if (insertAnchor && insertAnchor.parentNode === messagesEl) {
       messagesEl.insertBefore(li, insertAnchor);
+    } else if (thinkingEl && thinkingEl.parentNode === messagesEl) {
+      messagesEl.insertBefore(li, thinkingEl);
     } else {
       messagesEl.appendChild(li);
     }
@@ -1233,9 +1235,10 @@
   // Inline 3-dot bubble while claude is working. Dots pulse in place when
   // idle (no recent pty activity → waiting on API) and switch to a wave
   // cascade when pty chunks arrive within PTY_ACTIVE_MS (mid tool-call).
-  // Motion quality alone signals the state — no text label. Bubble is
-  // position:sticky so it pins to the viewport bottom when the user scrolls
-  // up (iMessage-style typing indicator) — see .msg.thinking in app.css.
+  // Motion quality alone signals the state — no text label. Bubble lives
+  // at the tail of the message list in natural flow, so it scrolls off
+  // when the user scrolls up (iMessage-style: the typing indicator is
+  // part of the thread, not pinned to the viewport).
   //
   // Turn stays "active" (activeTab().waitingForAssistant=true) from the
   // user-sent Enter until stop_reason=end_turn or THINKING_IDLE_MS of pty
