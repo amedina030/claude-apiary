@@ -121,14 +121,16 @@ class TestNonApiaryKeysPreserved(_BootstrapHarness):
             "base",
             '{"$schema_version": 1, "permissions": {"allow": ["APIARY_Y"]}}',
         )
-        rc = self._cli("base")
+        # --force because existing permissions.allow has user content that
+        # the profile replaces — first-run safety warning would otherwise prompt.
+        rc = self._cli("base", "--force")
         self.assertEqual(rc, 0)
         settings = self._settings()
         # Top-level non-apiary keys preserved byte-for-byte.
         self.assertEqual(settings["theme"], "dark")
         self.assertEqual(settings["user_field"], {"nested": "keep me"})
         # Apiary-owned top-level key ("permissions") fully replaced — users
-        # extending permissions alongside apiary should use a custom profile.
+        # should layer their entries via .claude/settings.local.json.
         self.assertEqual(settings["permissions"], {"allow": ["APIARY_Y"]})
 
 
@@ -223,6 +225,111 @@ class TestErrors(_BootstrapHarness):
         self.assertEqual(rc, 2)
         err_text = stderr.getvalue()
         self.assertIn("broken.jsonc", err_text)
+
+
+class TestFirstRunSafetyWarning(_BootstrapHarness):
+
+    def _seed_existing_settings(self, payload: dict) -> None:
+        claude_dir = self.target / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text(
+            json.dumps(payload, indent=2), encoding="utf-8"
+        )
+
+    def test_first_run_empty_settings_no_warning(self):
+        _write_profile(
+            self.apiary,
+            "base",
+            '{"$schema_version": 1, "permissions": {"allow": ["APIARY"]}}',
+        )
+        stderr = io.StringIO()
+        with mock.patch("sys.stderr", stderr):
+            rc = self._cli("base")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("warning:", stderr.getvalue())
+
+    def test_first_run_non_apiary_keys_no_warning(self):
+        self._seed_existing_settings({"theme": "dark", "custom": "keep"})
+        _write_profile(
+            self.apiary,
+            "base",
+            '{"$schema_version": 1, "permissions": {"allow": ["APIARY"]}}',
+        )
+        stderr = io.StringIO()
+        with mock.patch("sys.stderr", stderr):
+            rc = self._cli("base")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("warning:", stderr.getvalue())
+
+    def test_first_run_wipe_candidate_in_permissions_deny_prompts(self):
+        self._seed_existing_settings(
+            {"permissions": {"allow": ["USER_X"], "deny": ["Read(secrets/*)"]}}
+        )
+        _write_profile(
+            self.apiary,
+            "base",
+            '{"$schema_version": 1, "permissions": {"allow": ["APIARY"]}}',
+        )
+        stderr = io.StringIO()
+        with mock.patch("sys.stderr", stderr):
+            rc = self._cli("base", stdin_tty=True, stdin_answer="y\n")
+        self.assertEqual(rc, 0)
+        err = stderr.getvalue()
+        self.assertIn("warning:", err.lower())
+        self.assertIn("Read(secrets/*)", err)
+        self.assertIn("USER_X", err)
+        self.assertIn("settings.local.json", err)
+
+    def test_first_run_wipe_declined_exits_one(self):
+        self._seed_existing_settings(
+            {"permissions": {"deny": ["Read(secrets/*)"]}}
+        )
+        _write_profile(
+            self.apiary,
+            "base",
+            '{"$schema_version": 1, "permissions": {"allow": ["APIARY"]}}',
+        )
+        stderr = io.StringIO()
+        with mock.patch("sys.stderr", stderr):
+            rc = self._cli("base", stdin_tty=True, stdin_answer="n\n")
+        self.assertEqual(rc, 1)
+        # Settings not written.
+        self.assertEqual(
+            self._settings(),
+            {"permissions": {"deny": ["Read(secrets/*)"]}},
+        )
+
+    def test_first_run_force_skips_prompt_but_still_warns(self):
+        self._seed_existing_settings(
+            {"permissions": {"deny": ["Read(secrets/*)"]}}
+        )
+        _write_profile(
+            self.apiary,
+            "base",
+            '{"$schema_version": 1, "permissions": {"allow": ["APIARY"]}}',
+        )
+        stderr = io.StringIO()
+        with mock.patch("sys.stderr", stderr):
+            rc = self._cli("base", "--force")
+        self.assertEqual(rc, 0)
+        self.assertIn("warning:", stderr.getvalue().lower())
+        # Settings written — apiary's permissions now in place.
+        self.assertEqual(self._settings()["permissions"], {"allow": ["APIARY"]})
+
+    def test_first_run_non_tty_without_force_errors(self):
+        self._seed_existing_settings(
+            {"permissions": {"deny": ["Read(secrets/*)"]}}
+        )
+        _write_profile(
+            self.apiary,
+            "base",
+            '{"$schema_version": 1, "permissions": {"allow": ["APIARY"]}}',
+        )
+        stderr = io.StringIO()
+        with mock.patch("sys.stderr", stderr):
+            rc = self._cli("base", stdin_tty=False)
+        self.assertEqual(rc, 1)
+        self.assertIn("--force", stderr.getvalue())
 
 
 class TestPreExistingApiaryDir(_BootstrapHarness):

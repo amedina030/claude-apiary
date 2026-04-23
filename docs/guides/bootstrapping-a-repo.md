@@ -100,6 +100,16 @@ The ship-set profiles are:
 | `base.jsonc` | — | Minimum permissions every apiary-managed repo needs (scribe CLI, transcript hook, session identity) |
 | `apiary.jsonc` | `base` | Apiary's self-dogfood — extends `base` with no additions today, a hook for repo-specific additions later |
 
+## First-run safety warning
+
+When bootstrap runs against an existing `.claude/settings.json` for the first time (no `bootstrap_state.json` yet), it checks for content inside apiary-owned keys that the profile doesn't set. If any is found, it prints a warning listing the entries that will be wiped and waits for confirmation.
+
+Example: if the repo already has `permissions.deny: ["Read(secrets/*)"]` and the profile only sets `permissions.allow`, the first run warns that the `deny` list is about to disappear and suggests moving it to `.claude/settings.local.json` first (Claude Code merges both files natively).
+
+`--force` skips the prompt but still prints the warning — that way automated runs still surface what was lost.
+
+Non-TTY stdin without `--force` is a hard error, same as the re-run drift path.
+
 ## Re-run drift
 
 On any run after the first, the bootstrap:

@@ -140,7 +140,14 @@ def _run(args: argparse.Namespace) -> int:
     state_path = target_repo / ".apiary" / _STATE_FILENAME
     prior_state = _read_state(state_path)
 
-    if prior_state is not None and existing_settings != merged_settings:
+    if prior_state is None:
+        wipes = _detect_wipe_candidates(existing_settings, resolved.merged)
+        if wipes:
+            _print_wipe_warning(wipes)
+            if not args.force:
+                if not _prompt_yes_no("Apply anyway? [y/N] "):
+                    raise BootstrapError("aborted by user")
+    elif existing_settings != merged_settings:
         if not args.force:
             _print_diff(existing_settings, merged_settings, owned_keys)
             if not _prompt_yes_no(
@@ -232,6 +239,68 @@ def _write_lf(path: Path, text: str) -> None:
     stays byte-identical across Windows/macOS/Linux re-runs."""
     with path.open("w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
+
+
+def _detect_wipe_candidates(existing: dict, profile_merged: dict) -> dict:
+    """Return the parts of ``existing`` inside apiary-owned top-level keys
+    that are not present in the profile's contribution — i.e. content that
+    would be lost when the profile's value replaces the whole top-level key.
+
+    Non-apiary-owned top-level keys (keys absent from ``profile_merged``)
+    are not considered; they pass through untouched and nothing is lost.
+    """
+    wipes: dict = {}
+    for key in profile_merged:
+        if key not in existing:
+            continue
+        lost = _diff_lost(existing[key], profile_merged[key])
+        if lost is not None:
+            wipes[key] = lost
+    return wipes
+
+
+def _diff_lost(existing: Any, profile: Any) -> Any:
+    """Return content in ``existing`` that ``profile`` doesn't supply.
+
+    Dicts recurse per-key. Lists return entries in ``existing`` not also
+    in ``profile``. Scalars that differ return the existing value. Returns
+    ``None`` when nothing is lost.
+    """
+    if isinstance(existing, dict) and isinstance(profile, dict):
+        lost: dict = {}
+        for k, v in existing.items():
+            if k not in profile:
+                lost[k] = v
+                continue
+            sub = _diff_lost(v, profile[k])
+            if sub is not None:
+                lost[k] = sub
+        return lost or None
+    if isinstance(existing, list) and isinstance(profile, list):
+        extras = [item for item in existing if item not in profile]
+        return extras or None
+    if existing == profile:
+        return None
+    return existing
+
+
+def _print_wipe_warning(wipes: dict) -> None:
+    print(
+        "\nwarning: first bootstrap would overwrite existing content in "
+        "apiary-owned keys that the profile does not set:\n",
+        file=sys.stderr,
+    )
+    for key, lost in wipes.items():
+        print(f"  {key}:", file=sys.stderr)
+        for line in json.dumps(lost, indent=2, ensure_ascii=False).splitlines():
+            print(f"    {line}", file=sys.stderr)
+    print(
+        "\nThese entries will be removed when the profile writes .claude/settings.json.\n"
+        "To keep them, move them to .claude/settings.local.json before proceeding —\n"
+        "Claude Code merges settings.local.json on top of settings.json natively\n"
+        "(permissions arrays concat, deny beats allow).\n",
+        file=sys.stderr,
+    )
 
 
 def _print_diff(existing: dict, new: dict, owned_keys: list[str]) -> None:
