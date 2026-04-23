@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for core.apiary_bootstrap — CLI, state, drift prompt, error paths.
-
-Covers acceptance criteria AC-1 through AC-9 and AC-21.
-"""
+"""Tests for core.apiary_bootstrap — CLI, state, drift prompt, error paths."""
 import io
 import json
 import tempfile
@@ -67,7 +64,7 @@ class _BootstrapHarness(unittest.TestCase):
 
 class TestFreshBootstrap(_BootstrapHarness):
 
-    def test_ac1_fresh_target_writes_settings_and_state(self):
+    def test_fresh_target_writes_settings_and_state(self):
         _write_profile(
             self.apiary,
             "base",

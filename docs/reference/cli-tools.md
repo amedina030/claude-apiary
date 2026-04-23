@@ -747,12 +747,14 @@ python ~/.claude/apiary_bootstrap.py --profile <name> [--target PATH] [--force] 
 |------|----------|-------------|
 | `--profile NAME` | yes | Profile name under `<apiary-repo>/profiles/<name>.jsonc` |
 | `--target PATH` | no | Target repo root (default: cwd) |
-| `--force` | no | Skip the re-run drift prompt; apply changes non-interactively |
+| `--force` | no | Skip the re-run drift prompt and the first-run wipe prompt; apply changes non-interactively. Warnings still print. |
 | `--apiary-repo PATH` | no | Override apiary repo location (default: via `~/.claude/apiary.json` pointer) |
 
 Walks the profile's `extends` chain, deep-merges parents left-to-right then the child on top (`{"$replace": value}` escape hatch replaces instead of merges), and writes the resolved apiary-owned top-level keys into `.claude/settings.json`, preserving non-apiary keys verbatim. State lands at `.apiary/bootstrap_state.json` (schema version, profile chain, per-profile content hashes, last bootstrap timestamp).
 
-Re-runs detect drift against the stored state: if the new merge would change the current `settings.json`, a per-key diff prints and the tool prompts before applying. `--force` skips the prompt. Non-TTY stdin without `--force` is a hard error.
+First-run safety: if the target has an existing `settings.json` with content inside apiary-owned keys that the profile doesn't set, a warning prints listing the about-to-be-wiped entries and recommends moving them to `.claude/settings.local.json` (Claude Code merges that file natively). The tool prompts before applying; `--force` skips the prompt but still prints the warning.
+
+Re-runs detect drift against the stored state: if the new merge would change the current `settings.json`, a per-key diff prints and the tool prompts before applying. `--force` skips the prompt. Non-TTY stdin without `--force` is a hard error in both the first-run-wipe and re-run-drift paths.
 
 Exit codes:
 - `0` — success, or re-run no-op
