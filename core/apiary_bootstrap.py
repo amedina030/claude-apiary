@@ -25,7 +25,42 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+def _prepare_sys_path() -> None:
+    """Put the apiary repo root on sys.path so ``core.*`` imports resolve.
+
+    Works from two invocation contexts:
+
+    - Running from the repo (``<apiary>/core/apiary_bootstrap.py``) —
+      ``__file__.parent.parent`` is the apiary repo root.
+    - Running from the installed copy (``~/.claude/apiary_bootstrap.py``) —
+      ``__file__.parent.parent`` is ``~``, which doesn't have ``core/``.
+      Fall back to the ``~/.claude/apiary.json`` pointer file to locate
+      the real repo.
+    """
+    here = Path(__file__).resolve()
+    candidate = here.parent.parent
+    if (candidate / "core" / "apiary_profiles.py").is_file():
+        if str(candidate) not in sys.path:
+            sys.path.insert(0, str(candidate))
+        return
+    pointer = Path.home() / ".claude" / "apiary.json"
+    if not pointer.is_file():
+        print("error: cannot locate apiary repo (pointer file missing)", file=sys.stderr)
+        sys.exit(1)
+    try:
+        data = json.loads(pointer.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        print(f"error: apiary pointer file {pointer} malformed", file=sys.stderr)
+        sys.exit(1)
+    repo_path = data.get("repo_path", "") if isinstance(data, dict) else ""
+    if not repo_path or not Path(repo_path).is_dir():
+        print(f"error: apiary pointer repo_path missing or invalid: {repo_path!r}", file=sys.stderr)
+        sys.exit(1)
+    sys.path.insert(0, str(Path(repo_path)))
+
+
+_prepare_sys_path()
 
 from core.apiary_profiles import (
     ProfileCycleError,
@@ -178,7 +213,7 @@ def _read_state(state_path: Path) -> dict | None:
 def _write_settings(target_repo: Path, merged: dict) -> None:
     path = target_repo / _SETTINGS_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+    _write_lf(path, json.dumps(merged, indent=2) + "\n")
 
 
 def _write_state(state_path: Path, resolved: ResolvedProfile, owned_keys: list[str]) -> None:
@@ -191,7 +226,14 @@ def _write_state(state_path: Path, resolved: ResolvedProfile, owned_keys: list[s
         "applied_apiary_keys": owned_keys,
         "last_bootstrap_ts": datetime.now(timezone.utc).isoformat(),
     }
-    state_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    _write_lf(state_path, json.dumps(payload, indent=2) + "\n")
+
+
+def _write_lf(path: Path, text: str) -> None:
+    """Write LF-terminated text regardless of platform so the managed file
+    stays byte-identical across Windows/macOS/Linux re-runs."""
+    with path.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
 
 
 def _warn_missing_observer_scripts(profile_merged: dict, apiary_repo: Path) -> None:
