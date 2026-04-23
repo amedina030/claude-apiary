@@ -29,3 +29,4 @@ Framework version: **1.0** | Last updated: 2026-04-02
 - [Adding a Hook](guides/adding-a-hook.md) — End-to-end: write, register, test
 - [Adding a Command](guides/adding-a-command.md) — End-to-end: write, register, test
 - [Adding a Tool](guides/adding-a-tool.md) — New top-level tool from scratch
+- [Bootstrapping a Repo](guides/bootstrapping-a-repo.md) — Apply an apiary profile to a target repo and author new profiles

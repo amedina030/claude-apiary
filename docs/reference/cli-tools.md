@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-04-22"
+last_verified: "2026-04-23"
 ---
 
 # CLI Tools
@@ -734,6 +734,32 @@ Regenerates `gui/packaging/apiary_gui.ico` (multi-resolution 16/32/48/128/256) �
 poetry run pip install "Pillow>=10,<12"          # one-time, build-only
 poetry run python gui/packaging/make_icon.py
 ```
+
+## core/apiary_bootstrap.py
+
+Apply an apiary profile to a target repo's `.claude/settings.json`. Source at `core/apiary_bootstrap.py`; installed to `~/.claude/apiary_bootstrap.py` by `setup.py --global`, which is the canonical invocation path.
+
+```bash
+python ~/.claude/apiary_bootstrap.py --profile <name> [--target PATH] [--force] [--apiary-repo PATH]
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--profile NAME` | yes | Profile name under `<apiary-repo>/profiles/<name>.jsonc` |
+| `--target PATH` | no | Target repo root (default: cwd) |
+| `--force` | no | Skip the re-run drift prompt; apply changes non-interactively |
+| `--apiary-repo PATH` | no | Override apiary repo location (default: via `~/.claude/apiary.json` pointer) |
+
+Walks the profile's `extends` chain, deep-merges parents left-to-right then the child on top (`{"$replace": value}` escape hatch replaces instead of merges), and writes the resolved apiary-owned top-level keys into `.claude/settings.json`, preserving non-apiary keys verbatim. State lands at `.apiary/bootstrap_state.json` (schema version, profile chain, per-profile content hashes, last bootstrap timestamp).
+
+Re-runs detect drift against the stored state: if the new merge would change the current `settings.json`, a per-key diff prints and the tool prompts before applying. `--force` skips the prompt. Non-TTY stdin without `--force` is a hard error.
+
+Exit codes:
+- `0` — success, or re-run no-op
+- `1` — aborted by user, or non-TTY re-run without `--force`
+- `2` — profile not found, extends cycle, unsupported `$schema_version`, or JSONC parse error
+
+See [Bootstrapping a repo](../guides/bootstrapping-a-repo.md) for profile authoring and the full workflow.
 
 ## Test scripts
 

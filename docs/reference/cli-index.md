@@ -4,7 +4,7 @@ title: CLI Tools Index
 scope: project
 description: Quick-reference table of all CLI entry points with key flags — use cli_lookup.py for full details
 framework_version: "1.0"
-last_verified: "2026-04-17"
+last_verified: "2026-04-23"
 ---
 
 # CLI Tools Index
@@ -47,3 +47,4 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `runner/cost_emit.py` | Emit usage XML from Claude envelope | Library — no CLI |
 | `runner/config_loader.py` | Shared runner config loader | Library — no CLI |
 | `setup.py` | Unified installer | --global, --project-path, --check |
+| `core/apiary_bootstrap.py` | Apply an apiary profile to a target repo's `.claude/settings.json` | --profile, --target, --force, --apiary-repo |

@@ -115,6 +115,23 @@ Researcher state lives at `<repo-root>/.apiary/research/` under the umbrella `.a
 
 The template (`researcher/template.md`) ships in the repo, not under `.apiary/` — it's source, not state.
 
+## Bootstrap state
+
+Apiary's profile-based bootstrap (`core/apiary_bootstrap.py`) writes its provenance record at `<target>/.apiary/bootstrap_state.json`. Git-ignored like the rest of `.apiary/`.
+
+| Field | Description |
+|------|-------------|
+| `schema_version` | State file schema version (currently 1) |
+| `profile` | Profile name applied on the last bootstrap |
+| `profiles_applied` | Full extends chain in merge order (parents before children) |
+| `profile_content_hashes` | `{name: "sha256:..."}` per applied profile — detects profile drift between runs |
+| `applied_apiary_keys` | Top-level keys in `.claude/settings.json` that apiary owns after this bootstrap |
+| `last_bootstrap_ts` | ISO-8601 UTC timestamp of the last successful run |
+
+The state file is the signal that re-run drift-detection fires against. Absent state → bootstrap treats the target as fresh (AC-21 — existing `.apiary/scribe/` won't be disturbed). Present state with drift → diff + prompt unless `--force`.
+
+Profile manifests themselves live at `<apiary-repo>/profiles/<name>.jsonc` (not target-repo state). See [Bootstrapping a repo](../guides/bootstrapping-a-repo.md).
+
 ## Observer data
 
 Observer state lives at `<repo-root>/.apiary/observer/` under the umbrella `.apiary/` directory. All git-ignored.
