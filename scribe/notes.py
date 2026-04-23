@@ -8,7 +8,7 @@ Notes are operational state — deferred work, handoffs, decisions — not perma
 Requires PYTHONUTF8=1 environment variable on Windows (set by setup.py).
 
 Usage:
-    notes.py add --type todo --content "..." --session-id X [--auto] [--role X] [--mission X]
+    notes.py add --type todo (--content "..." | --content-file PATH) --session-id X [--auto] [--role X] [--mission X]
     notes.py list [--type X] [--session X] [--search X] [--last N | --limit N] [--all] [--archive] [--role X] [--mission X]
     notes.py learn --content "..." [--session-id X] [--role X] [--mission X]
     notes.py learnings [--search X] [--role X] [--mission X]
@@ -296,7 +296,15 @@ def cmd_add(args):
                 print(f"Handoff for session {target_sid.short} already exists ({h.get('display_id', _format_id(h))}). Skipping.")
                 return
 
-    content = args.content
+    if getattr(args, 'content_file', None):
+        content_path = Path(args.content_file)
+        try:
+            content = content_path.read_text(encoding='utf-8')
+        except OSError as e:
+            print(f'Error: cannot read --content-file {args.content_file!r}: {e}', file=sys.stderr)
+            sys.exit(1)
+    else:
+        content = args.content
     if len(content.encode('utf-8')) > MAX_CONTENT_LENGTH:
         print(f'Error: content exceeds {MAX_CONTENT_LENGTH} bytes', file=sys.stderr)
         sys.exit(1)
@@ -1185,7 +1193,12 @@ def main():
     # add
     p_add = sub.add_parser("add")
     p_add.add_argument("--type", required=True, choices=VALID_TYPES)
-    p_add.add_argument("--content", required=True)
+    p_add_content = p_add.add_mutually_exclusive_group(required=True)
+    p_add_content.add_argument("--content")
+    p_add_content.add_argument("--content-file", dest="content_file",
+                        help="Read content from a UTF-8 file instead of --content. Use this when "
+                             "content contains backticks, /-prefixed tokens, or filenames that would "
+                             "otherwise trigger shell command substitution in the caller.")
     p_add.add_argument("--summary", default="",
                         help="One-line abstract shown in lists and startup. Required for --type handoff.")
     p_add.add_argument("--brief-summary", default="", dest="brief_summary",

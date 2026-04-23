@@ -198,6 +198,31 @@ class TestScribeNotes(unittest.TestCase):
         todos = self.store.list_notes(note_type='todo')
         self.assertEqual(len(todos), 1)
 
+    def test_cmd_add_content_file_reads_file_verbatim(self):
+        raw = 'has `echo XXX` and /clear and filename.md'
+        src = self.tmp_dir / 'content.md'
+        src.write_text(raw, encoding='utf-8')
+        args = self._make_args(
+            type='context', content=None, content_file=str(src),
+            summary='', session_id='sess1', auto=False, role='', mission='',
+            if_no_handoff_for=None,
+        )
+        notes.cmd_add(args)
+        stored = self.store.list_notes(note_type='context')
+        self.assertEqual(len(stored), 1)
+        full = self.store.get_note('context', stored[0]['year'], stored[0]['seq'])
+        self.assertEqual(full['content'], raw)
+
+    def test_cmd_add_content_file_missing_fails(self):
+        args = self._make_args(
+            type='context', content=None,
+            content_file=str(self.tmp_dir / 'does_not_exist.md'),
+            summary='', session_id='sess1', auto=False, role='', mission='',
+            if_no_handoff_for=None,
+        )
+        with self.assertRaises(SystemExit):
+            notes.cmd_add(args)
+
     def test_unarchive_restores_note(self):
         entry = self.store.add_note('todo', 'round-trip', 'sess1')
         self.store.update_note('todo', entry['year'], entry['seq'], status='done')
