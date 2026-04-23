@@ -4,6 +4,10 @@ Wraps observer script handlers with the invariant: any failure is logged
 to ``<target>/.apiary/observer.log`` and filed as a scribe blocker note,
 but the observer process always exits 0 so the originating tool call is
 never blocked (:ac:`AC-11`).
+
+Successful dispatches that produce a summary dict are appended to a
+per-session JSONL under ``<target>/.apiary/observer/<YYYY-MM-DD>/<session>.jsonl``.
+Scribe is reserved for the human-attention failure path only.
 """
 from __future__ import annotations
 
@@ -22,12 +26,14 @@ from .adapter import (
     _parse_json_bytes,
     from_payload,
 )
+from core.utils.filelock import FileLock
 
 _LAUNCHER_PATH = Path.home() / ".claude" / "apiary_launch.py"
 _SCRIBE_TIMEOUT_SECONDS = 15
+_UNKNOWN_SESSION = "unknown-session"
 
 
-ObserverHandler = Callable[[ObservationEvent], None]
+ObserverHandler = Callable[[ObservationEvent], Optional[dict]]
 
 
 def run_observer(observer_name: str, handler: ObserverHandler) -> int:
@@ -37,6 +43,12 @@ def run_observer(observer_name: str, handler: ObserverHandler) -> int:
     the originating tool call. Failures are persisted to
     ``<cwd>/.apiary/observer.log`` and surfaced as a scribe blocker note so
     silent observer breakage becomes visible at next session startup.
+
+    The handler may return a ``dict`` summary to record the observation in
+    ``<cwd>/.apiary/observer/<date>/<session>.jsonl`` (one line per call).
+    Returning ``None`` signals "not interested in this event" and skips the
+    log write — defense-in-depth matchers do this when the tool name
+    doesn't match the observer's scope.
     """
     target_repo = Path.cwd()
     raw_payload: Optional[Any] = None
@@ -47,7 +59,9 @@ def run_observer(observer_name: str, handler: ObserverHandler) -> int:
             raise AdapterError("stdin is empty")
         raw_payload = _parse_json_bytes(raw_bytes)
         event = from_payload(raw_payload)
-        handler(event)
+        summary = handler(event)
+        if summary is not None:
+            _append_observation_log(target_repo, observer_name, event, summary)
         return 0
     except Exception as exc:  # noqa: BLE001 — contract: never propagate
         _handle_failure(target_repo, observer_name, exc, raw_payload)
@@ -78,6 +92,53 @@ def _handle_failure(
         _file_scribe_blocker(observer_name, summary_line, error_text, raw_payload)
     except Exception:  # noqa: BLE001 — scribe unreachable must not propagate
         pass
+
+
+def _append_observation_log(
+    target_repo: Path,
+    observer_name: str,
+    event: ObservationEvent,
+    summary: dict,
+) -> None:
+    """Append one JSONL line per observed event to the per-session log.
+
+    Path shape: ``<target>/.apiary/observer/<YYYY-MM-DD>/<session>.jsonl``.
+    Date comes from wall-clock UTC; session comes from the event. Lines are
+    newline-delimited JSON; ``default=str`` accommodates non-serialisable
+    values in ``tool_response``.
+    """
+    now = datetime.now(timezone.utc)
+    session_id = event.session_id or _UNKNOWN_SESSION
+    log_dir = target_repo / ".apiary" / "observer" / now.strftime("%Y-%m-%d")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{session_id}.jsonl"
+    entry = {
+        "timestamp": now.isoformat(),
+        "observer": observer_name,
+        "schema_version": event.schema_version,
+        "event": _event_to_dict(event),
+        "summary": summary,
+    }
+    line = json.dumps(entry, default=str, ensure_ascii=False)
+    with FileLock(log_path):
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+
+
+def _event_to_dict(event: ObservationEvent) -> dict:
+    return {
+        "session_id": event.session_id,
+        "hook_event_name": event.hook_event_name,
+        "tool_name": event.tool_name,
+        "tool_use_id": event.tool_use_id,
+        "transcript_path": event.transcript_path,
+        "cwd": event.cwd,
+        "permission_mode": event.permission_mode,
+        "raw": {
+            "tool_input": event.raw.tool_input,
+            "tool_response": event.raw.tool_response,
+        },
+    }
 
 
 def _append_observer_log(

@@ -4,7 +4,7 @@ title: File Storage
 scope: project
 description: Runtime data locations — where JSONL logs, flags, transcripts, and session state live
 framework_version: "1.0"
-last_verified: 2026-04-22
+last_verified: 2026-04-23
 ---
 
 # File Storage
@@ -114,6 +114,18 @@ Researcher state lives at `<repo-root>/.apiary/research/` under the umbrella `.a
 | `research/<topic>/<slug>.md` | One research entry per file. YAML-subset frontmatter (title, topic, tags, date_created, date_last_verified, sources) followed by Summary / Context / Findings / Code / Caveats sections |
 
 The template (`researcher/template.md`) ships in the repo, not under `.apiary/` — it's source, not state.
+
+## Observer data
+
+Observer state lives at `<repo-root>/.apiary/observer/` under the umbrella `.apiary/` directory. All git-ignored.
+
+| Path | Description |
+|------|-------------|
+| `observer/<YYYY-MM-DD>/<session-id>.jsonl` | One JSONL line per successful PostToolUse dispatch — fields: `timestamp`, `observer`, `schema_version`, `event` (full `ObservationEvent`), `summary` (handler's observer-specific dict). Appended under `FileLock` |
+| `observer/<YYYY-MM-DD>/<session-id>.jsonl.lock` | Sidecar lock file from `core/utils/filelock.FileLock`. Benign; left on disk after writes |
+| `observer.log` | Failure log (file, sibling to the `observer/` directory). Written only when an observer handler raises — stack trace + raw payload per entry |
+
+Observer failures also file a scribe blocker note via `scribe/notes.py add --type blocker` so silent observer breakage surfaces at next session startup.
 
 ## Transcripts
 

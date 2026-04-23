@@ -3,7 +3,6 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -27,73 +26,61 @@ def _event(tool_name: str, tool_input: dict | None = None) -> ObservationEvent:
 
 class TestDogfoodObserver(unittest.TestCase):
 
-    def test_rejects_non_grep_tool_without_writing(self):
-        with mock.patch.object(dogfood, "_write_scribe_reference") as writer:
-            dogfood.handle(_event("Read", {"path": "x"}))
-        writer.assert_not_called()
+    def test_rejects_non_grep_tool_returns_none(self):
+        self.assertIsNone(dogfood.handle(_event("Read", {"path": "x"})))
+        self.assertIsNone(dogfood.handle(_event("Bash", {"command": "ls"})))
 
-    def test_accepts_grep_and_writes_scribe_reference(self):
-        with mock.patch.object(dogfood, "_write_scribe_reference") as writer:
-            dogfood.handle(_event("Grep", {"pattern": "foo", "path": "src"}))
-        writer.assert_called_once()
-        summary, content = writer.call_args.args
-        self.assertIn("Grep: foo", summary)
-        self.assertIn("src", summary)
-        self.assertIn("pattern", content)
+    def test_accepts_grep_and_returns_summary_dict(self):
+        result = dogfood.handle(_event("Grep", {"pattern": "foo", "path": "src"}))
+        self.assertIsNotNone(result)
+        self.assertEqual(result["pattern"], "foo")
+        self.assertEqual(result["path"], "src")
+
+    def test_grep_with_glob_instead_of_path(self):
+        result = dogfood.handle(_event("Grep", {"pattern": "foo", "glob": "*.py"}))
+        self.assertEqual(result["path"], "*.py")
 
     def test_handles_missing_tool_input(self):
-        with mock.patch.object(dogfood, "_write_scribe_reference") as writer:
-            dogfood.handle(_event("Grep", None))
-        writer.assert_called_once()
+        result = dogfood.handle(_event("Grep", None))
+        self.assertIsNotNone(result)
+        self.assertEqual(result["pattern"], "")
+        self.assertEqual(result["path"], "")
 
     def test_truncates_very_long_pattern(self):
         long_pattern = "a" * 500
-        with mock.patch.object(dogfood, "_write_scribe_reference") as writer:
-            dogfood.handle(_event("Grep", {"pattern": long_pattern}))
-        summary, _ = writer.call_args.args
-        self.assertLess(len(summary), 200)
+        result = dogfood.handle(_event("Grep", {"pattern": long_pattern}))
+        self.assertLess(len(result["pattern"]), 100)
 
 
 class TestUeLlmToolkitObserver(unittest.TestCase):
 
-    def test_rejects_non_prefixed_tool_without_writing(self):
-        with mock.patch.object(ue_llm_toolkit, "_write_scribe_reference") as writer:
-            ue_llm_toolkit.handle(_event("Grep"))
-            ue_llm_toolkit.handle(_event("mcp__other_server__tool"))
-        writer.assert_not_called()
+    def test_rejects_non_prefixed_tool_returns_none(self):
+        self.assertIsNone(ue_llm_toolkit.handle(_event("Grep")))
+        self.assertIsNone(ue_llm_toolkit.handle(_event("mcp__other_server__tool")))
 
-    def test_accepts_matching_prefix_and_writes_scribe_reference(self):
-        with mock.patch.object(ue_llm_toolkit, "_write_scribe_reference") as writer:
-            ue_llm_toolkit.handle(
-                _event(
-                    "mcp__ue_llm_toolkit__inspect_blueprint",
-                    {"blueprint": "BP_MainCharacter"},
-                )
+    def test_accepts_matching_prefix_and_returns_summary_dict(self):
+        result = ue_llm_toolkit.handle(
+            _event(
+                "mcp__ue_llm_toolkit__inspect_blueprint",
+                {"blueprint": "BP_MainCharacter"},
             )
-        writer.assert_called_once()
-        summary, content = writer.call_args.args
-        self.assertIn("mcp__ue_llm_toolkit__inspect_blueprint", summary)
-        self.assertIn("blueprint=BP_MainCharacter", summary)
-        self.assertIn("BP_MainCharacter", content)
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["tool"], "mcp__ue_llm_toolkit__inspect_blueprint")
+        self.assertIn("blueprint=BP_MainCharacter", result["input_summary"])
 
     def test_summarises_without_known_keys(self):
-        with mock.patch.object(ue_llm_toolkit, "_write_scribe_reference") as writer:
-            ue_llm_toolkit.handle(
-                _event(
-                    "mcp__ue_llm_toolkit__get_stats",
-                    {"unknown_key": "v", "another": 2},
-                )
+        result = ue_llm_toolkit.handle(
+            _event(
+                "mcp__ue_llm_toolkit__get_stats",
+                {"unknown_key": "v", "another": 2},
             )
-        summary, _ = writer.call_args.args
-        self.assertIn("keys=[", summary)
+        )
+        self.assertIn("keys=[", result["input_summary"])
 
     def test_empty_tool_input_produces_no_input_summary(self):
-        with mock.patch.object(ue_llm_toolkit, "_write_scribe_reference") as writer:
-            ue_llm_toolkit.handle(
-                _event("mcp__ue_llm_toolkit__noop", {})
-            )
-        summary, _ = writer.call_args.args
-        self.assertIn("(no input)", summary)
+        result = ue_llm_toolkit.handle(_event("mcp__ue_llm_toolkit__noop", {}))
+        self.assertIn("(no input)", result["input_summary"])
 
 
 if __name__ == "__main__":
