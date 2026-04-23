@@ -474,11 +474,19 @@ body.sidebar-hidden #totals {
    at all times. When the user is scrolled to the bottom the bubble sits
    in natural flow (sticky is a no-op); when they scroll up it stays
    pinned to the viewport bottom — like the "typing" indicator in
-   iMessage. No user-scrolled gate needed. */
+   iMessage. No user-scrolled gate needed.
+
+   content-visibility:auto (inherited from .msg) breaks sticky: layout+size
+   containment means the engine can't compute the sticky offset against a
+   normally-flowed box once it's past the viewport, and it just stops
+   pinning. Override to visible — the bubble is a ~40px three-dot node,
+   cheap to always render. */
 .msg.thinking {
   position: sticky;
   bottom: 6px;
   z-index: 2;
+  content-visibility: visible;
+  contain: none;
 }
 
 .msg.prompt .prompt-choice {

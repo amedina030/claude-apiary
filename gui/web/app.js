@@ -310,9 +310,43 @@
   }
 
   // --- message render -------------------------------------------------------
-  function appendMessage(msg) {
+  // `sid` defaults to active for frontend-synthesized records (prompt
+  // appearance/resolution). `isReplay` true means this is a transcript
+  // re-render (tab switch, reload) — render to DOM but do NOT touch tab
+  // state, since live events already maintain the canonical truth.
+  function appendMessage(msg, sid, isReplay) {
     if (msg.uuid && seen.has(msg.uuid)) return;
     if (msg.uuid) seen.add(msg.uuid);
+    const targetSid = sid || activeSessionId;
+
+    // State updates run for ALL tabs (live path only) — that's the whole
+    // point of per-tab state: a background tab's end_turn updates ITS
+    // bubble, not the active tab's. Replay skips this entirely; live
+    // events already maintained the canonical state when they first
+    // arrived, and re-running here would clobber lastAsstMsgAt with "now".
+    if (!isReplay && msg.role === "assistant") {
+      const t = getTab(targetSid);
+      t.lastAsstMsgAt = Date.now();
+      if (msg.stop_reason === "end_turn") {
+        hideThinkingBubbleFor(targetSid, true);
+        flashWindowIfBackground();
+      } else {
+        hideThinkingBubbleFor(targetSid, false);
+        if (targetSid === activeSessionId) ensureThinkingBubble();
+      }
+    }
+
+    // Inactive-tab messages stop here. They'll re-render from backend
+    // history when the user switches in — no point painting them into
+    // the active tab's DOM.
+    if (targetSid !== activeSessionId) return;
+
+    // Active-tab token + model totals: need to run for both live AND
+    // replay so a tab switch repopulates the chrome from history.
+    if (msg.role === "assistant") {
+      if (msg.tokens) addTokens(msg.tokens);
+      if (msg.model) setModel(msg.model);
+    }
 
     // Optimistic-render reconciliation: when a real user message arrives with
     // text that matches an outstanding tentative, replace the tentative in
@@ -409,29 +443,6 @@
       messagesEl.insertBefore(li, insertAnchor);
     } else {
       messagesEl.appendChild(li);
-    }
-
-    if (msg.role === "assistant") {
-      if (msg.tokens) addTokens(msg.tokens);
-      if (msg.model) setModel(msg.model);
-      lastAsstMsgAt = Date.now();
-      // Route on stop_reason. "end_turn" = claude is done → kill the bubble
-      // immediately. "tool_use" (or other mid-turn reasons) = more messages
-      // still coming → hide the current DOM node but keep waitingForAssistant
-      // true and re-spawn a fresh bubble right away so there's no visual gap
-      // between chained assistant messages. The 15s idle timer is the final
-      // safety net for sessions where stop_reason never resolves to end_turn.
-      if (typeof hideThinkingBubble === "function") {
-        if (msg.stop_reason === "end_turn") {
-          hideThinkingBubble(true);
-        } else {
-          hideThinkingBubble(false);
-          if (typeof ensureThinkingBubble === "function") ensureThinkingBubble();
-        }
-      }
-      if (msg.stop_reason === "end_turn") {
-        flashWindowIfBackground();
-      }
     }
 
     maybeScroll();
@@ -1066,8 +1077,6 @@
   // real pty activity for purposes of the 15s thinking-idle timeout — otherwise
   // turn-end detection gets extended by trailing repaints.
   const PTY_POST_MSG_GRACE_MS = 3000;
-  let lastPtyChunkAt = 0;
-  let lastAsstMsgAt = 0;
 
   // Read back CSS vars for xterm theme so a theme.json change propagates.
   function themeVar(name, fallback) {
@@ -1192,8 +1201,33 @@
   }
 
   function inPostMessageGrace() {
-    return lastAsstMsgAt > 0 && Date.now() - lastAsstMsgAt < PTY_POST_MSG_GRACE_MS;
+    const last = activeTab().lastAsstMsgAt;
+    return last > 0 && Date.now() - last < PTY_POST_MSG_GRACE_MS;
   }
+
+  // --- per-tab state --------------------------------------------------------
+  // Each session owns a TabState. Module-level singletons used to live here
+  // (waitingForAssistant, thinkingStartTs, lastPtyChunkAt, lastAsstMsgAt)
+  // representing only the active tab's state, requiring a hand-rolled save/
+  // restore on every switch. Now they're per-tab and live forever (until the
+  // session closes), so live events for inactive tabs still update the right
+  // state and tab switches just re-render the active tab's truth.
+  function newTabState() {
+    return {
+      waitingForAssistant: false,
+      thinkingStartTs: 0,
+      lastPtyChunkAt: 0,
+      lastAsstMsgAt: 0,
+    };
+  }
+  const tabs = new Map();
+  function getTab(sid) {
+    if (!sid) return newTabState();   // safe default for code that runs pre-activation
+    let t = tabs.get(sid);
+    if (!t) { t = newTabState(); tabs.set(sid, t); }
+    return t;
+  }
+  function activeTab() { return getTab(activeSessionId); }
 
   // --- thinking bubble ------------------------------------------------------
   // Inline 3-dot bubble while claude is working. Dots pulse in place when
@@ -1203,79 +1237,43 @@
   // position:sticky so it pins to the viewport bottom when the user scrolls
   // up (iMessage-style typing indicator) — see .msg.thinking in app.css.
   //
-  // Turn stays "active" (waitingForAssistant=true) from the user-sent Enter
-  // until stop_reason=end_turn or THINKING_IDLE_MS of pty silence. State is
-  // preserved per-session via sessionThinkingState so tab switches don't
-  // kill the bubble on the tab that's still working.
+  // Turn stays "active" (activeTab().waitingForAssistant=true) from the
+  // user-sent Enter until stop_reason=end_turn or THINKING_IDLE_MS of pty
+  // silence. State is per-tab so background tabs keep their turn alive.
   const THINKING_IDLE_MS = 15000;
   const PTY_ACTIVE_MS = 2000;
-  let thinkingEl = null;
-  let waitingForAssistant = false;
-  // Wall-clock ms when the current turn's Enter landed; 0 while idle.
-  let thinkingStartTs = 0;
-  // Per-session snapshots so a tab switch doesn't end the turn on tabs that
-  // are still working. Active tab's vars above are the live view; snapshot
-  // is taken on switch-out, restored on switch-in.
-  const sessionThinkingState = new Map();
+  let thinkingEl = null;   // single shared DOM node — the active tab's bubble
 
-  function saveThinkingStateForSession(sid) {
-    if (!sid) return;
-    sessionThinkingState.set(sid, {
-      waitingForAssistant,
-      thinkingStartTs,
-      lastPtyChunkAt,
-    });
-  }
-
-  function loadThinkingStateForSession(sid) {
-    const state = sid ? sessionThinkingState.get(sid) : null;
-    if (state) {
-      waitingForAssistant = state.waitingForAssistant;
-      thinkingStartTs = state.thinkingStartTs;
-      // The saved lastPtyChunkAt is frozen at switch-out time (background tab
-      // pty chunks are dropped by pushIsForActive), so it would be stale by
-      // the time we switch back. Re-baseline to now so the 15s idle-kill tick
-      // doesn't instantly murder a bubble we just re-spawned. The real pty
-      // activity will overwrite this as soon as fresh chunks arrive.
-      lastPtyChunkAt = waitingForAssistant ? Date.now() : state.lastPtyChunkAt;
-    } else {
-      waitingForAssistant = false;
-      thinkingStartTs = 0;
-      lastPtyChunkAt = 0;
-    }
-    if (waitingForAssistant && thinkingStartTs > 0) {
-      const secs = Math.floor((Date.now() - thinkingStartTs) / 1000);
+  function syncThinkingChrome() {
+    const t = activeTab();
+    if (t.waitingForAssistant && t.thinkingStartTs > 0) {
+      const secs = Math.floor((Date.now() - t.thinkingStartTs) / 1000);
       thinkingSecondsEl.textContent = secs + "s";
       thinkingSecondsEl.classList.remove("hidden");
     } else {
       thinkingSecondsEl.classList.add("hidden");
       thinkingSecondsEl.textContent = "";
     }
-    if (waitingForAssistant) ensureThinkingBubble();
+    if (t.waitingForAssistant) ensureThinkingBubble();
   }
 
   function startThinkingCounter() {
-    thinkingStartTs = Date.now();
+    activeTab().thinkingStartTs = Date.now();
     thinkingSecondsEl.textContent = "0s";
     thinkingSecondsEl.classList.remove("hidden");
-  }
-
-  function stopThinkingCounter() {
-    thinkingStartTs = 0;
-    thinkingSecondsEl.classList.add("hidden");
-    thinkingSecondsEl.textContent = "";
   }
 
   function updateThinkingState() {
     if (!thinkingEl) return;
     const body = thinkingEl.querySelector(".thinking-body");
     if (!body) return;
-    const ptyActive = lastPtyChunkAt > 0 && (Date.now() - lastPtyChunkAt) < PTY_ACTIVE_MS;
+    const last = activeTab().lastPtyChunkAt;
+    const ptyActive = last > 0 && (Date.now() - last) < PTY_ACTIVE_MS;
     body.classList.toggle("working", ptyActive);
   }
 
   function ensureThinkingBubble() {
-    if (!waitingForAssistant) return;
+    if (!activeTab().waitingForAssistant) return;
     if (thinkingEl && thinkingEl.isConnected) return;
     thinkingEl = document.createElement("li");
     thinkingEl.className = "msg thinking";
@@ -1290,21 +1288,32 @@
     maybeScroll();
   }
 
-  function hideThinkingBubble(endTurn) {
+  // Tear down the bubble for a specific tab. When that tab is the active
+  // one, also remove the DOM node. `endTurn=true` clears the waitingForAssistant
+  // flag (real end_turn or 15s idle); `false` is a transient hide between
+  // chained assistant messages within the same turn.
+  function hideThinkingBubbleFor(sid, endTurn) {
+    const t = getTab(sid);
     if (endTurn) {
-      waitingForAssistant = false;
-      stopThinkingCounter();
+      t.waitingForAssistant = false;
+      t.thinkingStartTs = 0;
     }
-    if (thinkingEl) {
-      thinkingEl.remove();
-      thinkingEl = null;
+    if (sid === activeSessionId) {
+      if (endTurn) {
+        thinkingSecondsEl.classList.add("hidden");
+        thinkingSecondsEl.textContent = "";
+      }
+      if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
     }
   }
+  // Convenience for callers that always mean the active tab.
+  function hideThinkingBubble(endTurn) { hideThinkingBubbleFor(activeSessionId, endTurn); }
 
   setInterval(() => {
-    if (!waitingForAssistant) return;
-    if (thinkingStartTs > 0) {
-      const secs = Math.floor((Date.now() - thinkingStartTs) / 1000);
+    const t = activeTab();
+    if (!t.waitingForAssistant) return;
+    if (t.thinkingStartTs > 0) {
+      const secs = Math.floor((Date.now() - t.thinkingStartTs) / 1000);
       thinkingSecondsEl.textContent = secs + "s";
     }
     updateThinkingState();
@@ -1314,7 +1323,7 @@
     if (thinkingEl && thinkingEl.isConnected && thinkingEl !== messagesEl.lastElementChild) {
       messagesEl.appendChild(thinkingEl);
     }
-    if (Date.now() - lastPtyChunkAt > THINKING_IDLE_MS) {
+    if (Date.now() - t.lastPtyChunkAt > THINKING_IDLE_MS) {
       hideThinkingBubble(true);
     }
   }, 1000);
@@ -1330,7 +1339,7 @@
     // signature from the last stationary state).
     unknownPromptNotifiedSig = null;
     if (inPostMessageGrace()) return;
-    lastPtyChunkAt = Date.now();
+    activeTab().lastPtyChunkAt = Date.now();
   }
 
   // Fallback auto-expand: if the pty has been stationary for a while AND the
@@ -1344,8 +1353,9 @@
   setInterval(() => {
     if (!ptyStripWrapEl.classList.contains("collapsed")) return;
     if (activePrompt) return;               // banner is handling it
-    if (lastPtyChunkAt === 0) return;        // nothing has happened yet
-    if (Date.now() - lastPtyChunkAt < UNKNOWN_PROMPT_QUIET_MS) return; // still busy
+    const last = activeTab().lastPtyChunkAt;
+    if (last === 0) return;                 // nothing has happened yet
+    if (Date.now() - last < UNKNOWN_PROMPT_QUIET_MS) return; // still busy
     const lines = readScreenLines();
     // If the structured detector would *accept* this buffer, the detector
     // (with its dismiss-cooldown) is in charge — not the fallback. This
@@ -2171,13 +2181,6 @@
       // already pushed the active session's history before setActiveSession
       // arrives — clearing would wipe that history.
       if (isFirstActivation) return;
-      // Snapshot outgoing tab's thinking state BEFORE clearing the DOM, so a
-      // tab still working keeps its bubble when the user returns. The DOM
-      // node itself is torn down (it'll re-render from backend history on
-      // switch-back), but waitingForAssistant / counter state is preserved.
-      if (typeof saveThinkingStateForSession === "function") {
-        saveThinkingStateForSession(prevSid);
-      }
       try { clearMessages(); } catch (_) {}
       try { term.reset(); } catch (_) {}
       if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
@@ -2187,27 +2190,44 @@
       mcpPrompt = null;
       try { allNotes = []; renderSidebar(); } catch (_) {}
       try { resetAgentsStripState(); } catch (_) {}
-      // Restore incoming tab's thinking state (re-spawns the bubble if that
-      // tab is still mid-turn). Must run AFTER the DOM teardown above so the
-      // re-spawned bubble doesn't get wiped.
-      if (typeof loadThinkingStateForSession === "function") {
-        loadThinkingStateForSession(nextSid);
-      }
+      // The pty buffer is dropped while the tab was inactive (no per-tab
+      // xterm yet — that's a separate refactor), so the 15s idle-kill
+      // timer would falsely fire on switch-back. Re-baseline lastPtyChunkAt
+      // so the timer waits 15s of real silence, not 15s since switch-out.
+      const t = getTab(nextSid);
+      if (t.waitingForAssistant) t.lastPtyChunkAt = Date.now();
+      // Sync the bubble + seconds counter from the new active tab. State
+      // is already correct (per-tab, maintained by live events); this is
+      // just a re-attach after the DOM teardown above. onMessages replay
+      // calls syncThinkingChrome again once it lands, ensuring the bubble
+      // is the last child of the (now-repopulated) message list.
+      syncThinkingChrome();
     },
     onMessage(msgJson, sessionId) {
-      if (!pushIsForActive(sessionId)) return;
+      // Live messages flow to ALL tabs (state updates), not just active.
+      // appendMessage gates DOM render on activeSessionId internally.
       try {
         const msg = typeof msgJson === "string" ? JSON.parse(msgJson) : msgJson;
-        appendMessage(msg);
+        appendMessage(msg, sessionId, false);
       } catch (e) {
         console.error("onMessage parse error", e);
       }
     },
     onMessages(arrJson, sessionId) {
-      if (!pushIsForActive(sessionId)) return;
+      // Bulk push = transcript replay (tab switch, reload, close-other).
+      // Replay is always for the active tab — backend only replays the
+      // session the user is viewing. Skip if it isn't, defensively.
+      if (sessionId && sessionId !== activeSessionId) return;
       try {
         const arr = typeof arrJson === "string" ? JSON.parse(arrJson) : arrJson;
-        if (Array.isArray(arr)) for (const m of arr) appendMessage(m);
+        if (Array.isArray(arr)) {
+          for (const m of arr) appendMessage(m, sessionId, true);
+          // After replay, sync the chrome (seconds counter + bubble) from
+          // the active tab's authoritative state. State is always correct
+          // because live events updated it as they arrived; this just
+          // re-attaches DOM that the prior clearMessages tore down.
+          syncThinkingChrome();
+        }
       } catch (e) {
         console.error("onMessages parse error", e);
       }
@@ -2242,6 +2262,12 @@
         const arr = typeof arrJson === "string" ? JSON.parse(arrJson) : arrJson;
         if (Array.isArray(arr)) {
           window.apiary.__sessions = arr;
+          // Drop tab state for sessions that no longer exist (closed tabs).
+          // The Map otherwise leaks indefinitely as tabs come and go.
+          const live = new Set(arr.map(s => s.session_id));
+          for (const sid of Array.from(tabs.keys())) {
+            if (!live.has(sid)) tabs.delete(sid);
+          }
           if (typeof window.renderTabs === "function") window.renderTabs(arr);
         }
       } catch (e) {
@@ -2356,7 +2382,8 @@
       // the tentative render while we're in feedback-submission mode —
       // claude treats this as input to the plan prompt, not a new user msg.
       if (text && !text.startsWith("/") && !awaitingFeedback) {
-        if (!waitingForAssistant) {
+        const t = activeTab();
+        if (!t.waitingForAssistant) {
           // Fresh turn (not queued). Clear any stale .queued markers from
           // prior turns: if claude bundled multiple queued messages into one
           // reply (so not every queued msg got a dedicated response), those
@@ -2366,14 +2393,14 @@
             .forEach(el => el.classList.remove("queued"));
           startThinkingCounter();
         }
-        // If waitingForAssistant is already true, claude is still working on
-        // a prior turn — this message is queued, and needs the .queued marker
-        // so the assistant reply for the prior turn lands before it.
-        appendTentativeUserMessage(text, waitingForAssistant);
+        // If t.waitingForAssistant is already true, claude is still working
+        // on a prior turn — this message is queued, and needs the .queued
+        // marker so the assistant reply for the prior turn lands before it.
+        appendTentativeUserMessage(text, t.waitingForAssistant);
         // From here until the assistant message lands, the thinking bubble
         // may spawn on pty chunks. Slash commands and feedback submissions
         // don't get a normal assistant reply, so we don't arm for them.
-        waitingForAssistant = true;
+        t.waitingForAssistant = true;
       }
       window.pywebview.api.send_input(text);
       if (awaitingFeedback) {
