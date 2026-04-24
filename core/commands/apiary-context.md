@@ -74,6 +74,17 @@ Apiary uses **scribe** (`scribe/notes.py`) for operational state (TODOs, handoff
 
 ---
 
+## Reference subsystems (lookup-on-demand)
+
+Apiary has two per-repo reference stores. Neither is surfaced in the startup banner — reach for them when the task is research- or visual-adjacent, and let the user know what you found.
+
+- **Researcher** (`researcher/cli.py`) — text findings (markdown + YAML frontmatter). Use for landscape surveys, evaluations, decisions made-from-research that may stay relevant for months. Look up: `researcher/cli.py find <query>`.
+- **Captures** (`captures/cli.py`) — image + sidecar pairs. Use for screenshots (GUI iterations, UE viewport, design references) and any visual data the user wants tracked. Look up: `captures/cli.py find <query>`. Get a single image path to feed the Read tool: `captures/cli.py path <topic> <slug>`.
+
+Both store state under `<repo-root>/.apiary/<tool>/` per-repo. Both use a controlled tag vocabulary in `<tool>/tags.yaml` — register tags via `register-tag` before adding entries that use them.
+
+---
+
 ## List-form subprocess for long CLI arguments
 
 When invoking a CLI tool with a text argument longer than ~3 lines or containing markdown, **always** use list-form subprocess -- never bash with shell quoting (backticks trigger command substitution, apostrophes break quoting).

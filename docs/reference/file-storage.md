@@ -115,6 +115,16 @@ Researcher state lives at `<repo-root>/.apiary/research/` under the umbrella `.a
 
 The template (`researcher/template.md`) ships in the repo, not under `.apiary/` — it's source, not state.
 
+## Captures data
+
+Captures state lives at `<repo-root>/.apiary/captures/` under the umbrella `.apiary/` directory. All git-ignored. Each capture is a pair of files sharing a slug.
+
+| Path | Description |
+|------|-------------|
+| `captures/tags.yaml` | Controlled-tag vocabulary for this repo. Edited via `captures/cli.py register-tag` |
+| `captures/<topic>/<slug>.<ext>` | The canonical image file. Extension preserved from the source (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp`) |
+| `captures/<topic>/<slug>.md` | Sidecar metadata. YAML-subset frontmatter (title, topic, tags, captured_at, image, optional session_id, related_notes, sources) followed by a free-text context body |
+
 ## Bootstrap state
 
 Apiary's profile-based bootstrap (`core/apiary_bootstrap.py`) writes its provenance record at `<target>/.apiary/bootstrap_state.json`. Git-ignored like the rest of `.apiary/`.

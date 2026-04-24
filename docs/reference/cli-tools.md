@@ -255,6 +255,35 @@ Manage structured research findings per repo. Entries live at `<repo>/.apiary/re
 
 State is auto-created on first `add` or `register-tag`: `.apiary/research/` directory and a default `tags.yaml` with empty tag list.
 
+## captures/cli.py
+
+Manage visual captures (screenshots, UI mockups, viewport shots, etc.) per repo. Each capture pairs an image file with a markdown sidecar that holds metadata. State lives at `<repo>/.apiary/captures/<topic>/<slug>.<ext>` (image) alongside `<topic>/<slug>.md` (sidecar, YAML-subset frontmatter: title, topic, tags, captured_at, image, session_id, related_notes, sources, plus a free-text context body). A controlled tag vocabulary lives at `<repo>/.apiary/captures/tags.yaml`.
+
+### Subcommands
+
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `add` | `cli.py add <topic> <image-path> --title "<t>" [--tags t1,t2] [--context "<text>"] [--related ID1,ID2] [--session-id <id>] [--move]` | Ingest an image by copying (default) or moving it into the store; writes the sidecar. Rejects unknown tags, unsupported extensions, duplicate slugs |
+| `find` | `cli.py find <query> [--limit N]` | Ranked search over sidecar title/tags/body (title ×3, tags ×2, content ×1). Exits 0 even on zero hits |
+| `list` | `cli.py list [--topic X] [--tag Y]` | List captures grouped by topic, optionally filtered |
+| `show` | `cli.py show <topic> <slug>` | Print the sidecar contents followed by the absolute image path |
+| `path` | `cli.py path <topic> <slug>` | Print only the absolute image path (for scripting / feeding into Claude's Read tool) |
+| `register-tag` | `cli.py register-tag <tag>` | Append a tag to `tags.yaml` (controlled vocabulary) |
+
+### Allowed image extensions
+
+`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp` (case-insensitive).
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success (also returned by `find` with zero hits) |
+| `2` | Validation error: unknown tag, duplicate slug, entry not found, unsupported extension, missing source image, tag already registered |
+| `3` | Config error: invalid YAML in `tags.yaml` or sidecar frontmatter |
+
+State is auto-created on first `add` or `register-tag`: `.apiary/captures/` directory and a default `tags.yaml` with empty tag list.
+
 ## harden/validate_and_assign.py
 
 Combined validate + assign-IDs script. Preferred over calling validators and assign_ids separately.
