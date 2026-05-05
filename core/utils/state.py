@@ -22,12 +22,20 @@ import json
 import os
 import re
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from core.utils.apiary_pointer import get_repo_path
-from core.utils.filelock import FileLock
+# Allow `python core/utils/state.py` (e.g. via the launcher CLI mode) to
+# resolve the `core.*` imports below — Python only puts the script's own
+# directory on sys.path, not the repo root.
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from core.utils.apiary_pointer import get_repo_path  # noqa: E402
+from core.utils.filelock import FileLock  # noqa: E402
 
 REPOS_DIRNAME = ".repos"
 REGISTRY_FILENAME = "registry.json"
@@ -304,9 +312,8 @@ if __name__ == "__main__":
     # and shell snippets that need the path without re-implementing the
     # registry lookup. Invoked via:
     #   python ~/.claude/apiary_launch.py core/utils/state.py
-    import sys as _sys
     try:
         print(resolve_target_state_dir())
     except RuntimeError as exc:
-        print(f"error: {exc}", file=_sys.stderr)
-        _sys.exit(1)
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(1)
