@@ -269,6 +269,31 @@ def state_dir_from_env() -> Optional[Path]:
     return Path(value)
 
 
+def find_state_dir(target_repo: Path) -> Optional[Path]:
+    """Return the per-target state directory for ``target_repo``, or None.
+
+    Read-only resolver — does not allocate ids, write registry entries,
+    or run git. Reads ``<target_repo>/.apiary/pointer`` to get the
+    apiary repo path and target id, then returns
+    ``<apiary>/.repos/<target_id>/`` if it exists on disk.
+
+    Use this from passive consumers (GUI, dashboards, audits) that need
+    to find an already-registered target's state without side effects.
+    Targets that have never been registered, or whose pointer write
+    failed, return None — callers may fall back to a legacy in-repo
+    path if they want to support unmigrated targets.
+    """
+    pointer = _read_pointer(Path(target_repo))
+    if pointer is None:
+        return None
+    apiary_str = pointer.get("apiary_repo", "")
+    target_id = pointer.get("target_id", "")
+    if not apiary_str or not target_id:
+        return None
+    state_dir = Path(apiary_str) / REPOS_DIRNAME / target_id
+    return state_dir if state_dir.is_dir() else None
+
+
 def is_legacy_layout() -> bool:
     """Return True when the legacy layout escape hatch is set."""
     return os.environ.get(LEGACY_LAYOUT_ENV, "").strip().lower() == "legacy"

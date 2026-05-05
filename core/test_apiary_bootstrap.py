@@ -2,6 +2,7 @@
 """Tests for core.apiary_bootstrap — CLI, state, drift prompt, error paths."""
 import io
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -38,6 +39,13 @@ class _BootstrapHarness(unittest.TestCase):
         self.apiary = _make_apiary_repo(self.tmp)
         self.target = self.tmp / "target"
         self.target.mkdir()
+        # The state resolver requires the target to be inside a git repo.
+        subprocess.run(
+            ["git", "init", "--quiet"],
+            cwd=str(self.target),
+            check=True,
+            capture_output=True,
+        )
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -46,9 +54,12 @@ class _BootstrapHarness(unittest.TestCase):
         path = self.target / ".claude" / "settings.json"
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def _state_path(self) -> Path:
+        """Resolve the bootstrap-state file path under the centralized layout."""
+        return apiary_bootstrap._bootstrap_state_path(self.target, self.apiary)
+
     def _state(self) -> dict:
-        path = self.target / ".apiary" / "bootstrap_state.json"
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(self._state_path().read_text(encoding="utf-8"))
 
     def _cli(self, *extra: str, stdin_tty: bool = False, stdin_answer: str = "") -> int:
         args = [
@@ -443,6 +454,51 @@ class TestNonTTYReRun(_BootstrapHarness):
             rc = self._cli("base", stdin_tty=False)
         self.assertEqual(rc, 1)
         self.assertIn("--force", stderr.getvalue())
+
+
+class TestLegacyStateFallback(_BootstrapHarness):
+
+    def test_pre_migration_state_at_legacy_path_is_read_once(self):
+        # Pre-seed a legacy bootstrap_state.json at <target>/.apiary/ — this
+        # simulates a target that was bootstrapped before the C-2026-46
+        # migration moved state under <apiary>/.repos/<name>-<id>/. The
+        # rerun should pick up the legacy applied_apiary_keys (so previously
+        # owned keys still get evicted on re-bootstrap) and write the new
+        # state to the centralized path.
+        legacy_path = self.target / ".apiary" / "bootstrap_state.json"
+        legacy_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_state = {
+            "schema_version": 1,
+            "profile": "base",
+            "profiles_applied": ["base"],
+            "profile_content_hashes": {"base": "deadbeef"},
+            "applied_apiary_keys": ["legacy_key"],
+            "last_bootstrap_ts": "2026-01-01T00:00:00Z",
+        }
+        legacy_path.write_text(json.dumps(legacy_state), encoding="utf-8")
+        # Existing target settings.json shows that legacy_key was previously
+        # apiary-owned. After the rerun with a profile that no longer sets
+        # it, eviction should remove it.
+        settings_path = self.target / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps({"legacy_key": {"x": 1}, "permissions": {"allow": ["A"]}}),
+            encoding="utf-8",
+        )
+
+        _write_profile(
+            self.apiary,
+            "base",
+            '{"$schema_version": 1, "permissions": {"allow": ["A"]}}',
+        )
+        rc = self._cli("base", "--force")
+        self.assertEqual(rc, 0)
+        # legacy_key was evicted because the legacy state recorded it as
+        # apiary-owned and the new profile doesn't set it.
+        self.assertNotIn("legacy_key", self._settings())
+        # New state file lives at the centralized path; legacy file is
+        # left in place (read-only fallback, not migrated by this code).
+        self.assertTrue(self._state_path().is_file())
 
 
 class TestSummaryOutput(_BootstrapHarness):

@@ -1,18 +1,29 @@
 """Aggregate scribe notes across registered apiary repos.
 
-Reads `<repo>/.apiary/scribe/<type>/<year>/index.jsonl` directly (faster than
-shelling out to `notes.py list`). Returns active notes only — archived notes are
-filtered out. Includes the body file path so the frontend can lazy-load full
-content on click.
+Reads ``<state-dir>/scribe/<type>/<year>/index.jsonl`` directly (faster than
+shelling out to ``notes.py list``). Each target repo's state-dir is resolved
+via the per-target pointer at ``<target>/.apiary/pointer`` written at
+registration time. Unmigrated targets fall back to the legacy in-repo
+``<target>/.apiary/scribe/`` path so old data still surfaces during the
+migration window.
+
+Returns active notes only — archived notes are filtered out. Includes the
+body file path so the frontend can lazy-load full content on click.
 """
 
 from __future__ import annotations
 
 import json
+import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
+
+# core.utils.state lives one directory up; mirror the import-path pattern
+# used by other gui modules (sys.path insert + repo-root-relative import).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core.utils.state import find_state_dir  # noqa: E402
 
 
 @dataclass
@@ -64,9 +75,26 @@ _FOLDER_TO_TYPE = {
 _SKIP_FOLDERS = {"memory", "backup", "backups", "archive"}
 
 
+def _resolve_scribe_root(repo: Path) -> Optional[Path]:
+    """Find this target's scribe state directory.
+
+    Honors the post-migration layout (``<apiary>/.repos/<target_id>/scribe/``)
+    via the per-target pointer, and falls back to the legacy in-repo path
+    (``<target>/.apiary/scribe/``) for unmigrated targets.
+    Returns None if neither exists.
+    """
+    state_dir = find_state_dir(repo)
+    if state_dir is not None:
+        candidate = state_dir / "scribe"
+        if candidate.is_dir():
+            return candidate
+    legacy = repo / ".apiary" / "scribe"
+    return legacy if legacy.is_dir() else None
+
+
 def _scan_repo(repo: Path) -> list[NoteEntry]:
-    scribe_root = repo / ".apiary" / "scribe"
-    if not scribe_root.is_dir():
+    scribe_root = _resolve_scribe_root(repo)
+    if scribe_root is None:
         return []
     out: list[NoteEntry] = []
     repo_label = repo.name

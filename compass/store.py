@@ -1,6 +1,14 @@
 """Path resolution, dimension config, and observation helpers for compass.
 
-Compass state lives at ``<git-repo-root>/.apiary/compass/``:
+Compass state lives at ``<state-dir>/compass/`` where ``<state-dir>`` is
+the per-target directory resolved by the centralized state registry
+(``<apiary>/.repos/<name>-<id>/``). The launcher exports
+``APIARY_TARGET_STATE_DIR`` after registry lookup so this module can
+return the correct path without re-running the resolver. When that env
+var is unset (direct invocation, tests, or unmigrated targets), we fall
+back to the legacy in-repo path ``<git-repo-root>/.apiary/compass/``.
+
+Layout::
 
     observations/<session_id>.json   — active per-session observation files
     observations/archive/<year>-<week>/<session_id>.json — archived
@@ -12,6 +20,7 @@ Dimensions config ships with the compass module at ``compass/dimensions.json``.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from datetime import datetime, timezone
@@ -19,6 +28,7 @@ from pathlib import Path
 
 APIARY_STATE_DIRNAME = ".apiary"
 COMPASS_SUBDIR = "compass"
+TARGET_STATE_DIR_ENV = "APIARY_TARGET_STATE_DIR"
 
 OBSERVATIONS_DIRNAME = "observations"
 ARCHIVE_DIRNAME = "archive"
@@ -59,10 +69,17 @@ def _git_repo_root(start: Path | None = None) -> Path | None:
 
 
 def compass_dir(start: Path | None = None) -> Path:
-    """Return ``<repo-root>/.apiary/compass/``.
+    """Return the compass state directory.
 
-    Falls back to ``<cwd>/.apiary/compass/`` when not inside a git repo.
+    Resolution order:
+      1. ``APIARY_TARGET_STATE_DIR`` env var (set by apiary_launch.py after
+         the registry resolver runs) — returns ``<state_dir>/compass/``.
+      2. ``<repo-root>/.apiary/compass/`` via git rev-parse on *start*.
+      3. ``<cwd>/.apiary/compass/`` when not inside a git repo.
     """
+    env_dir = os.environ.get(TARGET_STATE_DIR_ENV, "").strip()
+    if env_dir:
+        return Path(env_dir) / COMPASS_SUBDIR
     root = _git_repo_root(start) or (start or Path.cwd())
     return Path(root) / APIARY_STATE_DIRNAME / COMPASS_SUBDIR
 

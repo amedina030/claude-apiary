@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Idempotent bootstrap for a fresh claude-apiary clone.
 
-Creates the in-repo scribe state directory at <repo-root>/.apiary/scribe/
-(decision #269), lays out the typed-year folder skeleton (todos/, handoffs/,
-…, learnings/) via ScribeStore.ensure_layout, seeds an empty
-memory/MEMORY.md, writes the umbrella .apiary/.gitignore so the whole dir
-self-ignores, sets the auto-startup flag if missing, and verifies the
-runtime environment.
+Resolves the apiary repo's per-target state directory under
+``<apiary>/.repos/<name>-<id>/`` (post C-2026-46 centralization) by
+calling the state resolver, lays out the scribe typed-year folder
+skeleton (todos/, handoffs/, …, learnings/) via ScribeStore.ensure_layout,
+seeds an empty memory/MEMORY.md, sets the auto-startup flag if missing,
+and verifies the runtime environment.
+
+The legacy in-repo umbrella at ``<repo>/.apiary/`` only holds the pointer
+file the resolver writes during registration; bootstrap doesn't seed any
+state there anymore.
 
 Safe to run repeatedly — never clobbers existing data.
 
@@ -22,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from core.utils.project import get_project_key, project_key_from_path  # noqa: E402
+from core.utils.state import resolve_target_state_dir  # noqa: E402
 from scribe.store import ScribeStore  # noqa: E402
 
 # Markers for the pre-v2 flat-jsonl scribe layout under ~/.claude/projects/<key>/.
@@ -40,12 +45,11 @@ PROJECTS_DIR = CLAUDE_DIR / "projects"
 AUTO_STARTUP_FLAG = CLAUDE_DIR / "auto-startup-enabled"
 REQUIREMENTS_FILE = REPO_ROOT / "requirements.txt"
 
-# In-repo umbrella state directory (decision #269, todos #262–#268).
-# Scribe state lives under <repo-root>/.apiary/scribe/; the umbrella
-# self-ignores via .apiary/.gitignore containing '*'.
-APIARY_UMBRELLA_NAME = ".apiary"
+# Scribe state lives under <state-dir>/scribe/ where <state-dir> is
+# resolved by the registry (post C-2026-46). The legacy umbrella
+# <repo>/.apiary/ now only holds the pointer file written during
+# registration.
 SCRIBE_SUBDIR_NAME = "scribe"
-UMBRELLA_GITIGNORE_BODY = "*\n"
 
 
 class BootstrapResult:
@@ -180,17 +184,18 @@ def _check_requirements(result: BootstrapResult) -> None:
 
 def _unmigrated_legacy_state(repo_dir: Path, scribe_dir: Path) -> Optional[Path]:
     """Return the legacy project dir iff it holds scribe state that wasn't
-    migrated into the repo-local .apiary/scribe/ yet.
+    migrated into the centralized scribe location yet.
 
     Detects the case where an existing machine has scribe state at
-    ~/.claude/projects/<key>/{notes,learnings,memory} but the in-repo
-    ``<repo>/.apiary/scribe/`` is empty. Bootstrap must refuse to seed in
-    this state — writing empty files under .apiary/scribe/ would mask the
-    legacy data and leave the user's real notes stranded.
+    ~/.claude/projects/<key>/{notes,learnings,memory} but the centralized
+    ``<state-dir>/scribe/`` is empty. Bootstrap must refuse to seed in
+    this state — writing empty files there would mask the legacy data
+    and leave the user's real notes stranded.
 
     Returns ``None`` when either:
       - no legacy state exists, OR
-      - the in-repo location already has state (migration is done or in progress).
+      - the centralized location already has state (migration is done
+        or in progress).
     """
     project_key = get_project_key(repo_dir)
     candidate_keys = {project_key, project_key_from_path(repo_dir)}
@@ -204,12 +209,22 @@ def _unmigrated_legacy_state(repo_dir: Path, scribe_dir: Path) -> Optional[Path]
     return None
 
 
+def _resolve_scribe_dir(repo_dir: Path) -> Path:
+    """Return ``<state-dir>/scribe/`` for *repo_dir*, registering it if needed.
+
+    The registry resolver auto-allocates an id, creates the per-target
+    state dir under ``<apiary>/.repos/<name>-<id>/``, and writes a
+    pointer file back into ``<repo_dir>/.apiary/`` on first call.
+    """
+    state_dir = resolve_target_state_dir(cwd=repo_dir, apiary_repo=repo_dir)
+    return state_dir / SCRIBE_SUBDIR_NAME
+
+
 def bootstrap(repo_dir: Path) -> BootstrapResult:
     """Run all bootstrap steps for repo_dir. Returns a result tally."""
     result = BootstrapResult()
 
-    umbrella_dir = repo_dir / APIARY_UMBRELLA_NAME
-    scribe_dir = umbrella_dir / SCRIBE_SUBDIR_NAME
+    scribe_dir = _resolve_scribe_dir(repo_dir)
 
     legacy_dir = _unmigrated_legacy_state(repo_dir, scribe_dir)
     if legacy_dir is not None:
@@ -222,14 +237,7 @@ def bootstrap(repo_dir: Path) -> BootstrapResult:
         return result
 
     _ensure_dir(CLAUDE_DIR, "~/.claude", result)
-    _ensure_dir(umbrella_dir, f"{APIARY_UMBRELLA_NAME}/", result)
-    _ensure_text_file(
-        umbrella_dir / ".gitignore",
-        UMBRELLA_GITIGNORE_BODY,
-        f"{APIARY_UMBRELLA_NAME}/.gitignore",
-        result,
-    )
-    _ensure_dir(scribe_dir, f"{APIARY_UMBRELLA_NAME}/{SCRIBE_SUBDIR_NAME}/", result)
+    _ensure_dir(scribe_dir, "scribe state dir", result)
     _ensure_typed_year_layout(scribe_dir, result)
 
     memory_dir = scribe_dir / "memory"
@@ -253,7 +261,7 @@ def _print_summary(result: BootstrapResult, repo_dir: Path, quiet: bool) -> None
     if quiet and not result.warnings:
         return
     print(f"repo: {repo_dir}")
-    print(f"scribe state: {repo_dir / APIARY_UMBRELLA_NAME / SCRIBE_SUBDIR_NAME}")
+    print(f"scribe state: {_resolve_scribe_dir(repo_dir)}")
     if result.created:
         print("created:")
         for item in result.created:

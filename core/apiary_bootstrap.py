@@ -12,8 +12,11 @@ Resolves ``<profile>`` via ``<apiary-repo>/profiles/<name>.jsonc`` (walking
 ``extends`` chains and deep-merging), loads the target's existing
 ``.claude/settings.json`` (if any), merges apiary-owned top-level keys
 preserving non-apiary keys, writes ``.claude/settings.json`` and
-``.apiary/bootstrap_state.json``. Re-runs show a diff and prompt before
-overwriting unless ``--force``.
+``bootstrap_state.json`` under the target's centralized state dir
+(``<apiary>/.repos/<name>-<id>/`` — see C-2026-46). Re-runs show a diff
+and prompt before overwriting unless ``--force``. Pre-migration installs
+that left state at ``<target>/.apiary/bootstrap_state.json`` are still
+read once on the first centralized run, then drift forward.
 """
 from __future__ import annotations
 
@@ -73,11 +76,33 @@ from core.apiary_profiles import (
 )
 from core.utils.apiary_pointer import get_repo_path
 from core.utils.jsonc import JsoncParseError
+from core.utils.state import find_state_dir, resolve_target_state_dir
 
 STATE_SCHEMA_VERSION = 1
 _STATE_FILENAME = "bootstrap_state.json"
+_LEGACY_STATE_DIR = ".apiary"
 _SETTINGS_PATH = ".claude/settings.json"
 _PROFILES_SUBDIR = "profiles"
+
+
+def _bootstrap_state_path(target_repo: Path, apiary_repo: Path) -> Path:
+    """Return the bootstrap_state.json path for *target_repo*.
+
+    Centralized layout (post C-2026-46): state lives at
+    ``<apiary>/.repos/<name>-<id>/bootstrap_state.json``. When the target
+    is unregistered, ``resolve_target_state_dir`` allocates an id and
+    writes the pointer back into the target. The migration script moves
+    any pre-existing legacy file from ``<target>/.apiary/`` into the
+    centralized dir, so this is the single read/write location after
+    migration.
+    """
+    state_dir = resolve_target_state_dir(cwd=target_repo, apiary_repo=apiary_repo)
+    return state_dir / _STATE_FILENAME
+
+
+def _legacy_bootstrap_state_path(target_repo: Path) -> Path:
+    """Pre-migration in-repo path. Read-only fallback for unmigrated targets."""
+    return target_repo / _LEGACY_STATE_DIR / _STATE_FILENAME
 
 
 class BootstrapError(Exception):
@@ -135,8 +160,16 @@ def _run(args: argparse.Namespace) -> int:
     resolved = resolve(args.profile, profiles_dir)
 
     existing_settings = _load_existing_settings(target_repo)
-    state_path = target_repo / ".apiary" / _STATE_FILENAME
+    state_path = _bootstrap_state_path(target_repo, apiary_repo)
     prior_state = _read_state(state_path)
+    if prior_state is None:
+        # Read-only fallback: pick up state from the legacy in-repo path
+        # for targets that pre-date the migration. The next write lands at
+        # state_path (centralized), so this is one-way drift toward the
+        # new layout.
+        legacy_path = _legacy_bootstrap_state_path(target_repo)
+        if legacy_path.is_file():
+            prior_state = _read_state(legacy_path)
     prior_owned_keys = prior_state.get("applied_apiary_keys", []) if prior_state else []
     merged_settings, owned_keys = _merge_profile_into_settings(
         existing_settings, resolved.merged, prior_owned_keys
@@ -160,7 +193,7 @@ def _run(args: argparse.Namespace) -> int:
     _write_settings(target_repo, merged_settings)
     _write_state(state_path, resolved, owned_keys)
 
-    _print_summary(target_repo, resolved, owned_keys, merged_settings)
+    _print_summary(target_repo, apiary_repo, resolved, owned_keys, merged_settings)
     return 0
 
 
@@ -344,12 +377,13 @@ def _prompt_yes_no(prompt: str) -> bool:
 
 def _print_summary(
     target_repo: Path,
+    apiary_repo: Path,
     resolved: ResolvedProfile,
     owned_keys: list[str],
     merged: dict,
 ) -> None:
     settings_path = target_repo / _SETTINGS_PATH
-    state_path = target_repo / ".apiary" / _STATE_FILENAME
+    state_path = _bootstrap_state_path(target_repo, apiary_repo)
     print(f"Applied profile chain: {' → '.join(resolved.profiles_applied)}")
     print(f"Wrote {settings_path}")
     print(f"Wrote {state_path}")

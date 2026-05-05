@@ -170,6 +170,101 @@ class AggregateTests(unittest.TestCase):
             self.assertEqual(read_body(notes[0].body_path), "body of T-2026-1")
 
 
+def _make_pointer(target_repo: Path, apiary: Path, target_id: str) -> None:
+    pointer_dir = target_repo / ".apiary"
+    pointer_dir.mkdir(parents=True, exist_ok=True)
+    (pointer_dir / "pointer").write_text(
+        json.dumps({
+            "apiary_repo": str(apiary.resolve()),
+            "target_id": target_id,
+            "registered_at": "2026-05-04T00:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+
+def _seed_state_dir(state_dir: Path, notes: list[dict], folder: str = "todos", year: str = "2026") -> None:
+    """Seed scribe data under <state_dir>/scribe/ (post-migration layout)."""
+    type_dir = state_dir / "scribe" / folder / year
+    type_dir.mkdir(parents=True, exist_ok=True)
+    index = type_dir / "index.jsonl"
+    with index.open("w", encoding="utf-8") as f:
+        for rec in notes:
+            f.write(json.dumps(rec) + "\n")
+
+
+class AggregatePointerTests(unittest.TestCase):
+    """Post-migration: scribe state lives at <apiary>/.repos/<target_id>/scribe/.
+    The aggregator must resolve target -> state-dir via the per-target pointer
+    file written by core/utils/state.py at registration time.
+    """
+
+    def test_pointer_resolves_to_centralized_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            apiary = Path(tmp) / "apiary"
+            target = Path(tmp) / "target"
+            target_id = "target-7"
+            state_dir = apiary / ".repos" / target_id
+            state_dir.mkdir(parents=True)
+            target.mkdir()
+            _make_pointer(target, apiary, target_id)
+            _seed_state_dir(state_dir, [
+                {"display_id": "T-2026-1", "seq": 1, "status": "active",
+                 "summary": "centralized", "timestamp": "z", "has_body": False},
+            ])
+            notes, warnings = aggregate([target])
+            self.assertEqual(warnings, [])
+            self.assertEqual([n.display_id for n in notes], ["T-2026-1"])
+
+    def test_pointer_takes_precedence_over_legacy_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            apiary = Path(tmp) / "apiary"
+            target = Path(tmp) / "target"
+            target_id = "target-7"
+            state_dir = apiary / ".repos" / target_id
+            state_dir.mkdir(parents=True)
+            target.mkdir()
+            _make_pointer(target, apiary, target_id)
+            _seed_state_dir(state_dir, [
+                {"display_id": "T-2026-NEW", "seq": 1, "status": "active",
+                 "summary": "centralized", "timestamp": "z", "has_body": False},
+            ])
+            # Stale legacy data left behind by an incomplete migration —
+            # the pointer-resolved state must win so the GUI doesn't show
+            # ghost notes.
+            _seed_scribe(target, [
+                {"display_id": "T-2026-OLD", "seq": 1, "status": "active",
+                 "summary": "legacy", "timestamp": "z", "has_body": False},
+            ])
+            notes, _ = aggregate([target])
+            self.assertEqual([n.display_id for n in notes], ["T-2026-NEW"])
+
+    def test_falls_back_to_legacy_when_pointer_state_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            apiary = Path(tmp) / "apiary"
+            target = Path(tmp) / "target"
+            target.mkdir()
+            # Pointer exists but the centralized state directory does not.
+            _make_pointer(target, apiary, "target-99")
+            _seed_scribe(target, [
+                {"display_id": "T-2026-LEG", "seq": 1, "status": "active",
+                 "summary": "legacy", "timestamp": "z", "has_body": False},
+            ])
+            notes, _ = aggregate([target])
+            self.assertEqual([n.display_id for n in notes], ["T-2026-LEG"])
+
+    def test_no_pointer_uses_legacy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target"
+            target.mkdir()
+            _seed_scribe(target, [
+                {"display_id": "T-2026-1", "seq": 1, "status": "active",
+                 "summary": "ok", "timestamp": "z", "has_body": False},
+            ])
+            notes, _ = aggregate([target])
+            self.assertEqual([n.display_id for n in notes], ["T-2026-1"])
+
+
 class RepoRegistryTests(unittest.TestCase):
     def test_load_creates_file_when_missing_and_seeds_with_directories_only(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -247,8 +247,11 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         )
         print(f"  detail: {msg}", file=sys.stderr)
         print(
-            f"  recover: copy spec from apiary note {args.spec_note_id} into "
-            f"{target}/.apiary/scribe/ manually, then close the original.",
+            f"  recover: cd into {target} and re-run "
+            f"`python ~/.claude/apiary_launch.py scribe/notes.py add --type context "
+            f"--content <spec-body>` (auto-registers the new repo and lands the "
+            f"spec under <apiary>/.repos/<name>-<id>/scribe/), then close the "
+            f"original via `scribe/notes.py done {args.spec_note_id}`.",
             file=sys.stderr,
         )
         return EXIT_MIGRATION_FAILED

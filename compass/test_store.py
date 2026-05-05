@@ -131,6 +131,36 @@ class PathsTest(unittest.TestCase):
             self.assertEqual(dest.parent.name, "2026-03")
             self.assertEqual(dest.name, "deadbeef.json")
 
+    def test_compass_dir_honors_target_state_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp) / "claude-apiary-1"
+            state_dir.mkdir()
+            prev = os.environ.get(store.TARGET_STATE_DIR_ENV)
+            os.environ[store.TARGET_STATE_DIR_ENV] = str(state_dir)
+            try:
+                self.assertEqual(store.compass_dir(), state_dir / store.COMPASS_SUBDIR)
+            finally:
+                if prev is None:
+                    del os.environ[store.TARGET_STATE_DIR_ENV]
+                else:
+                    os.environ[store.TARGET_STATE_DIR_ENV] = prev
+
+    def test_compass_dir_falls_back_to_repo_root_without_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            prev = os.environ.get(store.TARGET_STATE_DIR_ENV)
+            if prev is not None:
+                del os.environ[store.TARGET_STATE_DIR_ENV]
+            try:
+                # No env, no git repo — falls through to <start>/.apiary/compass.
+                self.assertEqual(
+                    store.compass_dir(start=tmp_path),
+                    tmp_path / store.APIARY_STATE_DIRNAME / store.COMPASS_SUBDIR,
+                )
+            finally:
+                if prev is not None:
+                    os.environ[store.TARGET_STATE_DIR_ENV] = prev
+
 
 class LoadObservationTest(unittest.TestCase):
     def test_load_valid_file(self):

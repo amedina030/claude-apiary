@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Tests for scripts/bootstrap.py (todo #273).
+"""Tests for scripts/bootstrap.py.
 
-Covers the in-repo umbrella seed introduced after decision #269:
-  - fresh-clone seed creates .apiary/.gitignore + .apiary/scribe/ files
+Covers the post-C-2026-46 centralized seed:
+  - fresh-clone seed creates the scribe typed-year layout under the
+    resolver-allocated state dir (<apiary>/.repos/<name>-<id>/scribe/)
   - idempotent re-run is a no-op on all paths
   - legacy-state guard refuses to seed when ~/.claude/projects/<key>/
     still holds unmigrated scribe state
   - auto-startup flag creation is gated on absence
 """
-import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -36,6 +37,13 @@ class BootstrapTestBase(unittest.TestCase):
         self.fake_auto_flag = self.fake_home / "auto-startup-enabled"
         self.fake_repo = self.tmp_path / "apiary-repo"
         self.fake_repo.mkdir()
+        # The state resolver requires the repo to be a git repo.
+        subprocess.run(
+            ["git", "init", "--quiet"],
+            cwd=str(self.fake_repo),
+            check=True,
+            capture_output=True,
+        )
 
         self._patches = [
             mock.patch.object(bootstrap, "CLAUDE_DIR", self.fake_home),
@@ -54,25 +62,21 @@ class BootstrapTestBase(unittest.TestCase):
         self._tmp.cleanup()
 
     @property
-    def umbrella(self) -> Path:
-        return self.fake_repo / ".apiary"
-
-    @property
     def scribe_dir(self) -> Path:
-        return self.umbrella / "scribe"
+        """Resolve the scribe dir via the registry (auto-registers if needed)."""
+        return bootstrap._resolve_scribe_dir(self.fake_repo)
 
 
 class FreshSeedTests(BootstrapTestBase):
-    def test_creates_umbrella_and_gitignore(self):
+    def test_creates_centralized_scribe_dir(self):
         result = bootstrap.bootstrap(self.fake_repo)
         self.assertEqual(result.warnings, [])
-        self.assertTrue(self.umbrella.is_dir())
-        gitignore = self.umbrella / ".gitignore"
-        self.assertTrue(gitignore.is_file())
-        self.assertEqual(
-            gitignore.read_text(encoding="utf-8"),
-            bootstrap.UMBRELLA_GITIGNORE_BODY,
-        )
+        self.assertTrue(self.scribe_dir.is_dir())
+        # State landed under <repo>/.repos/<name>-<id>/scribe/ (the
+        # resolver uses self.fake_repo as the apiary root in tests).
+        self.assertIn(".repos", self.scribe_dir.parts)
+        # A pointer breadcrumb was written back into the repo.
+        self.assertTrue((self.fake_repo / ".apiary" / "pointer").is_file())
 
     def test_creates_typed_year_layout(self):
         bootstrap.bootstrap(self.fake_repo)
@@ -139,16 +143,6 @@ class IdempotencyTests(BootstrapTestBase):
             '{"display_id":"T-2026-1"}\n',
         )
 
-    def test_rerun_does_not_clobber_custom_gitignore(self):
-        """A pre-existing umbrella .gitignore must survive re-bootstrap."""
-        self.umbrella.mkdir(parents=True)
-        gitignore = self.umbrella / ".gitignore"
-        gitignore.write_text("custom-pattern\n", encoding="utf-8")
-
-        bootstrap.bootstrap(self.fake_repo)
-        self.assertEqual(
-            gitignore.read_text(encoding="utf-8"), "custom-pattern\n"
-        )
 
 
 class LegacyStateGuardTests(BootstrapTestBase):
