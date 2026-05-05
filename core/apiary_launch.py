@@ -101,8 +101,17 @@ def main() -> int:
 
     script = repo_path / hook_rel
     if not script.is_file():
-        # Silent exit -- avoids noisy failures when apiary repo moved.
-        return 0
+        # Loud failure: a missing script with a *resolved* repo means the
+        # caller passed a bad path (typo, treating a subcommand as a path,
+        # etc.). The "apiary repo moved" case is already handled above by
+        # the `repo_path is None` branch, so silence here just hides usage
+        # errors as exit-0 success.
+        print(
+            f"error: script not found: {script} "
+            f"(launcher expects a path relative to apiary repo, e.g. scribe/notes.py)",
+            file=sys.stderr,
+        )
+        return 1
 
     # Inherit cwd and env from caller -- don't chdir into apiary or override
     # CLAUDE_PROJECT_DIR.  See module docstring for why.
