@@ -157,16 +157,24 @@ def _repo_scribe_dir(start: Path | None = None) -> Path:
 def scribe_state_dir(start: Path | None = None) -> Path | None:
     """Return the scribe state *directory* under the active layout.
 
-    Repo layout (APIARY_STATE_LAYOUT=repo): resolves ``<git-repo-root>/.apiary/scribe/``
-    via git rev-parse run from *start* (or cwd). Returns ``None`` when *start*
-    is not inside a git repo — callers must decide whether to fall back to the
-    legacy path, skip state loading, or error.
+    Resolution order:
+      1. ``APIARY_TARGET_STATE_DIR`` env var (set by apiary_launch.py after
+         the registry resolver runs) — returns ``<state_dir>/scribe/``.
+      2. ``<git-repo-root>/.apiary/scribe/`` via git rev-parse on *start*
+         (or cwd). This is the legacy in-repo path that pre-dates the
+         centralized .repos/ registry; still used during the migration
+         window for unmigrated targets.
+      3. ``None`` when *start* is not inside a git repo — callers decide
+         whether to fall back further or error.
 
-    Legacy layout: returns ``None``. Legacy callers use the project-key helpers
-    below instead of the state-dir concept.
+    Legacy layout (``APIARY_STATE_LAYOUT=legacy``): returns ``None`` so
+    callers fall through to the project-key helpers.
     """
     if not _use_repo_layout():
         return None
+    env_dir = os.environ.get("APIARY_TARGET_STATE_DIR", "").strip()
+    if env_dir:
+        return Path(env_dir) / SCRIBE_SUBDIR
     root = _git_repo_root(start)
     if root is None:
         return None

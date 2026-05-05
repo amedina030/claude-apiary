@@ -112,6 +112,8 @@ def resolve_target_repo(
 # they're plumbed with a resolved target.
 
 _RUNNER_STATE_DIR = ".apiary/runner"
+_RUNNER_SUBDIR = "runner"
+_TARGET_STATE_DIR_ENV = "APIARY_TARGET_STATE_DIR"
 
 
 def _default_target(target: Optional[Path]) -> Path:
@@ -124,7 +126,21 @@ def _default_target(target: Optional[Path]) -> Path:
 
 
 def artifacts_root(target: Optional[Path] = None) -> Path:
-    """Return ``<target>/.apiary/runner/`` (the umbrella for runner state)."""
+    """Return the umbrella directory for runner state.
+
+    Resolution order:
+      1. ``APIARY_TARGET_STATE_DIR`` env var (set by apiary_launch.py after
+         the registry resolver runs) — returns ``<state_dir>/runner/``.
+         Used when the caller did not pass an explicit *target* override.
+      2. ``<target>/.apiary/runner/`` — legacy in-repo path. Used when an
+         explicit *target* is passed (e.g. multi-repo runner orchestrating
+         a different repo than the one apiary is registered against), or
+         as a fallback when the env var is unset.
+    """
+    if target is None:
+        env_state = os.environ.get(_TARGET_STATE_DIR_ENV, "").strip()
+        if env_state:
+            return Path(env_state) / _RUNNER_SUBDIR
     return _default_target(target) / _RUNNER_STATE_DIR
 
 

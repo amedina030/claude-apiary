@@ -3,6 +3,13 @@ __pycache__/
 *.pyo
 .venv/
 
+# Centralized per-target apiary state (registry + per-target subdirs)
+.repos/
+
+# Apiary's own per-target breadcrumb (lives at <target>/.apiary/pointer post-migration)
+.apiary/
+.apiary.pre-migration/
+
 # Hook forensic logs
 core/hooks/*.log
 

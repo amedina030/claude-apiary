@@ -31,6 +31,33 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Env var the launcher sets so child scripts (scribe/runner/captures/...)
+# can find their per-target state dir without re-running the registry
+# lookup. Mirrors core.utils.state.TARGET_STATE_DIR_ENV — kept as a
+# literal here so this file stays importable without core/utils on path.
+_TARGET_STATE_DIR_ENV = "APIARY_TARGET_STATE_DIR"
+_LEGACY_LAYOUT_ENV = "APIARY_STATE_LAYOUT"
+
+
+def _resolve_target_state_dir(repo_path: Path) -> "Path | None":
+    """Resolve the per-target state dir for the launcher's caller cwd, or
+    None if it can't be determined. Never raises — the launcher must not
+    block hooks on resolver errors."""
+    # Legacy escape hatch — skip the resolver entirely.
+    if os.environ.get(_LEGACY_LAYOUT_ENV, "").strip().lower() == "legacy":
+        return None
+    try:
+        sys.path.insert(0, str(repo_path))
+        from core.utils import state as _state
+        return _state.resolve_target_state_dir(apiary_repo=repo_path)
+    except Exception:
+        return None
+    finally:
+        try:
+            sys.path.remove(str(repo_path))
+        except ValueError:
+            pass
+
 
 def _resolve_repo_path() -> "Path | None":
     """Locate the apiary repo root from the pointer file or env var."""
@@ -79,7 +106,16 @@ def main() -> int:
 
     # Inherit cwd and env from caller -- don't chdir into apiary or override
     # CLAUDE_PROJECT_DIR.  See module docstring for why.
-    result = subprocess.run([sys.executable, str(script)] + sys.argv[2:])
+    env = os.environ.copy()
+    if not env.get(_TARGET_STATE_DIR_ENV, "").strip():
+        # Lazy auto-registration: first state-touching call from a new
+        # path creates a .repos/<name>-<id>/ entry. If the caller is not
+        # in a git repo, or anything else fails, the env var is left
+        # unset and child tools fall back to their existing logic.
+        state_dir = _resolve_target_state_dir(repo_path)
+        if state_dir is not None:
+            env[_TARGET_STATE_DIR_ENV] = str(state_dir)
+    result = subprocess.run([sys.executable, str(script)] + sys.argv[2:], env=env)
     return result.returncode
 
 

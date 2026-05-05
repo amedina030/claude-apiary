@@ -25,12 +25,16 @@ from core.sanitizer import sanitize_and_report
 from core.startup import run_init, run_summary
 from scribe.notes import _git_repo_root, _use_repo_layout, STATE_LAYOUT_ENV
 
-# Sanitizer hit log lives in the in-repo umbrella state directory.
-# Pre-stages the umbrella state layout decided in note #269 — the first
-# occupant of <apiary-repo>/.apiary/. The directory self-ignores via a
-# sibling .gitignore containing '*' written on first use.
-_APIARY_STATE_DIR = PROJECT_ROOT / ".apiary"
-_SANITIZER_DEBUG_LOG = _APIARY_STATE_DIR / "hooks" / "sanitizer_debug.jsonl"
+# Sanitizer hit log lives in the umbrella state directory. With the
+# centralized .repos/ layout, this resolves to
+# <apiary>/.repos/<name>-<id>/hooks/ — per-target observability. Falls
+# back to <apiary-repo>/.apiary/hooks/ when the env var is not set so
+# the legacy in-repo layout still works during the migration window.
+def _hook_state_dir() -> Path:
+    env_dir = os.environ.get("APIARY_TARGET_STATE_DIR", "").strip()
+    if env_dir:
+        return Path(env_dir)
+    return PROJECT_ROOT / ".apiary"
 
 
 def _log_sanitizer_hits(site: str, hits: dict[str, int], session_id: str) -> None:
@@ -43,8 +47,10 @@ def _log_sanitizer_hits(site: str, hits: dict[str, int], session_id: str) -> Non
     if not hits:
         return
     try:
-        _SANITIZER_DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
-        gitignore = _APIARY_STATE_DIR / ".gitignore"
+        state_dir = _hook_state_dir()
+        log_path = state_dir / "hooks" / "sanitizer_debug.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        gitignore = state_dir / ".gitignore"
         if not gitignore.exists():
             gitignore.write_text("*\n", encoding="utf-8")
         entry = {
@@ -53,7 +59,7 @@ def _log_sanitizer_hits(site: str, hits: dict[str, int], session_id: str) -> Non
             "site": site,
             "hits": hits,
         }
-        with _SANITIZER_DEBUG_LOG.open("a", encoding="utf-8") as f:
+        with log_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
     except Exception:
         pass

@@ -11,6 +11,7 @@ pairs exactly one image with exactly one sidecar, sharing a stem.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -20,6 +21,7 @@ from researcher import _yaml_mini
 
 APIARY_STATE_DIRNAME = ".apiary"
 CAPTURES_SUBDIR = "captures"
+TARGET_STATE_DIR_ENV = "APIARY_TARGET_STATE_DIR"
 TAGS_FILENAME = "tags.yaml"
 
 FRONTMATTER_DELIM = "---"
@@ -64,10 +66,17 @@ def _git_repo_root(start: Path | None = None) -> Path | None:
 
 
 def captures_dir(start: Path | None = None) -> Path:
-    """Return ``<repo-root>/.apiary/captures/``.
+    """Return the captures state directory.
 
-    Falls back to ``<cwd>/.apiary/captures/`` when not inside a git repo.
+    Resolution order:
+      1. ``APIARY_TARGET_STATE_DIR`` env var (set by apiary_launch.py after
+         the registry resolver runs) — returns ``<state_dir>/captures/``.
+      2. ``<repo-root>/.apiary/captures/`` via git rev-parse on *start*.
+      3. ``<cwd>/.apiary/captures/`` when not inside a git repo.
     """
+    env_dir = os.environ.get(TARGET_STATE_DIR_ENV, "").strip()
+    if env_dir:
+        return Path(env_dir) / CAPTURES_SUBDIR
     root = _git_repo_root(start) or (start or Path.cwd())
     return Path(root) / APIARY_STATE_DIRNAME / CAPTURES_SUBDIR
 

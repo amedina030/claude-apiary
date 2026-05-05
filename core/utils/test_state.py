@@ -1,0 +1,212 @@
+"""Tests for the centralized state resolver in core/utils/state.py."""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from core.utils import state
+
+
+def _git_init(path: Path) -> None:
+    """Initialize a fresh git repo at *path* with a single empty commit so
+    ``git rev-parse --show-toplevel`` resolves to it. Tests rely on the
+    resolver detecting a real git repo, not a directory that happens to
+    have a .git folder."""
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "--allow-empty", "-q", "-m", "init"],
+        cwd=path, check=True,
+    )
+
+
+class StateResolverTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.apiary = self.root / "apiary"
+        self.apiary.mkdir()
+        # Apiary repo needs to look real enough for resolve_apiary_repo
+        # callers that pass it explicitly. We don't init git on it.
+
+    def _make_target(self, name: str = "myrepo") -> Path:
+        target = self.root / name
+        target.mkdir()
+        _git_init(target)
+        return target
+
+    # --- Happy paths --------------------------------------------------
+
+    def test_first_call_creates_repos_dir_registry_and_pointer(self):
+        target = self._make_target("foo")
+        state_dir = state.resolve_target_state_dir(cwd=target, apiary_repo=self.apiary)
+
+        # State dir under .repos/<name>-<id>/
+        self.assertTrue(state_dir.is_dir())
+        self.assertEqual(state_dir.parent, self.apiary / ".repos")
+        self.assertTrue(state_dir.name.startswith("foo-"))
+
+        # Registry has the entry
+        registry = json.loads((self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(registry), 1)
+        only_id, entry = next(iter(registry.items()))
+        self.assertEqual(entry["name"], "foo")
+        self.assertEqual(Path(entry["real_path"]), target.resolve())
+        self.assertTrue(entry["verified_ok"])
+        self.assertIn("registered_at", entry)
+        self.assertIn("last_used", entry)
+        self.assertEqual(state_dir.name, f"foo-{only_id}")
+
+        # Pointer breadcrumb exists in target
+        pointer = target / ".apiary" / "pointer"
+        self.assertTrue(pointer.is_file())
+        payload = json.loads(pointer.read_text(encoding="utf-8"))
+        self.assertEqual(payload["target_id"], state_dir.name)
+        self.assertEqual(Path(payload["apiary_repo"]), self.apiary.resolve())
+
+    def test_second_call_reuses_entry_and_updates_last_used(self):
+        target = self._make_target("foo")
+        first = state.resolve_target_state_dir(cwd=target, apiary_repo=self.apiary)
+        registry_path = self.apiary / ".repos" / "registry.json"
+        first_registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        first_id, first_entry = next(iter(first_registry.items()))
+        first_last_used = first_entry["last_used"]
+
+        # Sleep a touch so the timestamp can move forward
+        import time
+        time.sleep(1.1)
+
+        second = state.resolve_target_state_dir(cwd=target, apiary_repo=self.apiary)
+        self.assertEqual(first, second)
+
+        second_registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(second_registry), 1)  # no new entry
+        self.assertNotEqual(second_registry[first_id]["last_used"], first_last_used)
+
+    def test_two_repos_with_same_basename_get_distinct_ids(self):
+        a = self.root / "parent_a" / "foo"
+        a.mkdir(parents=True)
+        _git_init(a)
+        b = self.root / "parent_b" / "foo"
+        b.mkdir(parents=True)
+        _git_init(b)
+
+        sa = state.resolve_target_state_dir(cwd=a, apiary_repo=self.apiary)
+        sb = state.resolve_target_state_dir(cwd=b, apiary_repo=self.apiary)
+
+        self.assertNotEqual(sa, sb)
+        self.assertTrue(sa.name.startswith("foo-"))
+        self.assertTrue(sb.name.startswith("foo-"))
+        # Registry has two distinct entries pointing at distinct paths
+        registry = json.loads((self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(registry), 2)
+        paths = {Path(e["real_path"]) for e in registry.values()}
+        self.assertEqual(paths, {a.resolve(), b.resolve()})
+
+    def test_id_counter_is_monotonic_and_never_reused(self):
+        a = self._make_target("a_repo")
+        b = self._make_target("b_repo")
+        sa = state.resolve_target_state_dir(cwd=a, apiary_repo=self.apiary)
+        sb = state.resolve_target_state_dir(cwd=b, apiary_repo=self.apiary)
+        # Names end in -1, -2 in registration order
+        self.assertEqual(sa.name, "a_repo-1")
+        self.assertEqual(sb.name, "b_repo-2")
+        # next_id file holds 2 (last allocated)
+        next_id = (self.apiary / ".repos" / "next_id").read_text(encoding="utf-8").strip()
+        self.assertEqual(next_id, "2")
+
+    def test_resolves_when_invoked_from_subdirectory_of_target(self):
+        target = self._make_target("foo")
+        sub = target / "src" / "deeply" / "nested"
+        sub.mkdir(parents=True)
+        state_dir = state.resolve_target_state_dir(cwd=sub, apiary_repo=self.apiary)
+        self.assertTrue(state_dir.name.startswith("foo-"))
+
+    # --- Error paths --------------------------------------------------
+
+    def test_not_inside_git_repo_raises(self):
+        plain = self.root / "no_git_here"
+        plain.mkdir()
+        with self.assertRaises(RuntimeError) as ctx:
+            state.resolve_target_state_dir(cwd=plain, apiary_repo=self.apiary)
+        self.assertIn("Not inside a git repository", str(ctx.exception))
+
+    def test_auto_register_disabled_raises_for_unknown_path(self):
+        target = self._make_target("foo")
+        with self.assertRaises(RuntimeError) as ctx:
+            state.resolve_target_state_dir(
+                cwd=target, apiary_repo=self.apiary, auto_register=False,
+            )
+        self.assertIn("not registered", str(ctx.exception).lower())
+
+    # --- Edge cases ---------------------------------------------------
+
+    def test_pointer_with_unknown_target_id_is_overwritten(self):
+        target = self._make_target("foo")
+        # Pre-write a stale pointer naming an id that doesn't exist yet.
+        pointer_dir = target / ".apiary"
+        pointer_dir.mkdir()
+        (pointer_dir / "pointer").write_text(
+            json.dumps({"apiary_repo": "/old", "target_id": "ghost-99"}),
+            encoding="utf-8",
+        )
+        state_dir = state.resolve_target_state_dir(cwd=target, apiary_repo=self.apiary)
+        # Pointer was rewritten with the freshly assigned id
+        new_payload = json.loads((pointer_dir / "pointer").read_text(encoding="utf-8"))
+        self.assertEqual(new_payload["target_id"], state_dir.name)
+        self.assertNotEqual(new_payload["target_id"], "ghost-99")
+
+    def test_unsafe_basename_is_sanitized(self):
+        # Git won't accept truly nasty paths, but a name with spaces/dots
+        # is plausible. We can't easily fabricate one git accepts on every
+        # OS, so probe the helper directly.
+        self.assertEqual(state._safe_name("my repo!"), "my-repo")
+        self.assertEqual(state._safe_name("..."), "repo")
+        self.assertEqual(state._safe_name(""), "repo")
+        self.assertEqual(state._safe_name("ok-name_v2"), "ok-name_v2")
+
+
+class EnvHelperTests(unittest.TestCase):
+    def test_state_dir_from_env_returns_path_when_set(self):
+        os.environ[state.TARGET_STATE_DIR_ENV] = "/some/path"
+        try:
+            self.assertEqual(state.state_dir_from_env(), Path("/some/path"))
+        finally:
+            del os.environ[state.TARGET_STATE_DIR_ENV]
+
+    def test_state_dir_from_env_returns_none_when_unset(self):
+        os.environ.pop(state.TARGET_STATE_DIR_ENV, None)
+        self.assertIsNone(state.state_dir_from_env())
+
+    def test_state_dir_from_env_returns_none_for_blank(self):
+        os.environ[state.TARGET_STATE_DIR_ENV] = "   "
+        try:
+            self.assertIsNone(state.state_dir_from_env())
+        finally:
+            del os.environ[state.TARGET_STATE_DIR_ENV]
+
+    def test_is_legacy_layout_case_insensitive(self):
+        os.environ[state.LEGACY_LAYOUT_ENV] = "Legacy"
+        try:
+            self.assertTrue(state.is_legacy_layout())
+        finally:
+            del os.environ[state.LEGACY_LAYOUT_ENV]
+
+    def test_is_legacy_layout_false_for_other_values(self):
+        os.environ[state.LEGACY_LAYOUT_ENV] = "repo"
+        try:
+            self.assertFalse(state.is_legacy_layout())
+        finally:
+            del os.environ[state.LEGACY_LAYOUT_ENV]
+
+
+if __name__ == "__main__":
+    unittest.main()

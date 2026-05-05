@@ -82,6 +82,33 @@ class ScribeStateDirTests(unittest.TestCase):
                 mock.patch.object(notes, "_git_repo_root", return_value=None):
             self.assertIsNone(notes.scribe_state_dir(non_repo))
 
+    def test_env_var_overrides_git_root_lookup(self):
+        """APIARY_TARGET_STATE_DIR takes precedence over the git-root path —
+        this is the integration point with the centralized .repos/ layout
+        plumbed by apiary_launch.py."""
+        env_state = self.tmp_path / "centralized" / "state"
+        env_state.mkdir(parents=True)
+        with mock.patch.dict(os.environ, {
+            notes.STATE_LAYOUT_ENV: "repo",
+            "APIARY_TARGET_STATE_DIR": str(env_state),
+        }), mock.patch.object(notes, "_git_repo_root", return_value=self.tmp_path):
+            self.assertEqual(
+                notes.scribe_state_dir(self.tmp_path),
+                env_state / "scribe",
+            )
+
+    def test_blank_env_var_falls_through_to_git_root(self):
+        fake_root = self.tmp_path / "repo"
+        fake_root.mkdir()
+        with mock.patch.dict(os.environ, {
+            notes.STATE_LAYOUT_ENV: "repo",
+            "APIARY_TARGET_STATE_DIR": "   ",
+        }), mock.patch.object(notes, "_git_repo_root", return_value=fake_root):
+            self.assertEqual(
+                notes.scribe_state_dir(fake_root),
+                fake_root / ".apiary" / "scribe",
+            )
+
 
 class GitRepoRootTests(unittest.TestCase):
     """_git_repo_root shells out to git and tolerates the absence of git."""
