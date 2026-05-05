@@ -15,7 +15,9 @@ os.environ["APIARY_RUNNER_TEST_ISOLATION"] = "1"
 from runner import run          # noqa: E402
 from runner import detached_lib  # noqa: E402
 from runner import run_history as run_history_module  # noqa: E402
+from runner import run_lock as run_lock_module  # noqa: E402
 from runner import run_tracker as run_tracker_module  # noqa: E402
+from runner import target_repo as target_repo_module  # noqa: E402
 from runner import queue as runner_queue  # noqa: E402
 
 
@@ -83,6 +85,39 @@ class TestDetachedRun(unittest.TestCase):
         )
         self._tracker_patcher.start()
         self.addCleanup(self._tracker_patcher.stop)
+
+        # T-2026-214: redirect target_repo.APIARY_REPO_ROOT (the fallback
+        # used by every path helper when no target_repo is configured) and
+        # run_lock.LOCKS_DIR (frozen at import via locks_dir()) to a
+        # per-test tempdir. Without this, tests that drive run_detached()
+        # without supplying --target-repo write intake/log/lock files into
+        # the real <apiary>/.apiary/runner/. Also clear the env vars that
+        # short-circuit the helpers, so leakage from a prior test or the
+        # parent shell can't bypass the patch.
+        self._apiary_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._apiary_tmp.cleanup)
+        fake_apiary = Path(self._apiary_tmp.name)
+        # resolve_target_repo() validates that the chosen path contains a
+        # .git entry. The tests fall back to APIARY_REPO_ROOT when they
+        # don't supply --target-repo, so the patched root must be a real
+        # git repo or that validation rejects the test fixture.
+        subprocess.run(['git', 'init', '-q', '-b', 'master'],
+                       cwd=str(fake_apiary), check=True)
+        self._apiary_root_patcher = mock.patch.object(
+            target_repo_module, "APIARY_REPO_ROOT", fake_apiary,
+        )
+        self._apiary_root_patcher.start()
+        self.addCleanup(self._apiary_root_patcher.stop)
+        self._locks_patcher = mock.patch.object(
+            run_lock_module, "LOCKS_DIR",
+            fake_apiary / ".apiary" / "runner" / "locks",
+        )
+        self._locks_patcher.start()
+        self.addCleanup(self._locks_patcher.stop)
+        for _env in ("APIARY_TARGET_REPO", "APIARY_TARGET_STATE_DIR"):
+            _prior = os.environ.pop(_env, None)
+            if _prior is not None:
+                self.addCleanup(os.environ.__setitem__, _env, _prior)
 
     def _make_intake_file(self, directory: Path, uid: str = 'test-uuid-1234',
                           title: str = 'Test Item') -> Path:
