@@ -20,6 +20,7 @@ Usage:
     notes.py repair [--dry-run]
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -49,6 +50,12 @@ APIARY_STATE_DIRNAME = ".apiary"
 SCRIBE_SUBDIR = "scribe"
 
 VALID_TYPES = ["todo", "handoff", "decision", "wishlist", "reference", "blocker", "context", "general"]
+
+# Per-type formatting templates that gate `scribe add`. When a non-empty
+# templates/<type>.md exists, the caller must ack its current hash before
+# the write is allowed. See T-2026-212.
+TEMPLATES_DIRNAME = "templates"
+TEMPLATE_HASH_LEN = 12
 
 _PREFIX_TO_TYPE: dict[str, str] = {
     'T': 'todo', 'H': 'handoff', 'D': 'decision', 'W': 'wishlist',
@@ -179,6 +186,38 @@ def scribe_state_dir(start: Path | None = None) -> Path | None:
     if root is None:
         return None
     return root / APIARY_STATE_DIRNAME / SCRIBE_SUBDIR
+
+
+def template_path(state_dir: Path, note_type: str) -> Path:
+    """Return the absolute path to the template file for a note type.
+
+    The file may or may not exist; this helper is purely a path resolver.
+    """
+    return state_dir / TEMPLATES_DIRNAME / f"{note_type}.md"
+
+
+def template_text(state_dir: Path, note_type: str) -> "str | None":
+    """Return template body for a note type, or None if missing/empty.
+
+    A whitespace-only file is treated the same as a missing one — both
+    skip the gate. Read errors also return None so a transient I/O
+    failure cannot lock the user out of writing notes.
+    """
+    path = template_path(state_dir, note_type)
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding='utf-8')
+    except OSError:
+        return None
+    if not text.strip():
+        return None
+    return text
+
+
+def template_hash(text: str) -> str:
+    """Short content hash used to detect mid-flight template edits."""
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()[:TEMPLATE_HASH_LEN]
 
 
 def _now_iso():
@@ -341,6 +380,26 @@ def cmd_add(args):
             file=sys.stderr,
         )
         sys.exit(1)
+
+    # Template gate — if the user has defined a per-type template, the
+    # caller must ack its current hash before the write proceeds. See
+    # T-2026-212.
+    tpl_text = template_text(store.state_dir, args.type)
+    if tpl_text is not None:
+        expected = template_hash(tpl_text)
+        provided = (getattr(args, 'ack_template', '') or '').strip()
+        if provided != expected:
+            print(
+                f'Template gate: a template exists for type {args.type!r} '
+                f'and must be acknowledged before writing.\n\n'
+                f'--- {args.type}.md (hash {expected}) ---\n'
+                f'{tpl_text.rstrip()}\n'
+                f'--- end ---\n\n'
+                f'Re-run with --ack-template {expected} after composing '
+                f'a body that conforms to the template above.',
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     # Build metadata dict for extra fields
     metadata = {}
@@ -1188,6 +1247,40 @@ def cmd_repair(args):
         print(line)
 
 
+def cmd_template(args):
+    store = args.store
+    action = getattr(args, 'template_action', None)
+    if action is None:
+        print("Error: subcommand required (show | path | list)", file=sys.stderr)
+        sys.exit(1)
+
+    if action == 'list':
+        for t in VALID_TYPES:
+            text = template_text(store.state_dir, t)
+            if text is not None:
+                print(f"{t:10s} hash={template_hash(text)}  {template_path(store.state_dir, t)}")
+        return
+
+    note_type = args.type
+    if action == 'path':
+        print(template_path(store.state_dir, note_type))
+        return
+
+    if action == 'show':
+        text = template_text(store.state_dir, note_type)
+        path = template_path(store.state_dir, note_type)
+        if text is None:
+            print(
+                f"(no template for type {note_type!r}; "
+                f"create {path} to enable the gate)",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print(f"# template for {note_type} (hash {template_hash(text)})")
+        print(text, end='' if text.endswith('\n') else '\n')
+        return
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1217,6 +1310,24 @@ def main():
                         help="Only add if no handoff exists for this session ID")
     p_add.add_argument("--role", default="", help="Session role (e.g. user, attacker)")
     p_add.add_argument("--mission", default="", help="Session mission (e.g. general, project-x)")
+    p_add.add_argument("--ack-template", default="", dest="ack_template",
+                        help="Acknowledge the current template hash. Required "
+                             "when a non-empty templates/<type>.md exists. The "
+                             "hash is printed in the gate failure message of a "
+                             "prior add attempt, or via `scribe template show`.")
+
+    # template — inspect per-type formatting templates that gate `add`
+    p_template = sub.add_parser("template",
+                                help="Inspect per-type formatting templates that gate `add`")
+    p_template_sub = p_template.add_subparsers(dest="template_action")
+    p_template_show = p_template_sub.add_parser("show",
+                                                help="Print the template content (and current hash) for a type")
+    p_template_show.add_argument("type", choices=VALID_TYPES)
+    p_template_path = p_template_sub.add_parser("path",
+                                                help="Print the absolute file path for a type's template")
+    p_template_path.add_argument("type", choices=VALID_TYPES)
+    p_template_sub.add_parser("list",
+                              help="List types whose template file exists and is non-empty")
 
     # list
     p_list = sub.add_parser("list")
@@ -1373,6 +1484,7 @@ def main():
         'migrate': cmd_migrate,
         'repair': cmd_repair,
         'backfill-brief': cmd_backfill_brief,
+        'template': cmd_template,
     }
     handler = commands.get(args.command)
     if handler:
