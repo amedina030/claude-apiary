@@ -109,6 +109,49 @@
       </main>
 
       <div id="toasts" class="toasts"></div>
+
+      <div id="picker" class="picker hidden" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+        <div class="picker-backdrop" data-picker-dismiss></div>
+        <div class="picker-window" role="document">
+          <header class="picker-header">
+            <div class="picker-title-row">
+              <h2 id="picker-title" class="picker-title">Open a directory</h2>
+              <button id="picker-close" type="button" class="picker-close" aria-label="cancel">×</button>
+            </div>
+            <div class="picker-pathbar">
+              <button id="picker-up" type="button" class="picker-iconbtn" aria-label="go up" title="up">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M8 12V4"/><path d="M4 8l4-4 4 4"/>
+                </svg>
+              </button>
+              <input id="picker-path" type="text" class="picker-pathinput" spellcheck="false" autocomplete="off" placeholder="type a path and press Enter" />
+            </div>
+          </header>
+          <div class="picker-body">
+            <aside class="picker-rail">
+              <div class="picker-rail-section">
+                <div class="picker-rail-label">Quick</div>
+                <button type="button" class="picker-rail-item" data-picker-quick="home">Home</button>
+                <button type="button" class="picker-rail-item" data-picker-quick="root">Computer</button>
+              </div>
+              <div class="picker-rail-section">
+                <div class="picker-rail-label">Recent</div>
+                <div id="picker-recents" class="picker-recents"></div>
+              </div>
+            </aside>
+            <main class="picker-main">
+              <ol id="picker-entries" class="picker-entries" tabindex="0" aria-label="folders"></ol>
+              <div id="picker-error" class="picker-error hidden" role="alert"></div>
+            </main>
+          </div>
+          <footer class="picker-footer">
+            <span id="picker-current" class="picker-current"></span>
+            <span class="picker-footer-spacer"></span>
+            <button id="picker-cancel" type="button" class="picker-btn picker-btn-ghost">Cancel</button>
+            <button id="picker-open" type="button" class="picker-btn picker-btn-primary">Open here</button>
+          </footer>
+        </div>
+      </div>
     </div>
     <script src="vendor/xterm/xterm.min.js"></script>
     <script src="vendor/xterm/addon-fit.min.js"></script>

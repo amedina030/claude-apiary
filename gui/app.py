@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from gui import composer_state, pty_capture, sidebar_state, tabs_state, usage_fetcher
+from gui import composer_state, picker, pty_capture, sidebar_state, tabs_state, usage_fetcher
 from gui import permission_mcp
 from gui.permission_bridge import PermissionBridge
 from gui.permission_mcp import BRIDGE_URL_ENV as _PERMISSION_MCP_BRIDGE_URL_ENV
@@ -145,9 +145,13 @@ class GuiBridge:
     def list_sessions(self) -> list[dict]:
         return self._app._sessions_descriptor()
 
-    def pick_directory(self) -> Optional[str]:
-        """Open a native folder picker; returns the chosen path or None."""
-        return self._app.pick_directory()
+    def picker_context(self) -> dict:
+        """Initial context for the themed folder picker (recents, home, initial path)."""
+        return picker.picker_context()
+
+    def list_directory(self, path: Optional[str] = None) -> dict:
+        """List subdirectories of `path` for the themed folder picker."""
+        return picker.list_directory(path)
 
     def open_session(self, cwd: str) -> Optional[str]:
         """Spawn a new tab at ``cwd``; returns the new session_id or None."""
@@ -600,29 +604,6 @@ class App:
                 self._persist_tabs()
                 return True
         return False
-
-    def pick_directory(self) -> Optional[str]:
-        """Open a native folder picker and return the selected path, or None."""
-        win = self.window
-        if win is None:
-            return None
-        try:
-            import webview  # type: ignore
-
-            result = win.create_file_dialog(
-                webview.FOLDER_DIALOG,
-                allow_multiple=False,
-            )
-        except Exception as e:
-            self._push_toast(f"Folder dialog failed: {e}", "error")
-            return None
-        if not result:
-            return None
-        # create_file_dialog returns a tuple/list of paths (or a single string
-        # depending on pywebview version); take the first.
-        if isinstance(result, (list, tuple)):
-            return str(result[0]) if result else None
-        return str(result)
 
     def start_services(self) -> None:
         # Webview 'loaded' fires again on every page reload (Ctrl+F5). Without

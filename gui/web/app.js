@@ -101,15 +101,212 @@
 
   async function openNewTab() {
     if (!bridgeReady()) return;
-    try {
-      const dir = await window.pywebview.api.pick_directory();
-      if (!dir) return;
-      await window.pywebview.api.open_session(dir);
-    } catch (e) {
-      console.error("open new tab failed", e);
-    }
+    openPickerModal();
   }
   emptyPickBtn.addEventListener("click", openNewTab);
+
+  // --- folder picker modal --------------------------------------------------
+  // Themed in-app folder browser. Replaces the native OS folder dialog so the
+  // new-session popup matches the app theme. Backend supplies recents + an
+  // initial path; navigation calls list_directory(path) on each step.
+  const pickerEl = document.getElementById("picker");
+  const pickerPathEl = document.getElementById("picker-path");
+  const pickerEntriesEl = document.getElementById("picker-entries");
+  const pickerErrorEl = document.getElementById("picker-error");
+  const pickerCurrentEl = document.getElementById("picker-current");
+  const pickerOpenBtn = document.getElementById("picker-open");
+  const pickerCancelBtn = document.getElementById("picker-cancel");
+  const pickerCloseBtn = document.getElementById("picker-close");
+  const pickerUpBtn = document.getElementById("picker-up");
+  const pickerRecentsEl = document.getElementById("picker-recents");
+
+  const pickerState = {
+    open: false,
+    currentPath: "",
+    parent: null,
+    isRoot: false,
+    home: "",
+    selectedIndex: -1,
+    entries: [],
+  };
+
+  async function openPickerModal() {
+    pickerEl.classList.remove("hidden");
+    pickerState.open = true;
+    let ctx = { recents: [], home: "", initial: "" };
+    try {
+      ctx = await window.pywebview.api.picker_context();
+    } catch (e) {
+      console.error("picker_context failed", e);
+    }
+    pickerState.home = ctx.home || "";
+    renderPickerRecents(ctx.recents || []);
+    await navigatePicker(ctx.initial || ctx.home || "");
+    pickerPathEl.focus();
+    pickerPathEl.select();
+  }
+
+  function closePickerModal() {
+    pickerEl.classList.add("hidden");
+    pickerState.open = false;
+    pickerState.entries = [];
+    pickerState.selectedIndex = -1;
+  }
+
+  function renderPickerRecents(recents) {
+    pickerRecentsEl.innerHTML = "";
+    for (const r of recents) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "picker-rail-item";
+      btn.textContent = basename(r) || r;
+      btn.title = r;
+      btn.addEventListener("click", () => navigatePicker(r));
+      pickerRecentsEl.appendChild(btn);
+    }
+  }
+
+  function basename(p) {
+    if (!p) return "";
+    const norm = p.replace(/[\\/]+$/, "");
+    const slash = Math.max(norm.lastIndexOf("/"), norm.lastIndexOf("\\"));
+    return slash >= 0 ? norm.slice(slash + 1) : norm;
+  }
+
+  async function navigatePicker(path) {
+    let result;
+    try {
+      result = await window.pywebview.api.list_directory(path);
+    } catch (e) {
+      console.error("list_directory failed", e);
+      pickerErrorEl.textContent = String(e);
+      pickerErrorEl.classList.remove("hidden");
+      return;
+    }
+    pickerState.currentPath = result.path || "";
+    pickerState.parent = result.parent;
+    pickerState.isRoot = !!result.is_root;
+    pickerState.entries = result.entries || [];
+    pickerState.selectedIndex = -1;
+
+    pickerPathEl.value = pickerState.isRoot ? "" : pickerState.currentPath;
+    pickerCurrentEl.textContent = pickerState.isRoot
+      ? "Computer"
+      : pickerState.currentPath;
+    pickerUpBtn.disabled = pickerState.parent === null;
+    pickerOpenBtn.disabled = pickerState.isRoot;
+
+    if (result.error) {
+      pickerErrorEl.textContent = result.error;
+      pickerErrorEl.classList.remove("hidden");
+    } else {
+      pickerErrorEl.classList.add("hidden");
+    }
+
+    pickerEntriesEl.innerHTML = "";
+    if (pickerState.entries.length === 0 && !result.error) {
+      const empty = document.createElement("li");
+      empty.className = "picker-empty";
+      empty.textContent = pickerState.isRoot ? "no drives detected" : "(no subdirectories)";
+      pickerEntriesEl.appendChild(empty);
+      return;
+    }
+    for (let i = 0; i < pickerState.entries.length; i++) {
+      const e = pickerState.entries[i];
+      const li = document.createElement("li");
+      li.className = "picker-entry";
+      li.dataset.idx = String(i);
+      li.title = e.path;
+
+      const icon = document.createElement("span");
+      icon.className = "picker-entry-icon";
+      icon.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v5.5A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5z"/></svg>';
+      li.appendChild(icon);
+
+      const name = document.createElement("span");
+      name.className = "picker-entry-name";
+      name.textContent = e.name;
+      li.appendChild(name);
+
+      li.addEventListener("click", () => selectPickerEntry(i));
+      li.addEventListener("dblclick", () => navigatePicker(e.path));
+      pickerEntriesEl.appendChild(li);
+    }
+  }
+
+  function selectPickerEntry(idx) {
+    pickerState.selectedIndex = idx;
+    for (const node of pickerEntriesEl.querySelectorAll(".picker-entry")) {
+      node.classList.toggle("selected", Number(node.dataset.idx) === idx);
+    }
+  }
+
+  async function confirmPicker() {
+    if (pickerState.isRoot) return;
+    const path = pickerPathEl.value.trim() || pickerState.currentPath;
+    if (!path) return;
+    const result = await window.pywebview.api.list_directory(path);
+    if (result.error || !result.path) {
+      pickerErrorEl.textContent = result.error || "invalid path";
+      pickerErrorEl.classList.remove("hidden");
+      return;
+    }
+    closePickerModal();
+    try {
+      await window.pywebview.api.open_session(result.path);
+    } catch (e) {
+      console.error("open_session failed", e);
+    }
+  }
+
+  pickerCloseBtn.addEventListener("click", closePickerModal);
+  pickerCancelBtn.addEventListener("click", closePickerModal);
+  pickerOpenBtn.addEventListener("click", confirmPicker);
+  pickerUpBtn.addEventListener("click", () => {
+    if (pickerState.parent !== null) navigatePicker(pickerState.parent);
+  });
+  for (const node of pickerEl.querySelectorAll("[data-picker-dismiss]")) {
+    node.addEventListener("click", closePickerModal);
+  }
+  for (const node of pickerEl.querySelectorAll("[data-picker-quick]")) {
+    node.addEventListener("click", () => {
+      const which = node.dataset.pickerQuick;
+      if (which === "home") navigatePicker(pickerState.home);
+      else if (which === "root") navigatePicker("");
+    });
+  }
+  pickerPathEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      navigatePicker(pickerPathEl.value);
+    }
+  });
+  pickerEntriesEl.addEventListener("keydown", (e) => {
+    if (!pickerState.entries.length) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const next = Math.min(pickerState.entries.length - 1, pickerState.selectedIndex + 1);
+      selectPickerEntry(next);
+      const node = pickerEntriesEl.querySelector(`[data-idx="${next}"]`);
+      if (node) node.scrollIntoView({ block: "nearest" });
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const prev = Math.max(0, pickerState.selectedIndex - 1);
+      selectPickerEntry(prev);
+      const node = pickerEntriesEl.querySelector(`[data-idx="${prev}"]`);
+      if (node) node.scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter" && pickerState.selectedIndex >= 0) {
+      e.preventDefault();
+      navigatePicker(pickerState.entries[pickerState.selectedIndex].path);
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!pickerState.open) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closePickerModal();
+    }
+  });
 
   // --- chat state -----------------------------------------------------------
   const totals = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
