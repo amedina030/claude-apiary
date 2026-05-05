@@ -39,17 +39,17 @@ python ~/.claude/apiary_launch.py docs/reference/cli_lookup.py <tool>   # e.g. n
 
 ## Memory path
 
-Canonical memory directory: `<repo-root>/.apiary/scribe/memory/`. Do not write to the cwd-derived harness path.
+Canonical memory directory: `<state-dir>/scribe/memory/` where `<state-dir>` is the per-target dir resolved by the registry (`<apiary>/.repos/<name>-<id>/`). Do not write to the cwd-derived harness path.
 
 ---
 
 ## Compass personality profile
 
-If `<repo-root>/.apiary/compass/personality.md` exists, read it as part of loading this context. It describes the user's personality, behavior patterns, and quirks as inferred from prior sessions, and should inform how you respond — preferred verbosity, when to ask vs decide, communication style, autonomy tolerance, etc.
+If the current target's compass profile exists, read it as part of loading this context. It describes the user's personality, behavior patterns, and quirks as inferred from prior sessions, and should inform how you respond — preferred verbosity, when to ask vs decide, communication style, autonomy tolerance, etc.
 
 ```bash
-apiary_root=$(python ~/.claude/apiary_launch.py --print-repo-path)
-test -f "$apiary_root/.apiary/compass/personality.md" && cat "$apiary_root/.apiary/compass/personality.md"
+state_dir=$(python ~/.claude/apiary_launch.py core/utils/state.py)
+test -f "$state_dir/compass/personality.md" && cat "$state_dir/compass/personality.md"
 ```
 
 If the file is missing, do nothing (no error, no fallback). The personality profile is updated weekly by the compass synthesizer (`/compass-sync` for manual trigger). Treat its content as soft guidance — explicit user statements and `feedback`-type memory entries still override it.
@@ -68,7 +68,7 @@ Apiary uses **scribe** (`scribe/notes.py`) for operational state (TODOs, handoff
 
 **Read `scribe/CLAUDE.md` before writing notes, learnings, or making memory decisions.** Quick decision tree:
 
-- Still true in 3 months -> **memory** (`<repo-root>/.apiary/scribe/memory/`)
+- Still true in 3 months -> **memory** (`<state-dir>/scribe/memory/`)
 - Decays / operational / about current work -> **note** (`python ~/.claude/apiary_launch.py scribe/notes.py add --type ...`)
 - Error workaround or non-obvious pattern -> **learning** (`python ~/.claude/apiary_launch.py scribe/notes.py learn`)
 

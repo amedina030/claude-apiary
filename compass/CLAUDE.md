@@ -10,10 +10,12 @@ Project-level rules live in the repo-root `CLAUDE.md`. This file is only about c
 
 Compass and auto-memory are deliberately separate stores:
 
+Both stores live under the per-target state directory the registry allocates (`<apiary>/.repos/<name>-<id>/` post-C-2026-46) — `<state-dir>/scribe/memory/` for auto-memory and `<state-dir>/compass/` for compass. Path resolution is automatic when invoking the tools via the launcher.
+
 | Store | What it captures | Lifespan | Authority |
 |---|---|---|---|
-| **Auto-memory** (`<repo>/.apiary/scribe/memory/`) | Facts, rules, explicit user statements ("don't mock the DB", "I'm a senior Go engineer") | Permanent, manually edited | **Hard** — explicit user statements override compass |
-| **Compass** (`<repo>/.apiary/compass/`) | Personality, behavior patterns, tone, decision style — *how* the user engages | Decays; rolling 50-session window with archive | **Soft** — guidance for the LLM, not a binding rule |
+| **Auto-memory** (`<state-dir>/scribe/memory/`) | Facts, rules, explicit user statements ("don't mock the DB", "I'm a senior Go engineer") | Permanent, manually edited | **Hard** — explicit user statements override compass |
+| **Compass** (`<state-dir>/compass/`) | Personality, behavior patterns, tone, decision style — *how* the user engages | Decays; rolling 50-session window with archive | **Soft** — guidance for the LLM, not a binding rule |
 
 If something the user said reads more like a *rule* ("always use list-form subprocess") or a *fact* ("I work primarily in Go"), it belongs in auto-memory, not compass. If it reads more like a *trait* ("user pushes back on suggestions with 'why X not Y' rather than direct rejection"), that's compass.
 
@@ -76,7 +78,7 @@ When auto-memory and compass disagree:
 
 ## `corrections.md` — manual override path
 
-`<repo>/.apiary/compass/corrections.md` is a free-text file the user (or Claude on the user's behalf) edits when the synthesizer gets something wrong. The synthesizer treats its content as **high-weight evidence** that overrides raw observations.
+`<state-dir>/compass/corrections.md` is a free-text file the user (or Claude on the user's behalf) edits when the synthesizer gets something wrong. The synthesizer treats its content as **high-weight evidence** that overrides raw observations.
 
 Use corrections when:
 - The synthesized profile mischaracterizes a trait and you want it fixed *now* without waiting for new observations to accumulate.

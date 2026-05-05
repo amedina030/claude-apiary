@@ -29,14 +29,14 @@ python scripts/bootstrap.py
 `bootstrap.py` is idempotent: safe to run as many times as you want. On first run it:
 
 - Creates `~/.claude/` (for Claude Code's own per-user state — identity files, transcripts, the auto-startup flag).
-- Creates the in-repo umbrella state directory `<repo-root>/.apiary/` and writes `<repo-root>/.apiary/.gitignore` containing `*` so the whole umbrella self-ignores.
-- Creates `<repo-root>/.apiary/scribe/` and lays out the typed-year folder skeleton (`todos/`, `handoffs/`, `decisions/`, …, `learnings/`, each with an `index.jsonl`, `archive/` subfolder, and `<year>/next_seq` counter) plus an empty `memory/MEMORY.md` so the scribe and memory systems have something to read.
+- Resolves the apiary repo's per-target state directory under `<apiary>/.repos/<name>-<id>/` via the registry (auto-allocates an id and writes a pointer file at `<repo-root>/.apiary/pointer` on first call; see C-2026-46).
+- Lays out the scribe typed-year folder skeleton under `<state-dir>/scribe/` (`todos/`, `handoffs/`, `decisions/`, …, `learnings/`, each with an `index.jsonl`, `archive/` subfolder, and `<year>/next_seq` counter) plus an empty `memory/MEMORY.md` so the scribe and memory systems have something to read.
 - Creates `~/.claude/auto-startup-enabled` so the startup hook runs on first session.
 - Verifies your Python version meets the minimum and warns if any package in `requirements.txt` fails to import.
 
 On re-run it reports everything as "already present" and exits 0.
 
-If you run `bootstrap.py` on a machine that already has scribe state under the legacy `~/.claude/projects/<key>/` location and the in-repo `<repo-root>/.apiary/scribe/` is empty, bootstrap refuses to seed and tells you to run `python scripts/migrate_scribe_state.py --source <legacy-dir>` first. That's the one-shot in-repo migration from decision #269.
+If you run `bootstrap.py` on a machine that already has scribe state under the legacy `~/.claude/projects/<key>/` location and the centralized state dir is empty, bootstrap refuses to seed and tells you to migrate first.
 
 ## State: what's local, what's in the repo
 
@@ -50,23 +50,28 @@ Two storage locations, two purposes.
 
 Anything checked into git is shared across all clones of the repo.
 
-### Local to each checkout (`<repo-root>/.apiary/`)
+### Centralized per-target state (`<apiary>/.repos/<name>-<id>/`)
 
-Scribe state lives in the repo checkout under the umbrella `.apiary/` directory, which self-ignores via `.apiary/.gitignore` (contents: `*`). Each subdirectory is owned by one apiary tool:
+Per-target state lives under the apiary checkout, not inside each target repo. The launcher resolves it via `git rev-parse` on the session's cwd, looks the repo up in `<apiary>/.repos/registry.json`, and exports `APIARY_TARGET_STATE_DIR` for child processes. A breadcrumb at `<target>/.apiary/pointer` lets passive consumers reverse-resolve.
 
-- `<repo-root>/.apiary/scribe/<type>/<year>/index.jsonl` — scribe's operational notes in typed-year layout (e.g. `todos/2026/index.jsonl`, `handoffs/2026/index.jsonl`)
-- `<repo-root>/.apiary/scribe/<type>/<year>/<seq>.md` — per-note body files
-- `<repo-root>/.apiary/scribe/<type>/<year>/archive/` — auto-archived old notes (moved after 30 days)
-- `<repo-root>/.apiary/scribe/learnings/<year>/` — accumulated project learnings (same typed-year layout)
-- `<repo-root>/.apiary/scribe/migration_id_map.json` — legacy bare-int to typed-year ID map for CLI lookups
-- `<repo-root>/.apiary/scribe/memory/` — long-lived memory facts loaded at session start
-- `<repo-root>/.apiary/hooks/` — hook runtime state (sanitizer hit log, etc.)
+- `<state-dir>/scribe/<type>/<year>/index.jsonl` — scribe's operational notes (e.g. `todos/2026/index.jsonl`, `handoffs/2026/index.jsonl`)
+- `<state-dir>/scribe/<type>/<year>/<seq>.md` — per-note body files
+- `<state-dir>/scribe/<type>/<year>/archive/` — auto-archived old notes (moved after 30 days)
+- `<state-dir>/scribe/learnings/<year>/` — accumulated project learnings (same typed-year layout)
+- `<state-dir>/scribe/migration_id_map.json` — legacy bare-int to typed-year ID map for CLI lookups
+- `<state-dir>/scribe/memory/` — long-lived memory facts loaded at session start
+- `<state-dir>/compass/` — personality observations + synthesized profile
+- `<state-dir>/research/` — researcher entries + tag vocabulary
+- `<state-dir>/captures/` — image + sidecar pairs
+- `<state-dir>/runner/` — runner artifacts (intake, specs, plans, executions, etc.)
+- `<state-dir>/bootstrap_state.json` — apiary_bootstrap provenance record
+- `<repo-root>/.apiary/pointer` — JSON breadcrumb pointing at the apiary repo + target id
 
 Session transcripts and identity files written by Claude Code itself stay under `~/.claude/` — those belong to Claude Code, not apiary.
 
 **This state is intentionally per-checkout and is not portable.** Notes, learnings, memory, and budgeter logs reflect what *this* checkout's Claude has been working on, with paths, session IDs, and timing rooted in that machine's history. Copying them to another machine usually creates more confusion than value (stale paths, dangling session references, conflicting handoffs). If you switch machines, start fresh on the new one — the repo is the source of truth, the local state is short-horizon scratchpad.
 
-**Migration status.** The in-repo layout (decision #269) is now the default. Set `APIARY_STATE_LAYOUT=legacy` as an escape hatch if you need the pre-migration `~/.claude/projects/<project-key>/` path.
+**Layout escape hatch.** Set `APIARY_STATE_LAYOUT=legacy` to force scribe back to the historical `~/.claude/projects/<project-key>/` path; useful only for diagnosing pre-migration installs.
 
 If you have a specific reason to move a single artifact (e.g. one decision note you want to carry forward), copy it by hand. There is deliberately no export/import script.
 
@@ -101,10 +106,10 @@ Claude Code sets this automatically when invoking hooks. If you're running a hoo
 Global hooks use `~/.claude/apiary_launch.py` to locate the apiary repo via `~/.claude/apiary.json`. If either file is missing, re-run `python setup.py --global` from the apiary repo to install them. If you see `$CLAUDE_PROJECT_DIR` in the failing command, your hooks are using the old format — re-running setup will replace them with launcher-based commands.
 
 **Bootstrap refuses to seed and tells me to migrate first.**
-You have scribe state under a legacy `~/.claude/projects/<key>/` location and the in-repo `<repo-root>/.apiary/scribe/` is empty. Run `python scripts/migrate_scribe_state.py --source <legacy-dir>` (or just `--dry-run` first to preview) to copy it into the umbrella, then re-run bootstrap.
+You have scribe state under a legacy `~/.claude/projects/<key>/` location and the centralized `<state-dir>/scribe/` is empty. Migrate the legacy data into the centralized layout before re-running bootstrap.
 
 **Hook scripts work on macOS/Linux but fail on Windows.**
 Make sure you're running them through Git Bash (or WSL), not PowerShell or `cmd.exe`. Claude Code on Windows expects bash for hook commands.
 
 **Notes from another machine I copied over look broken.**
-Per the state-locality section, scribe state is intentionally not portable. Don't copy `<repo-root>/.apiary/` (or the legacy `~/.claude/projects/<key>/`) between machines.
+Per the state-locality section, scribe state is intentionally not portable. Don't copy `<apiary>/.repos/` (or the legacy `<repo-root>/.apiary/` and `~/.claude/projects/<key>/` paths) between machines.

@@ -39,11 +39,13 @@ from pathlib import Path
 CLAUDE_DIR = Path.home() / ".claude"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
 
-# In-repo state layout (decision #269, todos #262–#268).
-# Scribe reads/writes its state from <git-repo-root>/.apiary/scribe/ under
-# the umbrella .apiary/ directory shared with other apiary tools. The
-# APIARY_STATE_LAYOUT=legacy environment variable is an escape hatch that
-# falls back to the historical ~/.claude/projects/<project_key>/ path.
+# Centralized per-target state layout (C-2026-46). Scribe reads/writes
+# from <state-dir>/scribe/ where <state-dir> is the registry-allocated
+# folder under <apiary>/.repos/<name>-<id>/. The launcher exports
+# APIARY_TARGET_STATE_DIR after the registry resolver runs; absent that
+# env var, scribe_state_dir() falls back to <git-repo-root>/.apiary/scribe/
+# for unmigrated targets. APIARY_STATE_LAYOUT=legacy is an escape hatch
+# that drops back to the historical ~/.claude/projects/<project_key>/ path.
 # Default (env unset) is the in-repo layout as of todo #268.
 STATE_LAYOUT_ENV = "APIARY_STATE_LAYOUT"
 APIARY_STATE_DIRNAME = ".apiary"
@@ -112,10 +114,11 @@ def _project_key(project_override=None):
 
 
 def _use_repo_layout() -> bool:
-    """Return True when the repo-root state layout is active.
+    """Return True when the per-repo state layout is active (the default).
 
-    Default is the in-repo layout under ``<git-repo-root>/.apiary/scribe/``
-    (flipped in todo #268). Set ``APIARY_STATE_LAYOUT=legacy``
+    The default resolves state via the registry to
+    ``<apiary>/.repos/<name>-<id>/scribe/`` (or the legacy in-repo path
+    when no pointer exists). Set ``APIARY_STATE_LAYOUT=legacy``
     (case-insensitive) as an escape hatch to fall back to the historical
     ``~/.claude/projects/<project_key>/`` location.
     """
@@ -150,12 +153,12 @@ def _git_repo_root(start: Path | None = None) -> Path | None:
 
 
 def _repo_scribe_dir(start: Path | None = None) -> Path:
-    """Return the in-repo scribe state directory for the new layout.
+    """Return the legacy in-repo scribe state directory.
 
     Resolves to ``<git-repo-root>/.apiary/scribe/`` when *start* (or cwd) is
     inside a git repo, and falls back to ``<cwd>/.apiary/scribe/`` when it
-    is not. The caller is responsible for ensuring APIARY_STATE_LAYOUT=repo
-    before using this; see _use_repo_layout().
+    is not. Used as a fallback by ``scribe_state_dir`` for unmigrated
+    targets that have no pointer file yet.
     """
     root = _git_repo_root(start) or (start or Path.cwd())
     return Path(root) / APIARY_STATE_DIRNAME / SCRIBE_SUBDIR

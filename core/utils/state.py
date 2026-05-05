@@ -297,3 +297,16 @@ def find_state_dir(target_repo: Path) -> Optional[Path]:
 def is_legacy_layout() -> bool:
     """Return True when the legacy layout escape hatch is set."""
     return os.environ.get(LEGACY_LAYOUT_ENV, "").strip().lower() == "legacy"
+
+
+if __name__ == "__main__":
+    # Print the per-target state dir for the cwd. Used by skill templates
+    # and shell snippets that need the path without re-implementing the
+    # registry lookup. Invoked via:
+    #   python ~/.claude/apiary_launch.py core/utils/state.py
+    import sys as _sys
+    try:
+        print(resolve_target_state_dir())
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=_sys.stderr)
+        _sys.exit(1)

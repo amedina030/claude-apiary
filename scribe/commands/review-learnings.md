@@ -63,11 +63,7 @@ Walk the user through the project's learning corpus, one tag group at a time, so
    python -c "from pathlib import Path; from scribe.notes import scribe_state_dir; p = scribe_state_dir() / 'learnings' / 'last_review'; p.parent.mkdir(parents=True, exist_ok=True); p.write_text('', encoding='utf-8'); import os, time; os.utime(p)"
    ```
 
-   Or equivalently with a shell:
-
-   ```bash
-   touch .apiary/scribe/learnings/last_review
-   ```
+   The python form above is preferred — it resolves the per-target state dir via the registry, so it works regardless of cwd.
 
 6. Report the summary to the user: N kept, M archived, K superseded.
 

@@ -28,7 +28,7 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 | `/review` | `docs/commands/review.md` | Review changes against standards, then fix issues |
 | `/wrapup` | `core/commands/wrapup.md` | Commit, push, and generate a session handoff note. Also captures compass observations from the session (Step 4, non-blocking). |
 | `/compass-sync` | `compass/commands/compass-sync.md` | Manually trigger compass synthesis — regenerate `personality.md` from active observations |
-| `/research` | `researcher/commands/research.md` | Add, find, list, show, verify, or register tags for research findings stored per-repo under `.apiary/research/` |
+| `/research` | `researcher/commands/research.md` | Add, find, list, show, verify, or register tags for research findings stored per-target under `<state-dir>/research/` |
 | `/runner-prep` | `runner/commands/runner-prep.md` | Audit active scribe todos and prepare automation-ready intake JSONs for the runner pipeline, with dependency ordering and safety classification |
 | `/incubator` | `incubator/commands/incubator.md` | Spawn a new side-project repo wired up with the apiary toolkit — refines the idea, creates a git repo, drops a Python+poetry skeleton, migrates the spec into the new repo's scribe |
 

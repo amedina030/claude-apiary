@@ -107,9 +107,13 @@ python scripts/install_context_rules.py --uninstall
 **Budgeter:**
 - Optionally delete `~/.claude/budgeter-log-enabled` and `~/.claude/budgeter-warn-enabled`
 
+**All per-target apiary state:**
+- Delete `<apiary>/.repos/` (centralized state dir for all registered targets — scribe, captures, researcher, runner, compass, bootstrap_state.json). Removed when the apiary repo directory is deleted.
+- Delete `<target>/.apiary/pointer` from each registered target repo (the breadcrumb the resolver wrote during registration).
+- If pre-migration state still exists at `<target>/.apiary/scribe/`, `<target>/.apiary/compass/`, etc., or at the legacy `~/.claude/projects/<key>/{notes,learnings,notes_archive}.jsonl`, delete those too.
+
 **Scribe:**
 - Delete `~/.claude/commands/note.md`, `~/.claude/commands/notes.md`, `~/.claude/commands/startup.md`
-- Optionally delete the repo-local scribe state at `<repo-root>/.apiary/scribe/` (new canonical location under the umbrella `.apiary/` dir). If the repo still has pre-migration state at `~/.claude/projects/*/notes.jsonl`, `learnings.jsonl`, and `notes_archive.jsonl`, delete those too.
 
 **Docs framework:**
 - Delete `~/.claude/commands/review.md`
@@ -117,11 +121,9 @@ python scripts/install_context_rules.py --uninstall
 
 **Researcher:**
 - Delete `~/.claude/commands/research.md`
-- Optionally delete the repo-local researcher state at `<repo-root>/.apiary/research/` (entries and `tags.yaml`)
 
 **Runner:**
 - Delete `~/.claude/commands/runner-prep.md`
-- Runner state (intake, backlog, plans, hardens, executions, reports, logs) lives inside the apiary repo under `runner/` — it is removed when the repo directory is deleted
 
 **Everything:**
 - Delete the `claude-apiary` repo directory

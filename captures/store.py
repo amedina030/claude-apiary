@@ -1,6 +1,9 @@
 """Path resolution and storage helpers for captures.
 
-Captures state lives at ``<git-repo-root>/.apiary/captures/``::
+Captures state lives at ``<state-dir>/captures/`` where ``<state-dir>``
+is the registry-allocated per-target dir (``<apiary>/.repos/<name>-<id>/``).
+The launcher exports ``APIARY_TARGET_STATE_DIR`` after registry lookup.
+Layout::
 
     tags.yaml                    — controlled tag vocabulary (per repo)
     <topic>/<slug>.md            — sidecar metadata (YAML frontmatter + body)
@@ -71,7 +74,8 @@ def captures_dir(start: Path | None = None) -> Path:
     Resolution order:
       1. ``APIARY_TARGET_STATE_DIR`` env var (set by apiary_launch.py after
          the registry resolver runs) — returns ``<state_dir>/captures/``.
-      2. ``<repo-root>/.apiary/captures/`` via git rev-parse on *start*.
+      2. Legacy in-repo path via git rev-parse on *start* — used for
+         unmigrated targets only.
       3. ``<cwd>/.apiary/captures/`` when not inside a git repo.
     """
     env_dir = os.environ.get(TARGET_STATE_DIR_ENV, "").strip()

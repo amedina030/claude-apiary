@@ -230,9 +230,9 @@ def bootstrap(repo_dir: Path) -> BootstrapResult:
     if legacy_dir is not None:
         result.warnings.append(
             f"Legacy scribe state found at {legacy_dir} and no state at "
-            f"{scribe_dir}. Run `python scripts/migrate_scribe_state.py "
-            f"--source {legacy_dir}` first, then re-run bootstrap. Refusing "
-            f"to seed empty files."
+            f"{scribe_dir}. Migrate the legacy data into the centralized "
+            f"layout (manually copy files into {scribe_dir}/) before re-running "
+            f"bootstrap. Refusing to seed empty files."
         )
         return result
 

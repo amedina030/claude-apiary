@@ -148,8 +148,8 @@ class Session:
         if not self._start_pty():
             return False
         self.discovery.start()
-        # Scribe aggregator scoped to this session's cwd only. Non-apiary cwds
-        # simply yield an empty notes list (no .apiary/scribe/ to read).
+        # Scribe aggregator scoped to this session's cwd only. Unregistered
+        # repos with no pointer file simply yield an empty notes list.
         self.aggregator = ScribeAggregatorService(
             repos=[self.cwd],
             on_update=self._on_notes,

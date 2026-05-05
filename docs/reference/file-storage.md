@@ -4,12 +4,18 @@ title: File Storage
 scope: project
 description: Runtime data locations — where JSONL logs, flags, transcripts, and session state live
 framework_version: "1.0"
-last_verified: 2026-04-23
+last_verified: 2026-05-04
 ---
 
 # File Storage
 
-Runtime data splits across two locations: user-global state under `~/.claude/` (git-ignored, shared across all repos) and repo-local state under `<repo-root>/.apiary/` (self-ignored via `.apiary/.gitignore`, travels with the checkout). Scribe state lives in the repo-local umbrella; budgeter logs, transcripts, and Claude Code's own session files stay under `~/.claude/`.
+Runtime data splits across three locations:
+
+- **Per-target state** (post C-2026-46) lives under `<apiary-repo>/.repos/<name>-<id>/`, where `<apiary-repo>` is wherever the apiary toolkit is checked out and `<name>-<id>` is the registry-allocated folder for a given target repo. The launcher resolves the path via `git rev-parse --show-toplevel` on the session's cwd, looks the repo up in `<apiary-repo>/.repos/registry.json`, allocates an id on first call, and exports `APIARY_TARGET_STATE_DIR=<apiary-repo>/.repos/<name>-<id>` for the child process. Tools that respect this env var (scribe, captures, researcher, runner, compass, apiary_bootstrap) read/write under it. A breadcrumb pointer at `<target>/.apiary/pointer` lets passive consumers (GUI) reverse-resolve without rerunning the registry.
+- **User-global state** under `~/.claude/` — shared across all repos (transcripts, GUI per-instance state, flags).
+- **Apiary repo–local files** that aren't state — source, profiles, dimension configs.
+
+Source of truth for the centralization spec: scribe note `C-2026-46`; resolver lives in `core/utils/state.py`.
 
 ## Runner data
 
@@ -47,22 +53,22 @@ Managed via `core/flags.py`: `flags.is_enabled("budgeter-log")`, `flags.enable(n
 
 ## Scribe data
 
-All scribe data lives inside the repo checkout at `<repo-root>/.apiary/scribe/`, under the umbrella `<repo-root>/.apiary/` state directory. The umbrella self-ignores via `.apiary/.gitignore` (contents: `*`), so nothing inside it is tracked by git.
+Scribe state lives at `<state-dir>/scribe/` under the per-target dir resolved by the registry (see intro). Folder-per-type layout, with each note's body as `<id>.md` and a sibling `index.jsonl` for fast listing.
 
-| File | Description |
+| Path | Description |
 |------|-------------|
-| `notes.jsonl` | Active notes (TODOs, handoffs, decisions, etc.) |
-| `notes_archive.jsonl` | Archived notes (older than 30 days) |
-| `learnings.jsonl` | Project-specific learnings (no auto-archive) |
-| `memory/` | Permanent memory files, indexed via `MEMORY.md` |
+| `scribe/<type>/<year>/<seq>.md` | Note body. `<type>` is `todos`, `handoffs`, `decisions`, `wishlists`, `blockers`, `references`, `context`, `general`, or `learnings` |
+| `scribe/<type>/<year>/index.jsonl` | One line per note for fast listing |
+| `scribe/<type>/<year>/next_seq` | Monotonic per-(type, year) sequence counter |
+| `scribe/<type>/archive/<year>/` | Archived bodies + index (auto-archived after 30 days; learnings never auto-archive) |
+| `scribe/memory/MEMORY.md` | One-line index of permanent memory entries; loaded into startup context |
+| `scribe/memory/<topic>.md` | One memory entry per file, kebab-case slug |
 
-**Layout gate.** Scribe's path resolution is selected by the `APIARY_STATE_LAYOUT` environment variable. When set to `repo`, the helpers in `scribe.notes` run `git rev-parse --show-toplevel` on the session's cwd and resolve state under `<repo-root>/.apiary/scribe/`. When unset (current default), they fall back to the legacy per-project location `~/.claude/projects/<project-key>/{notes,notes_archive,learnings}.jsonl` where `<project-key>` comes from the `.claude-project-key` marker file. Todo #268 flips the default; decision #269 tracks the migration.
-
-**Historical note.** Before decision #269, scribe state was project-scoped under `~/.claude/projects/<project-key>/`. The `<project-key>` was originally derived from the absolute cwd path (e.g. `D--Professional-claude-apiary`); the T5c migration moved it to a stable key read from the `.claude-project-key` marker file. The current in-repo layout supersedes both schemes.
+**Path resolution.** `scribe.notes.scribe_state_dir()` returns `$APIARY_TARGET_STATE_DIR/scribe` when the launcher set the env var, otherwise falls back to `<git-repo-root>/.apiary/scribe/` for unmigrated targets. `APIARY_STATE_LAYOUT=legacy` is an escape hatch that drops back to the historical `~/.claude/projects/<project-key>/` location.
 
 ## Compass data
 
-Compass state lives at `<repo-root>/.apiary/compass/` under the umbrella `.apiary/` directory. All git-ignored.
+Compass state lives at `<state-dir>/compass/`. All paths are git-ignored (the apiary repo's `.gitignore` excludes `.repos/`).
 
 | Path | Description |
 |------|-------------|
@@ -71,7 +77,7 @@ Compass state lives at `<repo-root>/.apiary/compass/` under the umbrella `.apiar
 | `compass/personality.md` | Synthesized personality profile, regenerated weekly. Read at startup by `/apiary-context` |
 | `compass/corrections.md` | Optional manual high-weight evidence the synthesizer treats above raw observations |
 
-The dimensions config (`compass/dimensions.json`) ships in the repo, not under `.apiary/` — it's source code, not state.
+The dimensions config (`compass/dimensions.json`) ships in the apiary repo, not under per-target state — it's source code, not state.
 
 ## Refiner data
 
@@ -106,18 +112,18 @@ GUI build outputs (PyInstaller) live at the repo root, both git-ignored:
 
 ## Researcher data
 
-Researcher state lives at `<repo-root>/.apiary/research/` under the umbrella `.apiary/` directory. All git-ignored.
+Researcher state lives at `<state-dir>/research/`. All git-ignored.
 
 | Path | Description |
 |------|-------------|
 | `research/tags.yaml` | Controlled-tag vocabulary for this repo. Edited via `researcher/cli.py register-tag` |
 | `research/<topic>/<slug>.md` | One research entry per file. YAML-subset frontmatter (title, topic, tags, date_created, date_last_verified, sources) followed by Summary / Context / Findings / Code / Caveats sections |
 
-The template (`researcher/template.md`) ships in the repo, not under `.apiary/` — it's source, not state.
+The template (`researcher/template.md`) ships in the apiary repo — it's source, not state.
 
 ## Captures data
 
-Captures state lives at `<repo-root>/.apiary/captures/` under the umbrella `.apiary/` directory. All git-ignored. Each capture is a pair of files sharing a slug.
+Captures state lives at `<state-dir>/captures/`. All git-ignored. Each capture is a pair of files sharing a slug.
 
 | Path | Description |
 |------|-------------|
@@ -127,7 +133,7 @@ Captures state lives at `<repo-root>/.apiary/captures/` under the umbrella `.api
 
 ## Bootstrap state
 
-Apiary's profile-based bootstrap (`core/apiary_bootstrap.py`) writes its provenance record at `<target>/.apiary/bootstrap_state.json`. Git-ignored like the rest of `.apiary/`.
+`core/apiary_bootstrap.py` writes its provenance record at `<state-dir>/bootstrap_state.json`. For pre-migration installs that left the file at `<target>/.apiary/bootstrap_state.json`, the first centralized run reads it once as fallback, then writes only to the centralized path.
 
 | Field | Description |
 |------|-------------|
@@ -138,7 +144,7 @@ Apiary's profile-based bootstrap (`core/apiary_bootstrap.py`) writes its provena
 | `applied_apiary_keys` | Top-level keys in `.claude/settings.json` that apiary owns after this bootstrap |
 | `last_bootstrap_ts` | ISO-8601 UTC timestamp of the last successful run |
 
-The state file is the signal that re-run drift-detection fires against. Absent state → bootstrap treats the target as fresh (AC-21 — existing `.apiary/scribe/` won't be disturbed). Present state with drift → diff + prompt unless `--force`.
+The state file is the signal that re-run drift-detection fires against. Absent state → bootstrap treats the target as fresh. Present state with drift → diff + prompt unless `--force`.
 
 Profile manifests themselves live at `<apiary-repo>/profiles/<name>.jsonc` (not target-repo state). See [Bootstrapping a repo](../guides/bootstrapping-a-repo.md).
 

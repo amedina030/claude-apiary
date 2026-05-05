@@ -132,9 +132,9 @@ On any run after the first, the bootstrap:
 | Aborted at drift prompt | 1 | State and settings unchanged |
 | Non-TTY re-run without `--force` | 1 | Says "re-run with --force to apply non-interactively" |
 
-## Pre-existing `.apiary/` directories
+## Pre-existing state
 
-If the target already has `.apiary/scribe/` or other subsystems in place but no `bootstrap_state.json`, the bootstrap treats the run as fresh. Existing scribe, research, and compass state are left untouched.
+If the target already has registered state under `<apiary>/.repos/<name>-<id>/` but no `bootstrap_state.json`, the bootstrap treats the run as fresh. Existing scribe, research, and compass state are left untouched. Pre-migration state at the legacy `<target>/.apiary/bootstrap_state.json` is read once as fallback (and the new run writes to the centralized path).
 
 ## Related
 

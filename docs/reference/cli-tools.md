@@ -160,7 +160,7 @@ echo '<usage>...</usage>' | python budgeter/log_agent_cost.py --session-id ID [-
 
 ## compass/observations.py
 
-Inspect and maintain per-session personality observation files at `<repo>/.apiary/compass/observations/`.
+Inspect and maintain per-session personality observation files at `<state-dir>/compass/observations/` (per-target state dir resolved via the registry; see [File Storage](file-storage.md)).
 
 ### Subcommands
 
@@ -255,7 +255,7 @@ State is stored at `refiner/tmp/round_<session-id>.json`. Directory is auto-crea
 
 ## researcher/cli.py
 
-Manage structured research findings per repo. Entries live at `<repo>/.apiary/research/<topic>/<slug>.md` with a YAML-subset frontmatter (title, topic, tags, dates, sources) and a standard body (Summary / Context / Findings / Code / Caveats). A controlled tag vocabulary lives at `<repo>/.apiary/research/tags.yaml`.
+Manage structured research findings per repo. Entries live at `<state-dir>/research/<topic>/<slug>.md` with a YAML-subset frontmatter (title, topic, tags, dates, sources) and a standard body (Summary / Context / Findings / Code / Caveats). A controlled tag vocabulary lives at `<state-dir>/research/tags.yaml`. See [File Storage](file-storage.md) for the per-target state-dir resolver.
 
 ### Subcommands
 
@@ -276,11 +276,11 @@ Manage structured research findings per repo. Entries live at `<repo>/.apiary/re
 | `2` | Validation error: unknown tag, duplicate slug, entry not found, tag already registered |
 | `3` | Config error: invalid YAML in `tags.yaml` or entry frontmatter |
 
-State is auto-created on first `add` or `register-tag`: `.apiary/research/` directory and a default `tags.yaml` with empty tag list.
+State is auto-created on first `add` or `register-tag`: `<state-dir>/research/` directory and a default `tags.yaml` with empty tag list.
 
 ## captures/cli.py
 
-Manage visual captures (screenshots, UI mockups, viewport shots, etc.) per repo. Each capture pairs an image file with a markdown sidecar that holds metadata. State lives at `<repo>/.apiary/captures/<topic>/<slug>.<ext>` (image) alongside `<topic>/<slug>.md` (sidecar, YAML-subset frontmatter: title, topic, tags, captured_at, image, session_id, related_notes, sources, plus a free-text context body). A controlled tag vocabulary lives at `<repo>/.apiary/captures/tags.yaml`.
+Manage visual captures (screenshots, UI mockups, viewport shots, etc.) per repo. Each capture pairs an image file with a markdown sidecar that holds metadata. State lives at `<state-dir>/captures/<topic>/<slug>.<ext>` (image) alongside `<topic>/<slug>.md` (sidecar, YAML-subset frontmatter: title, topic, tags, captured_at, image, session_id, related_notes, sources, plus a free-text context body). A controlled tag vocabulary lives at `<state-dir>/captures/tags.yaml`. See [File Storage](file-storage.md) for the per-target state-dir resolver.
 
 ### Subcommands
 
@@ -305,7 +305,7 @@ Manage visual captures (screenshots, UI mockups, viewport shots, etc.) per repo.
 | `2` | Validation error: unknown tag, duplicate slug, entry not found, unsupported extension, missing source image, tag already registered |
 | `3` | Config error: invalid YAML in `tags.yaml` or sidecar frontmatter |
 
-State is auto-created on first `add` or `register-tag`: `.apiary/captures/` directory and a default `tags.yaml` with empty tag list.
+State is auto-created on first `add` or `register-tag`: `<state-dir>/captures/` directory and a default `tags.yaml` with empty tag list.
 
 ## harden/validate_and_assign.py
 

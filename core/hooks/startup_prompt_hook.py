@@ -107,11 +107,11 @@ def _run():
     first_message = payload.get("message", "")
     cwd = payload.get("cwd", str(PROJECT_ROOT))
 
-    # Repo-layout gate (decision #269, todo #264). When APIARY_STATE_LAYOUT=repo,
-    # scribe state is loaded from <session-repo>/.apiary/scribe/ via git rev-parse
-    # on the session's cwd. Sessions started outside a git repo skip notes/
-    # summary/learnings injection rather than falsely loading apiary's own state.
-    # Default layout (env var unset) is unchanged — still reads from
+    # Repo-layout gate. The default centralized layout resolves scribe state
+    # via git rev-parse on the session's cwd → registry → <state-dir>/scribe/.
+    # Sessions started outside a git repo skip notes/summary/learnings
+    # injection rather than falsely loading apiary's own state. The
+    # APIARY_STATE_LAYOUT=legacy escape hatch reads from
     # ~/.claude/projects/<project_key>/.
     repo_layout = _use_repo_layout()
     session_repo_root = _git_repo_root(Path(cwd)) if repo_layout else None

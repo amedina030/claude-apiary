@@ -165,7 +165,7 @@ class LegacyStateGuardTests(BootstrapTestBase):
             result = bootstrap.bootstrap(self.fake_repo)
         self.assertEqual(len(result.warnings), 1)
         self.assertIn(str(legacy_dir), result.warnings[0])
-        self.assertIn("migrate_scribe_state.py", result.warnings[0])
+        self.assertIn("Migrate the legacy data", result.warnings[0])
         self.assertFalse(
             (self.scribe_dir / "todos").exists(),
             "bootstrap laid out typed-year folders despite legacy state being present",

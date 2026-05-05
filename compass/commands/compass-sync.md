@@ -8,7 +8,7 @@ Manually trigger the compass synthesizer. Normally this runs on a weekly cron, b
 
 ## What this does
 
-Reads active per-session observations from `<repo>/.apiary/compass/observations/`, plus the previous `personality.md` and `corrections.md`, and asks a headless `claude -p` subprocess to produce a new `personality.md`. The new file is read at every session startup via `/apiary-context`.
+Reads active per-session observations from `<state-dir>/compass/observations/`, plus the previous `personality.md` and `corrections.md`, and asks a headless `claude -p` subprocess to produce a new `personality.md`. The new file is read at every session startup via `/apiary-context`.
 
 ## Steps
 
@@ -37,12 +37,12 @@ This calls `claude -p` headlessly. It typically takes 10–30 seconds. Exit code
 After a successful sync, briefly preview what changed. Read the new file:
 
 ```bash
-apiary_root=$(python ~/.claude/apiary_launch.py --print-repo-path)
+state_dir=$(python ~/.claude/apiary_launch.py core/utils/state.py)
 ```
 
-Then `Read` `<apiary_root>/.apiary/compass/personality.md` and summarize the dimensions covered in 1-2 sentences. Don't dump the full file unless the user asks.
+Then `Read` `<state_dir>/compass/personality.md` and summarize the dimensions covered in 1-2 sentences. Don't dump the full file unless the user asks.
 
 ## Notes
 
 - This command does NOT capture new observations — capture happens inline during `/wrapup`. `/compass-sync` only re-runs the synthesis step.
-- If the user wants to influence synthesis without waiting for new observations to accumulate, they can edit `<repo>/.apiary/compass/corrections.md` and re-run this command. The synthesizer treats corrections as high-weight evidence.
+- If the user wants to influence synthesis without waiting for new observations to accumulate, they can edit `<state-dir>/compass/corrections.md` and re-run this command. The synthesizer treats corrections as high-weight evidence.

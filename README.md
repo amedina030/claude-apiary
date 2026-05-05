@@ -48,10 +48,10 @@ Structured note management for cross-session continuity.
 Claude Code sessions are isolated — each one starts fresh with no memory of what happened before. Scribe bridges that gap with project-scoped notes that persist across sessions and are loaded automatically at startup.
 
 **What it does:**
-- **Notes** — typed operational state (TODOs, handoffs, blockers, decisions, wishlists, context) stored in `notes.jsonl` inside the repo checkout at `<repo-root>/.apiary/scribe/` (under the umbrella `.apiary/` state directory, self-ignored via `.apiary/.gitignore`)
-- **Learnings** — project-specific knowledge Claude discovers during task execution (workarounds, better approaches, platform quirks). Stored separately in `learnings.jsonl`, no auto-archive
+- **Notes** — typed operational state (TODOs, handoffs, blockers, decisions, wishlists, context) stored under the per-target state dir at `<state-dir>/scribe/` (the registry-allocated folder under `<apiary>/.repos/<name>-<id>/`)
+- **Learnings** — project-specific knowledge Claude discovers during task execution (workarounds, better approaches, platform quirks). Stored separately in `learnings/`, no auto-archive
 - **Handoffs** — structured session summaries generated automatically on startup from the previous session's transcript, so the next session knows what happened
-- **Auto-archive** — notes older than 30 days are moved to an archive file. Learnings persist indefinitely
+- **Auto-archive** — notes older than 30 days are moved to an archive folder. Learnings persist indefinitely
 
 **Commands:**
 ```
@@ -62,7 +62,7 @@ Claude Code sessions are isolated — each one starts fresh with no memory of wh
 /startup          # session init — generates handoff + loads notes and learnings
 ```
 
-**Storage:** `<repo-root>/.apiary/scribe/` — typed-year folder layout (`todos/2026/`, `handoffs/2026/`, …, each with `index.jsonl` and per-note `<seq>.md` files). Repo-local and self-ignored via the umbrella `.apiary/.gitignore`. This is the default; set `APIARY_STATE_LAYOUT=legacy` only as an escape hatch to read the pre-migration `~/.claude/projects/<project-key>/` path. See [`PORTABILITY.md`](PORTABILITY.md) for the full state map.
+**Storage:** `<state-dir>/scribe/` — typed-year folder layout (`todos/2026/`, `handoffs/2026/`, …, each with `index.jsonl` and per-note `<seq>.md` files). Per-target state lives under `<apiary>/.repos/<name>-<id>/`, resolved automatically by the launcher. Set `APIARY_STATE_LAYOUT=legacy` only as an escape hatch to read the pre-migration `~/.claude/projects/<project-key>/` path. See [`PORTABILITY.md`](PORTABILITY.md) for the full state map.
 
 ---
 
@@ -103,7 +103,7 @@ An automated attack-defend loop where an Attacker agent finds weaknesses (edge c
 
 Captures personality and behavior signals across sessions and synthesizes them into a profile that future sessions read at startup, so Claude can anticipate this user's preferences — verbosity, when to ask vs decide, pushback style — and act in alignment in headless/runner sessions where it can't pause to ask.
 
-Two-tier storage: per-session JSON observations under `<repo>/.apiary/compass/observations/` (written inline by `/wrapup`'s Step 4 capture, or by `compass/backfill.py` for historical transcripts), and a synthesized `personality.md` rewritten weekly from those observations + `corrections.md` (manual high-weight evidence). The startup `/apiary-context` skill reads `personality.md` and uses it as soft guidance — explicit auto-memory feedback still overrides it.
+Two-tier storage: per-session JSON observations under `<state-dir>/compass/observations/` (written inline by `/wrapup`'s Step 4 capture, or by `compass/backfill.py` for historical transcripts), and a synthesized `personality.md` rewritten weekly from those observations + `corrections.md` (manual high-weight evidence). The startup `/apiary-context` skill reads `personality.md` and uses it as soft guidance — explicit auto-memory feedback still overrides it.
 
 ```
 /compass-sync                                                      # manually re-run synthesis
@@ -118,7 +118,7 @@ Bloat handling: rolling archive at 50+ active observations and 90+ days old; nev
 
 ### Researcher
 
-Per-repo compendium of structured research findings — a place to capture what you learned from a WebSearch so next time you (or Claude) need the same answer it comes from the compendium, not another round of googling. Entries are markdown files under `<repo>/.apiary/research/<topic>/<slug>.md` with a YAML-subset frontmatter (title, topic, tags, dates, sources) and standard sections (Summary, Context, Findings, Code, Caveats). Tags are drawn from a controlled vocabulary at `<repo>/.apiary/research/tags.yaml`.
+Per-repo compendium of structured research findings — a place to capture what you learned from a WebSearch so next time you (or Claude) need the same answer it comes from the compendium, not another round of googling. Entries are markdown files under `<state-dir>/research/<topic>/<slug>.md` with a YAML-subset frontmatter (title, topic, tags, dates, sources) and standard sections (Summary, Context, Findings, Code, Caveats). Tags are drawn from a controlled vocabulary at `<state-dir>/research/tags.yaml`.
 
 The `/research` skill is expected to be invoked **before** `WebSearch` on any topic plausibly in the compendium — `/research find <keywords>` first, fall through to web only on miss.
 

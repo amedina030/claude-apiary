@@ -1,6 +1,9 @@
 """Path resolution and storage helpers for researcher.
 
-Researcher state lives at ``<git-repo-root>/.apiary/research/``::
+Researcher state lives at ``<state-dir>/research/`` where ``<state-dir>``
+is the registry-allocated per-target dir (``<apiary>/.repos/<name>-<id>/``).
+The launcher exports ``APIARY_TARGET_STATE_DIR`` after registry lookup.
+Layout::
 
     tags.yaml                 — controlled tag vocabulary (per repo)
     <topic>/<slug>.md         — one research entry per file
@@ -63,7 +66,8 @@ def research_dir(start: Path | None = None) -> Path:
     Resolution order:
       1. ``APIARY_TARGET_STATE_DIR`` env var (set by apiary_launch.py after
          the registry resolver runs) — returns ``<state_dir>/research/``.
-      2. ``<repo-root>/.apiary/research/`` via git rev-parse on *start*.
+      2. Legacy in-repo path via git rev-parse on *start* — used for
+         unmigrated targets only.
       3. ``<cwd>/.apiary/research/`` when not inside a git repo.
     """
     env_dir = os.environ.get(TARGET_STATE_DIR_ENV, "").strip()

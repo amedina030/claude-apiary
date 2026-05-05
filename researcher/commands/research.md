@@ -1,12 +1,12 @@
 ---
 name: research
-description: Add, find, list, show, verify, or register tags for research findings stored per-repo under .apiary/research/
+description: Add, find, list, show, verify, or register tags for research findings stored per-target under <state-dir>/research/
 user-invocable: true
 ---
 
 # /research — Research compendium
 
-Structured per-repo store of research findings (e.g. Unreal Engine quirks, C++ gotchas, library behavior). Entries live at `.apiary/research/<topic>/<slug>.md` with YAML frontmatter (title, topic, tags, dates, sources) and a standard body (Summary, Context, Findings, Code, Caveats).
+Structured per-repo store of research findings (e.g. Unreal Engine quirks, C++ gotchas, library behavior). Entries live at `<state-dir>/research/<topic>/<slug>.md` with YAML frontmatter (title, topic, tags, dates, sources) and a standard body (Summary, Context, Findings, Code, Caveats).
 
 ## Compendium-first rule (critical)
 
@@ -58,7 +58,7 @@ python ~/.claude/apiary_launch.py researcher/cli.py verify unreal replication-ba
 ```
 
 ### `/research register-tag <tag>`
-Append a tag to `.apiary/research/tags.yaml` (the controlled vocabulary).
+Append a tag to `<state-dir>/research/tags.yaml` (the controlled vocabulary).
 
 ```bash
 python ~/.claude/apiary_launch.py researcher/cli.py register-tag multiplayer

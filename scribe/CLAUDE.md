@@ -10,13 +10,15 @@ Project-level rules (portability, CLI lookup, etc.) live in the repo-root `CLAUD
 
 Three separate stores. Pick the right one up front — moving entries between them is manual and tedious.
 
-| Store | Location | Lifespan | Good for |
-|---|---|---|---|
-| **Memory** | `<repo-root>/.apiary/scribe/memory/*.md` (indexed via `MEMORY.md`) | Permanent — still true in 3 months | User preferences, project facts, reference patterns, cross-session conventions |
-| **Notes** | `<repo-root>/.apiary/scribe/<type>/` (folder-per-type, indexed via `index.jsonl`) | Decays; auto-archived after 30 days | Operational state — TODOs, handoffs, decisions, blockers, wishlists, current-work context |
-| **Learnings** | `<repo-root>/.apiary/scribe/learnings/` (folder-per-type, indexed via `index.jsonl`) | Permanent (no auto-archive) | Project-specific error workarounds, non-obvious patterns, tool quirks you figured out |
+All three live under the per-target state directory the registry allocates for the current repo (`<apiary>/.repos/<name>-<id>/scribe/` post-C-2026-46). The path resolves automatically when you invoke `scribe/notes.py` via the launcher — you never need to construct it yourself.
 
-**Scribe v2 storage.** Notes use a folder-per-type layout under `<repo-root>/.apiary/scribe/`. Each note type has its own folder (`todos/`, `handoffs/`, `decisions/`, `wishlists/`, `blockers/`, `references/`, `context/`, `general/`) containing individual `<id>.md` files and an `index.jsonl` for fast listing. Learnings live in `learnings/` with the same structure. Archived notes move into `<type>/archive/` subfolders. The legacy `~/.claude/projects/claude-apiary/notes.jsonl` layout was migrated in scribe-v2 Phase 3 and is no longer the primary store.
+| Store | Subpath under `<state-dir>/scribe/` | Lifespan | Good for |
+|---|---|---|---|
+| **Memory** | `memory/*.md` (indexed via `MEMORY.md`) | Permanent — still true in 3 months | User preferences, project facts, reference patterns, cross-session conventions |
+| **Notes** | `<type>/` folder-per-type, indexed via `index.jsonl` | Decays; auto-archived after 30 days | Operational state — TODOs, handoffs, decisions, blockers, wishlists, current-work context |
+| **Learnings** | `learnings/` (same folder-per-type structure) | Permanent (no auto-archive) | Project-specific error workarounds, non-obvious patterns, tool quirks you figured out |
+
+**Storage layout.** Notes use a folder-per-type layout. Each note type has its own folder (`todos/`, `handoffs/`, `decisions/`, `wishlists/`, `blockers/`, `references/`, `context/`, `general/`) containing individual `<id>.md` files and an `index.jsonl` for fast listing. Learnings live in `learnings/` with the same structure. Archived notes move into `<type>/archive/` subfolders.
 
 **Quick decision:** Is it still true in 3 months → memory. Is it a workaround or a non-obvious thing I learned → learning. Is it about current work that will decay → note.
 
@@ -99,7 +101,7 @@ Learnings are project-specific things you discover during task execution. They p
 
 ### Learning commands
 
-Learnings are stored as individual `.md` files under `.apiary/scribe/learnings/`, with a single shared `index.jsonl` for fast listing.
+Learnings are stored as individual `.md` files under `<state-dir>/scribe/learnings/`, with a single shared `index.jsonl` for fast listing.
 
 ```bash
 # Add a learning
@@ -116,7 +118,7 @@ python scribe/notes.py unlearn <ID>  # e.g. L-2026-3
 
 ## Memory
 
-Memory lives at `<repo-root>/.apiary/scribe/memory/` (inside the repo checkout, under the umbrella `.apiary/` state dir). The directory contains:
+Memory lives at `<state-dir>/scribe/memory/` (the per-target state dir resolved by the registry — same place notes and learnings live). The directory contains:
 
 - `MEMORY.md` — one-line index pointing to each memory file. Loaded into startup context.
 - `<topic>.md` — one file per distinct memory entry. Filename is `kebab-case-description.md`.
@@ -135,7 +137,7 @@ Memory lives at `<repo-root>/.apiary/scribe/memory/` (inside the repo checkout, 
 
 ### Writing a new memory entry
 
-1. Create `<repo-root>/.apiary/scribe/memory/<kebab-case-topic>.md` with YAML frontmatter:
+1. Create `<state-dir>/scribe/memory/<kebab-case-topic>.md` with YAML frontmatter:
 
     ```markdown
     ---
@@ -147,7 +149,7 @@ Memory lives at `<repo-root>/.apiary/scribe/memory/` (inside the repo checkout, 
     Body content here — markdown, as long as needed.
     ```
 
-2. Add a one-line entry to `<repo-root>/.apiary/scribe/memory/MEMORY.md`:
+2. Add a one-line entry to `<state-dir>/scribe/memory/MEMORY.md`:
 
     ```markdown
     - [Short name](kebab-case-topic.md) — one-line hook
@@ -165,4 +167,4 @@ If a note the user references isn't found in active notes, search the archive:
 python scribe/notes.py list --archive --search "<keyword>"
 ```
 
-Active notes age into the archive after 30 days; the archive is keyword-searchable but not loaded into startup context. Each note type folder has its own archive subfolder (e.g. `.apiary/scribe/todos/archive/`); the `notes.py list --archive` command scans all of them.
+Active notes age into the archive after 30 days; the archive is keyword-searchable but not loaded into startup context. Each note type folder has its own archive subfolder (e.g. `<state-dir>/scribe/todos/archive/`); the `notes.py list --archive` command scans all of them.
