@@ -48,3 +48,4 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `runner/config_loader.py` | Shared runner config loader | Library — no CLI |
 | `setup.py` | Unified installer | --global, --project-path, --check |
 | `core/apiary_bootstrap.py` | Apply an apiary profile to a target repo's `.claude/settings.json` | --profile, --target, --force, --apiary-repo |
+| `incubator/cli.py` | Spawn a new side-project repo wired up with apiary | spawn |

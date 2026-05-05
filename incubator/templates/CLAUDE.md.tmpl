@@ -1,0 +1,25 @@
+# __PROJECT_NAME__
+
+__PROBLEM_LINE__
+
+__SOLUTION_LINE__
+
+__VALUE_LINE__
+
+## Apiary toolkit
+
+This repo was spawned by `/incubator` and ships with the apiary toolkit wired up. Invoke any apiary subsystem via the launcher:
+
+```bash
+python ~/.claude/apiary_launch.py <subsystem>/<script>.py [args]
+```
+
+Per-repo state lives under `.apiary/`. Common entry points:
+
+```bash
+python ~/.claude/apiary_launch.py scribe/notes.py list             # operational notes for this project
+python ~/.claude/apiary_launch.py scribe/notes.py list --type context  # specs and project context
+python ~/.claude/apiary_launch.py budgeter/report.py --since 7d    # session cost rollup
+```
+
+The full project spec produced during incubation lives as a `context`-type scribe note in this repo — run `scribe/notes.py list --type context` to find it.

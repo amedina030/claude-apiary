@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "__PROJECT_SLUG__"
+version = "0.1.0"
+description = "__PROJECT_DESCRIPTION__"
+authors = ["__PROJECT_AUTHOR__"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0,<9.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

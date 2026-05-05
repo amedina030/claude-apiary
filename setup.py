@@ -28,6 +28,7 @@ HARDEN_DIR = APIS_DIR / "harden"
 COMPASS_DIR = APIS_DIR / "compass"
 RESEARCHER_DIR = APIS_DIR / "researcher"
 RUNNER_DIR = APIS_DIR / "runner"
+INCUBATOR_DIR = APIS_DIR / "incubator"
 
 sys.path.insert(0, str(APIS_DIR))
 from core.hooks_lib import (
@@ -236,7 +237,7 @@ def write_manifest(claude_dir: Path):
     installed_files = []
 
     # Add all command files
-    for cmd_dir in [BUDGETER_DIR / "commands", SCRIBE_DIR / "commands", CORE_DIR / "commands", DOCS_DIR / "commands", REFINER_DIR / "commands", HARDEN_DIR / "commands", COMPASS_DIR / "commands", RESEARCHER_DIR / "commands", RUNNER_DIR / "commands"]:
+    for cmd_dir in [BUDGETER_DIR / "commands", SCRIBE_DIR / "commands", CORE_DIR / "commands", DOCS_DIR / "commands", REFINER_DIR / "commands", HARDEN_DIR / "commands", COMPASS_DIR / "commands", RESEARCHER_DIR / "commands", RUNNER_DIR / "commands", INCUBATOR_DIR / "commands"]:
         if cmd_dir.is_dir():
             for cmd_file in cmd_dir.glob("*.md"):
                 installed_files.append({
@@ -322,6 +323,7 @@ def _enumerate_installed_files(claude_dir):
         COMPASS_DIR / 'commands',
         RESEARCHER_DIR / 'commands',
         RUNNER_DIR / 'commands',
+        INCUBATOR_DIR / 'commands',
     ]:
         if cmd_dir.is_dir():
             for cmd_file in cmd_dir.glob('*.md'):
@@ -787,6 +789,11 @@ def main():
         for cmd_file in (RUNNER_DIR / "commands").glob("*.md"):
             shutil.copy2(cmd_file, commands_dir / cmd_file.name)
         print(f"  Runner commands  : {commands_dir}")
+
+        # Incubator commands
+        for cmd_file in (INCUBATOR_DIR / "commands").glob("*.md"):
+            shutil.copy2(cmd_file, commands_dir / cmd_file.name)
+        print(f"  Incubator cmds   : {commands_dir}")
 
         # Pre-commit hook
         install_pre_commit_hook()

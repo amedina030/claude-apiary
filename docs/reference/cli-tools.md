@@ -209,6 +209,29 @@ python ~/.claude/apiary_launch.py compass/backfill.py --since 2026-04-10 --last 
 
 Exit codes: `0` at least one file written; `1` no selectors / no matches / nothing written; `2` claude subprocess failed for every selected session.
 
+## incubator/cli.py
+
+Spawn a new side-project repo wired up with the apiary toolkit. Used by the `/incubator` skill after `/refine` produces a spec note. Lays down a Python+poetry skeleton, runs `git init`, and migrates the spec into the new repo's scribe.
+
+### Subcommands
+
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `spawn` | `cli.py spawn --path <abs-path> --spec-note-id <id> [--author "<name>"] [--session-id ID]` | Create the new repo and migrate the spec |
+
+### Flags
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--path` | yes | Absolute target directory; must not exist; parent must exist; must not be inside an existing git repo |
+| `--spec-note-id` | yes | ID of the `/refine` context note in apiary scribe (e.g. `C-2026-43`) |
+| `--author` | no | Author string for `pyproject.toml`; defaults to git config `user.name <user.email>` |
+| `--session-id` | no | Optional session ID stamped on the migrated spec note |
+
+Exit codes: `0` success; `2` validation error (bad path); `3` spec note not found; `4` spawn failure (rolled back automatically); `5` partial success — repo created but spec migration failed (recover manually).
+
+Templates that get written into the new repo live under `incubator/templates/` (`gitignore.tmpl`, `pyproject.toml.tmpl`, `CLAUDE.md.tmpl`).
+
 ## refiner/round_counter.py
 
 Track refinement round counts per session. Used by the `/refine` skill to enforce the 15-round soft limit.
