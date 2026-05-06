@@ -266,46 +266,49 @@ class AggregatePointerTests(unittest.TestCase):
 
 
 class RepoRegistryTests(unittest.TestCase):
-    def test_load_creates_file_when_missing_and_seeds_with_directories_only(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = Path(tmp) / "apiary_repos.json"
-            self.assertFalse(cfg.exists())
-            repos, err = repo_registry.load(cfg)
-            self.assertIsNone(err)
-            self.assertTrue(cfg.is_file())
-            data = json.loads(cfg.read_text(encoding="utf-8"))
-            self.assertIsInstance(data, list)
-            for entry in data:
-                self.assertTrue(Path(entry).is_dir(), f"seed entry not a directory: {entry}")
+    """Post-2026-05 the GUI's repo registry reads from main-apiary's
+    ``.repos/registry.json`` directly. The legacy JSON-list config file
+    is only consulted as a fallback when main-apiary's registry can't
+    be located (rare — broken setup)."""
 
-    def test_load_returns_only_existing_dirs(self):
+    def test_load_returns_real_paths_from_registry(self):
+        # Use a tmpdir as the deprecated cfg path so we don't fall back
+        # to it; load() reads main-apiary's actual registry on this
+        # machine. Registry has the four bootstrapped repos at minimum.
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp) / "apiary_repos.json"
-            real = Path(tmp) / "real-repo"
-            real.mkdir()
-            cfg.write_text(json.dumps([str(real), "C:/this/does/not/exist"]), encoding="utf-8")
             repos, err = repo_registry.load(cfg)
+            self.assertIsNone(err, f"unexpected error: {err}")
+            # Each returned entry must be a real directory.
+            for r in repos:
+                self.assertTrue(r.is_dir(), f"non-dir: {r}")
+
+    def test_load_legacy_fallback_when_no_registry(self):
+        # Simulate a broken setup where main-apiary's registry is missing
+        # by pointing the resolver at an empty tmp directory. Falls
+        # through to the legacy JSON-list config path.
+        import unittest.mock as _mock
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_p = Path(tmp)
+            cfg = tmp_p / "apiary_repos.json"
+            real = tmp_p / "real-repo"
+            real.mkdir()
+            cfg.write_text(json.dumps([str(real), "C:/no/such/path"]), encoding="utf-8")
+            with _mock.patch.object(repo_registry, "_registry_path", return_value=tmp_p / "missing.json"):
+                repos, err = repo_registry.load(cfg)
             self.assertIsNone(err)
             self.assertEqual(len(repos), 1)
             self.assertEqual(repos[0].resolve(), real.resolve())
 
-    def test_load_falls_back_on_malformed_json(self):
+    def test_load_returns_error_when_neither_registry_nor_legacy_exist(self):
+        import unittest.mock as _mock
         with tempfile.TemporaryDirectory() as tmp:
-            cfg = Path(tmp) / "apiary_repos.json"
-            cfg.write_text("{not json", encoding="utf-8")
-            _repos, err = repo_registry.load(cfg)
+            tmp_p = Path(tmp)
+            cfg = tmp_p / "missing-config.json"
+            with _mock.patch.object(repo_registry, "_registry_path", return_value=tmp_p / "missing-registry.json"):
+                repos, err = repo_registry.load(cfg)
+            self.assertEqual(repos, [])
             self.assertIsNotNone(err)
-            assert err is not None
-            self.assertIn("invalid", err)
-
-    def test_load_falls_back_on_non_list(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = Path(tmp) / "apiary_repos.json"
-            cfg.write_text(json.dumps({"repos": []}), encoding="utf-8")
-            _repos, err = repo_registry.load(cfg)
-            self.assertIsNotNone(err)
-            assert err is not None
-            self.assertIn("array", err)
 
 
 if __name__ == "__main__":

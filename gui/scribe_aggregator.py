@@ -23,7 +23,9 @@ from typing import Callable, Optional
 # core.utils.state lives one directory up; mirror the import-path pattern
 # used by other gui modules (sys.path insert + repo-root-relative import).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from core.utils.state import find_state_dir  # noqa: E402
+from core.utils.state import (  # noqa: E402
+    find_state_dir, read_main_apiary_pointer, read_self_pointer,
+)
 
 
 @dataclass
@@ -78,11 +80,29 @@ _SKIP_FOLDERS = {"memory", "backup", "backups", "archive"}
 def _resolve_scribe_root(repo: Path) -> Optional[Path]:
     """Find this target's scribe state directory.
 
-    Honors the post-migration layout (``<apiary>/.repos/<target_id>/scribe/``)
-    via the per-target pointer, and falls back to the legacy in-repo path
-    (``<target>/.apiary/scribe/``) for unmigrated targets.
-    Returns None if neither exists.
+    Resolution order:
+      1. Per-repo pin model (post-2026-05 migration): read
+         ``<repo>/.claude/apiary/{main-apiary-pointer,self-pointer}.json``
+         to construct ``<main_apiary>/.repos/<name>-<uid>/scribe/``.
+      2. Legacy ``<repo>/.apiary/pointer`` breadcrumb (pre-migration
+         centralized layout): ``find_state_dir`` reads it and returns
+         the centralized state dir if present.
+      3. In-repo fallback ``<repo>/.apiary/scribe/`` for un-bootstrapped
+         targets that still keep their state in-tree.
+
+    Returns None when none of the three resolve to a directory.
     """
+    main_pointer = read_main_apiary_pointer(repo)
+    self_pointer = read_self_pointer(repo)
+    if main_pointer is not None and self_pointer is not None:
+        main_apiary_path = main_pointer.get("main_apiary_path", "")
+        name = self_pointer.get("name") or ""
+        uid = self_pointer.get("uid")
+        if main_apiary_path and name and uid is not None:
+            candidate = Path(main_apiary_path) / ".repos" / f"{name}-{uid}" / "scribe"
+            if candidate.is_dir():
+                return candidate
+
     state_dir = find_state_dir(repo)
     if state_dir is not None:
         candidate = state_dir / "scribe"
