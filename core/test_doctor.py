@@ -225,5 +225,49 @@ class MainTests(unittest.TestCase):
         self.assertEqual(rc, 1)
 
 
+class FixActionsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.apiary = _make_apiary(self.root)
+
+    def test_fix_without_subcommand_errors(self):
+        rc = doctor.main(["--fix", "--apiary-repo", str(self.apiary)])
+        self.assertEqual(rc, 2)
+
+    def test_fix_unsupported_subcommand_errors(self):
+        rc = doctor.main(["registry", "--fix", "--apiary-repo", str(self.apiary)])
+        self.assertEqual(rc, 2)
+
+    def test_fix_mailbox_processes_pending_messages(self):
+        from core import mailbox
+        repo = self.root / "x"
+        repo.mkdir()
+        _write_registry(self.apiary, {
+            "5": {"name": "x", "real_path": "/old", "uid": 5, "version": "0.1.0"},
+        })
+        mailbox.write_message(
+            self.apiary, from_uid=5, kind=mailbox.KIND_UPDATE_PATH,
+            new_path=str(repo), name="x", version="0.1.0",
+        )
+        rc = doctor.main(["mailbox", "--fix", "--apiary-repo", str(self.apiary)])
+        self.assertEqual(rc, 0)
+        # Message file deleted; registry updated.
+        self.assertFalse(mailbox.message_path(self.apiary, 5).is_file())
+        registry = json.loads((self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8"))
+        self.assertEqual(registry["5"]["real_path"], str(repo))
+
+    def test_fix_pointers_runs_cascade(self):
+        # No bootstrapped repos beyond main-apiary itself → nothing to update,
+        # but the action should still run cleanly and report 0 updates.
+        _write_registry(self.apiary, {
+            "1": {"name": "main", "real_path": str(self.apiary),
+                  "uid": 1, "version": "0.1.0"},
+        })
+        rc = doctor.main(["pointers", "--fix", "--apiary-repo", str(self.apiary)])
+        self.assertEqual(rc, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

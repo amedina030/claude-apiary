@@ -239,6 +239,44 @@ def _run_all(apiary: Path) -> int:
     return rc
 
 
+# --- --fix actions -------------------------------------------------------
+# Each entry maps a subcommand name to a writer that performs the safe
+# fix. Subcommands not in this dict don't have a fix yet — callers that
+# pass --fix to one of them get a clear "not implemented" message.
+
+def _fix_mailbox(apiary: Path) -> int:
+    """Drain the mailbox: apply pending update_path / register_copy messages."""
+    from core import mailbox
+    report = mailbox.process_pending(apiary)
+    print(f"[mailbox --fix] processed {report['processed']} message(s)")
+    for entry in report["applied"]:
+        print(f"  applied: uid={entry['uid']} kind={entry['kind']} "
+              f"new_path={entry['new_path']}")
+    for err in report["errors"]:
+        print(f"  error: {err['file']} -> {err['reason']}")
+    return 0 if not report["errors"] else 1
+
+
+def _fix_pointers(apiary: Path) -> int:
+    """Cascade-fix all bootstrapped repos' main-apiary-pointer to the
+    current main-apiary location. Idempotent."""
+    from core import cascade
+    report = cascade.cascade_fix(apiary)
+    print(f"[pointers --fix] cascade-fix at {report.new_main_apiary_path}")
+    print(f"  updated {len(report.updated)} repo(s); skipped {len(report.skipped)}")
+    for uid in report.updated:
+        print(f"  updated uid={uid}")
+    for uid, reason in report.skipped:
+        print(f"  skipped uid={uid}: {reason}")
+    return 0
+
+
+FIXES = {
+    "mailbox": _fix_mailbox,
+    "pointers": _fix_pointers,
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="apiary doctor",
@@ -249,12 +287,28 @@ def main(argv: list[str] | None = None) -> int:
         help="check to run; omit to run all",
     )
     parser.add_argument(
+        "--fix", action="store_true",
+        help=("apply safe fixes for the named subcommand. Currently supported: "
+              f"{', '.join(FIXES.keys())}. Other subcommands report only."),
+    )
+    parser.add_argument(
         "--apiary-repo", type=Path, default=None,
         help="path to main-apiary checkout (default: resolved via launcher / pointer)",
     )
     args = parser.parse_args(argv)
 
     apiary = state.resolve_apiary_repo(args.apiary_repo)
+    if args.fix:
+        if not args.subcommand:
+            print("--fix requires a subcommand; pick one of: "
+                  f"{', '.join(FIXES.keys())}", file=sys.stderr)
+            return 2
+        if args.subcommand not in FIXES:
+            print(f"--fix is not implemented for `{args.subcommand}` "
+                  f"(supported: {', '.join(FIXES.keys())})", file=sys.stderr)
+            return 2
+        return FIXES[args.subcommand](apiary)
+
     if args.subcommand:
         return _run_one(args.subcommand, apiary)
     return _run_all(apiary)
