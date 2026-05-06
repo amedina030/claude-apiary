@@ -29,13 +29,13 @@ Look at the active scribe todos and prepare runner intake files for the ones tha
 List the active scribe todos:
 
 ```bash
-python ~/.claude/apiary_launch.py scribe/notes.py list --type todo
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py list --type todo
 ```
 
 For any todo whose body is not already visible, read it with:
 
 ```bash
-python ~/.claude/apiary_launch.py scribe/notes.py get T-YYYY-NN
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py get T-YYYY-NN
 ```
 
 If the user passed a restricted ID list as the argument, operate only on that subset.
@@ -107,7 +107,7 @@ If validation fails, delete the file and record the failure in the final report 
 For every todo that was successfully prepped, append a back-pointer line to its body so the user can find the intake later:
 
 ```bash
-python ~/.claude/apiary_launch.py scribe/notes.py update T-YYYY-NN \
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py update T-YYYY-NN \
   --content "<original body>
 
 ---

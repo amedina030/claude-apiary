@@ -15,15 +15,15 @@ Reads active per-session observations from `<state-dir>/compass/observations/`, 
 ### 1. Pre-check: are there any observations?
 
 ```bash
-python ~/.claude/apiary_launch.py compass/observations.py count
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/observations.py count
 ```
 
-If the count is `0`, tell the user there's nothing to synthesize yet and stop. They can populate observations via `/wrapup` (each session adds one) or `python ~/.claude/apiary_launch.py compass/backfill.py --last N` (historical).
+If the count is `0`, tell the user there's nothing to synthesize yet and stop. They can populate observations via `/wrapup` (each session adds one) or `python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/backfill.py --last N` (historical).
 
 ### 2. Run the synthesizer
 
 ```bash
-python ~/.claude/apiary_launch.py compass/synthesize.py
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/synthesize.py
 ```
 
 This calls `claude -p` headlessly. It typically takes 10–30 seconds. Exit codes:
@@ -37,7 +37,7 @@ This calls `claude -p` headlessly. It typically takes 10–30 seconds. Exit code
 After a successful sync, briefly preview what changed. Read the new file:
 
 ```bash
-state_dir=$(python ~/.claude/apiary_launch.py core/utils/state.py)
+state_dir=$(python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" core/utils/state.py)
 ```
 
 Then `Read` `<state_dir>/compass/personality.md` and summarize the dimensions covered in 1-2 sentences. Don't dump the full file unless the user asks.

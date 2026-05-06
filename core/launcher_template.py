@@ -59,6 +59,13 @@ def main() -> int:
         )
         return 0
 
+    # `--print-repo-path` mode: bash skills shell out to discover the
+    # apiary repo path (e.g. `apiary_root=$(... --print-repo-path)`).
+    # Compatibility shim with the historical ~/.claude/apiary_launch.py.
+    if len(sys.argv) >= 2 and sys.argv[1] == "--print-repo-path":
+        print(main_apiary)
+        return 0
+
     if len(sys.argv) < 2:
         print("[apiary] usage: launch.py <script-relative-to-main-apiary> [args...]",
               file=sys.stderr)

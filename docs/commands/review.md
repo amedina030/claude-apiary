@@ -28,14 +28,14 @@ Parse the diff to get a list of changed files and their changes.
 
 Run the conformance checker:
 ```bash
-python ~/.claude/apiary_launch.py docs/check.py
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" docs/check.py
 ```
 
 Report any issues found.
 
 ### 3. Load relevant standards
 
-Resolve the apiary repo path: `apiary_repo = output of python ~/.claude/apiary_launch.py --print-repo-path`
+Resolve the apiary repo path: `apiary_repo = output of python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" --print-repo-path`
 
 Based on what files changed, read the applicable standards:
 

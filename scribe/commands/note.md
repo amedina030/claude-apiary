@@ -23,11 +23,11 @@ Add a structured note using the scribe tool.
 
    Special subcommand: `/note done <N>` marks note N as done:
    ```bash
-   python ~/.claude/apiary_launch.py scribe/notes.py done <N>
+   python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py done <N>
    ```
 
 2. Run:
    ```bash
-   python ~/.claude/apiary_launch.py scribe/notes.py add --type <type> --session-id <first 8 chars of session_id> --content "<content>"
+   python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py add --type <type> --session-id <first 8 chars of session_id> --content "<content>"
    ```
 3. Confirm to the user: "Noted: #<id> (<type>)"
