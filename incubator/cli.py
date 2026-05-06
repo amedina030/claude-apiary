@@ -260,6 +260,10 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     print(f"  slug:    {project_slug}")
     print(f"  author:  {author}")
     print(f"  spec:    migrated from apiary {args.spec_note_id} -> new repo scribe")
+
+    bootstrap_msg = _per_repo_bootstrap(target)
+    if bootstrap_msg:
+        print(f"  bootstrap: {bootstrap_msg}")
     print()
     print("next steps:")
     print(f"  cd {target}")
@@ -268,6 +272,29 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         "  python ~/.claude/apiary_launch.py scribe/notes.py list --type context"
     )
     return EXIT_OK
+
+
+def _per_repo_bootstrap(target: Path) -> str:
+    """Best-effort: invoke ``apiary install --target <new repo>`` so the
+    new repo gets per-repo hooks / pin files alongside any global install
+    the user already has. Failures here do NOT fail incubator (returns a
+    short status string for the spawn report).
+
+    Per MIGRATION-PLAN.md §13.11 + phase 6 polish — every newly-spawned
+    repo should have apiary integration without the user having to run
+    install separately.
+    """
+    try:
+        from core import install as install_mod
+    except ImportError as exc:
+        return f"skipped (core.install not importable: {exc})"
+    try:
+        result = install_mod.install(target)
+    except install_mod.InstallError as exc:
+        return f"skipped ({exc})"
+    except Exception as exc:  # noqa: BLE001 — best-effort wrapper
+        return f"skipped (unexpected error: {exc.__class__.__name__})"
+    return f"per-repo install OK (uid={result.uid} slug={result.slug})"
 
 
 def _build_parser() -> argparse.ArgumentParser:

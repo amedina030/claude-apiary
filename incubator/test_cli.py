@@ -135,7 +135,8 @@ class SkeletonLayoutTests(unittest.TestCase):
             )
 
             with mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)), \
-                 mock.patch.object(cli, "_run_scribe", side_effect=[fake_add, fake_done]):
+                 mock.patch.object(cli, "_run_scribe", side_effect=[fake_add, fake_done]), \
+                 mock.patch.object(cli, "_per_repo_bootstrap", return_value="mocked"):
                 rc = cli.cmd_spawn(args)
 
             self.assertEqual(rc, cli.EXIT_OK, msg="spawn should succeed")
@@ -206,6 +207,44 @@ class SpecFetchErrorTests(unittest.TestCase):
                 rc = cli.cmd_spawn(args)
             self.assertEqual(rc, cli.EXIT_SPEC_NOT_FOUND)
             self.assertFalse(target.exists())
+
+
+class PerRepoBootstrapTests(unittest.TestCase):
+    """``_per_repo_bootstrap`` is best-effort — failures must not raise
+    or affect the return value of cmd_spawn. They surface as a short
+    status message in the spawn report instead."""
+
+    def test_install_failure_returns_status_string(self):
+        target = Path("/nonexistent/target")
+        # Make install raise InstallError → wrapper returns "skipped (...)"
+        from core import install as install_mod
+        with mock.patch.object(
+            install_mod, "install",
+            side_effect=install_mod.InstallError("not a directory"),
+        ):
+            msg = cli._per_repo_bootstrap(target)
+        self.assertIn("skipped", msg)
+        self.assertIn("not a directory", msg)
+
+    def test_unexpected_exception_returns_status_string(self):
+        from core import install as install_mod
+        with mock.patch.object(install_mod, "install", side_effect=RuntimeError("boom")):
+            msg = cli._per_repo_bootstrap(Path("/x"))
+        self.assertIn("skipped", msg)
+        self.assertIn("RuntimeError", msg)
+
+    def test_success_returns_uid_and_slug(self):
+        from core import install as install_mod
+        fake_result = install_mod.InstallResult(
+            uid=42, name="demo", slug="demo-42",
+            target_repo=Path("/x"), apiary_repo=Path("/apiary"),
+            state_dir=Path("/apiary/.repos/demo-42"),
+            apiary_version="0.1.0", is_first_install=True,
+        )
+        with mock.patch.object(install_mod, "install", return_value=fake_result):
+            msg = cli._per_repo_bootstrap(Path("/x"))
+        self.assertIn("uid=42", msg)
+        self.assertIn("demo-42", msg)
 
 
 if __name__ == "__main__":
