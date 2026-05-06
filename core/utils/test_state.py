@@ -215,20 +215,6 @@ class EnvHelperTests(unittest.TestCase):
         finally:
             del os.environ[state.TARGET_STATE_DIR_ENV]
 
-    def test_is_legacy_layout_case_insensitive(self):
-        os.environ[state.LEGACY_LAYOUT_ENV] = "Legacy"
-        try:
-            self.assertTrue(state.is_legacy_layout())
-        finally:
-            del os.environ[state.LEGACY_LAYOUT_ENV]
-
-    def test_is_legacy_layout_false_for_other_values(self):
-        os.environ[state.LEGACY_LAYOUT_ENV] = "repo"
-        try:
-            self.assertFalse(state.is_legacy_layout())
-        finally:
-            del os.environ[state.LEGACY_LAYOUT_ENV]
-
 
 class PinModelHelperTests(unittest.TestCase):
     """Round-trip tests for the per-repo pin-model files (self-pointer,

@@ -217,26 +217,20 @@ def _write_per_repo_settings(
     same hook set as ``setup.py --global``, just with the launcher path
     swapped to ``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``.
     """
-    # Lazy import — setup.py imports core/hooks_lib so we'd otherwise
-    # circle back through ourselves at module load.
-    sys.path.insert(0, str(apiary))
-    try:
-        import setup as apiary_setup
-    finally:
-        sys.path.pop(0)
+    from core import hooks_factory
+    from core.hooks_lib import hook_cmd
 
     hooks = {}
     for builder in (
-        apiary_setup.build_core_hooks,
-        apiary_setup.build_budgeter_hooks,
-        apiary_setup.build_scribe_hooks,
-        apiary_setup.build_docs_hooks,
+        hooks_factory.build_core_hooks,
+        hooks_factory.build_budgeter_hooks,
+        hooks_factory.build_scribe_hooks,
+        hooks_factory.build_docs_hooks,
     ):
-        for event, entries in builder(per_repo_launcher=True).items():
+        for event, entries in builder().items():
             hooks.setdefault(event, []).extend(entries)
     # Per-repo-only drift check — runs first on PreToolUse so the rest
     # of the chain sees an up-to-date self-pointer / mailbox state.
-    from core.hooks_lib import hook_cmd
     drift_cmd = hook_cmd(
         apiary / "core" / "hooks" / "per_repo_drift_check.py",
         repo_root=apiary, per_repo_launcher=True,

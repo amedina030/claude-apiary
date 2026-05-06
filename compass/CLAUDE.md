@@ -94,7 +94,7 @@ Don't use corrections to encode rules — those go in auto-memory feedback.
 - **Archive** moves files older than 90 days into `observations/archive/<iso-year>-<iso-week>/`, **but only when active count is ≥ 50**. Below that, no archive runs (preserves data while building signal).
 - **`personality.md` doesn't grow** — each synthesis rewrites it. Bounded by design.
 
-Archive sweep: `python ~/.claude/apiary_launch.py compass/observations.py archive [--apply]` (dry-run by default).
+Archive sweep: `python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/observations.py archive [--apply]` (dry-run by default).
 
 ---
 

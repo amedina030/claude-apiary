@@ -23,7 +23,7 @@ from core.session import SessionId
 from core.hook_context import context_block, hook_allow, read_payload
 from core.sanitizer import sanitize_and_report
 from core.startup import run_init, run_summary
-from scribe.notes import _git_repo_root, _use_repo_layout, STATE_LAYOUT_ENV
+from scribe.notes import _git_repo_root
 
 # Sanitizer hit log lives in the umbrella state directory. With the
 # centralized .repos/ layout, this resolves to
@@ -107,15 +107,12 @@ def _run():
     first_message = payload.get("message", "")
     cwd = payload.get("cwd", str(PROJECT_ROOT))
 
-    # Repo-layout gate. The default centralized layout resolves scribe state
-    # via git rev-parse on the session's cwd → registry → <state-dir>/scribe/.
-    # Sessions started outside a git repo skip notes/summary/learnings
-    # injection rather than falsely loading apiary's own state. The
-    # APIARY_STATE_LAYOUT=legacy escape hatch reads from
-    # ~/.claude/projects/<project_key>/.
-    repo_layout = _use_repo_layout()
-    session_repo_root = _git_repo_root(Path(cwd)) if repo_layout else None
-    skip_notes_injection = repo_layout and session_repo_root is None
+    # The centralized state layout resolves scribe state via git rev-parse
+    # on the session's cwd → registry → <state-dir>/scribe/. Sessions started
+    # outside a git repo skip notes/summary/learnings injection rather than
+    # falsely loading apiary's own state.
+    session_repo_root = _git_repo_root(Path(cwd))
+    skip_notes_injection = session_repo_root is None
 
     # --- 1. Init: identity ---
     identity = {}
@@ -137,10 +134,7 @@ def _run():
     mission = identity.get("mission", "general")
     if skip_notes_injection:
         parts.append("")
-        parts.append(
-            "summary: skipped (APIARY_STATE_LAYOUT=repo and session cwd "
-            "is not inside a git repo)"
-        )
+        parts.append("summary: skipped (session cwd is not inside a git repo)")
     else:
         try:
             summary_text = run_summary(cwd, role, mission)
@@ -159,11 +153,7 @@ def _run():
     if not skip_notes_injection:
         try:
             learnings_env = os.environ.copy()
-            if repo_layout:
-                learnings_env[STATE_LAYOUT_ENV] = "repo"
-                learnings_cwd = str(session_repo_root)
-            else:
-                learnings_cwd = str(PROJECT_ROOT)
+            learnings_cwd = str(session_repo_root)
             result = subprocess.run(
                 [sys.executable, str(PROJECT_ROOT / "scribe" / "notes.py"),
                  "learnings", "--index"],

@@ -209,8 +209,8 @@ Inspect and maintain per-session personality observation files at `<state-dir>/c
 Read active observations, previous `personality.md`, and `corrections.md`; call headless `claude -p` to produce a new `personality.md`. Used by `/compass-sync` and the weekly cron entry.
 
 ```bash
-python ~/.claude/apiary_launch.py compass/synthesize.py
-python ~/.claude/apiary_launch.py compass/synthesize.py --dry-run
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/synthesize.py
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/synthesize.py --dry-run
 python -m compass.synthesize --cron        # cron-driven; no-ops if personality.md is < 7 days old
 ```
 
@@ -227,9 +227,9 @@ Exit codes: `0` wrote `personality.md`; `1` no active observations; `2` claude s
 Extract observations from historical session transcripts via headless claude. Selectors are combinable and intersected.
 
 ```bash
-python ~/.claude/apiary_launch.py compass/backfill.py --last 5
-python ~/.claude/apiary_launch.py compass/backfill.py --session-ids 1089da5c,8123e697
-python ~/.claude/apiary_launch.py compass/backfill.py --since 2026-04-10 --last 5
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/backfill.py --last 5
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/backfill.py --session-ids 1089da5c,8123e697
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/backfill.py --since 2026-04-10 --last 5
 ```
 
 | Flag | Required | Description |
@@ -437,19 +437,18 @@ State is stored at `harden/tmp/round_<session-id>.json`. Format: `{"session_id":
 
 ## setup.py
 
-Unified installer for all tools.
+Redirect stub since the per-repo migration. `--global`, `--project-path`, and
+`--check` now exit 1 with a message pointing at the new commands. The real
+entry points are:
 
 ```bash
-python setup.py --global [--with-test-suite]
-python setup.py --project-path /path/to/project
-python setup.py --check
+poetry run apiary self-bootstrap                    # bootstrap main-apiary
+poetry run apiary install --target /path/to/repo    # bootstrap a target
+poetry run apiary doctor                            # validate install
+python scripts/install_repo_hooks.py                # main-apiary's own .git/hooks/
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--global` | Install globally in `~/.claude/settings.json` |
-| `--project-path PATH` | Install budgeter hooks for a specific project |
-| `--check` | Validate installation without making changes |
+See [`apiary` CLI](#apiary) below.
 
 ## scripts/install_context_rules.py
 
@@ -733,8 +732,8 @@ Silent on any failure — cost logging never breaks a stage. Sums all numeric fi
 Check or repair the host OS scheduler against apiary's canonical scheduled-entry registry (`cron_registry/<hostname>.json` at the apiary repo root). Each machine maintains its own file — named after `platform.node()` — so multi-machine setups don't fight over a single shared registry. Detects drift when the repo moves, files rename, or the registered command points at a path that no longer exists.
 
 ```bash
-python ~/.claude/apiary_launch.py runner/cron_health.py check
-python ~/.claude/apiary_launch.py runner/cron_health.py repair [--apply]
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" runner/cron_health.py check
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" runner/cron_health.py repair [--apply]
 ```
 
 ### Subcommands
@@ -820,22 +819,22 @@ poetry run pip install "Pillow>=10,<12"          # one-time, build-only
 poetry run python gui/packaging/make_icon.py
 ```
 
-## core/apiary_bootstrap.py
+## apiary
 
-Apply an apiary profile to a target repo's `.claude/settings.json`. Source at `core/apiary_bootstrap.py`; installed to `~/.claude/apiary_bootstrap.py` by `setup.py --global`, which is the canonical invocation path.
+The unified CLI registered as a console_script by `pyproject.toml` (run as
+`poetry run apiary <subcommand>`). Source at `core/cli.py`. Subcommands:
 
-```bash
-python ~/.claude/apiary_bootstrap.py --profile <name> [--target PATH] [--force] [--apiary-repo PATH]
-```
+| Subcommand | Description |
+|------------|-------------|
+| `install --target <repo>` | Bootstrap apiary into a target repo. `--profile <name>` selects a profile under `<main-apiary>/profiles/`. Idempotent. |
+| `uninstall --target <repo>` | Reverse of install. `--remove-data` also deletes the centralized per-target state. |
+| `self-bootstrap` | First-machine setup of main-apiary; equivalent to running `install --target` on main-apiary itself. |
+| `doctor [check]` | Read-only consistency checks; `--fix` applies safe fixes for `mailbox` and `pointers`. Subcommands: `pointers`, `registry`, `mailbox`, `versions`, `orphans`, `duplicates`, `unreachable`. |
+| `mailbox` | Process pending forwarding messages; `--list` to inspect without draining. |
+| `cascade-fix` | Rewrite every bootstrapped repo's `main-apiary-pointer.json` to the current main-apiary path. |
+| `version` | Print main-apiary's pinned version (the contents of `<main-apiary>/VERSION`). |
 
-| Flag | Required | Description |
-|------|----------|-------------|
-| `--profile NAME` | yes | Profile name under `<apiary-repo>/profiles/<name>.jsonc` |
-| `--target PATH` | no | Target repo root (default: cwd) |
-| `--force` | no | Skip the re-run drift prompt and the first-run wipe prompt; apply changes non-interactively. Warnings still print. |
-| `--apiary-repo PATH` | no | Override apiary repo location (default: via `~/.claude/apiary.json` pointer) |
-
-Walks the profile's `extends` chain, deep-merges parents left-to-right then the child on top (`{"$replace": value}` escape hatch replaces instead of merges), and writes the resolved apiary-owned top-level keys into `.claude/settings.json`, preserving non-apiary keys verbatim. State lands at `.apiary/bootstrap_state.json` (schema version, profile chain, per-profile content hashes, last bootstrap timestamp).
+`install` walks the profile's `extends` chain, deep-merges parents left-to-right then the child on top (`{"$replace": value}` escape hatch replaces instead of merges), and writes the resolved apiary-owned top-level keys into `<repo>/.claude/settings.json`. It also generates `<repo>/.claude/apiary/{launch.py, main-apiary-pointer.json, self-pointer.json, version.json}`, copies slash commands into `<repo>/.claude/commands/`, writes the apiary-managed zone into `<repo>/CLAUDE.md`, and updates `<repo>/.gitignore`. Centralized state lands at `<main-apiary>/.repos/<name>-<uid>/bootstrap_state.json` (schema v2 — adds hash fields used by `apiary doctor registry` for drift detection).
 
 First-run safety: if the target has an existing `settings.json` with content inside apiary-owned keys that the profile doesn't set, a warning prints listing the about-to-be-wiped entries and recommends moving them to `.claude/settings.local.json` (Claude Code merges that file natively). The tool prompts before applying; `--force` skips the prompt but still prints the warning.
 
@@ -853,8 +852,8 @@ See [Bootstrapping a repo](../guides/bootstrapping-a-repo.md) for profile author
 Inspect and verify the apiary target registry at `<apiary>/.repos/registry.json` (built by the resolver in `core/utils/state.py`). Every target whose `.apiary/` state has been created on this machine is indexed there; this tool reports the index and flags entries whose `real_path` no longer exists on disk.
 
 ```bash
-python ~/.claude/apiary_launch.py core/targets.py list
-python ~/.claude/apiary_launch.py core/targets.py verify
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" core/targets.py list
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" core/targets.py verify
 ```
 
 ### Subcommands

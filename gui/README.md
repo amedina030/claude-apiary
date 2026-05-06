@@ -7,7 +7,7 @@ A PyWebView + PyInstaller desktop app that wraps Claude Code as a hidden pty sub
 - a clean chat window (filtered to user-authored prompts and assistant text only)
 - per-message timestamps and per-message + cumulative token counts
 - a global scribe sidebar across all registered apiary repos (read-only in V1)
-- a hot-reloadable theme via `~/.claude/apiary_gui/theme.json`
+- a hot-reloadable theme via `<main-apiary>/.apiary/gui/apiary_gui/theme.json`
 - a small pty output strip for interactive Claude Code UI (plan-mode banners, legacy permission prompts when the MCP path is off)
 - a structured permission-prompt banner wired through a local MCP server (opt-in via `permission_mcp: true` in `launch.json`, or the `APIARY_PERMISSION_MCP=1` env var for a one-off) — see scribe `C-2026-36`
 
@@ -31,8 +31,8 @@ name. The profile re-roots all state (`tabs.json`, `sidebar_state.json`,
 APIARY_GUI_PROFILE=dev poetry run python -m gui.app
 ```
 
-State for the dev profile lives at `~/.claude/apiary_gui_dev/`. The window
-title becomes `apiary [dev]` so it's visually distinct from the main one.
+State for the dev profile lives at `<main-apiary>/.apiary/gui/apiary_gui_dev/`.
+The window title becomes `apiary [dev]` so it's visually distinct from the main one.
 
 ### Frontend hot-reload
 
@@ -62,7 +62,7 @@ so the window doesn't blur on display scaling > 100%.
 
 ## Config files
 
-Auto-created on first run under `~/.claude/apiary_gui/`:
+Auto-created on first run under `<main-apiary>/.apiary/gui/apiary_gui/`:
 
 - `theme.json` — CSS variable values (hot-reloads)
 - `launch.json` — Claude Code spawn args + cwd
@@ -78,7 +78,7 @@ now come through the structured MCP path (`APIARY_PERMISSION_MCP=1`), not
 the TUI scraper — only capture them here if reproducing a scraper-mode bug.
 
 ```bash
-# Launch GUI with capture on (writes ~/.claude/apiary_gui/captures/<ts>-<label>.bin)
+# Launch GUI with capture on (writes <main-apiary>/.apiary/gui/apiary_gui/captures/<ts>-<label>.bin)
 poetry run python -m gui.capture_session --label tool_permission
 
 # Reproduce the UI in the GUI, then close the window.

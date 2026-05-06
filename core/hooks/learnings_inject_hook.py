@@ -4,9 +4,9 @@
 Matcher is a pure function (``score_learnings``) so the ranking logic is
 fully unit-testable without touching stdin, subprocesses, or the scribe
 state directory. The hook shell around it reads the PreToolUse payload,
-resolves the scribe state dir from the session's cwd (respecting
-``APIARY_STATE_LAYOUT=repo``), loads ``learnings/<year>/index.jsonl``, and
-emits up to 3 matched learnings as a single context_block.
+resolves the scribe state dir from the session's cwd, loads
+``learnings/<year>/index.jsonl``, and emits up to 3 matched learnings
+as a single context_block.
 
 Fail-open: any error path (missing payload field, corrupt index, state dir
 not resolvable) degrades to an empty allow — the tool call still proceeds.
@@ -175,7 +175,7 @@ def _run():  # pragma: no cover — covered by integration in Step 7
     from core.flags import is_enabled
     from core.hook_context import context_block, hook_allow, read_payload
     from core.sanitizer import sanitize_and_report
-    from scribe.notes import _git_repo_root, _use_repo_layout, scribe_state_dir
+    from scribe.notes import _git_repo_root, scribe_state_dir
     from scribe.store import ScribeStore
 
     if not is_enabled('learnings-inject'):
@@ -212,7 +212,7 @@ def _run():  # pragma: no cover — covered by integration in Step 7
             return
 
     cwd = payload.get('cwd') or str(project_root)
-    state_dir = scribe_state_dir(Path(cwd)) if _use_repo_layout() else None
+    state_dir = scribe_state_dir(Path(cwd))
     if state_dir is None:
         hook_allow()
         return

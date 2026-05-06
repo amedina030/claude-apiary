@@ -7,36 +7,41 @@ claude-apiary is designed to run on Windows, macOS, and Linux without per-OS bra
 - **Python ≥ 3.11** on `PATH` as `python` (or `python3`).
 - **git** on `PATH`.
 - A POSIX-style shell (bash on macOS/Linux, Git Bash on Windows). The hooks and scripts use Unix shell syntax — `cmd.exe` and PowerShell are not supported.
-- Write access to `~/.claude/` (created on first run if missing).
+- Write access to the directory you cloned `claude-apiary` into, plus any repo you bootstrap apiary into. Apiary writes nothing to `~/.claude/` post-migration.
 
 That's it — no system services, no daemons, no compiled extensions.
 
-## Bootstrap (fresh clone)
+## Install (fresh clone)
 
 ```bash
 git clone <repo-url> claude-apiary
 cd claude-apiary
 
-# Preferred: Poetry (creates a virtualenv, locks dependencies)
+# Preferred: Poetry (creates a virtualenv, locks dependencies, registers the `apiary` console_script)
 poetry install
 
 # Alternative: pip (no lockfile)
 pip install -r requirements.txt
 
-python scripts/bootstrap.py
+# Bootstrap main-apiary against itself
+poetry run apiary self-bootstrap
 ```
 
-`bootstrap.py` is idempotent: safe to run as many times as you want. On first run it:
+`apiary self-bootstrap` is idempotent. It:
 
-- Creates `~/.claude/` (for Claude Code's own per-user state — identity files, transcripts, the auto-startup flag).
-- Resolves the apiary repo's per-target state directory under `<apiary>/.repos/<name>-<id>/` via the registry (auto-allocates an id and writes a pointer file at `<repo-root>/.apiary/pointer` on first call; see C-2026-46).
-- Lays out the scribe typed-year folder skeleton under `<state-dir>/scribe/` (`todos/`, `handoffs/`, `decisions/`, …, `learnings/`, each with an `index.jsonl`, `archive/` subfolder, and `<year>/next_seq` counter) plus an empty `memory/MEMORY.md` so the scribe and memory systems have something to read.
-- Creates `~/.claude/auto-startup-enabled` so the startup hook runs on first session.
-- Verifies your Python version meets the minimum and warns if any package in `requirements.txt` fails to import.
+- Creates `<main-apiary>/.repos/registry.json` if missing (initializes the bootstrapped-repo registry).
+- Generates main-apiary's per-repo files at `<main-apiary>/.claude/apiary/{launch.py, main-apiary-pointer.json, self-pointer.json, version.json}`.
+- Allocates uid 1 to main-apiary in the registry.
+- Writes hooks into `<main-apiary>/.claude/settings.json` that invoke the per-repo launcher.
+- Adds the apiary-managed zone to `<main-apiary>/CLAUDE.md`.
 
-On re-run it reports everything as "already present" and exits 0.
+To bootstrap any other repo so apiary acts in it:
 
-If you run `bootstrap.py` on a machine that already has scribe state under the legacy `~/.claude/projects/<key>/` location and the centralized state dir is empty, bootstrap refuses to seed and tells you to migrate first.
+```bash
+poetry run apiary install --target /path/to/your/repo
+```
+
+Sessions in non-bootstrapped repos run as vanilla Claude Code with no apiary hooks — apiary is fully opt-in per-repo.
 
 ## State: what's local, what's in the repo
 
@@ -71,8 +76,6 @@ Session transcripts and identity files written by Claude Code itself stay under 
 
 **This state is intentionally per-checkout and is not portable.** Notes, learnings, memory, and budgeter logs reflect what *this* checkout's Claude has been working on, with paths, session IDs, and timing rooted in that machine's history. Copying them to another machine usually creates more confusion than value (stale paths, dangling session references, conflicting handoffs). If you switch machines, start fresh on the new one — the repo is the source of truth, the local state is short-horizon scratchpad.
 
-**Layout escape hatch.** Set `APIARY_STATE_LAYOUT=legacy` to force scribe back to the historical `~/.claude/projects/<project-key>/` path; useful only for diagnosing pre-migration installs.
-
 If you have a specific reason to move a single artifact (e.g. one decision note you want to carry forward), copy it by hand. There is deliberately no export/import script.
 
 ## Portability rules for contributors
@@ -80,9 +83,9 @@ If you have a specific reason to move a single artifact (e.g. one decision note 
 If you're writing or editing hooks, skills, scripts, or settings in this repo, you must follow these rules so the codebase stays portable. The full canonical list lives in the user's global `CLAUDE.md`; the load-bearing items are reproduced here.
 
 - **No absolute paths.** Never hard-code `C:\Users\…`, `/Users/…`, `/home/…`, or interpreter paths like `python.exe`. In Python, derive from `pathlib.Path(__file__).resolve().parent`. For user home, use `Path.home()`.
-- **Hook commands use the launcher.** Global hook commands in `settings.json` must use `python ~/.claude/apiary_launch.py <relative-path>` — never `$CLAUDE_PROJECT_DIR` (which resolves to the *session's* repo, not apiary) or absolute paths. The launcher reads `~/.claude/apiary.json` to find the apiary repo, making hooks work from any repo. Source of truth: `core/apiary_launch.py`, copied to `~/.claude/` by `setup.py --global`.
-- **Skill CLI invocations use the launcher.** Skill templates (`.md` files in `*/commands/`) must invoke apiary CLI tools via `python ~/.claude/apiary_launch.py <relative-path> [args...]` — never `<repo_dir>` placeholders or bare relative paths. The launcher finds the repo, sets `cwd` and `CLAUDE_PROJECT_DIR`, and forwards all arguments. This eliminates LLM-dependent path resolution and makes skills work from any directory.
-- **Skill Read-tool paths use `--print-repo-path`.** When a skill template needs Claude to Read a file from the apiary repo (not invoke a CLI tool), resolve the path first: `python ~/.claude/apiary_launch.py --print-repo-path`. Use the output as the prefix for Read tool paths. Never use `<repo_dir>` placeholders for this — they depend on LLM substitution which is fragile and non-portable.
+- **Hook commands use the per-repo launcher.** Hook commands in a bootstrapped repo's `<repo>/.claude/settings.json` must use `python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" <relative-path>`. Claude Code expands `$CLAUDE_PROJECT_DIR` at hook-fire time so the launcher resolves to the bootstrapped repo's own copy. The launcher reads `<repo>/.claude/apiary/main-apiary-pointer.json` to find main-apiary; hooks fail-safe (exit 0 with stderr warning) when main-apiary is unreachable.
+- **Skill CLI invocations use the per-repo launcher.** Skill templates (`.md` files in `*/commands/`) must invoke apiary CLI tools via `python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" <relative-path> [args...]` — never `<repo_dir>` placeholders or bare relative paths. The launcher finds main-apiary, sets `APIARY_MAIN_REPO`, and forwards all arguments. This eliminates LLM-dependent path resolution and makes skills work in any bootstrapped repo.
+- **Skill Read-tool paths use `--print-repo-path`.** When a skill template needs Claude to Read a file from main-apiary (not invoke a CLI tool), resolve the path first: `python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" --print-repo-path`. Use the output as the prefix for Read tool paths. Never use `<repo_dir>` placeholders for this — they depend on LLM substitution which is fragile and non-portable.
 - **Null device:** use `os.devnull` or `subprocess.DEVNULL`. Never write the OS-specific literal — it differs by platform.
 - **Subprocess:** list-form (`["git", "status"]`), never `shell=True`, never `.exe` suffixes.
 - **Paths:** `pathlib.Path` end-to-end. Never concatenate with `/` or `\` literals.
@@ -102,8 +105,8 @@ Run `poetry install` (or `pip install -r requirements.txt`). If you use a virtua
 **`CLAUDE_PROJECT_DIR` not set in hook commands.**
 Claude Code sets this automatically when invoking hooks. If you're running a hook manually for testing, set it to the repo root: `CLAUDE_PROJECT_DIR=$(pwd) python core/hooks/<hook>.py`.
 
-**Hooks fail with "can't open file" from a different repo.**
-Global hooks use `~/.claude/apiary_launch.py` to locate the apiary repo via `~/.claude/apiary.json`. If either file is missing, re-run `python setup.py --global` from the apiary repo to install them. If you see `$CLAUDE_PROJECT_DIR` in the failing command, your hooks are using the old format — re-running setup will replace them with launcher-based commands.
+**Hooks fail with "can't open file" or "main-apiary not reachable".**
+The per-repo launcher at `<repo>/.claude/apiary/launch.py` reads `main-apiary-pointer.json` to find main-apiary. If main-apiary moved (or the pointer is stale), re-run `poetry run apiary install --target <repo>` from inside main-apiary, or open a Claude session in main-apiary first to trigger cascade-fix. If `<repo>/.claude/apiary/launch.py` doesn't exist, the repo isn't bootstrapped — run `apiary install --target <repo>`.
 
 **Bootstrap refuses to seed and tells me to migrate first.**
 You have scribe state under a legacy `~/.claude/projects/<key>/` location and the centralized `<state-dir>/scribe/` is empty. Migrate the legacy data into the centralized layout before re-running bootstrap.

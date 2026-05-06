@@ -43,16 +43,16 @@ Key rules:
 - `user-invocable: true` makes it appear in `/help` and tab completion
 - Keep instructions precise — Claude follows them literally
 
-### 2. Register in setup.py
+### 2. Register in install.py
 
-Add the command file to the list of files `setup.py` copies to `~/.claude/commands/`. The copy logic is in the global install section.
+Add the command's source dir name to `_slash_command_sources()` in `core/install.py` if it's not already covered by one of the known tool dirs. New commands placed under an existing `<tool>/commands/` are picked up automatically.
 
 ### 3. Test
 
-- Run `python setup.py --global` to install
-- Start a new Claude Code session
+- Run `poetry run apiary install --target <repo>` to propagate the command to a bootstrapped repo
+- Start a new Claude Code session in that repo
 - Type `/<name>` and verify it works as expected
-- Run `python setup.py --check` to verify installation
+- Run `poetry run apiary doctor registry` to verify the install hash records updated
 
 ### 4. Update docs
 
@@ -65,5 +65,5 @@ Add the command file to the list of files `setup.py` copies to `~/.claude/comman
 - [ ] Frontmatter includes `name`, `description`, `user-invocable`
 - [ ] Added to `setup.py` copy list
 - [ ] `docs/reference/slash-commands.md` updated
-- [ ] `python setup.py --check` passes
+- [ ] `poetry run apiary doctor` passes
 - [ ] `python docs/check.py` passes

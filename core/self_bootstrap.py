@@ -27,8 +27,8 @@ from core.utils import state
 # "fake apiary" tmpdir for tests can satisfy these by copying the real
 # files in.
 _SENTINEL_PATHS = (
-    "core/apiary_bootstrap.py",
     "core/install.py",
+    "core/cli.py",
     "migrations",
     "VERSION",
     "profiles",

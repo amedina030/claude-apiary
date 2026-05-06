@@ -106,10 +106,10 @@ Captures personality and behavior signals across sessions and synthesizes them i
 Two-tier storage: per-session JSON observations under `<state-dir>/compass/observations/` (written inline by `/wrapup`'s Step 4 capture, or by `compass/backfill.py` for historical transcripts), and a synthesized `personality.md` rewritten weekly from those observations + `corrections.md` (manual high-weight evidence). The startup `/apiary-context` skill reads `personality.md` and uses it as soft guidance — explicit auto-memory feedback still overrides it.
 
 ```
-/compass-sync                                                      # manually re-run synthesis
-python ~/.claude/apiary_launch.py compass/observations.py count    # how many active observations
-python ~/.claude/apiary_launch.py compass/backfill.py --last 5     # backfill 5 recent transcripts
-python ~/.claude/apiary_launch.py compass/observations.py archive  # dry-run archive sweep
+/compass-sync                                                                            # manually re-run synthesis
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/observations.py count      # how many active observations
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/backfill.py --last 5       # backfill 5 recent transcripts
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/observations.py archive    # dry-run archive sweep
 ```
 
 Bloat handling: rolling archive at 50+ active observations and 90+ days old; never archives below 50. Synthesizer self-throttles to 7-day cadence (cron runs daily, no-ops 6 of 7 days). Dimensions are configured at `compass/dimensions.json`. See [`compass/CLAUDE.md`](compass/CLAUDE.md) for lane discipline (compass vs auto-memory) and observation quality bar.
@@ -176,7 +176,7 @@ Working in Claude Code's terminal UI is painful for visibility and ergonomics: s
 - **Per-message + cumulative token counts** in the header
 - **Multi-tab / multi-cwd** — each tab owns its own claude pty, transcript tail, and scribe sidebar scoped to that cwd
 - **Global scribe sidebar** — searchable per-type note groups for the active tab's repo
-- **Hot-reloadable theme** — edit `~/.claude/apiary_gui/theme.json`, watcher applies live
+- **Hot-reloadable theme** — edit `<main-apiary>/.apiary/gui/apiary_gui/theme.json`, watcher applies live
 - **PyInstaller one-folder build** for a single double-clickable `.exe` (with three-hex taskbar icon)
 
 **Run from source:**
@@ -193,7 +193,7 @@ poetry run python gui/packaging/build.py
 ```
 
 **Working on the GUI from inside the GUI:**
-The GUI is single-instance per profile. Set `APIARY_GUI_PROFILE=dev` to run a second instance with isolated state (`~/.claude/apiary_gui_dev/`) alongside your main one. `Ctrl+R` / `F5` reloads the frontend without restarting the Python backend.
+The GUI is single-instance per profile. Set `APIARY_GUI_PROFILE=dev` to run a second instance with isolated state (`<main-apiary>/.apiary/gui/apiary_gui_dev/`) alongside your main one. `Ctrl+R` / `F5` reloads the frontend without restarting the Python backend.
 
 Full details: [`gui/README.md`](gui/README.md).
 

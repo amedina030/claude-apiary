@@ -34,7 +34,6 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from core.utils.apiary_pointer import get_repo_path  # noqa: E402
 from core.utils.filelock import FileLock  # noqa: E402
 
 REPOS_DIRNAME = ".repos"
@@ -59,7 +58,6 @@ VERSION_FILENAME = "version.json"
 PIN_SCHEMA_VERSION = 1
 
 TARGET_STATE_DIR_ENV = "APIARY_TARGET_STATE_DIR"
-LEGACY_LAYOUT_ENV = "APIARY_STATE_LAYOUT"
 
 _NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -209,18 +207,47 @@ def _find_entry_by_path(registry: dict, real_path: Path) -> tuple[str, dict] | N
 
 
 def resolve_apiary_repo(explicit: Path | None = None) -> Path:
-    """Return the apiary checkout root. Prefers *explicit*, falls back to
-    the global ``~/.claude/apiary.json`` pointer. Raises RuntimeError when
-    neither is available — the resolver cannot operate without it."""
+    """Return the apiary checkout root.
+
+    Resolution order (post-migration):
+
+    1. ``explicit`` — caller supplied the path (CLI ``--apiary-repo`` flag).
+    2. ``APIARY_MAIN_REPO`` env var — set by the per-repo launcher when
+       it dispatches a script.
+    3. ``__file__``-based: this module lives at ``<main-apiary>/core/utils/``,
+       so its grandparent is main-apiary's root. This works whenever the
+       resolver is called from inside main-apiary's own source tree.
+    4. ``main-apiary-pointer.json`` at ``<cwd>/.claude/apiary/`` — set by
+       ``apiary install`` for any bootstrapped repo, so callers running
+       from inside a bootstrapped repo can locate main-apiary.
+
+    Raises RuntimeError when none of the above resolve to a directory.
+    """
     if explicit is not None:
         return Path(explicit).resolve()
-    repo = get_repo_path()
-    if repo is None:
-        raise RuntimeError(
-            "Cannot locate apiary repo: no ~/.claude/apiary.json pointer. "
-            "Run setup.py --global to install the pointer, or pass an explicit path."
-        )
-    return repo
+
+    env_path = os.environ.get("APIARY_MAIN_REPO", "").strip()
+    if env_path and Path(env_path).is_dir():
+        return Path(env_path).resolve()
+
+    self_repo = _REPO_ROOT
+    if (self_repo / "core" / "install.py").is_file() and (self_repo / "VERSION").is_file():
+        return self_repo
+
+    pin = Path.cwd() / ".claude" / "apiary" / "main-apiary-pointer.json"
+    if pin.is_file():
+        try:
+            data = json.loads(pin.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        candidate = Path(data.get("main_apiary_path", ""))
+        if candidate.is_dir():
+            return candidate.resolve()
+
+    raise RuntimeError(
+        "Cannot locate apiary repo. Pass --apiary-repo, set APIARY_MAIN_REPO, "
+        "or run from inside main-apiary or a bootstrapped repo."
+    )
 
 
 def resolve_target_state_dir(
@@ -331,11 +358,6 @@ def find_state_dir(target_repo: Path) -> Optional[Path]:
         return None
     state_dir = Path(apiary_str) / REPOS_DIRNAME / target_id
     return state_dir if state_dir.is_dir() else None
-
-
-def is_legacy_layout() -> bool:
-    """Return True when the legacy layout escape hatch is set."""
-    return os.environ.get(LEGACY_LAYOUT_ENV, "").strip().lower() == "legacy"
 
 
 def read_apiary_version(apiary_repo: Path) -> str:
