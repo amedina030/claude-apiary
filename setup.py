@@ -90,18 +90,25 @@ def _expand_hook_script_path(script_path: str) -> Path:
     return Path(win)
 
 
-def build_budgeter_hooks(*, use_launcher: bool = False):
-    """Build PreToolUse, PostToolUse, and Stop hook entries for the budgeter."""
+def build_budgeter_hooks(*, use_launcher: bool = False, per_repo_launcher: bool = False):
+    """Build PreToolUse, PostToolUse, and Stop hook entries for the budgeter.
+
+    When ``per_repo_launcher`` is True, hook commands reference the
+    per-repo shim at ``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``
+    (used by ``apiary install --target <repo>``). Implies
+    ``use_launcher=True`` (a launcher is always involved).
+    """
     try:
         with open(BUDGETER_DIR / "config.json", encoding="utf-8") as f:
             tools = json.load(f).get("monitored_tools", ["Agent", "Bash"])
     except (FileNotFoundError, json.JSONDecodeError):
         tools = ["Agent", "Bash"]
 
-    root = APIS_DIR if use_launcher else None
-    pre_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "pre_tool_use.py", PYTHON, repo_root=root)
-    post_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "post_tool_use.py", PYTHON, repo_root=root)
-    stop_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "stop_session.py", PYTHON, repo_root=root)
+    root = APIS_DIR if (use_launcher or per_repo_launcher) else None
+    kw = {"repo_root": root, "per_repo_launcher": per_repo_launcher}
+    pre_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "pre_tool_use.py", PYTHON, **kw)
+    post_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "post_tool_use.py", PYTHON, **kw)
+    stop_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "stop_session.py", PYTHON, **kw)
 
     return {
         "PreToolUse": [
@@ -130,16 +137,21 @@ def file_hash(path):
     return h.hexdigest()
 
 
-def build_core_hooks(*, use_launcher: bool = False):
-    """Build UserPromptSubmit, PreToolUse, PostToolUse, and Stop hook entries for core hooks."""
-    root = APIS_DIR if use_launcher else None
-    prompt_startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_prompt_hook.py", PYTHON, repo_root=root)
-    install_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install.py", PYTHON, repo_root=root)
-    session_cmd = hook_cmd(CORE_DIR / "hooks" / "inject_session.py", PYTHON, repo_root=root)
-    startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_hook.py", PYTHON, repo_root=root)
-    stop_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install_stop.py", PYTHON, repo_root=root)
-    error_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "context_rule_error_reminder.py", PYTHON, repo_root=root)
-    learnings_inject_cmd = hook_cmd(CORE_DIR / "hooks" / "learnings_inject_hook.py", PYTHON, repo_root=root)
+def build_core_hooks(*, use_launcher: bool = False, per_repo_launcher: bool = False):
+    """Build UserPromptSubmit, PreToolUse, PostToolUse, and Stop hook entries for core hooks.
+
+    ``per_repo_launcher=True`` switches to the per-repo shim path; see
+    ``build_budgeter_hooks`` for the contract.
+    """
+    root = APIS_DIR if (use_launcher or per_repo_launcher) else None
+    kw = {"repo_root": root, "per_repo_launcher": per_repo_launcher}
+    prompt_startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_prompt_hook.py", PYTHON, **kw)
+    install_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install.py", PYTHON, **kw)
+    session_cmd = hook_cmd(CORE_DIR / "hooks" / "inject_session.py", PYTHON, **kw)
+    startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_hook.py", PYTHON, **kw)
+    stop_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install_stop.py", PYTHON, **kw)
+    error_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "context_rule_error_reminder.py", PYTHON, **kw)
+    learnings_inject_cmd = hook_cmd(CORE_DIR / "hooks" / "learnings_inject_hook.py", PYTHON, **kw)
     return {
         "UserPromptSubmit": [
             {"hooks": [{"type": "command", "command": prompt_startup_cmd}]},
@@ -161,10 +173,13 @@ def build_core_hooks(*, use_launcher: bool = False):
     }
 
 
-def build_scribe_hooks(*, use_launcher: bool = False):
+def build_scribe_hooks(*, use_launcher: bool = False, per_repo_launcher: bool = False):
     """Build Stop hook entry for the scribe transcript saver."""
-    root = APIS_DIR if use_launcher else None
-    save_cmd = hook_cmd(CORE_DIR / "hooks" / "save_transcript.py", PYTHON, repo_root=root)
+    root = APIS_DIR if (use_launcher or per_repo_launcher) else None
+    save_cmd = hook_cmd(
+        CORE_DIR / "hooks" / "save_transcript.py", PYTHON,
+        repo_root=root, per_repo_launcher=per_repo_launcher,
+    )
     return {
         "Stop": [
             {"hooks": [{"type": "command", "command": save_cmd}]},
@@ -172,10 +187,13 @@ def build_scribe_hooks(*, use_launcher: bool = False):
     }
 
 
-def build_docs_hooks(*, use_launcher: bool = False):
+def build_docs_hooks(*, use_launcher: bool = False, per_repo_launcher: bool = False):
     """Build PreToolUse hook entry for the docs standards reminder."""
-    root = APIS_DIR if use_launcher else None
-    remind_cmd = hook_cmd(DOCS_DIR / "hooks" / "remind_standards.py", PYTHON, repo_root=root)
+    root = APIS_DIR if (use_launcher or per_repo_launcher) else None
+    remind_cmd = hook_cmd(
+        DOCS_DIR / "hooks" / "remind_standards.py", PYTHON,
+        repo_root=root, per_repo_launcher=per_repo_launcher,
+    )
     return {
         "PreToolUse": [
             {"matcher": "", "hooks": [{"type": "command", "command": remind_cmd}]},

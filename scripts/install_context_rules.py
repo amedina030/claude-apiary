@@ -448,9 +448,27 @@ def cmd_interactive(args, all_rules, target):
 # ---------------------------------------------------------------------------
 
 
+def _resolve_target_path(target: Path) -> Path:
+    """Translate a ``--target`` arg into the actual CLAUDE.md path.
+
+    Directories are interpreted as repo roots (per-repo install) and the
+    zone is written to ``<dir>/CLAUDE.md``. File paths (or non-existent
+    paths whose parent exists) are used verbatim, preserving the
+    historical ``--target /tmp/foo/CLAUDE.md`` semantics.
+    """
+    if target.is_dir():
+        return target / "CLAUDE.md"
+    return target
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--target", type=Path, default=DEFAULT_TARGET, help="CLAUDE.md path (default: ~/.claude/CLAUDE.md)")
+    p.add_argument(
+        "--target", type=Path, default=DEFAULT_TARGET,
+        help=("CLAUDE.md path OR repo directory. When a directory is passed "
+              "(per-repo install per MIGRATION-PLAN.md §3.5 D20), the zone "
+              "is written to <dir>/CLAUDE.md. Default: ~/.claude/CLAUDE.md."),
+    )
     p.add_argument("--rules-dir", type=Path, default=cr.RULES_DIR, help="Source rules directory")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--force", action="store_true", help="Bypass tamper checks and rebuild the zone")
@@ -477,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no rules found under {args.rules_dir}", file=sys.stderr)
         return EXIT_USAGE
 
-    target = args.target
+    target = _resolve_target_path(args.target)
 
     if args.list:
         return cmd_list(args, all_rules, target)

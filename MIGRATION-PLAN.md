@@ -903,14 +903,14 @@ The migration must happen in this order. Each phase's exit criteria must be met 
 
 Outcome: tooling exists; no behavior change for users.
 
-- [ ] Promote `core/utils/state._allocate_next_id` to public `allocate_next_id`. Update callers.
-- [ ] Add `core/utils/state` helpers: `read_self_pointer`, `write_self_pointer`, `read_main_apiary_pointer`, `write_main_apiary_pointer`, `read_version`, `write_version`. Keep them under one module so future code finds them.
-- [ ] Create `<main-apiary>/migrations/` directory with a `README.md` documenting the migration contract. Write a no-op `v0_0_0_to_v0_1_0.py` example for shape reference.
-- [ ] Create `<main-apiary>/.apiary/` directory. Add empty `forwarding/` subdirectory. Add `gui/` placeholder (state is copied here in phase 4).
-- [ ] Define main-apiary's current version as `0.1.0` in a new `<main-apiary>/VERSION` file (single-line semver). The startup hook reads this for version comparisons.
-- [ ] Implement `apiary doctor` skeleton with all subcommands listed in §7.6. Each subcommand is read-only initially (no `--fix` actions yet).
-- [ ] Verify all currently-bootstrapped repos (the 4 in `.repos/registry.json`) have correct entries with current `real_path`s. Run `apiary doctor unreachable` to confirm none are stale.
-- [ ] Update `core/utils/state.registry` schema to include `uid` and `version` fields. Write a one-shot migration that adds these to existing entries (uid = the registry key as int; version = `0.1.0` for all current entries).
+- [x] Promote `core/utils/state._allocate_next_id` to public `allocate_next_id`. Update callers.
+- [x] Add `core/utils/state` helpers: `read_self_pointer`, `write_self_pointer`, `read_main_apiary_pointer`, `write_main_apiary_pointer`, `read_version`, `write_version`. Keep them under one module so future code finds them.
+- [x] Create `<main-apiary>/migrations/` directory with a `README.md` documenting the migration contract. Write a no-op `v0_0_0_to_v0_1_0.py` example for shape reference.
+- [x] Create `<main-apiary>/.apiary/forwarding/` mailbox directory. (`gui/` placeholder deferred to phase 3 when GUI state is migrated.)
+- [x] Define main-apiary's current version as `0.1.0` in a new `<main-apiary>/VERSION` file (single-line semver). The startup hook reads this for version comparisons.
+- [x] Implement `apiary doctor` skeleton with all subcommands listed in §7.6. Each subcommand is read-only initially (no `--fix` actions yet). — `core/doctor.py`
+- [x] Verify all currently-bootstrapped repos (the 4 in `.repos/registry.json`) have correct entries with current `real_path`s. Run `apiary doctor unreachable` to confirm none are stale.
+- [x] Update `core/utils/state.registry` schema to include `uid` and `version` fields. One-shot migration at `scripts/phase0_extend_registry.py` (idempotent; `--apply` to write).
 
 Exit criteria:
 - `apiary doctor` returns clean for all subsystems.
@@ -922,15 +922,16 @@ Exit criteria:
 
 Outcome: `apiary install --target <repo>` works AND global install still works. Bootstrapped repos can run via either.
 
-- [ ] Implement `apiary install --target <repo>` (§7.8). It generates the per-repo files and updates registry.
-- [ ] Implement the per-repo launcher template (§7.7).
-- [ ] Implement `apiary self-bootstrap` (§7.9) — a no-op-on-already-bootstrapped variant; bootstrap main-apiary against itself.
-- [ ] Implement the per-repo PreToolUse drift-handler hook (§7.2). For now it's silent in the no-drift case; in drift cases it queues mailbox messages without failing.
-- [ ] Implement mailbox processor (§7.4) — runs on main-apiary session open and on `apiary doctor mailbox`.
-- [ ] Implement cascade-fix (§7.3).
-- [ ] Migrate per-repo flag handling: `core/flags.py` reads from `<repo>/.claude/apiary/flags/<name>-enabled` first, falls back to `~/.claude/<name>-enabled` if missing. (The fallback is ONLY for the duration of phases 1–4 — removed in phase 5.)
-- [ ] Migrate context-rules zone target: `scripts/install_context_rules.py` learns `--target <repo>` and writes to `<repo>/CLAUDE.md`. The `--global` flag continues to work for now.
-- [ ] Add `apiary uninstall --target <repo>` (§7.11).
+- [x] Implement `apiary install --target <repo>` (§7.8). — `core/install.py`
+- [x] Implement the per-repo launcher template (§7.7). — `core/launcher_template.py`
+- [x] Implement `apiary self-bootstrap` (§7.9). — `core/self_bootstrap.py`
+- [x] Implement the per-repo PreToolUse drift-handler hook (§7.2). — `core/drift.py` + `core/hooks/per_repo_drift_check.py`
+- [x] Implement mailbox processor (§7.4). — `core/mailbox.py` (`process_pending`)
+- [x] Implement cascade-fix (§7.3). — `core/cascade.py`; wired into main-apiary's drift dispatch
+- [x] Migrate per-repo flag handling: `core/flags.py` reads from `<repo>/.claude/apiary/flags/<name>-enabled` first, falls back to `~/.claude/<name>-enabled` if missing. (The fallback is ONLY for the duration of phases 1–4 — removed in phase 5.)
+- [x] Migrate context-rules zone target: `scripts/install_context_rules.py` learns `--target <repo>` and writes to `<repo>/CLAUDE.md`. The `--global` flag continues to work for now.
+- [x] Add `apiary uninstall --target <repo>` (§7.11). — `core/uninstall.py`
+- [x] Unified `apiary` CLI (§14.6). — `core/cli.py` with subcommands install/uninstall/self-bootstrap/doctor/mailbox/cascade-fix/version
 
 Exit criteria:
 - `apiary self-bootstrap` from a fresh main-apiary clone produces a working main-apiary entry.

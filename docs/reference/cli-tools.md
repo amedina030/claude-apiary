@@ -93,6 +93,39 @@ Session initialization and summary loading.
 | `--role ROLE` | summary | no | Filter by role (default: `user`) |
 | `--mission MISSION` | summary | no | Filter by mission (default: `general`) |
 
+## core/doctor.py
+
+Read-only consistency checks for the per-repo install model. Phase-0 scaffold;
+`--fix` actions land in later phases. See `MIGRATION-PLAN.md` §7.6.
+
+```bash
+python core/doctor.py [subcommand] [--apiary-repo PATH]
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| (none) | Run all checks, print a summary |
+| `pointers` | Verify main-apiary's self-pointer matches its actual location |
+| `registry` | Walk every registered repo: path exists; uid/version fields present |
+| `mailbox` | Count pending forwarding messages at `<apiary>/.apiary/forwarding/` |
+| `versions` | Compare each repo's pinned version against `<apiary>/VERSION` |
+| `orphans` | Folders under `.repos/<slug>/` whose UID has no registry entry |
+| `duplicates` | Registry entries sharing a `real_path` |
+| `unreachable` | Registry entries whose `real_path` does not exist on disk |
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--apiary-repo PATH` | Path to main-apiary checkout (default: resolved via launcher / pointer) |
+
+### Exit code
+
+- `0` — all checks pass (notes are informational and do not fail the run).
+- `1` — any check reported an issue.
+
 ## budgeter/report.py
 
 Usage reporting CLI.
