@@ -12,7 +12,7 @@ All apiary CLI tools must be invoked via the launcher, which resolves the apiary
 python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" <relative-script-path> [args...]
 ```
 
-The launcher reads `~/.claude/apiary.json` to locate the apiary repo, then runs the target script with its arguments forwarded. **The subprocess inherits the caller's cwd unchanged** — the launcher does NOT chdir into the apiary repo, so tools like scribe that use `git rev-parse --show-toplevel` resolve to the session's actual repo (where operational state should land). Apiary scripts find their own code via `Path(__file__)`, not cwd, so they don't need the chdir. This works from any directory — no `<repo_dir>` substitution needed.
+The launcher reads `<repo>/.claude/apiary/{main-apiary-pointer,self-pointer}.json` to locate the main apiary repo and the per-target state dir, then runs the target script with its arguments forwarded. It also exports `APIARY_MAIN_REPO` and `APIARY_TARGET_STATE_DIR` for the dispatched script. **The subprocess inherits the caller's cwd unchanged** — the launcher does NOT chdir into the apiary repo, so tools like scribe that use `git rev-parse --show-toplevel` resolve to the session's actual repo (where operational state should land). Apiary scripts find their own code via `Path(__file__)`, not cwd, so they don't need the chdir. This works from any directory — no `<repo_dir>` substitution needed.
 
 To resolve the apiary repo path for Read tool targets (not CLI invocations), use:
 
@@ -23,7 +23,7 @@ python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" --print-repo-path
 Examples:
 ```bash
 python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py list --type todo
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" budgeter/report.py --since 7d
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" budgeter/report.py --since 2026-06-01
 python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" harden/round_counter.py start --session-id abc12345
 ```
 
@@ -81,7 +81,7 @@ Apiary has two per-repo reference stores. Neither is surfaced in the startup ban
 - **Researcher** (`researcher/cli.py`) — text findings (markdown + YAML frontmatter). Use for landscape surveys, evaluations, decisions made-from-research that may stay relevant for months. Look up: `researcher/cli.py find <query>`.
 - **Captures** (`captures/cli.py`) — image + sidecar pairs. Use for screenshots (GUI iterations, UE viewport, design references) and any visual data the user wants tracked. Look up: `captures/cli.py find <query>`. Get a single image path to feed the Read tool: `captures/cli.py path <topic> <slug>`.
 
-Both store state under `<repo-root>/.apiary/<tool>/` per-repo. Both use a controlled tag vocabulary in `<tool>/tags.yaml` — register tags via `register-tag` before adding entries that use them.
+Both store state under `<state-dir>/<tool>/` per-repo, where `<state-dir>` is the registry-allocated target dir (`<apiary>/.repos/<name>-<id>/`). Both use a controlled tag vocabulary in `<tool>/tags.yaml` — register tags via `register-tag` before adding entries that use them.
 
 ---
 
