@@ -15,6 +15,12 @@ from collections import deque
 from typing import Callable, Optional, Sequence
 
 
+# Chunk size for send_text. Chosen well under MAX_CANON (4096 on Linux/macOS)
+# and the historical Windows ConPTY cooked-mode line-input limit. See
+# send_text() docstring.
+_SEND_CHUNK_SIZE = 1024
+
+
 def _resolve_claude_executable(name: str = "claude") -> Optional[str]:
     """Return the absolute path to the `claude` CLI on PATH, or None."""
     found = shutil.which(name)
@@ -147,12 +153,23 @@ class PtyWrapper:
             pass
 
     def send_text(self, text: str) -> bool:
-        """Write text characters to the pty. Returns True on success."""
+        """Write text characters to the pty in chunks. Returns True on success.
+
+        Long writes (multi-KB pastes) are split into ``_SEND_CHUNK_SIZE``-char
+        segments. A single ``proc.write`` of a multi-KB string can be silently
+        truncated by ConPTY's input handling on Windows and by canonical-mode
+        line buffering (MAX_CANON = 4096) on POSIX — the *tail* survives and
+        the head is dropped, so a 5KB paste arrives starting mid-word.
+        Chunking each write below any plausible buffer cap avoids this.
+        """
         proc = self._proc
         if proc is None or not proc.isalive():
             return False
+        if not text:
+            return True
         try:
-            proc.write(text)
+            for i in range(0, len(text), _SEND_CHUNK_SIZE):
+                proc.write(text[i:i + _SEND_CHUNK_SIZE])
             return True
         except Exception:
             return False
