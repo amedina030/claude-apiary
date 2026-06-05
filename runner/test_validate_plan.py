@@ -387,9 +387,9 @@ class TestPathAllowlist(unittest.TestCase):
         # resolved against repo root, falls under the repo (so it would
         # be accepted, technically as relative). Only assert the rejection
         # on platforms where the parser treats it as absolute.
-        steps = [_step(1, "create", "x", files=["C:\\Users\\amedi\\.claude\\CLAUDE.md"])]
+        steps = [_step(1, "create", "x", files=["C:\\Users\\user\\.claude\\CLAUDE.md"])]
         errors = _check_path_allowlist(steps)
-        if Path("C:\\Users\\amedi\\.claude\\CLAUDE.md").is_absolute():
+        if Path("C:\\Users\\user\\.claude\\CLAUDE.md").is_absolute():
             self.assertEqual(len(errors), 1)
             self.assertIn("outside the repo working tree", errors[0])
 

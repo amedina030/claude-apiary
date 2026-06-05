@@ -45,8 +45,8 @@ def _claude_code_project_key(cwd: Path) -> str:
     — keep this local so we don't risk changing apiary's on-disk scribe
     layout for existing users.
 
-    Example: ``C:\\Users\\amedi\\.claude\\projects\\claude-apiary`` →
-    ``C--Users-amedi--claude-projects-claude-apiary``.
+    Example: ``C:\\Users\\user\\.claude\\projects\\claude-apiary`` →
+    ``C--Users-user--claude-projects-claude-apiary``.
     """
     p = Path(cwd).resolve()
     if p.drive:
