@@ -9,7 +9,7 @@ user-invocable: true
 All apiary CLI tools must be invoked via the launcher, which resolves the apiary repo path programmatically:
 
 ```bash
-python ~/.claude/apiary_launch.py <relative-script-path> [args...]
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" <relative-script-path> [args...]
 ```
 
 The launcher reads `~/.claude/apiary.json` to locate the apiary repo, then runs the target script with its arguments forwarded. **The subprocess inherits the caller's cwd unchanged** — the launcher does NOT chdir into the apiary repo, so tools like scribe that use `git rev-parse --show-toplevel` resolve to the session's actual repo (where operational state should land). Apiary scripts find their own code via `Path(__file__)`, not cwd, so they don't need the chdir. This works from any directory — no `<repo_dir>` substitution needed.
@@ -17,14 +17,14 @@ The launcher reads `~/.claude/apiary.json` to locate the apiary repo, then runs 
 To resolve the apiary repo path for Read tool targets (not CLI invocations), use:
 
 ```bash
-python ~/.claude/apiary_launch.py --print-repo-path
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" --print-repo-path
 ```
 
 Examples:
 ```bash
-python ~/.claude/apiary_launch.py scribe/notes.py list --type todo
-python ~/.claude/apiary_launch.py budgeter/report.py --since 7d
-python ~/.claude/apiary_launch.py harden/round_counter.py start --session-id abc12345
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py list --type todo
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" budgeter/report.py --since 7d
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" harden/round_counter.py start --session-id abc12345
 ```
 
 ## CLI tool lookup
@@ -32,7 +32,7 @@ python ~/.claude/apiary_launch.py harden/round_counter.py start --session-id abc
 When in doubt about a CLI tool's flags, look it up rather than guessing:
 
 ```bash
-python ~/.claude/apiary_launch.py docs/reference/cli_lookup.py <tool>   # e.g. notes, report, round_counter
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" docs/reference/cli_lookup.py <tool>   # e.g. notes, report, round_counter
 ```
 
 ---
@@ -48,7 +48,7 @@ Canonical memory directory: `<state-dir>/scribe/memory/` where `<state-dir>` is 
 If the current target's compass profile exists, read it as part of loading this context. It describes the user's personality, behavior patterns, and quirks as inferred from prior sessions, and should inform how you respond — preferred verbosity, when to ask vs decide, communication style, autonomy tolerance, etc.
 
 ```bash
-state_dir=$(python ~/.claude/apiary_launch.py core/utils/state.py)
+state_dir=$(python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" core/utils/state.py)
 test -f "$state_dir/compass/personality.md" && cat "$state_dir/compass/personality.md"
 ```
 
@@ -69,8 +69,8 @@ Apiary uses **scribe** (`scribe/notes.py`) for operational state (TODOs, handoff
 **Read `scribe/CLAUDE.md` before writing notes, learnings, or making memory decisions.** Quick decision tree:
 
 - Still true in 3 months -> **memory** (`<state-dir>/scribe/memory/`)
-- Decays / operational / about current work -> **note** (`python ~/.claude/apiary_launch.py scribe/notes.py add --type ...`)
-- Error workaround or non-obvious pattern -> **learning** (`python ~/.claude/apiary_launch.py scribe/notes.py learn`)
+- Decays / operational / about current work -> **note** (`python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py add --type ...`)
+- Error workaround or non-obvious pattern -> **learning** (`python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py learn`)
 
 ---
 
@@ -90,7 +90,7 @@ Both store state under `<repo-root>/.apiary/<tool>/` per-repo. Both use a contro
 When invoking a CLI tool with a text argument longer than ~3 lines or containing markdown, **always** use list-form subprocess -- never bash with shell quoting (backticks trigger command substitution, apostrophes break quoting).
 
 ```python
-subprocess.run(["python", os.path.expanduser("~/.claude/apiary_launch.py"),
+subprocess.run(["python", os.path.expandvars("$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py"),
                  "scribe/notes.py", "add", "--type", "handoff",
                  "--summary", short_summary_var,
                  "--content", long_text_var], ...)

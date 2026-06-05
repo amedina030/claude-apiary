@@ -87,18 +87,18 @@ The dimensions config (`compass/dimensions.json`) ships in the apiary repo, not 
 
 ## GUI data
 
-GUI per-instance state lives under `~/.claude/apiary_gui/` (default profile). Setting `APIARY_GUI_PROFILE=<name>` re-roots everything to `~/.claude/apiary_gui_<name>/`, isolating a "dev" build from the main one. Path resolution is centralized in `gui/paths.py` (`state_dir()`, `mutex_name()`, `window_title()`).
+GUI per-instance state lives under `<main-apiary>/.apiary/gui/apiary_gui/` (default profile). Setting `APIARY_GUI_PROFILE=<name>` re-roots everything to `<main-apiary>/.apiary/gui/apiary_gui_<name>/`, isolating a "dev" build from the main one. Path resolution is centralized in `gui/paths.py` (`state_dir()`, `mutex_name()`, `window_title()`); `_MAIN_APIARY` is computed from `gui/paths.py`'s own location, so the GUI always reads from the apiary checkout it shipped from.
 
 | File | Path | Description |
 |------|------|-------------|
-| Tab state | `~/.claude/apiary_gui/tabs.json` | Open tab cwds + active index (restored on relaunch) |
-| Sidebar state | `~/.claude/apiary_gui/sidebar_state.json` | Per-group collapsed/expanded state |
-| Composer state | `~/.claude/apiary_gui/composer_state.json` | Chat input height in pixels (set by dragging the gutter above the input) |
-| Theme | `~/.claude/apiary_gui/theme.json` | CSS variable values (hot-reloads via watchdog) |
-| Launch config | `~/.claude/apiary_gui/launch.json` | Claude Code spawn args + cwd + feature flags (schema in `docs/reference/config-files.md`) |
-| Captures | `~/.claude/apiary_gui/captures/<ts>-<label>.bin` | Raw pty-output captures (binary), populated only when `APIARY_GUI_CAPTURE_LABEL` is set |
-| Permission-MCP config | `~/.claude/apiary_gui/permission_mcp_config.json` | `--mcp-config` file handed to claude when `APIARY_PERMISSION_MCP=1` (points at `gui/permission_mcp.py`). Rewritten each session start |
-| Permission-MCP log | `~/.claude/apiary_gui/permission_mcp.log` | Append-only log of START/REQUEST/DECISION/EXIT events from the permission-prompt MCP stdio server |
+| Tab state | `<main-apiary>/.apiary/gui/apiary_gui/tabs.json` | Open tab cwds + active index (restored on relaunch) |
+| Sidebar state | `<main-apiary>/.apiary/gui/apiary_gui/sidebar_state.json` | Per-group collapsed/expanded state |
+| Composer state | `<main-apiary>/.apiary/gui/apiary_gui/composer_state.json` | Chat input height in pixels (set by dragging the gutter above the input) |
+| Theme | `<main-apiary>/.apiary/gui/apiary_gui/theme.json` | CSS variable values (hot-reloads via watchdog) |
+| Launch config | `<main-apiary>/.apiary/gui/apiary_gui/launch.json` | Claude Code spawn args + cwd + feature flags (schema in `docs/reference/config-files.md`) |
+| Captures | `<main-apiary>/.apiary/gui/apiary_gui/captures/<ts>-<label>.bin` | Raw pty-output captures (binary), populated only when `APIARY_GUI_CAPTURE_LABEL` is set |
+| Permission-MCP config | `<main-apiary>/.apiary/gui/apiary_gui/permission_mcp_config.json` | `--mcp-config` file handed to claude when `APIARY_PERMISSION_MCP=1` (points at `gui/permission_mcp.py`). Rewritten each session start |
+| Permission-MCP log | `<main-apiary>/.apiary/gui/apiary_gui/permission_mcp.log` | Append-only log of START/REQUEST/DECISION/EXIT events from the permission-prompt MCP stdio server |
 
 `theme.json`, `launch.json`, and the directory itself are auto-created on first run.
 
@@ -161,10 +161,14 @@ Profile manifests themselves live at `<apiary-repo>/profiles/<name>.jsonc` (not 
 |------|------|-------------|
 | Session identity | `.claude-session-identity.json` | Current session ID, role, mission (git-ignored) |
 
-## Installed files (in ~/.claude/)
+## Installed files (per bootstrapped repo)
 
-These are copied from the repo by `setup.py --global`:
+These are written into each bootstrapped repo by `apiary install --target <repo>`:
 
 | Source | Destination |
 |--------|-------------|
-| `*/commands/*.md` | `~/.claude/commands/<name>.md` |
+| `<main-apiary>/<tool>/commands/*.md` | `<repo>/.claude/commands/<name>.md` |
+| `core/launcher_template.LAUNCHER_PY` | `<repo>/.claude/apiary/launch.py` |
+| (generated) | `<repo>/.claude/apiary/{main-apiary-pointer,self-pointer,version}.json` |
+| Resolved profile + `core/hooks_factory` | `<repo>/.claude/settings.json` |
+| `core/context_rules` rendered zone | `<repo>/CLAUDE.md` (sentinel-bounded) |

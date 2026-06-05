@@ -19,7 +19,7 @@ Push the current branch to the remote. If the branch has no upstream, use `git p
 Review the **entire session** for deferred work and untracked bugs. File any missing TODOs first, then generate a handoff note:
 
 ```bash
-python ~/.claude/apiary_launch.py scribe/notes.py add --type handoff --session-id <session_id_8char> --summary "<one-line abstract>" --content "<handoff>"
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py add --type handoff --session-id <session_id_8char> --summary "<one-line abstract>" --content "<handoff>"
 ```
 
 The handoff is written as an individual .md file under `<state-dir>/scribe/handoffs/<year>/` and indexed in `handoffs/<year>/index.jsonl`. The `--summary` argument is **required** for handoffs and must be a single concrete sentence (≤300 chars) — this is what every future session sees in startup context, so name the file/area touched and the outcome (e.g. `"Session abc12345: fixed scribe v2 handoff de-dup in core/startup.py + notes.py guard, all tests pass, commit 9a32226"`). Do not just restate "session X handoff" — that adds no information.
@@ -54,7 +54,7 @@ Look for signals across these dimensions (load full descriptions from the dimens
 
 Full dimension descriptions:
 ```bash
-cat "$(python ~/.claude/apiary_launch.py --print-repo-path)/compass/dimensions.json"
+cat "$(python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" --print-repo-path)/compass/dimensions.json"
 ```
 
 ### Quality bar
@@ -88,7 +88,7 @@ Write this exact shape to `<state-dir>/compass/observations/<session_id_8char>.j
 After writing, validate the file:
 
 ```bash
-python ~/.claude/apiary_launch.py compass/observations.py validate "$(python ~/.claude/apiary_launch.py core/utils/state.py)/compass/observations/<sid>.json"
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/observations.py validate "$(python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" core/utils/state.py)/compass/observations/<sid>.json"
 ```
 
 If validation fails, fix and re-write. If validation keeps failing, log a brief warning to the user and move on — capture is non-blocking and should never prevent /wrapup from completing.

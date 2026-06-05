@@ -11,7 +11,7 @@ Walk the user through the project's learning corpus, one tag group at a time, so
 1. Resolve the scribe state dir:
 
    ```bash
-   python ~/.claude/apiary_launch.py scribe/notes.py learnings --index
+   python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py learnings --index
    ```
 
    If the command fails (not inside a git repo, etc.), tell the user and stop.
@@ -23,7 +23,7 @@ Walk the user through the project's learning corpus, one tag group at a time, so
    a. List the learnings in that group — show ID, brief summary (use the output from step 1), and for any entry the user wants details on, fetch full body via:
 
       ```bash
-      python ~/.claude/apiary_launch.py scribe/notes.py get <ID>
+      python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py get <ID>
       ```
 
    b. Ask (via `AskUserQuestion` when possible) what to do with the group:
@@ -36,13 +36,13 @@ Walk the user through the project's learning corpus, one tag group at a time, so
       - **Archive** — retire without replacement. Run:
 
         ```bash
-        python ~/.claude/apiary_launch.py scribe/notes.py archive-learning <ID>
+        python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py archive-learning <ID>
         ```
 
       - **Supersede** — user provides updated content; you write a replacement that archives the old one and carries `supersedes: <old-ID>` in its frontmatter:
 
         ```bash
-        python ~/.claude/apiary_launch.py scribe/notes.py supersede <old-ID> --content "<new content>"
+        python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py supersede <old-ID> --content "<new content>"
         ```
 
         (Omit `--tags` and `--area` — they'll be inferred via `claude -p`, same as a regular learn.)

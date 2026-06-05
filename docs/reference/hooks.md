@@ -41,6 +41,7 @@ Hooks are Python scripts registered in `~/.claude/settings.json` that fire at Cl
 | Context-rules drift detector | PreToolUse | `core/hooks/startup_hook.py` | Reports context-rules drift if `~/.claude/CLAUDE.md` has an installed managed zone whose rule hashes diverge from source. Gated by `auto-startup` flag. |
 | Context-rule error reminder | PostToolUse | `core/hooks/context_rule_error_reminder.py` | On Bash failure (non-zero exit, traceback, interrupted, is_error), injects the `recover_from_trivial_errors` behavioral rule and the `Errors Signal Doc Gaps` principle. Skips successes and hook denials. |
 | Learnings injector | PreToolUse | `core/hooks/learnings_inject_hook.py` | Injects the top-3 most-relevant learnings before Edit/Write/Bash, scored against the tool call payload (file paths, command text, tags). Fail-open on any error path — tool call still proceeds. |
+| Per-repo drift check | PreToolUse | `core/hooks/per_repo_drift_check.py` | Detects whether the bootstrapped repo has been moved or copied since last bootstrap; queues a mailbox message to main-apiary so the registry catches up. Fails silent on errors (must never block tool calls). Installed by `apiary install --target <repo>`. |
 
 ## Hook execution order
 
@@ -77,8 +78,8 @@ These scripts live under `hooks/` directories but are not registered as Claude C
 
 ## Hook registration
 
-Hooks are registered by `setup.py --global`. Each hook entry in `settings.json` specifies:
+Hooks are written into each bootstrapped repo's `<repo>/.claude/settings.json` by `apiary install --target <repo>`. The hook commands all dispatch through the per-repo launcher: `python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" <relative-script-path>`. Each hook entry specifies:
 - `matcher`: which tool types trigger this hook (e.g. `Agent`, `Bash`, or `*` for all)
 - `hooks`: array of `{type, command}` objects
 
-See `core/hooks_lib.py` for the registration API.
+See `core/hooks_factory.py` for the per-tool builders, `core/hooks_lib.py` for the registration / detection API.

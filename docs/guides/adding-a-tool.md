@@ -48,13 +48,12 @@ See [Adding a Command](adding-a-command.md).
 - Isolate from real user data with `tempfile.TemporaryDirectory()`
 - Cover core logic and edge cases
 
-### 7. Integrate with setup.py
+### 7. Integrate with `apiary install`
 
-- Register hooks in `settings.json`
-- Copy commands to `~/.claude/commands/`
-- Copy agents to `~/.claude/agents/` (if applicable)
-- Add validation to `setup.py --check`
-- Add uninstall instructions to `SETUP.md`
+- Add the new tool's `hooks/` builder to `core/hooks_factory.py` (extend an existing builder if the hooks fit a current event set, or add a new `build_<tool>_hooks` and wire it into `core/install.py`).
+- Slash commands placed under `<tool>/commands/*.md` are auto-discovered by `core/install._slash_command_sources`.
+- Add a doctor check in `core/doctor.py` if the tool introduces new on-disk state worth validating.
+- Add uninstall instructions to `SETUP.md`.
 
 ### 8. Write documentation
 

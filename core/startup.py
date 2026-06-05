@@ -20,7 +20,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from core.session import CLAUDE_DIR, SessionId
 from core.utils.project import get_project_key
 from scribe.notes import (
-    format_age, run_auto_archive, scribe_state_dir, _use_repo_layout,
+    format_age, run_auto_archive, scribe_state_dir,
     PROJECTS_DIR, _format_id,
 )
 from scribe.store import ScribeStore, TYPE_FOLDERS
@@ -142,8 +142,10 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
     project_key = get_project_key(repo_dir)
     start = Path(repo_dir)
 
-    # Compute state_dir: repo layout uses git-root-relative path; legacy uses PROJECTS_DIR.
-    sd = scribe_state_dir(start) if _use_repo_layout() else None
+    # Compute state_dir from the registry-resolved path; fall back to the
+    # historical PROJECTS_DIR/<project_key> path when scribe_state_dir
+    # can't resolve (session not inside a git repo).
+    sd = scribe_state_dir(start)
     if sd is None:
         sd = PROJECTS_DIR / project_key
 

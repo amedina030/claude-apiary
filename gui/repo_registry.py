@@ -1,150 +1,106 @@
 """Repo registry — which apiary repos to scan for scribe notes.
 
-Config file: `~/.claude/apiary_repos.json` (a flat JSON list of absolute repo paths).
-Auto-seeded on first run with: the apiary repo itself + any unique repo cwds we
-can pull from `~/.claude/.session-history.json`.
+Source of truth: ``<main-apiary>/.repos/registry.json``. After the per-repo
+migration (2026-05) the GUI reads the registry directly instead of the
+hand-curated ``~/.claude/apiary_repos.json`` it used pre-migration.
 
-The user can hand-edit the file to add or remove repos. On malformed JSON the
-in-memory list falls back to the auto-seeded default and a toast is surfaced.
+The list of repos to surface in the GUI sidebar = registered repos whose
+``real_path`` is currently a directory on disk. Operators can hide a repo
+from the sidebar by uninstalling apiary from it
+(``poetry run apiary uninstall --target <repo>``); there's no separate
+GUI-only filter file.
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
 
+# Resolve main-apiary the same way gui/paths does — gui/ lives at
+# <main-apiary>/gui/, so the parent of this file's parent is main-apiary.
+_MAIN_APIARY = Path(__file__).resolve().parent.parent
 
-CONFIG_PATH = Path.home() / ".claude" / "apiary_repos.json"
-SESSION_HISTORY = Path.home() / ".claude" / ".session-history.json"
-APIARY_LAUNCH = Path.home() / ".claude" / "apiary_launch.py"
+# Kept for backwards-compatible import paths in tests; a path that doesn't
+# exist on a fresh machine. Callers shouldn't rely on its filesystem
+# behavior — it's never read post-migration.
+CONFIG_PATH = _MAIN_APIARY / ".apiary" / "gui" / "repo_registry.json"
 
 
-def _print_apiary_repo_path() -> Optional[Path]:
-    if not APIARY_LAUNCH.is_file():
-        return None
+def _registry_path() -> Path:
+    return _MAIN_APIARY / ".repos" / "registry.json"
+
+
+def load(config_path: Path = CONFIG_PATH) -> tuple[list[Path], Optional[str]]:
+    """Return ``(repos, error)`` where *repos* is the list of bootstrapped
+    repos to surface in the GUI sidebar.
+
+    *config_path* is accepted for backward compatibility with the
+    ``apiary_repos.json`` API, but is no longer the source of truth — it's
+    used only as a tie-breaker if the registry can't be read. Tests that
+    pass a custom path should fall through to the registry on this machine.
+
+    Errors when:
+    - the registry file is missing (`error` describes the situation),
+    - the registry is malformed (`error` describes the JSON parse).
+    Returns the best-effort list anyway so the GUI can still open with an
+    empty sidebar.
+    """
+    p = _registry_path()
+    if not p.is_file():
+        # Fall through to the (deprecated) JSON-list config path. This
+        # path lets operator-curated lists work for one-off setups, but
+        # `apiary install` is the canonical way to register a repo.
+        if config_path.is_file():
+            return _load_legacy_list(config_path)
+        return [], f"registry not found at {p}; run `apiary self-bootstrap` first"
+
     try:
-        out = subprocess.check_output(
-            [sys.executable, str(APIARY_LAUNCH), "--print-repo-path"],
-            text=True,
-            timeout=5,
-        ).strip()
-        if not out:
-            return None
-        p = Path(out)
-        return p if p.is_dir() else None
-    except Exception:
-        return None
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [], f"registry malformed: {exc}"
 
+    if not isinstance(data, dict):
+        return [], "registry is not a JSON object"
 
-def _peek_transcript_cwd(transcript_path: Path) -> Optional[Path]:
-    """Open a JSONL transcript and pull a `cwd` from the first record that has one."""
-    try:
-        with transcript_path.open("r", encoding="utf-8", errors="replace") as f:
-            for i, line in enumerate(f):
-                if i > 50:
-                    break
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                cwd = rec.get("cwd")
-                if isinstance(cwd, str) and cwd:
-                    return Path(cwd)
-    except OSError:
-        return None
-    return None
-
-
-def _seed_from_session_history() -> list[Path]:
-    """Best-effort: walk recent transcripts in session-history and collect unique cwds."""
-    if not SESSION_HISTORY.is_file():
-        return []
-    try:
-        data = json.loads(SESSION_HISTORY.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
-    if not isinstance(data, list):
-        return []
-    seen: set[Path] = set()
     out: list[Path] = []
-    for entry in data:
+    seen: set[Path] = set()
+    for entry in data.values():
         if not isinstance(entry, dict):
             continue
-        tp = entry.get("transcript_path")
-        if not isinstance(tp, str):
+        real = entry.get("real_path")
+        if not isinstance(real, str) or not real:
             continue
-        cwd = _peek_transcript_cwd(Path(tp))
-        if cwd is None:
+        candidate = Path(real)
+        if not candidate.is_dir():
             continue
         try:
-            resolved = cwd.resolve()
+            resolved = candidate.resolve()
         except OSError:
             continue
         if resolved in seen:
             continue
-        if not resolved.is_dir():
-            continue
         seen.add(resolved)
-        out.append(resolved)
-    return out
+        out.append(candidate)
+    return out, None
 
 
-def auto_seed() -> list[Path]:
-    """Build the default repo list: apiary repo + any session-history-derived cwds."""
-    seeded: list[Path] = []
-    seen: set[Path] = set()
-    apiary = _print_apiary_repo_path()
-    if apiary is not None:
-        try:
-            apiary = apiary.resolve()
-        except OSError:
-            pass
-        seen.add(apiary)
-        seeded.append(apiary)
-    for p in _seed_from_session_history():
-        if p in seen:
-            continue
-        seen.add(p)
-        seeded.append(p)
-    return seeded
-
-
-def load(config_path: Path = CONFIG_PATH) -> tuple[list[Path], Optional[str]]:
-    """Return (repos, error_message). On malformed JSON, returns auto_seed() and an error.
-    On missing file, auto-seeds, writes the file, and returns the result.
-    """
-    if not config_path.is_file():
-        seeded = auto_seed()
-        try:
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            config_path.write_text(
-                json.dumps([str(p) for p in seeded], indent=2),
-                encoding="utf-8",
-            )
-        except OSError:
-            pass
-        return seeded, None
-
+def _load_legacy_list(config_path: Path) -> tuple[list[Path], Optional[str]]:
+    """Read a flat JSON list of paths. Best-effort fallback for the (rare)
+    case where main-apiary's registry isn't available."""
     try:
         text = config_path.read_text(encoding="utf-8")
         data = json.loads(text)
-    except (OSError, json.JSONDecodeError) as e:
-        return auto_seed(), f"apiary_repos.json invalid: {e}"
-
+    except (OSError, json.JSONDecodeError) as exc:
+        return [], f"{config_path.name} invalid: {exc}"
     if not isinstance(data, list):
-        return auto_seed(), "apiary_repos.json must be a JSON array of paths"
-
+        return [], f"{config_path.name} must be a JSON array of paths"
     out: list[Path] = []
     for item in data:
         if not isinstance(item, str):
             continue
-        p = Path(item)
-        if p.is_dir():
-            out.append(p)
+        candidate = Path(item)
+        if candidate.is_dir():
+            out.append(candidate)
     return out, None

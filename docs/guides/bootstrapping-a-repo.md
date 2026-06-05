@@ -19,18 +19,21 @@ Apiary ships a profile-based bootstrap that writes a target repo's `.claude/sett
 
 ## Quick start
 
-From the target repo:
+From inside main-apiary:
 
 ```bash
-python ~/.claude/apiary_bootstrap.py --profile <name>
+poetry run apiary install --target /path/to/target/repo --profile <name>
 ```
 
-The installer at `~/.claude/apiary_bootstrap.py` finds the apiary repo via `~/.claude/apiary.json` (written by `setup.py --global`). It resolves `<apiary-repo>/profiles/<name>.jsonc`, walks its `extends` chain, and writes two files:
+`apiary install` resolves `<main-apiary>/profiles/<name>.jsonc`, walks its `extends` chain, and writes the per-repo install:
 
 | File | Purpose |
 |------|---------|
-| `.claude/settings.json` | Claude Code config — apiary-owned top-level keys replaced, non-apiary keys preserved |
-| `.apiary/bootstrap_state.json` | Provenance + drift-detection state (see [File Storage](../reference/file-storage.md#bootstrap-state)) |
+| `<target>/.claude/settings.json` | Claude Code config — apiary-owned top-level keys replaced (hooks always come from `core/hooks_factory`), non-apiary keys preserved |
+| `<target>/.claude/apiary/launch.py` + pin files | Per-repo launcher and pointers (see [File Storage](../reference/file-storage.md)) |
+| `<target>/.claude/commands/*.md` | Apiary slash commands copied at install time |
+| `<target>/CLAUDE.md` (apiary zone) | Sentinel-bounded context-rules zone |
+| `<main-apiary>/.repos/<name>-<uid>/bootstrap_state.json` | Provenance + drift-detection hashes (schema v2) |
 
 ## Profile manifest format
 
@@ -87,9 +90,8 @@ Between the resolved profile and the target repo's existing `.claude/settings.js
 1. Create `<apiary-repo>/profiles/<your-profile>.jsonc` with `$schema_version: 1`, an optional `extends`, and the keys you want to manage.
 2. Run the bootstrap against a test repo to verify the merge:
    ```bash
-   cd /tmp/test-repo
-   python ~/.claude/apiary_bootstrap.py --profile <your-profile>
-   cat .claude/settings.json
+   poetry run apiary install --target /tmp/test-repo --profile <your-profile>
+   cat /tmp/test-repo/.claude/settings.json
    ```
 3. Commit `<apiary-repo>/profiles/<your-profile>.jsonc` to apiary.
 

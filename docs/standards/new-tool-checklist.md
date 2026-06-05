@@ -58,7 +58,7 @@ When adding a new top-level tool to the project (like budgeter, scribe, or harde
 ### 6. Setup integration
 - [ ] `setup.py` registers hooks (if any) in `settings.json`
 - [ ] `setup.py` copies commands and agents to `~/.claude/`
-- [ ] `setup.py --check` validates the new tool's installation
+- [ ] `poetry run apiary doctor` validates the new tool's installation
 - [ ] Uninstall instructions added to `SETUP.md`
 
 ### 7. Documentation

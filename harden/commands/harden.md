@@ -33,7 +33,7 @@ Run an automated attack-defend loop where an Attacker agent finds weaknesses and
 ### Cancel
 
 If the argument is `cancel`:
-1. Run: `python ~/.claude/apiary_launch.py harden/round_counter.py reset --session-id <session_id>`
+1. Run: `python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" harden/round_counter.py reset --session-id <session_id>`
 2. Respond: "Harden cancelled. No changes were made."
 3. Stop.
 
@@ -72,7 +72,7 @@ Extract optional flags with their defaults:
 3. For each file, verify it exists using the Read tool. If any file is missing, list the missing files and stop.
 
 **Plan mode:**
-1. Run: `python ~/.claude/apiary_launch.py scribe/notes.py get <note-id>`
+1. Run: `python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py get <note-id>`
 2. If the note doesn't exist, tell the user: "Note <id> not found. Use `/notes` to find the correct ID." Stop.
 3. Save the note content for use in later steps.
 
@@ -146,7 +146,7 @@ Also capture the session working directory (the directory Claude Code is running
 ### Start round counter
 
 ```bash
-python ~/.claude/apiary_launch.py harden/round_counter.py start --session-id <session_id>
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" harden/round_counter.py start --session-id <session_id>
 ```
 
 ### Create worktree (code mode only)
@@ -206,7 +206,7 @@ If the user declines (does not choose Proceed), stop immediately — do not star
 Resolve the apiary repo path, then read the agent prompt templates once before the loop:
 
 ```
-apiary_repo = output of `python ~/.claude/apiary_launch.py --print-repo-path`
+apiary_repo = output of `python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" --print-repo-path`
 attacker_template = contents of <apiary_repo>/harden/agents/attacker.md
 defender_template = contents of <apiary_repo>/harden/agents/defender.md
 ```
@@ -244,7 +244,7 @@ Extract the JSON array from the agent's response. If the response contains markd
 Write the extracted JSON to a temp file, then run validate-and-assign to sanitize, validate, and assign IDs in one step:
 
 ```bash
-python ~/.claude/apiary_launch.py harden/validate_and_assign.py findings --file <temp_file> --sanitize [--check-files] [--deep]
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" harden/validate_and_assign.py findings --file <temp_file> --sanitize [--check-files] [--deep]
 ```
 
 Use `--check-files` in code mode. Use `--deep` if the deep flag is set. The `--sanitize` flag auto-strips unknown fields (e.g. `title`, `fix`) and maps invalid categories (e.g. `correctness` → `logic`) before validation.
@@ -262,13 +262,13 @@ Use `--check-files` in code mode. Use `--deep` if the deep flag is set. The `--s
 Tick the round counter first (so Step 4's `rounds=<N completed>/<N max>` includes this round):
 
 ```bash
-python ~/.claude/apiary_launch.py harden/round_counter.py tick --session-id <session_id>
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" harden/round_counter.py tick --session-id <session_id>
 ```
 
 Then query the running spend for this request (same as Step 2g). Note: because the Defender was not invoked on this path, spend covers only the Attacker — this is expected and will show lower than the per-round estimate:
 
 ```bash
-spent=$(python ~/.claude/apiary_launch.py budgeter/query_request.py --request-id <request_id> --cwd <session_cwd> 2>&1)
+spent=$(python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" budgeter/query_request.py --request-id <request_id> --cwd <session_cwd> 2>&1)
 spent_status=$?
 ```
 
@@ -320,7 +320,7 @@ Spawn a **foreground** Agent (subagent_type: "general-purpose") with:
 After the Defender responds, store its agent ID in the round state file:
 
 ```bash
-python ~/.claude/apiary_launch.py harden/round_counter.py defender --session-id <session_id> --set <agent_id>
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" harden/round_counter.py defender --session-id <session_id> --set <agent_id>
 ```
 
 Where `<agent_id>` is the internal agent ID returned by the Agent tool (shown in the tool result).
@@ -330,7 +330,7 @@ Where `<agent_id>` is the internal agent ID returned by the Agent tool (shown in
 Read the Defender agent ID from the state file:
 
 ```bash
-python ~/.claude/apiary_launch.py harden/round_counter.py defender --session-id <session_id> --get
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" harden/round_counter.py defender --session-id <session_id> --get
 ```
 
 If this fails (exit code 1), abort the harden run: "Defender state corrupted — no agent ID found. Aborting."
@@ -371,7 +371,7 @@ expected_ids = comma-separated list of all ATK-NNN IDs from the findings
 Write the extracted JSON to a temp file, then run validate-and-assign to validate and assign IDs in one step:
 
 ```bash
-python ~/.claude/apiary_launch.py harden/validate_and_assign.py response --file <temp_file> --expected-ids <expected_ids> [--check-files]
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" harden/validate_and_assign.py response --file <temp_file> --expected-ids <expected_ids> [--check-files]
 ```
 
 Use `--check-files` in code mode. validate_and_assign.py handles extracting the `responses` array, assigning DEF-IDs, and validating the full object.
@@ -383,7 +383,7 @@ Use `--check-files` in code mode. validate_and_assign.py handles extracting the 
 Query the running spend for this request before printing the summary:
 
 ```bash
-spent=$(python ~/.claude/apiary_launch.py budgeter/query_request.py --request-id <request_id> --cwd <session_cwd> 2>&1)
+spent=$(python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" budgeter/query_request.py --request-id <request_id> --cwd <session_cwd> 2>&1)
 spent_status=$?
 ```
 
@@ -408,7 +408,7 @@ Save `spent` (integer on success, `None` on error) to a variable for Step 2j to 
 For each item in the Defender's `todos` array:
 
 ```bash
-python ~/.claude/apiary_launch.py scribe/notes.py add --type todo \
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py add --type todo \
   --content "<todo content> (from /harden round <N>)" \
   --session-id "<session_id>" --auto
 ```
@@ -418,7 +418,7 @@ python ~/.claude/apiary_launch.py scribe/notes.py add --type todo \
 For each response in the Defender's output where `action` is `deferred`, create a TODO note so the deferred item is individually trackable:
 
 ```bash
-python ~/.claude/apiary_launch.py scribe/notes.py add --type todo \
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py add --type todo \
   --content "Deferred <finding_ref>: <finding description> — Reason: <deferral reason from Defender> (from /harden round <N>)" \
   --session-id "<session_id>" --auto
 ```
@@ -431,7 +431,7 @@ The `<finding description>` comes from the original Attacker finding (matched by
 - Tick the round counter:
 
 ```bash
-python ~/.claude/apiary_launch.py harden/round_counter.py tick --session-id <session_id>
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" harden/round_counter.py tick --session-id <session_id>
 ```
 
 #### 2k. Budget abort check
@@ -539,7 +539,7 @@ The two lines `**BUDGET EXCEEDED**` and `Spend at abort: ...` are the very first
 ### Save summary note
 
 ```bash
-python ~/.claude/apiary_launch.py scribe/notes.py add --type context \
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py add --type context \
   --content "<summary>" \
   --session-id "<session_id>"
 ```
@@ -547,7 +547,7 @@ python ~/.claude/apiary_launch.py scribe/notes.py add --type context \
 ### Reset round counter
 
 ```bash
-python ~/.claude/apiary_launch.py harden/round_counter.py reset --session-id <session_id>
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" harden/round_counter.py reset --session-id <session_id>
 ```
 
 ### Final message

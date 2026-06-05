@@ -62,7 +62,7 @@ Add the hook to the appropriate section in `setup.py` using `core/hooks_lib.py`:
 - Write tests in `<tool>/test_<module>.py`
 - Use `tempfile.TemporaryDirectory()` for any file I/O
 - Test the hook's logic directly (import and call functions) — don't shell out
-- Run `python setup.py --check` to verify registration
+- Run `poetry run apiary doctor` to verify registration
 
 ### 4. Update docs
 
@@ -73,8 +73,8 @@ Add the hook to the appropriate section in `setup.py` using `core/hooks_lib.py`:
 
 - [ ] Hook script created under `<tool>/hooks/`
 - [ ] try/except wrapper around main logic
-- [ ] Registered in `setup.py`
+- [ ] Added to the appropriate builder in `core/hooks_factory.py`
 - [ ] Tests written and passing
 - [ ] `docs/reference/hooks.md` updated
-- [ ] `python setup.py --check` passes
+- [ ] `poetry run apiary doctor` passes
 - [ ] `python docs/check.py` passes

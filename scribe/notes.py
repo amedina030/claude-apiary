@@ -44,10 +44,9 @@ PROJECTS_DIR = CLAUDE_DIR / "projects"
 # folder under <apiary>/.repos/<name>-<id>/. The launcher exports
 # APIARY_TARGET_STATE_DIR after the registry resolver runs; absent that
 # env var, scribe_state_dir() falls back to <git-repo-root>/.apiary/scribe/
-# for unmigrated targets. APIARY_STATE_LAYOUT=legacy is an escape hatch
-# that drops back to the historical ~/.claude/projects/<project_key>/ path.
-# Default (env unset) is the in-repo layout as of todo #268.
-STATE_LAYOUT_ENV = "APIARY_STATE_LAYOUT"
+# for unmigrated targets. The APIARY_STATE_LAYOUT=legacy escape hatch
+# was removed in phase 5 of the per-repo migration — the centralized
+# layout is the only one now.
 APIARY_STATE_DIRNAME = ".apiary"
 SCRIBE_SUBDIR = "scribe"
 
@@ -113,18 +112,6 @@ def _project_key(project_override=None):
     return get_project_key(Path.cwd())
 
 
-def _use_repo_layout() -> bool:
-    """Return True when the per-repo state layout is active (the default).
-
-    The default resolves state via the registry to
-    ``<apiary>/.repos/<name>-<id>/scribe/`` (or the legacy in-repo path
-    when no pointer exists). Set ``APIARY_STATE_LAYOUT=legacy``
-    (case-insensitive) as an escape hatch to fall back to the historical
-    ``~/.claude/projects/<project_key>/`` location.
-    """
-    return os.environ.get(STATE_LAYOUT_ENV, "").strip().lower() != "legacy"
-
-
 def _git_repo_root(start: Path | None = None) -> Path | None:
     """Return the git repo root containing *start* (or cwd), or None.
 
@@ -168,20 +155,14 @@ def scribe_state_dir(start: Path | None = None) -> Path | None:
     """Return the scribe state *directory* under the active layout.
 
     Resolution order:
-      1. ``APIARY_TARGET_STATE_DIR`` env var (set by apiary_launch.py after
-         the registry resolver runs) — returns ``<state_dir>/scribe/``.
+      1. ``APIARY_TARGET_STATE_DIR`` env var (set by the per-repo launcher
+         after the registry resolver runs) — returns ``<state_dir>/scribe/``.
       2. ``<git-repo-root>/.apiary/scribe/`` via git rev-parse on *start*
-         (or cwd). This is the legacy in-repo path that pre-dates the
-         centralized .repos/ registry; still used during the migration
-         window for unmigrated targets.
+         (or cwd). Pre-migration in-repo path retained for unmigrated
+         targets that haven't been re-bootstrapped yet.
       3. ``None`` when *start* is not inside a git repo — callers decide
          whether to fall back further or error.
-
-    Legacy layout (``APIARY_STATE_LAYOUT=legacy``): returns ``None`` so
-    callers fall through to the project-key helpers.
     """
-    if not _use_repo_layout():
-        return None
     env_dir = os.environ.get("APIARY_TARGET_STATE_DIR", "").strip()
     if env_dir:
         return Path(env_dir) / SCRIBE_SUBDIR

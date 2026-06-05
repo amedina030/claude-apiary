@@ -35,7 +35,7 @@ APIARY_PATH_SUBSTRINGS: tuple[str, ...] = (
 def is_apiary_entry(entry: Any) -> bool:
     """Return True if a settings.json hook entry was installed by apiary.
 
-    Recognizes three formats:
+    Recognizes four formats:
       1. Absolute-path entries written by ``setup.py --global`` whose
          path contains ``APIARY_MARKER`` ("claude-apiary").
       2. Portable hand-edited entries that use ``$CLAUDE_PROJECT_DIR/<sub>/...``
@@ -43,6 +43,9 @@ def is_apiary_entry(entry: Any) -> bool:
          substrings (``/budgeter/hooks/``, ``/core/hooks/``, ``/scribe/``, …).
       3. Launcher-based entries that use ``apiary_launch.py`` to locate
          the apiary repo via the pointer file.
+      4. Per-repo launcher entries (post-migration) whose commands invoke
+         ``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``. Distinct from
+         the global ``apiary_launch.py`` — both substrings are checked.
 
     Shared with setup.py's drift check and scripts/uninstall_hooks.py so
     the install and uninstall paths agree on which entries are ours.
@@ -51,6 +54,8 @@ def is_apiary_entry(entry: Any) -> bool:
     if APIARY_MARKER in blob:
         return True
     if "apiary_launch.py" in blob:
+        return True
+    if ".claude/apiary/launch.py" in blob or ".claude\\\\apiary\\\\launch.py" in blob:
         return True
     return any(sub in blob for sub in APIARY_PATH_SUBSTRINGS)
 
@@ -61,18 +66,38 @@ def to_bash_path(p: Path) -> str:
     return re.sub(r'^([A-Za-z]):', lambda m: '/' + m.group(1).lower(), s)
 
 
-def hook_cmd(script_path: Path, python_exe: Path = None, *, repo_root: Path = None) -> str:
+def hook_cmd(
+    script_path: Path,
+    python_exe: Path = None,
+    *,
+    repo_root: Path = None,
+    per_repo_launcher: bool = False,
+) -> str:
     """Build a hook command string using bash-compatible paths.
 
-    When *repo_root* is given the command uses the launcher script at
-    ``~/.claude/apiary_launch.py`` with a relative path, making it both
-    portable and cross-repo safe.  Without *repo_root* the legacy
-    absolute-path format is used (suitable for ``--project-path`` installs
-    where the session CWD matches the hook repo).
+    Three modes, selected by the keyword args:
+
+    - ``per_repo_launcher=True`` (requires ``repo_root``): emits
+      ``python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" <rel>``.
+      The launcher is the per-repo shim written by ``apiary install``;
+      Claude Code expands ``$CLAUDE_PROJECT_DIR`` at hook-fire time.
+      Used by phase-1+ installs.
+    - ``repo_root`` only: emits ``python ~/.claude/apiary_launch.py <rel>``.
+      The historical global launcher mode (used by ``setup.py --global``).
+    - Neither: legacy absolute-path format suitable for ``--project-path``
+      installs where the session cwd matches the hook repo.
+
+    *repo_root* in the launcher modes is **main-apiary's** root, not the
+    bootstrapped repo's — the path is made relative so the launcher can
+    re-resolve it against main-apiary at runtime.
     """
     if repo_root is not None:
         rel = script_path.relative_to(repo_root).as_posix()
+        if per_repo_launcher:
+            return f'python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" {rel}'
         return f"python ~/.claude/apiary_launch.py {rel}"
+    if per_repo_launcher:
+        raise ValueError("per_repo_launcher=True requires repo_root")
     exe = python_exe or Path(sys.executable)
     return f"{to_bash_path(exe)} {to_bash_path(script_path)}"
 

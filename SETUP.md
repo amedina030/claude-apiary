@@ -5,75 +5,83 @@
 - Python 3.11+
 - [Claude Code](https://claude.ai/claude-code) installed and configured
 - [Poetry](https://python-poetry.org/) (recommended) or pip
+- git (every bootstrapped repo must be a git repo — apiary uses `git rev-parse` to identify targets)
 
 No external runtime dependencies — dev dependencies (pytest) are managed via `pyproject.toml`.
 
 ---
 
+## Install Model
+
+Apiary uses a **per-repo opt-in** install. Each repo you want apiary to act on is bootstrapped individually; sessions in non-bootstrapped repos run as vanilla Claude Code with no apiary hooks, no managed CLAUDE.md zone, no budgeter logging. The single `~/.claude/apiary*` global install model was retired in 2026-05 — see `MIGRATION-PLAN.md` for the full design.
+
+What lives where after bootstrap:
+
+- **Per-repo install state** — `<repo>/.claude/apiary/` (launcher, pointers, version, flags). Gitignored; regenerable.
+- **Per-repo hooks** — `<repo>/.claude/settings.json` references `$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py`.
+- **Per-repo slash commands** — `<repo>/.claude/commands/*.md`, copied at install time.
+- **Per-target data** — centralized at `<main-apiary>/.repos/<name>-<uid>/` (scribe notes, sessions, runner state, compass observations, captures, researcher findings).
+- **Apiary code** — your `claude-apiary` clone (referred to as **main-apiary**).
+
+---
+
 ## New Machine Install
 
-### 1. Clone the repo
+### 1. Clone and install dependencies
 
 ```bash
 git clone https://github.com/amedina030/claude-apiary.git /path/to/claude-apiary
 cd /path/to/claude-apiary
+poetry install        # registers the `apiary` console_script
 ```
 
-### 2. Install dependencies
+### 2. Bootstrap main-apiary against itself
 
 ```bash
-# Preferred: Poetry (creates a virtualenv, locks dependencies)
-poetry install
-
-# Alternative: pip (no lockfile)
-pip install -r requirements.txt
+poetry run apiary self-bootstrap
 ```
 
-### 3. Run the installer
+This creates `<main-apiary>/.claude/apiary/{launch.py, main-apiary-pointer.json, self-pointer.json, version.json}`, registers main-apiary at `uid=1` in `<main-apiary>/.repos/registry.json`, and installs hooks into `<main-apiary>/.claude/settings.json`.
+
+### 3. Bootstrap any other repo you want apiary in
 
 ```bash
-python setup.py --global
+poetry run apiary install --target /path/to/your/repo
 ```
 
-This will:
-- Register all hooks (budgeter, transcript saver, install checker) in `~/.claude/settings.json`
-- Copy slash commands to `~/.claude/commands/` (budgeter, scribe, startup, etc.)
-- Check whether `~/.claude/CLAUDE.md` exists
+For each target, this:
 
-### 4. Start a new Claude Code session
+- Allocates a new uid in main-apiary's registry.
+- Generates the per-repo files under `<target>/.claude/apiary/`.
+- Writes `<target>/.claude/settings.json` from the resolved profile.
+- Copies slash commands into `<target>/.claude/commands/`.
+- Adds the apiary-managed zone to `<target>/CLAUDE.md`.
+- Adds `.claude/` to `<target>/.gitignore` if not already there.
 
-Hooks and command files are loaded at session start. Restart Claude Code after setup.
+Idempotent — re-running refreshes generated files and updates hash records in `<main-apiary>/.repos/<slug>/bootstrap_state.json`.
 
-### 5. Enable the features you want
+### 4. Install repo-local git hooks (main-apiary only)
 
-In any Claude Code session:
+```bash
+python scripts/install_repo_hooks.py
+```
+
+This installs `.git/hooks/pre-commit` (runs `docs/check.py`) and `.git/hooks/post-merge` (closes scribe TODOs linked to merged runner branches) into main-apiary's own `.git/hooks/`. Repo-local — unrelated to Claude Code hooks.
+
+### 5. Start a new Claude Code session
+
+Hooks and slash commands are loaded at session start. Restart Claude Code after bootstrap.
+
+### 6. Enable the features you want
+
+Inside a bootstrapped repo:
 
 ```
 /budgeter-log     # start recording token usage
 /budgeter-warn    # enable expensive-call warnings
 ```
 
-Scribe (notes, learnings, handoffs) and the `/startup` skill are always active — no toggle needed.
-
-Each toggle persists across sessions (stored as a flag file in `~/.claude/`).
-
----
-
-## Per-Project Install (budgeter only)
-
-To scope budgeter logging to a single project instead of globally:
-
-```bash
-python setup.py --project-path /path/to/your/project
-```
-
-This creates `.claude/budgeter.json` inside the project with independent config and stores logs at `.claude/budgeter-log.jsonl`.
-
----
-
-## Re-running Setup
-
-Safe to re-run at any time — old `claude-apiary` hook entries are stripped before writing new ones, so no duplicates accumulate. Run it again after pulling updates to keep installed files in sync.
+Toggles persist per-repo at `<repo>/.claude/apiary/flags/<flag-name>-enabled`.
 
 ---
 
@@ -81,62 +89,67 @@ Safe to re-run at any time — old `claude-apiary` hook entries are stripped bef
 
 ```bash
 git pull
-poetry install    # or: pip install -r requirements.txt
-python setup.py --global
+poetry install
+poetry run apiary self-bootstrap                       # refresh main-apiary
+poetry run apiary install --target /path/to/repo       # refresh each bootstrapped repo
+poetry run apiary doctor                               # validate registry + pin files
 ```
+
+If main-apiary's pinned version (`<main-apiary>/VERSION`) advanced past a repo's pinned version (`<repo>/.claude/apiary/version.json`), `apiary doctor versions` flags it. The versioned migration runner under `<main-apiary>/migrations/` chains the upgrade scripts.
+
+---
+
+## Moving main-apiary
+
+If you move the `claude-apiary` checkout, open a Claude session inside it. The drift handler detects that main-apiary's self-pointer no longer matches the actual location, updates main-apiary's own pointers, and **cascade-fixes** every bootstrapped repo's `<repo>/.claude/apiary/main-apiary-pointer.json` to the new path.
+
+You can also force the cascade manually:
+
+```bash
+poetry run apiary cascade-fix
+```
+
+---
+
+## Moving a bootstrapped repo
+
+Open a Claude session inside the moved repo. The drift handler detects the move, queues an `update_path` message into main-apiary's mailbox at `<main-apiary>/.apiary/forwarding/<uid>.json`. On main-apiary's next session (or `apiary doctor mailbox --fix`), the registry's `real_path` is updated.
 
 ---
 
 ## Uninstalling
 
-**Hook entries (all tools):**
+**Per-repo (one repo):**
 
 ```bash
-python scripts/uninstall_hooks.py --list        # see what's installed
-python scripts/uninstall_hooks.py --dry-run     # preview what would be removed
-python scripts/uninstall_hooks.py --uninstall   # remove apiary entries from ~/.claude/settings.json
+poetry run apiary uninstall --target /path/to/repo               # keep data
+poetry run apiary uninstall --target /path/to/repo --remove-data # also delete the repo's per-target state
 ```
 
-The script removes every apiary-owned hook entry — budgeter, core, scribe, docs, refiner, harden, runner — in one pass. It uses `core.hooks_lib.is_apiary_entry` so portable `$CLAUDE_PROJECT_DIR`-form entries and absolute-path entries are both recognized; unrelated third-party entries are never touched. Pass `--settings <path>` to target a project-local settings file.
-
-**Context-rules zone in `~/.claude/CLAUDE.md`:**
-```bash
-python scripts/install_context_rules.py --uninstall
-```
-
-**Budgeter:**
-- Optionally delete `~/.claude/budgeter-log-enabled` and `~/.claude/budgeter-warn-enabled`
-
-**All per-target apiary state:**
-- Delete `<apiary>/.repos/` (centralized state dir for all registered targets — scribe, captures, researcher, runner, compass, bootstrap_state.json). Removed when the apiary repo directory is deleted.
-- Delete `<target>/.apiary/pointer` from each registered target repo (the breadcrumb the resolver wrote during registration).
-- If pre-migration state still exists at `<target>/.apiary/scribe/`, `<target>/.apiary/compass/`, etc., or at the legacy `~/.claude/projects/<key>/{notes,learnings,notes_archive}.jsonl`, delete those too.
-
-**Scribe:**
-- Delete `~/.claude/commands/note.md`, `~/.claude/commands/notes.md`, `~/.claude/commands/startup.md`
-
-**Docs framework:**
-- Delete `~/.claude/commands/review.md`
-- Delete `.git/hooks/pre-commit` (if it references `docs/check.py`)
-
-**Researcher:**
-- Delete `~/.claude/commands/research.md`
-
-**Runner:**
-- Delete `~/.claude/commands/runner-prep.md`
+This removes `<repo>/.claude/apiary/`, the apiary-installed slash commands, the apiary hook entries from `<repo>/.claude/settings.json`, and the apiary-managed zone in `<repo>/CLAUDE.md`. Without `--remove-data`, the `<main-apiary>/.repos/<slug>/` per-target state stays put for archival.
 
 **Everything:**
-- Delete the `claude-apiary` repo directory
+
+Uninstall each repo (above), then delete the `claude-apiary` checkout. Apiary writes nothing to `~/.claude/`.
 
 ---
 
 ## Troubleshooting
 
-**Hooks not firing**
-Start a new Claude Code session — hooks are loaded at session start, not mid-session.
+**Hooks not firing in a repo**
+Confirm `<repo>/.claude/apiary/launch.py` exists. If not, run `apiary install --target <repo>` and start a new Claude session.
 
-**`budgeter-log` toggle has no effect**
-Check that `~/.claude/budgeter-log-enabled` exists (ON) or is absent (OFF). The slash command creates/removes this file.
+**`apiary doctor` reports `pointers` issues**
+Main-apiary's self-pointer drifted. Run `apiary doctor pointers --fix` to update main-apiary's pointers and cascade-fix every bootstrapped repo's reference.
+
+**`apiary doctor` reports `unreachable`**
+A registered repo's `real_path` no longer exists on disk. Either restore the repo, or `apiary uninstall --target <real_path>` (the registry entry is removed even if the path is gone, freeing the slug).
+
+**`/budgeter-log` toggle has no effect**
+Check `<repo>/.claude/apiary/flags/budgeter-log-enabled` exists when ON, is absent when OFF. The slash command creates/removes this file.
 
 **Warnings never firing**
-Warnings require at least `min_tasks` unique tasks in the log (default: 50). Run `/budgeter-log` to start building history, then check again after enough sessions.
+Warnings require at least `min_tasks` unique tasks in the log (default: 50). Run `/budgeter-log` and use the repo until you've accumulated enough history.
+
+**`setup.py --global` still in your muscle memory**
+That mode is gone. The redirect stub at `setup.py` will print the new commands.

@@ -33,7 +33,7 @@ Invoke the `/refine` skill with the user's idea. Let `/refine` run its full flow
 When `/refine` saves the spec, its final tool output will include a line like `Added C-YYYY-NN (context)`. **Capture that note ID** — you'll need it for the spawn step. If you can't see the ID in the output, query scribe to find the most recent context note for this session:
 
 ```bash
-python ~/.claude/apiary_launch.py scribe/notes.py list --type context --last 1
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py list --type context --last 1
 ```
 
 If `/refine` killed the idea (insufficient grounding), exit cleanly. Do not proceed to spawn.
@@ -55,7 +55,7 @@ If the user gives a relative path or a path that already exists, point it out an
 Call the spawner CLI:
 
 ```bash
-python ~/.claude/apiary_launch.py incubator/cli.py spawn \
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" incubator/cli.py spawn \
   --path "<absolute target path>" \
   --spec-note-id "<C-YYYY-NN from step 2>" \
   --session-id "<session_id>"

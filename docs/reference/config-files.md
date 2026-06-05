@@ -67,7 +67,7 @@ Canonical list of scheduled OS-scheduler entries that apiary owns on a given mac
 | `cwd` | string | no | Working directory; supports the `<apiary_repo>` placeholder |
 | `disabled` | bool | no | `true` means the entry must NOT exist in the scheduler; `repair --apply` deletes any matching entry |
 
-## ~/.claude/apiary_gui/launch.json
+## &lt;main-apiary&gt;/.apiary/gui/apiary_gui/launch.json
 
 Claude Code spawn configuration for the GUI. Auto-created on first run from `DEFAULT_LAUNCH` in `gui/theme.py`; hand-edit to persist non-default values.
 
@@ -128,7 +128,7 @@ Global budgeter configuration. Located in the repo at `budgeter/config.json`.
 
 ## .claude/budgeter.json (per-project)
 
-Optional per-project budgeter override. Created by `setup.py --project-path`. Same schema as `budgeter/config.json`. Loaded via `core/config.py` with `budgeter/config.json` as the defaults fallback.
+Optional per-project budgeter override. Hand-authored — the historical `setup.py --project-path` install flow that created it was retired in the per-repo migration. Same schema as `budgeter/config.json`. Loaded via `core/config.py` with `budgeter/config.json` as the defaults fallback.
 
 ## .claude/settings.json
 

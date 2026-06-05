@@ -34,7 +34,6 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from core.utils.apiary_pointer import get_repo_path  # noqa: E402
 from core.utils.filelock import FileLock  # noqa: E402
 
 REPOS_DIRNAME = ".repos"
@@ -43,8 +42,22 @@ NEXT_ID_FILENAME = "next_id"
 POINTER_DIRNAME = ".apiary"
 POINTER_FILENAME = "pointer"
 
+# main-apiary's own version pin. Single-line semver. Read on every session
+# open in a bootstrapped repo to compare against the repo's own version.json
+# and trigger `apiary update` on mismatch (see MIGRATION-PLAN.md §7.5).
+VERSION_FILE = "VERSION"
+DEFAULT_APIARY_VERSION = "0.1.0"
+
+# Per-repo pin-model files (introduced by per-repo migration; see MIGRATION-PLAN.md §5–§6).
+# Each bootstrapped repo carries three small JSON files under <repo>/.claude/apiary/
+# identifying main-apiary, recording its own current path, and pinning a version.
+PIN_DIRNAME = ".claude/apiary"
+SELF_POINTER_FILENAME = "self-pointer.json"
+MAIN_APIARY_POINTER_FILENAME = "main-apiary-pointer.json"
+VERSION_FILENAME = "version.json"
+PIN_SCHEMA_VERSION = 1
+
 TARGET_STATE_DIR_ENV = "APIARY_TARGET_STATE_DIR"
-LEGACY_LAYOUT_ENV = "APIARY_STATE_LAYOUT"
 
 _NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -119,9 +132,23 @@ def _save_registry(apiary_repo: Path, data: dict) -> None:
     tmp.replace(p)
 
 
-def _allocate_next_id(apiary_repo: Path) -> int:
-    """Read-and-bump the monotonic id counter. Caller MUST hold the
-    registry FileLock — counter writes are not separately locked."""
+def allocate_next_id(apiary_repo: Path) -> int:
+    """Allocate a fresh monotonic UID by reading and bumping the counter.
+
+    Public API. The single allocator for all UID-needing code paths:
+    - ``resolve_target_state_dir`` (lazy auto-registration)
+    - ``apiary install --target <repo>`` (per-repo bootstrap, post-migration)
+    - drift handler's copy-detection branch (``register_copy`` mailbox flow)
+    - mailbox processor (``register_copy`` message handling)
+
+    Never call a parallel ID generator — the monotonic-only contract relies
+    on a single source of allocations. New UIDs only ever increase, so they
+    never collide with existing or historical entries.
+
+    Caller MUST hold the registry FileLock — counter writes are not
+    separately locked, and a concurrent allocator would otherwise issue
+    duplicate UIDs.
+    """
     p = next_id_path(apiary_repo)
     p.parent.mkdir(parents=True, exist_ok=True)
     current = 0
@@ -180,18 +207,47 @@ def _find_entry_by_path(registry: dict, real_path: Path) -> tuple[str, dict] | N
 
 
 def resolve_apiary_repo(explicit: Path | None = None) -> Path:
-    """Return the apiary checkout root. Prefers *explicit*, falls back to
-    the global ``~/.claude/apiary.json`` pointer. Raises RuntimeError when
-    neither is available — the resolver cannot operate without it."""
+    """Return the apiary checkout root.
+
+    Resolution order (post-migration):
+
+    1. ``explicit`` — caller supplied the path (CLI ``--apiary-repo`` flag).
+    2. ``APIARY_MAIN_REPO`` env var — set by the per-repo launcher when
+       it dispatches a script.
+    3. ``__file__``-based: this module lives at ``<main-apiary>/core/utils/``,
+       so its grandparent is main-apiary's root. This works whenever the
+       resolver is called from inside main-apiary's own source tree.
+    4. ``main-apiary-pointer.json`` at ``<cwd>/.claude/apiary/`` — set by
+       ``apiary install`` for any bootstrapped repo, so callers running
+       from inside a bootstrapped repo can locate main-apiary.
+
+    Raises RuntimeError when none of the above resolve to a directory.
+    """
     if explicit is not None:
         return Path(explicit).resolve()
-    repo = get_repo_path()
-    if repo is None:
-        raise RuntimeError(
-            "Cannot locate apiary repo: no ~/.claude/apiary.json pointer. "
-            "Run setup.py --global to install the pointer, or pass an explicit path."
-        )
-    return repo
+
+    env_path = os.environ.get("APIARY_MAIN_REPO", "").strip()
+    if env_path and Path(env_path).is_dir():
+        return Path(env_path).resolve()
+
+    self_repo = _REPO_ROOT
+    if (self_repo / "core" / "install.py").is_file() and (self_repo / "VERSION").is_file():
+        return self_repo
+
+    pin = Path.cwd() / ".claude" / "apiary" / "main-apiary-pointer.json"
+    if pin.is_file():
+        try:
+            data = json.loads(pin.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        candidate = Path(data.get("main_apiary_path", ""))
+        if candidate.is_dir():
+            return candidate.resolve()
+
+    raise RuntimeError(
+        "Cannot locate apiary repo. Pass --apiary-repo, set APIARY_MAIN_REPO, "
+        "or run from inside main-apiary or a bootstrapped repo."
+    )
 
 
 def resolve_target_state_dir(
@@ -243,7 +299,7 @@ def resolve_target_state_dir(
                 f"Auto-registration disabled."
             )
 
-        new_id = _allocate_next_id(apiary)
+        new_id = allocate_next_id(apiary)
         name = _safe_name(target_root.name)
         folder_name = f"{name}-{new_id}"
         state_dir = repos_root / folder_name
@@ -252,6 +308,8 @@ def resolve_target_state_dir(
         registry[str(new_id)] = {
             "name": name,
             "real_path": str(target_root),
+            "uid": new_id,
+            "version": read_apiary_version(apiary),
             "registered_at": now,
             "last_used": now,
             "verified_ok": True,
@@ -302,9 +360,126 @@ def find_state_dir(target_repo: Path) -> Optional[Path]:
     return state_dir if state_dir.is_dir() else None
 
 
-def is_legacy_layout() -> bool:
-    """Return True when the legacy layout escape hatch is set."""
-    return os.environ.get(LEGACY_LAYOUT_ENV, "").strip().lower() == "legacy"
+def read_apiary_version(apiary_repo: Path) -> str:
+    """Return main-apiary's pinned version (the contents of ``<apiary>/VERSION``).
+
+    Falls back to ``DEFAULT_APIARY_VERSION`` when the file is missing or
+    empty — this matches phase 0's "all repos start at 0.1.0" baseline and
+    avoids forcing every caller to handle a missing-VERSION case during
+    the migration window.
+    """
+    p = Path(apiary_repo) / VERSION_FILE
+    if not p.is_file():
+        return DEFAULT_APIARY_VERSION
+    try:
+        text = p.read_text(encoding="utf-8").strip()
+    except OSError:
+        return DEFAULT_APIARY_VERSION
+    return text or DEFAULT_APIARY_VERSION
+
+
+# --- per-repo pin-model helpers -------------------------------------------------
+# These read/write the three small JSON files that each bootstrapped repo
+# carries under <repo>/.claude/apiary/. See MIGRATION-PLAN.md §5–§6 for
+# schemas. Read helpers tolerate missing/malformed files (return None) so
+# callers can branch on "not yet bootstrapped" without try/except. Write
+# helpers are atomic (.tmp + os.replace) and create parent dirs.
+
+
+def pin_dir(repo: Path) -> Path:
+    """Return ``<repo>/.claude/apiary/`` — the per-repo pin-model directory."""
+    return Path(repo) / PIN_DIRNAME
+
+
+def self_pointer_path(repo: Path) -> Path:
+    return pin_dir(repo) / SELF_POINTER_FILENAME
+
+
+def main_apiary_pointer_path(repo: Path) -> Path:
+    return pin_dir(repo) / MAIN_APIARY_POINTER_FILENAME
+
+
+def version_path(repo: Path) -> Path:
+    return pin_dir(repo) / VERSION_FILENAME
+
+
+def _read_json_file(p: Path) -> dict | None:
+    """Load a JSON object from *p*. Return None for missing/malformed files."""
+    if not p.is_file():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _write_json_file(p: Path, payload: dict) -> Path:
+    """Atomic write of *payload* as JSON. Creates parent dirs."""
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(p)
+    return p
+
+
+def read_self_pointer(repo: Path) -> dict | None:
+    """Return the parsed self-pointer for *repo*, or None.
+
+    Schema (§6.3): ``{schema_version, uid, name, real_path, registered_at, last_drift_check}``.
+    The ``real_path`` field is the source of truth for "where this repo
+    thinks it lives." A mismatch with the repo's actual current path means
+    drift — see §7.2 for the handler.
+    """
+    return _read_json_file(self_pointer_path(repo))
+
+
+def write_self_pointer(repo: Path, payload: dict) -> Path:
+    """Atomically write the self-pointer for *repo*.
+
+    Caller supplies the dict; this helper does not validate field shape
+    beyond injecting ``schema_version`` if absent. Bootstrap and the drift
+    handler are the two callers expected post-migration.
+
+    **Critical:** the file MUST NOT be committed to git — every clone would
+    inherit the original's path and the drift handler would treat the clone
+    as the original-that-moved. ``apiary install`` writes ``.claude/`` into
+    the repo's ``.gitignore``; do not relax that.
+    """
+    payload = {"schema_version": PIN_SCHEMA_VERSION, **payload}
+    return _write_json_file(self_pointer_path(repo), payload)
+
+
+def read_main_apiary_pointer(repo: Path) -> dict | None:
+    """Return the parsed main-apiary-pointer for *repo*, or None.
+
+    Schema (§6.2): ``{schema_version, main_apiary_path, main_apiary_uid, registered_at}``.
+    The ``main_apiary_path`` is absolute and machine-specific; updated by
+    main-apiary's cascade-fix when main-apiary itself moves (§7.3).
+    """
+    return _read_json_file(main_apiary_pointer_path(repo))
+
+
+def write_main_apiary_pointer(repo: Path, payload: dict) -> Path:
+    """Atomically write the main-apiary-pointer for *repo*."""
+    payload = {"schema_version": PIN_SCHEMA_VERSION, **payload}
+    return _write_json_file(main_apiary_pointer_path(repo), payload)
+
+
+def read_version(repo: Path) -> dict | None:
+    """Return the parsed version pin for *repo*, or None.
+
+    Schema (§6.4): ``{schema_version, apiary_version, pinned_at}``. The
+    ``apiary_version`` is semver; compared against ``<main-apiary>/VERSION``
+    on every session open to detect drift.
+    """
+    return _read_json_file(version_path(repo))
+
+
+def write_version(repo: Path, payload: dict) -> Path:
+    """Atomically write the version pin for *repo*."""
+    payload = {"schema_version": PIN_SCHEMA_VERSION, **payload}
+    return _write_json_file(version_path(repo), payload)
 
 
 if __name__ == "__main__":

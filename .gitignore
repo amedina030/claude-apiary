@@ -60,3 +60,4 @@ session_*.txt
 # GUI PyInstaller build outputs
 build/
 dist/
+.claude/

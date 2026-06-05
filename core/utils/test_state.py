@@ -164,6 +164,28 @@ class StateResolverTests(unittest.TestCase):
         self.assertEqual(new_payload["target_id"], state_dir.name)
         self.assertNotEqual(new_payload["target_id"], "ghost-99")
 
+    def test_new_entry_includes_uid_and_version(self):
+        # Phase 0: every new registry entry carries uid (int) and version
+        # (apiary version) fields for the per-repo migration model.
+        target = self._make_target("foo")
+        # Pin a known apiary version so the assertion is deterministic.
+        (self.apiary / "VERSION").write_text("0.1.0\n", encoding="utf-8")
+
+        state.resolve_target_state_dir(cwd=target, apiary_repo=self.apiary)
+        registry = json.loads((self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8"))
+        only_id, entry = next(iter(registry.items()))
+        self.assertEqual(entry["uid"], int(only_id))
+        self.assertEqual(entry["version"], "0.1.0")
+
+    def test_new_entry_uses_default_version_when_VERSION_missing(self):
+        # During phase 0 a missing/empty VERSION falls back to the default.
+        # No VERSION file in self.apiary at this point.
+        target = self._make_target("foo")
+        state.resolve_target_state_dir(cwd=target, apiary_repo=self.apiary)
+        registry = json.loads((self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8"))
+        _, entry = next(iter(registry.items()))
+        self.assertEqual(entry["version"], state.DEFAULT_APIARY_VERSION)
+
     def test_unsafe_basename_is_sanitized(self):
         # Git won't accept truly nasty paths, but a name with spaces/dots
         # is plausible. We can't easily fabricate one git accepts on every
@@ -193,19 +215,70 @@ class EnvHelperTests(unittest.TestCase):
         finally:
             del os.environ[state.TARGET_STATE_DIR_ENV]
 
-    def test_is_legacy_layout_case_insensitive(self):
-        os.environ[state.LEGACY_LAYOUT_ENV] = "Legacy"
-        try:
-            self.assertTrue(state.is_legacy_layout())
-        finally:
-            del os.environ[state.LEGACY_LAYOUT_ENV]
 
-    def test_is_legacy_layout_false_for_other_values(self):
-        os.environ[state.LEGACY_LAYOUT_ENV] = "repo"
-        try:
-            self.assertFalse(state.is_legacy_layout())
-        finally:
-            del os.environ[state.LEGACY_LAYOUT_ENV]
+class PinModelHelperTests(unittest.TestCase):
+    """Round-trip tests for the per-repo pin-model files (self-pointer,
+    main-apiary-pointer, version) introduced by the per-repo migration."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = Path(self._tmp.name)
+
+    def test_pin_dir_is_under_dot_claude_apiary(self):
+        self.assertEqual(state.pin_dir(self.repo), self.repo / ".claude" / "apiary")
+
+    def test_self_pointer_round_trip_injects_schema_version(self):
+        payload = {"uid": 7, "name": "HexWorld", "real_path": str(self.repo)}
+        path = state.write_self_pointer(self.repo, payload)
+        self.assertTrue(path.is_file())
+        loaded = state.read_self_pointer(self.repo)
+        self.assertEqual(loaded["uid"], 7)
+        self.assertEqual(loaded["name"], "HexWorld")
+        self.assertEqual(loaded["schema_version"], state.PIN_SCHEMA_VERSION)
+
+    def test_main_apiary_pointer_round_trip(self):
+        payload = {"main_apiary_path": "/abs/main", "main_apiary_uid": 1}
+        state.write_main_apiary_pointer(self.repo, payload)
+        loaded = state.read_main_apiary_pointer(self.repo)
+        self.assertEqual(loaded["main_apiary_path"], "/abs/main")
+        self.assertEqual(loaded["main_apiary_uid"], 1)
+        self.assertEqual(loaded["schema_version"], state.PIN_SCHEMA_VERSION)
+
+    def test_version_round_trip(self):
+        state.write_version(self.repo, {"apiary_version": "0.1.0", "pinned_at": "2026-05-05T00:00:00Z"})
+        loaded = state.read_version(self.repo)
+        self.assertEqual(loaded["apiary_version"], "0.1.0")
+        self.assertEqual(loaded["schema_version"], state.PIN_SCHEMA_VERSION)
+
+    def test_read_returns_none_when_missing(self):
+        self.assertIsNone(state.read_self_pointer(self.repo))
+        self.assertIsNone(state.read_main_apiary_pointer(self.repo))
+        self.assertIsNone(state.read_version(self.repo))
+
+    def test_read_returns_none_when_malformed(self):
+        state.self_pointer_path(self.repo).parent.mkdir(parents=True, exist_ok=True)
+        state.self_pointer_path(self.repo).write_text("{not valid json", encoding="utf-8")
+        self.assertIsNone(state.read_self_pointer(self.repo))
+
+    def test_write_creates_parent_dir(self):
+        # pin_dir does not exist at start
+        self.assertFalse(state.pin_dir(self.repo).is_dir())
+        state.write_self_pointer(self.repo, {"uid": 1, "name": "x", "real_path": "/p"})
+        self.assertTrue(state.pin_dir(self.repo).is_dir())
+
+    def test_write_is_atomic_no_tmp_left_behind(self):
+        state.write_self_pointer(self.repo, {"uid": 1, "name": "x", "real_path": "/p"})
+        leftover = list(state.pin_dir(self.repo).glob("*.tmp"))
+        self.assertEqual(leftover, [])
+
+    def test_caller_supplied_schema_version_is_preserved(self):
+        # If a future migration writes schema_version=2, the helper should
+        # not silently downgrade it. The {schema_version: 1, **payload}
+        # spread lets the caller's value win.
+        state.write_self_pointer(self.repo, {"schema_version": 2, "uid": 1, "name": "x", "real_path": "/p"})
+        loaded = state.read_self_pointer(self.repo)
+        self.assertEqual(loaded["schema_version"], 2)
 
 
 if __name__ == "__main__":
