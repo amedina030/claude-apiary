@@ -422,6 +422,24 @@ class Session:
             return False
         return self.pty.send_bytes(b"\x1b")
 
+    def send_bytes(self, values) -> bool:
+        """Forward an exact byte sequence to the pty.
+
+        Crosses the JS bridge as a list of ints (0-255), e.g. arrow-up =
+        ``[27, 91, 65]`` (ESC [ A). Used by the arrow-key menu driver, which
+        needs precise control bytes with no text-mode/IME transformation.
+        Rejects out-of-range or non-int values rather than sending garbage.
+        """
+        if self.pty is None:
+            return False
+        if not isinstance(values, (list, tuple)) or not values:
+            return False
+        try:
+            raw = bytes(int(v) for v in values)
+        except (TypeError, ValueError):
+            return False
+        return self.pty.send_bytes(raw)
+
     def pty_resize(self, rows: int, cols: int) -> bool:
         if self.pty is None:
             return False

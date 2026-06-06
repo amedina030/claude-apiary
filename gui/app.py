@@ -75,6 +75,16 @@ class GuiBridge:
         sess = self._app.active
         return sess.send_text(text) if sess is not None else False
 
+    def send_bytes(self, values) -> bool:
+        """Send an exact byte sequence (list of ints 0-255) to the active pty.
+
+        The arrow-key menu driver uses this for precise control sequences, e.g.
+        arrow-up = [27, 91, 65]. Distinct from send_text (text/IME path) and
+        send_control (single ctrl char).
+        """
+        sess = self._app.active
+        return sess.send_bytes(values) if sess is not None else False
+
     def restart_pty(self) -> bool:
         sess = self._app.active
         return sess.restart_pty() if sess is not None else False
