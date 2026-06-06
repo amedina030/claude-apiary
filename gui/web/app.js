@@ -1398,15 +1398,6 @@
       window.pywebview.api.send_escape();
       return;
     }
-    // PASTE-PROBE: report browser-side length/fingerprints before the bridge
-    // hop, so a drop between here and bridge_recv is visible. Remove with the
-    // rest of the paste_probe instrumentation. Only logged for sizable writes
-    // (real pastes), not every keystroke.
-    if (data.length > 64) {
-      try {
-        window.pywebview.api.paste_probe("browser", data.length, data.slice(0, 24), data.slice(-24));
-      } catch (_) {}
-    }
     window.pywebview.api.send_text(data);
   });
 
@@ -2670,15 +2661,6 @@
         // may spawn on pty chunks. Slash commands and feedback submissions
         // don't get a normal assistant reply, so we don't arm for them.
         t.waitingForAssistant = true;
-      }
-      // PASTE-PROBE: browser-side length/fingerprints for the CHAT path, before
-      // crossing the pywebview bridge. Pairs with bridge_recv_input on the
-      // Python side so a drop across the JS->Python marshaling boundary is
-      // visible. Only sizable sends (real pastes), not routine messages.
-      if (text && text.length > 64) {
-        try {
-          window.pywebview.api.paste_probe("browser_input", text.length, text.slice(0, 24), text.slice(-24));
-        } catch (_) {}
       }
       window.pywebview.api.send_input(text);
       if (awaitingFeedback) {
