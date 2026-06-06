@@ -24,20 +24,20 @@ Run these checks before any user-facing output.
 ### Cancel
 
 If the argument is `cancel`:
-1. Run: `python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" refiner/round_counter.py reset --session-id <session_id>`
+1. Run: `python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" refiner/round_counter.py reset --session-id <session_id>`
 2. Respond: "Refinement cancelled. No spec was saved."
 3. Stop.
 
 ### Start the round counter
 
 ```bash
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" refiner/round_counter.py start --session-id <session_id>
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" refiner/round_counter.py start --session-id <session_id>
 ```
 
 ### Docs loading (conditional)
 
 If the user provided a `docs:<path>` prefix:
-1. Resolve the apiary repo path: `apiary_repo = output of python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" --print-repo-path`
+1. Resolve the apiary repo path: `apiary_repo = output of python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" --print-repo-path`
 2. Read `<apiary_repo>/docs/<path>`. If the file does not exist, tell the user and continue without it.
 3. Use the document as architectural context during refinement. Do NOT quote it verbatim in the handoff.
 
@@ -72,7 +72,7 @@ When the user cannot state the problem this solves:
 2. Ask what parts, if any, are worth revisiting.
 3. Save a decision note:
    ```bash
-   python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py add --type decision \
+   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py add --type decision \
      --content "KILLED: <original idea>\nReason: <why it was killed>\nSalvageable: <parts worth revisiting, or None>" \
      --session-id "<session_id>"
    ```
@@ -96,7 +96,7 @@ You are a demanding product architect. Your job is to interrogate the idea until
 At the start of each question round, tick the counter:
 
 ```bash
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" refiner/round_counter.py tick --session-id <session_id>
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" refiner/round_counter.py tick --session-id <session_id>
 ```
 
 If the returned count is **15**:
@@ -195,7 +195,7 @@ Iterate until the user approves.
 Save the approved handoff as a scribe note:
 
 ```bash
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py add --type context \
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py add --type context \
   --content "<full handoff text>" \
   --session-id "<session_id>"
 ```
@@ -203,7 +203,7 @@ python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py add --type
 Reset the round counter:
 
 ```bash
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" refiner/round_counter.py reset --session-id <session_id>
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" refiner/round_counter.py reset --session-id <session_id>
 ```
 
 Tell the user the spec is saved and suggest next steps:
