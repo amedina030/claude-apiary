@@ -187,34 +187,37 @@ test("signature changes when options differ", () => {
   assert.notEqual(a.signature, b.signature);
 });
 
-// AskUserQuestion card (real shape, from a GUI capture). Each option carries an
-// indented description sub-line; the card auto-appends a "Type something" (Other)
-// entry and a "Chat about this" entry, and prints a navigation footer. The old
-// parser stopped at the first description line and lost the prompt entirely.
+// AskUserQuestion card (REAL shape, from a GUI capture). Crucially, claude
+// emits NO selector glyph here — every option sits at the same column with a
+// single leading space, and the selected row is shown via xterm cell highlight
+// that translateToString() discards. Each option carries an indented
+// description sub-line; the card auto-appends a "Type something" (Other) entry
+// and a "Chat about this" entry, and prints a navigation footer. The Phase 1
+// parser anchored on the glyph and so never matched this at all.
 const ASKUSERQUESTION_CARD = linesOf(`
 Repro test: this very prompt is a deliberate AskUserQuestion. How did it just appear in your GUI?
 
->  1. Terminal card, arrow keys
-      It showed up in the terminal pane as an arrow-key selection card.
-   2. Clickable banner
-      It appeared as clickable buttons in the chat pane.
-   3. Both / something else
-      It showed up some other way, or behaved oddly.
-   4. Type something.
+ 1. Terminal card, arrow keys
+    It showed up in the terminal pane as an arrow-key selection card.
+ 2. Clickable banner
+    It appeared as clickable buttons in the chat pane.
+ 3. Both / something else
+    It showed up some other way, or behaved oddly.
+ 4. Type something.
 
-   5. Chat about this
+ 5. Chat about this
 Enter to select · ↑/↓ to navigate · Esc to cancel
 `);
 
-// Same option/description shape but with NO navigation footer — must be
-// rejected, so ordinary indented output can't masquerade as a menu.
+// Same glyph-less option/description shape but with NO navigation footer — must
+// be rejected, so ordinary indented numbered output can't masquerade as a menu.
 const DESCRIPTIONS_NO_FOOTER = linesOf(`
 Some heading
 
->  1. Option one
-      a description line
-   2. Option two
-      another description
+ 1. Option one
+    a description line
+ 2. Option two
+    another description
 `);
 
 test("AskUserQuestion card: parses all options with descriptions attached", () => {
@@ -222,7 +225,9 @@ test("AskUserQuestion card: parses all options with descriptions attached", () =
   assert.ok(r, "should detect the card");
   assert.match(r.question, /How did it just appear in your GUI\?$/);
   assert.equal(r.options.length, 5, "1-3 plus Type-something and Chat-about-this");
-  assert.equal(r.options[0].selected, true);
+  // Glyph-less shape: selection lives in cell attributes the buffer drops, so
+  // no option is marked selected (clicking drives by number regardless).
+  assert.equal(r.options[0].selected, false);
   assert.equal(r.options[0].text, "Terminal card, arrow keys");
   assert.match(r.options[0].description, /arrow-key selection card/);
   assert.match(r.options[1].description, /clickable buttons/);
@@ -234,6 +239,39 @@ test("AskUserQuestion card: parses all options with descriptions attached", () =
 test("descriptions without a nav footer are rejected (false-positive guard)", () => {
   const r = detectPrompt(DESCRIPTIONS_NO_FOOTER);
   assert.equal(r, null);
+});
+
+// Glyph-less numbered output WITHOUT a footer must not be mistaken for a menu —
+// this is the ordinary-output false-positive the footer gate exists to stop.
+const GLYPHLESS_NO_FOOTER = linesOf(`
+Here are the steps I'll take:
+
+ 1. Read the file
+ 2. Edit the function
+ 3. Run the tests
+`);
+
+test("glyph-less numbered output without a footer is not a prompt", () => {
+  assert.equal(detectPrompt(GLYPHLESS_NO_FOOTER), null);
+});
+
+// Glyph-less menu WITH a footer but no per-option descriptions (compact
+// AskUserQuestion). Must still be detected via the footer-anchored pass.
+const GLYPHLESS_COMPACT = linesOf(`
+Which one?
+
+ 1. First choice
+ 2. Second choice
+ 3. Third choice
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`);
+
+test("glyph-less compact menu (footer, no descriptions) is detected", () => {
+  const r = detectPrompt(GLYPHLESS_COMPACT);
+  assert.ok(r, "footer-anchored pass should catch it");
+  assert.equal(r.question, "Which one?");
+  assert.equal(r.options.length, 3);
+  assert.equal(r.options[2].text, "Third choice");
 });
 
 test("classic numbered prompts keep parsing without a footer", () => {
