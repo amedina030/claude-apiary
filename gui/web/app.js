@@ -1711,19 +1711,55 @@
   const detectPrompt = (window.apiaryPromptDetector && window.apiaryPromptDetector.detectPrompt) || (() => null);
 
   const SCREEN_SCAN_ROWS = 200;
-  function readScreenLines() {
+  // A row counts as "highlighted" when it carries a run of at least this many
+  // contiguous cells with reverse-video or a non-default background — the
+  // colored bar claude paints behind the selected option. Small enough to catch
+  // a short option, large enough to ignore single-cell color noise (cursor,
+  // syntax-highlighted tokens in chat output).
+  const HIGHLIGHT_MIN_RUN = 3;
+
+  // Does this xterm buffer line render with a selection-bar highlight? Reads
+  // cell attributes (isInverse / non-default bg) that translateToString drops.
+  // `cell` is an optional reusable IBufferCell to avoid per-cell allocation.
+  function rowIsHighlighted(line, cell) {
+    const cols = line.length;
+    let run = 0;
+    for (let x = 0; x < cols; x++) {
+      const c = cell ? line.getCell(x, cell) : line.getCell(x);
+      if (!c) { run = 0; continue; }
+      if (c.isInverse() || !c.isBgDefault()) {
+        run += 1;
+        if (run >= HIGHLIGHT_MIN_RUN) return true;
+      } else {
+        run = 0;
+      }
+    }
+    return false;
+  }
+
+  // Read the bottom of the scrollback as { lines, highlighted }, where
+  // `highlighted` is a Set of indices INTO `lines` (push-order, since null rows
+  // are skipped) whose cells show the selection bar. The detector consults it
+  // to mark the cursor row on glyph-less menus; the arrow driver re-reads it to
+  // verify a step landed. Single pass so the two stay perfectly aligned.
+  function readScreen() {
     const buf = term.buffer.active;
-    if (!buf) return [];
+    if (!buf) return { lines: [], highlighted: new Set() };
     const total = buf.length;
     const start = Math.max(0, total - SCREEN_SCAN_ROWS);
     const lines = [];
+    const highlighted = new Set();
+    const cell = typeof buf.getNullCell === "function" ? buf.getNullCell() : undefined;
     for (let y = start; y < total; y++) {
       const line = buf.getLine(y);
       if (!line) continue;
+      const idx = lines.length;
       lines.push(line.translateToString(true).replace(/\s+$/, ""));
+      if (rowIsHighlighted(line, cell)) highlighted.add(idx);
     }
-    return lines;
+    return { lines, highlighted };
   }
+  function readScreenLines() { return readScreen().lines; }
 
   function renderPromptBanner(prompt) {
     promptBannerEl.innerHTML = "";
@@ -2089,7 +2125,8 @@
   }
 
   function runDetect() {
-    const found = detectPrompt(readScreenLines());
+    const { lines, highlighted } = readScreen();
+    const found = detectPrompt(lines, { highlightedRows: highlighted });
     if (!found) {
       if (activePrompt) hidePromptBanner();
       // Also clear the dismiss cooldown — if the prompt is truly gone, a

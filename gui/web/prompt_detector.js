@@ -28,13 +28,27 @@
   // (per-option descriptions, and the glyph-less shape) against false positives.
   const NAV_HINT = /↑|↓|to select|to navigate|esc to cancel|enter to (?:select|confirm)/i;
 
+  // Normalize the optional highlighted-row hint into a Set of line indices.
+  // The browser derives this from xterm cell attributes (reverse-video /
+  // non-default background — the colored bar AskUserQuestion paints behind the
+  // selected row); Node tests pass an explicit array. Absent/empty → glyph-only
+  // selection, preserving the pre-Phase-2 behavior.
+  function toHighlightSet(highlighted) {
+    if (highlighted instanceof Set) return highlighted;
+    if (Array.isArray(highlighted)) return new Set(highlighted);
+    return new Set();
+  }
+
   // Parse a numbered-option block whose first (lowest-numbered) option sits at
   // line `i`. The selector glyph is optional: claude historically rendered ❯
   // (U+276F), 2.1.116+ emits a literal '>', and the AskUserQuestion card emits
   // NO glyph at all (the selected row is shown via xterm cell highlight, which
-  // translateToString() discards). Returns {options, lastIdx, sawDescription}
-  // or null when fewer than two options parse.
-  function parseOptionsFrom(lines, i) {
+  // translateToString() discards — so we accept it out-of-band via `highlight`).
+  // Returns {options, lastIdx, sawDescription} or null when fewer than two
+  // options parse. Each option carries `lineIdx` (its buffer row) so the arrow
+  // driver can verify the highlighted row after stepping.
+  function parseOptionsFrom(lines, i, highlight) {
+    const hl = toHighlightSet(highlight);
     // Capture the prefix (group 1) so we know the column the option number sits
     // at — description lines indent past it.
     const sel = lines[i].match(/^(\s*[❯>]?\s*)(\d+)\.\s+(.+)$/);
@@ -45,12 +59,11 @@
       number: firstNum,
       text: sel[3].trim(),
       description: "",
-      // We can only know the highlighted row from the glyph; the glyph-less
-      // shape carries the selection in cell attributes the string buffer drops,
-      // so leave it unselected (Phase 2 reads attributes). Clicking drives via
-      // the option number regardless, so this is cosmetic.
-      selected: hasGlyph,
+      // Selection comes from the glyph (classic shapes) OR the cell-highlight
+      // hint (glyph-less AskUserQuestion cards, cursor-off-first, >9 options).
+      selected: hasGlyph || hl.has(i),
       indent: sel[1].length,
+      lineIdx: i,
     }];
     let expected = firstNum + 1;
     let sawDescription = false;
@@ -63,8 +76,9 @@
           number: expected,
           text: m[3].trim(),
           description: "",
-          selected: false,
+          selected: hl.has(j),
           indent: m[1].length,
+          lineIdx: j,
         });
         expected += 1;
         continue;
@@ -151,13 +165,16 @@
     return { question, context, options, signature };
   }
 
-  function detectPrompt(lines) {
+  // `opts.highlightedRows` (Set|array of line indices) is the optional
+  // cell-attribute highlight hint from the browser; omitted in most tests.
+  function detectPrompt(lines, opts) {
+    const highlight = opts && opts.highlightedRows;
     // Pass 1 — glyphed anchor (❯ or '>'), scanned bottom-up. This is the
     // historical path; the glyph uniquely marks the selected (top) option, so
     // it's a safe anchor with no footer needed for classic shapes.
     for (let i = lines.length - 1; i >= 0; i--) {
       if (!/^\s*[❯>]\s*\d+\.\s+/.test(lines[i])) continue;
-      const parsed = parseOptionsFrom(lines, i);
+      const parsed = parseOptionsFrom(lines, i, highlight);
       if (!parsed) continue;
       // Guard the looser description path against false positives: a menu that
       // carries per-option descriptions must also show a navigation footer.
@@ -177,7 +194,7 @@
     // numbered output can't masquerade as a menu.
     const anchor = findGlyphlessAnchor(lines);
     if (anchor >= 0) {
-      const parsed = parseOptionsFrom(lines, anchor);
+      const parsed = parseOptionsFrom(lines, anchor, highlight);
       // Proximity gate: the nav footer must sit immediately after the option
       // block. A real menu always prints its footer on the line that ends the
       // options (blank lines are skipped during parsing, so parsed.lastIdx

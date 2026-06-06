@@ -274,6 +274,40 @@ test("glyph-less compact menu (footer, no descriptions) is detected", () => {
   assert.equal(r.options[2].text, "Third choice");
 });
 
+// Phase 2: cell-attribute highlight hint. GLYPHLESS_COMPACT option lines are at
+// buffer indices 3,4,5 (leading blank line shifts everything by one). The
+// browser passes the highlighted row index derived from xterm cell attributes;
+// here row 4 = the second option.
+test("highlight hint marks the cursor row on a glyph-less menu", () => {
+  const r = detectPrompt(GLYPHLESS_COMPACT, { highlightedRows: [4] });
+  assert.ok(r);
+  assert.deepEqual(
+    r.options.map((o) => o.selected),
+    [false, true, false],
+    "only the highlighted row (option 2) is selected"
+  );
+  // lineIdx is exposed so the arrow driver can re-verify after stepping.
+  assert.deepEqual(r.options.map((o) => o.lineIdx), [3, 4, 5]);
+});
+
+test("highlight hint accepts a Set and survives a non-option index", () => {
+  // Index 6 is the footer, not an option — must be ignored, not crash.
+  const r = detectPrompt(GLYPHLESS_COMPACT, { highlightedRows: new Set([5, 6]) });
+  assert.ok(r);
+  assert.deepEqual(r.options.map((o) => o.selected), [false, false, true]);
+});
+
+test("glyph-less menu without a highlight hint leaves all rows unselected", () => {
+  // Back-compat: omitting the hint preserves pre-Phase-2 behavior.
+  const r = detectPrompt(GLYPHLESS_COMPACT);
+  assert.deepEqual(r.options.map((o) => o.selected), [false, false, false]);
+});
+
+test("glyph selection still wins when no highlight hint is supplied", () => {
+  const r = detectPrompt(TRUST_FOLDER);
+  assert.deepEqual(r.options.map((o) => o.selected), [true, false]);
+});
+
 // Regression: the claude TUI renders the assistant's own chat messages into the
 // same xterm buffer the detector scrapes. A numbered list in prose, with a
 // nav-hint footer rendered well below it (claude's input hint), must NOT be
