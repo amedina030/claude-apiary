@@ -139,10 +139,16 @@ def check_versions(apiary: Path) -> CheckResult:
             )
             continue
         if repo_version != main_version:
+            real = entry.get("real_path", "")
+            remediation = (
+                f"run `apiary install --target \"{real}\"` to update"
+                if real
+                else "re-run `apiary install --target <path>` to update"
+            )
             issues.append(
                 f"registry[{id_str}] ({entry.get('name', '?')}) "
                 f"pinned to {repo_version}; main-apiary is at {main_version} "
-                "— `apiary update` needed."
+                f"— {remediation}."
             )
     return notes, issues
 
