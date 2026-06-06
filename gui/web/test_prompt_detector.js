@@ -274,6 +274,27 @@ test("glyph-less compact menu (footer, no descriptions) is detected", () => {
   assert.equal(r.options[2].text, "Third choice");
 });
 
+// Regression: the claude TUI renders the assistant's own chat messages into the
+// same xterm buffer the detector scrapes. A numbered list in prose, with a
+// nav-hint footer rendered well below it (claude's input hint), must NOT be
+// mistaken for a menu. The glyph-less pass walks up to 30 lines from a footer to
+// find a "1.", so without a proximity gate this prose list false-positives.
+const PROSE_LIST_FAR_FOOTER = linesOf(`
+Check, in order:
+ 1. Banner appears with every option
+ 2. Terminal panel stays put
+ 3. Click an option to commit
+
+Some more prose explaining the next steps.
+Another line that is not a menu at all.
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`);
+
+test("prose numbered list with a far-below footer is not a menu", () => {
+  assert.equal(detectPrompt(PROSE_LIST_FAR_FOOTER), null);
+});
+
 test("classic numbered prompts keep parsing without a footer", () => {
   // Regression: the footer requirement must apply only to the description path.
   assert.ok(detectPrompt(TRUST_FOLDER), "trust-folder has no footer, no descriptions");

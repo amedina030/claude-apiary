@@ -178,7 +178,18 @@
     const anchor = findGlyphlessAnchor(lines);
     if (anchor >= 0) {
       const parsed = parseOptionsFrom(lines, anchor);
-      if (parsed) return buildResult(lines, anchor, parsed);
+      // Proximity gate: the nav footer must sit immediately after the option
+      // block. A real menu always prints its footer on the line that ends the
+      // options (blank lines are skipped during parsing, so parsed.lastIdx
+      // lands on that footer). The claude TUI renders the whole conversation —
+      // including the assistant's own chat messages — into this same buffer, so
+      // a stray "1./2./3." numbered list in prose would otherwise be anchored to
+      // claude's input-hint footer many lines below and mis-rendered as a menu.
+      // Such prose has ordinary text after the list, not a footer, so it fails
+      // here. (parsed.lastIdx is the line that broke the option loop.)
+      if (parsed && hasNavFooter(lines, parsed.lastIdx, parsed.lastIdx + 2)) {
+        return buildResult(lines, anchor, parsed);
+      }
     }
     return null;
   }
