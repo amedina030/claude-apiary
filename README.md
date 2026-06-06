@@ -107,9 +107,9 @@ Two-tier storage: per-session JSON observations under `<state-dir>/compass/obser
 
 ```
 /compass-sync                                                                            # manually re-run synthesis
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/observations.py count      # how many active observations
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/backfill.py --last 5       # backfill 5 recent transcripts
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/observations.py archive    # dry-run archive sweep
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/observations.py count      # how many active observations
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/backfill.py --last 5       # backfill 5 recent transcripts
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/observations.py archive    # dry-run archive sweep
 ```
 
 Bloat handling: rolling archive at 50+ active observations and 90+ days old; never archives below 50. Synthesizer self-throttles to 7-day cadence (cron runs daily, no-ops 6 of 7 days). Dimensions are configured at `compass/dimensions.json`. See [`compass/CLAUDE.md`](compass/CLAUDE.md) for lane discipline (compass vs auto-memory) and observation quality bar.

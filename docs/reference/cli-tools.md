@@ -209,8 +209,8 @@ Inspect and maintain per-session personality observation files at `<state-dir>/c
 Read active observations, previous `personality.md`, and `corrections.md`; call headless `claude -p` to produce a new `personality.md`. Used by `/compass-sync` and the weekly cron entry.
 
 ```bash
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/synthesize.py
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/synthesize.py --dry-run
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/synthesize.py
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/synthesize.py --dry-run
 python -m compass.synthesize --cron        # cron-driven; no-ops if personality.md is < 7 days old
 ```
 
@@ -227,9 +227,9 @@ Exit codes: `0` wrote `personality.md`; `1` no active observations; `2` claude s
 Extract observations from historical session transcripts via headless claude. Selectors are combinable and intersected.
 
 ```bash
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/backfill.py --last 5
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/backfill.py --session-ids 1089da5c,8123e697
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" compass/backfill.py --since 2026-04-10 --last 5
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/backfill.py --last 5
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/backfill.py --session-ids 1089da5c,8123e697
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/backfill.py --since 2026-04-10 --last 5
 ```
 
 | Flag | Required | Description |
@@ -732,8 +732,8 @@ Silent on any failure — cost logging never breaks a stage. Sums all numeric fi
 Check or repair the host OS scheduler against apiary's canonical scheduled-entry registry (`cron_registry/<hostname>.json` at the apiary repo root). Each machine maintains its own file — named after `platform.node()` — so multi-machine setups don't fight over a single shared registry. Detects drift when the repo moves, files rename, or the registered command points at a path that no longer exists.
 
 ```bash
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" runner/cron_health.py check
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" runner/cron_health.py repair [--apply]
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" runner/cron_health.py check
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" runner/cron_health.py repair [--apply]
 ```
 
 ### Subcommands
@@ -852,8 +852,8 @@ See [Bootstrapping a repo](../guides/bootstrapping-a-repo.md) for profile author
 Inspect and verify the apiary target registry at `<apiary>/.repos/registry.json` (built by the resolver in `core/utils/state.py`). Every target whose `.apiary/` state has been created on this machine is indexed there; this tool reports the index and flags entries whose `real_path` no longer exists on disk.
 
 ```bash
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" core/targets.py list
-python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" core/targets.py verify
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" core/targets.py list
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" core/targets.py verify
 ```
 
 ### Subcommands

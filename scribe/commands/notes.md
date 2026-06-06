@@ -30,6 +30,6 @@ Query notes using the scribe tool.
 1. Parse the arguments above.
 2. Run the appropriate command:
    ```bash
-   python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" scribe/notes.py <subcommand> [args]
+   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py <subcommand> [args]
    ```
 3. Display the output to the user.
