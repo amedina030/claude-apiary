@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from gui import composer_state, paste_probe, picker, pty_capture, sidebar_state, tabs_state, usage_fetcher
+from gui import composer_state, picker, pty_capture, sidebar_state, tabs_state, usage_fetcher
 from gui import permission_mcp
 from gui.permission_bridge import PermissionBridge
 from gui.permission_mcp import BRIDGE_URL_ENV as _PERMISSION_MCP_BRIDGE_URL_ENV
@@ -60,7 +60,6 @@ class GuiBridge:
         return "ok"
 
     def send_input(self, text: str) -> bool:
-        paste_probe.probe_text("bridge_recv_input", text)  # PASTE-PROBE: chat-path bytes as the bridge received them
         sess = self._app.active
         return sess.send_input(text) if sess is not None else False
 
@@ -73,19 +72,8 @@ class GuiBridge:
         return sess.send_escape() if sess is not None else False
 
     def send_text(self, text: str) -> bool:
-        paste_probe.probe_text("bridge_recv", text)  # PASTE-PROBE: bytes as the bridge received them
         sess = self._app.active
         return sess.send_text(text) if sess is not None else False
-
-    def paste_probe(self, hop: str, length, head: str = "", tail: str = "") -> bool:
-        """PASTE-PROBE: browser hop reports its own measured length/fingerprints
-        so we can compare against what the bridge received. Temporary — remove
-        with the rest of the paste_probe instrumentation."""
-        try:
-            paste_probe.probe(str(hop), int(length), str(head), str(tail))
-        except Exception:
-            pass
-        return True
 
     def restart_pty(self) -> bool:
         sess = self._app.active

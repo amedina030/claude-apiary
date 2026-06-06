@@ -22,19 +22,6 @@ from typing import Callable, Optional, Sequence
 _SEND_CHUNK_SIZE = 1024
 
 
-# PASTE-PROBE: temporary truncation diagnostics. Guarded so a missing/broken
-# probe module never affects the send path. Remove with the rest of the probes.
-try:
-    from gui.paste_probe import probe as _paste_probe_raw
-    from gui.paste_probe import probe_text as _paste_probe
-except Exception:  # pragma: no cover
-    def _paste_probe(_hop: str, _text: str) -> None:  # type: ignore[misc]
-        pass
-
-    def _paste_probe_raw(_hop: str, _length: int, _head: str = "", _tail: str = "") -> None:  # type: ignore[misc]
-        pass
-
-
 def _resolve_claude_executable(name: str = "claude") -> Optional[str]:
     """Return the absolute path to the `claude` CLI on PATH, or None."""
     found = shutil.which(name)
@@ -226,30 +213,9 @@ class PtyWrapper:
             return False
         if not text:
             return True
-        _paste_probe("pty_send", text)  # PASTE-PROBE: bytes entering the pty layer
         try:
-            chunks = 0
-            short = 0  # PASTE-PROBE: count of chunks where write() reported a short count
             for i in range(0, len(text), _SEND_CHUNK_SIZE):
-                chunk = text[i:i + _SEND_CHUNK_SIZE]
-                # PASTE-PROBE: pywinpty.write returns the number of BYTES written.
-                # We compare against the chunk's UTF-8 byte length; a short count
-                # means the native agent accepted only part of the chunk and the
-                # remainder is silently dropped (the discarded-return-value bug).
-                want = len(chunk.encode("utf-8"))
-                got = proc.write(chunk)
-                try:
-                    got = int(got)
-                except (TypeError, ValueError):
-                    got = -1
-                if got != want:
-                    short += 1
-                    _paste_probe_raw(
-                        f"pty_short(chunk={chunks},want={want},got={got})",
-                        len(chunk), chunk[:24], chunk[-24:] if len(chunk) > 24 else "",
-                    )
-                chunks += 1
-            _paste_probe(f"pty_done(chunks={chunks},short={short})", text)  # PASTE-PROBE: loop completed
+                proc.write(text[i:i + _SEND_CHUNK_SIZE])
             return True
         except Exception:
             return False
