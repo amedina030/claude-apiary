@@ -269,5 +269,73 @@ class FixActionsTests(unittest.TestCase):
         self.assertEqual(rc, 0)
 
 
+class CheckStaleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.apiary = _make_apiary(self.root)
+
+    def _add_source_command(self, filename: str, content: str) -> Path:
+        """Write a source command file under a recognized tool dir."""
+        cmd_dir = self.apiary / "scribe" / "commands"
+        cmd_dir.mkdir(parents=True, exist_ok=True)
+        p = cmd_dir / filename
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def _register(self, uid: int, name: str, real_path: Path) -> None:
+        _write_registry(self.apiary, {
+            str(uid): {"uid": uid, "name": name,
+                       "real_path": str(real_path), "version": "0.1.0"},
+        })
+
+    def _write_bootstrap_state(self, slug: str, command_hashes: dict) -> None:
+        d = state.repos_dir(self.apiary) / slug
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "bootstrap_state.json").write_text(
+            json.dumps({"commands_dir_hashes": command_hashes}), encoding="utf-8")
+
+    def test_matching_hashes_returns_clean(self):
+        from core.install import _hash_file
+        src = self._add_source_command("notes.md", "current\n")
+        repo = self.root / "repo"
+        repo.mkdir()
+        self._register(2, "repo", repo)
+        self._write_bootstrap_state("repo-2", {"notes.md": _hash_file(src)})
+        notes, issues = doctor.check_stale(self.apiary)
+        self.assertEqual(notes, [])
+        self.assertEqual(issues, [])
+
+    def test_diverging_hash_is_an_issue(self):
+        self._add_source_command("notes.md", "edited-since-install\n")
+        repo = self.root / "repo"
+        repo.mkdir()
+        self._register(2, "repo", repo)
+        self._write_bootstrap_state("repo-2", {"notes.md": "0" * 64})  # stale hash
+        notes, issues = doctor.check_stale(self.apiary)
+        self.assertEqual(len(issues), 1)
+        self.assertIn("notes.md", issues[0])
+        self.assertIn("repo", issues[0])
+
+    def test_missing_bootstrap_state_is_a_note_not_an_issue(self):
+        self._add_source_command("notes.md", "current\n")
+        repo = self.root / "repo"
+        repo.mkdir()
+        self._register(2, "repo", repo)
+        # No bootstrap_state.json written.
+        notes, issues = doctor.check_stale(self.apiary)
+        self.assertEqual(issues, [])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("bootstrap_state", notes[0])
+
+    def test_unreachable_repo_is_skipped(self):
+        self._add_source_command("notes.md", "current\n")
+        self._register(2, "repo", self.root / "does-not-exist")
+        notes, issues = doctor.check_stale(self.apiary)
+        self.assertEqual(issues, [])
+        self.assertEqual(notes, [])
+
+
 if __name__ == "__main__":
     unittest.main()
