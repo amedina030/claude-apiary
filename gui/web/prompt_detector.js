@@ -27,6 +27,10 @@
   // menu-specific signal we have, so it gates the looser detection paths
   // (per-option descriptions, and the glyph-less shape) against false positives.
   const NAV_HINT = /↑|↓|to select|to navigate|esc to cancel|enter to (?:select|confirm)/i;
+  // A column-0 line that is TUI chrome (box borders, dividers, block/selector
+  // glyphs, the input composer) rather than the hard-wrapped tail of a prose
+  // description. Used to stop a description from swallowing the frame around it.
+  const WRAP_STOP = /^\s*(?:[─╌━]{3,}|[│┃┌┐└┘├┤┬┴┼╭╮╰╯▐▛▜▟▝▘█❯⏸])/;
 
   // Normalize the optional highlighted-row hint into a Set of line indices.
   // The browser derives this from xterm cell attributes (reverse-video /
@@ -97,6 +101,22 @@
         const extra = lines[j].trim();
         last.description = last.description ? last.description + " " + extra : extra;
         sawDescription = true;
+        continue;
+      }
+      // A column-0 (at-or-left of the number) non-numbered line. Usually the
+      // menu is over — but when a long description overflows the card width,
+      // xterm HARD-WRAPS its tail onto a fresh row at column 0 with no
+      // re-indent, and the old `break` here truncated the option list (often to
+      // a single option → null) and left the footer outside the proximity
+      // guards, so the whole card silently failed to parse. Fold such a row
+      // back into the current description, but only when it (a) directly abuts
+      // the description it continues — `last.description` is already non-empty
+      // and the previous row was non-blank, so a blank-separated paragraph ends
+      // the list — and (b) isn't TUI chrome. Otherwise the list is genuinely
+      // over.
+      const prevBlank = j === 0 || lines[j - 1].trim() === "";
+      if (last.description && !prevBlank && !WRAP_STOP.test(lines[j])) {
+        last.description = last.description + " " + lines[j].trim();
         continue;
       }
       break;

@@ -245,6 +245,60 @@ test("descriptions without a nav footer are rejected (false-positive guard)", ()
   assert.equal(r, null);
 });
 
+// Real failure captured live (#H-2026-241 verify): a glyphed AskUserQuestion
+// whose per-option descriptions are long enough that xterm HARD-WRAPS each tail
+// onto a fresh row at column 0 (no re-indent). The Phase-2 parser stopped at the
+// first wrapped row → parsed a single option → returned null → the GUI showed
+// the "couldn't parse — check the terminal" fallback instead of the banner.
+const ASKUSERQUESTION_WRAPPED = linesOf(`
+This is a live test of the 2a highlight detection. When this card appeared in
+the banner, did the option the cursor is on show an accent-colored border?
+
+> 1. Border present
+     The highlighted option has a visible accent-colored border in the
+banner so 2a is working.
+  2. No border
+     No option in the banner has a highlight or border so 2a is NOT
+working (regression or detection miss).
+  3. No banner at all
+     No prompt banner appeared in the GUI for this question.
+  4. Type something.
+
+  5. Chat about this
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`);
+
+test("wrapped descriptions: column-0 overflow folds back, all options parse", () => {
+  const r = detectPrompt(ASKUSERQUESTION_WRAPPED);
+  assert.ok(r, "must parse despite hard-wrapped descriptions");
+  assert.equal(r.options.length, 5, "1-3 plus Type-something and Chat-about-this");
+  assert.equal(r.options[0].selected, true, "glyph marks option 1");
+  // The wrapped tail is folded back into the same description, not dropped.
+  assert.match(r.options[0].description, /accent-colored border in the banner so 2a is working\.$/);
+  assert.match(r.options[1].description, /2a is NOT working \(regression or detection miss\)\.$/);
+  assert.equal(r.options[3].text, "Type something.");
+  assert.equal(r.options[3].description, "", "no description → nothing folded");
+  assert.equal(r.options[4].text, "Chat about this");
+});
+
+// A description-less option followed by column-0 TUI chrome (the input
+// composer) must NOT have that chrome folded into it — the fold only extends an
+// already-started description that directly abuts its tail.
+const CLASSIC_THEN_CHROME = linesOf(`
+Do you want to proceed?
+❯ 1. Yes
+  2. No
+│ > type your message here                       │
+`);
+
+test("column-0 chrome after a description-less option is not absorbed", () => {
+  const r = detectPrompt(CLASSIC_THEN_CHROME);
+  assert.ok(r);
+  assert.equal(r.options.length, 2);
+  assert.equal(r.options[1].text, "No");
+  assert.equal(r.options[1].description, "", "input-box chrome must not leak in");
+});
+
 // Glyph-less numbered output WITHOUT a footer must not be mistaken for a menu —
 // this is the ordinary-output false-positive the footer gate exists to stop.
 const GLYPHLESS_NO_FOOTER = linesOf(`
