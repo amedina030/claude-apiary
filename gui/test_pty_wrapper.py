@@ -6,6 +6,8 @@ that send_text round-trips arbitrary-length input by accumulating chunks.
 
 from __future__ import annotations
 
+import threading
+import time
 import unittest
 
 from gui import pty_wrapper
@@ -73,6 +75,54 @@ class SendTextChunkingTests(unittest.TestCase):
         self.assertFalse(wrapper.send_text("Y" * 4000))
         # Confirms partial writes before the failure; we don't claim atomicity.
         self.assertEqual(len(stub.writes), 2)
+
+
+class WaitForQuietTests(unittest.TestCase):
+    """wait_for_quiet() gates the submit CR after a bracketed paste so it isn't
+    sent before the CLI finishes rendering the paste (the double-Enter bug)."""
+
+    def test_returns_true_after_activity_settles(self) -> None:
+        wrapper = PtyWrapper()
+        # Output already arrived after the baseline, then went quiet.
+        wrapper._last_out_at = time.monotonic()
+        start = time.monotonic()
+        self.assertTrue(wrapper.wait_for_quiet(after=0.0, quiet=0.05, timeout=1.0))
+        # It must actually wait out the quiet window, not return instantly.
+        self.assertGreaterEqual(time.monotonic() - start, 0.05)
+
+    def test_idle_prompt_does_not_trigger_early_cr(self) -> None:
+        # No output ever arrives after the baseline (stale quiet from an idle
+        # prompt must NOT count as "settled"). Should wait the full timeout and
+        # report failure rather than firing the CR immediately.
+        wrapper = PtyWrapper()
+        baseline = wrapper._last_out_at  # 0.0, no output seen
+        start = time.monotonic()
+        self.assertFalse(wrapper.wait_for_quiet(after=baseline, quiet=0.05, timeout=0.1))
+        self.assertGreaterEqual(time.monotonic() - start, 0.1)
+
+    def test_continuous_output_times_out(self) -> None:
+        # A spinner that never goes quiet hits the timeout floor and returns
+        # False — the caller still sends the CR, just later.
+        wrapper = PtyWrapper()
+        stop = threading.Event()
+
+        def churn() -> None:
+            while not stop.is_set():
+                wrapper._last_out_at = time.monotonic()
+                time.sleep(0.01)
+
+        t = threading.Thread(target=churn, daemon=True)
+        t.start()
+        try:
+            self.assertFalse(wrapper.wait_for_quiet(after=0.0, quiet=0.08, timeout=0.2))
+        finally:
+            stop.set()
+            t.join(timeout=1.0)
+
+    def test_stop_event_short_circuits(self) -> None:
+        wrapper = PtyWrapper()
+        wrapper._stop.set()
+        self.assertFalse(wrapper.wait_for_quiet(after=0.0, quiet=0.05, timeout=5.0))
 
 
 if __name__ == "__main__":
