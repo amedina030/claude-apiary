@@ -89,6 +89,11 @@ _CLAUDE_SUBPROC_ENV = (
     "CLAUDE_CODE_SESSION_ID",
 )
 
+# Set to "1" in the spawned claude's env so the startup hook can tell the
+# session it's running inside the GUI. Read by core/hooks/startup_prompt_hook.py
+# (as a literal — core/ must not import from gui/).
+GUI_SESSION_ENV = "APIARY_GUI_SESSION"
+
 
 class Session:
     """A single claude subprocess + transcript pipeline keyed to one cwd."""
@@ -249,6 +254,10 @@ class Session:
         spawn_env = os.environ.copy()
         for key in _CLAUDE_SUBPROC_ENV:
             spawn_env.pop(key, None)
+        # Mark this as a GUI-hosted session. claude inherits this env, and so
+        # do its hook subprocesses, so the startup hook can tell the session
+        # it's running inside the GUI rather than a raw terminal.
+        spawn_env[GUI_SESSION_ENV] = "1"
         # Tag the MCP subprocess (spawned by claude, inherits this env) with
         # the owning session_id so the GUI can route incoming permission
         # prompts to the correct tab. See scribe C-2026-36 follow-up #4.

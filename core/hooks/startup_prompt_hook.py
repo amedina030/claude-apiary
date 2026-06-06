@@ -129,6 +129,18 @@ def _run():
     except Exception:
         parts.append("init: failed (using defaults)")
 
+    # --- 1b. Surface: flag GUI-hosted sessions ---
+    # gui/session.py sets APIARY_GUI_SESSION=1 in the spawned claude's env
+    # (inherited by this hook subprocess) when the session runs inside the GUI.
+    if os.environ.get("APIARY_GUI_SESSION") == "1":
+        parts.append("")
+        parts.append(
+            "surface: this session is running inside the apiary GUI (a pywebview "
+            "desktop app), not a raw terminal. The user reads your output in the "
+            "GUI chat pane and types into the GUI composer. Edits to gui/web/* "
+            "require a full GUI restart (not a reload) to take effect."
+        )
+
     # --- 2. Summary: active notes, latest handoff ---
     role = identity.get("role", "user")
     mission = identity.get("mission", "general")
