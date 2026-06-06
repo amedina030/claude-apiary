@@ -25,28 +25,67 @@
     for (let i = lines.length - 1; i >= 0; i--) {
       // Selector char: claude-code historically rendered ❯ (U+276F); 2.1.116+
       // emits a literal '>' instead. Accept either so the detector keeps
-      // working across versions.
-      const sel = lines[i].match(/^\s*[❯>]\s*(\d+)\.\s+(.+)$/);
+      // working across versions. Capture the prefix (group 1) so we know the
+      // column the option number sits at — description lines indent past it.
+      const sel = lines[i].match(/^(\s*[❯>]\s*)(\d+)\.\s+(.+)$/);
       if (!sel) continue;
-      const firstNum = parseInt(sel[1], 10);
+      const firstNum = parseInt(sel[2], 10);
       const options = [{
         number: firstNum,
-        text: sel[2].trim(),
+        text: sel[3].trim(),
+        description: "",
         selected: true,
+        indent: sel[1].length,
       }];
       let expected = firstNum + 1;
+      let sawDescription = false;
+      let lastIdx = i;
       for (let j = i + 1; j < lines.length && options.length < PROMPT_MAX_OPTIONS; j++) {
-        const m = lines[j].match(/^\s+(\d+)\.\s+(.+)$/);
-        if (m && parseInt(m[1], 10) === expected) {
-          options.push({ number: expected, text: m[2].trim(), selected: false });
+        lastIdx = j;
+        const m = lines[j].match(/^(\s+)(\d+)\.\s+(.+)$/);
+        if (m && parseInt(m[2], 10) === expected) {
+          options.push({
+            number: expected,
+            text: m[3].trim(),
+            description: "",
+            selected: false,
+            indent: m[1].length,
+          });
           expected += 1;
           continue;
         }
-        if (m) break;
+        if (m) break;                       // numbered, but out of sequence
         if (lines[j].trim() === "") continue;
+        // Non-blank, non-numbered line. AskUserQuestion and other rich menus
+        // render an indented description / wrapped sub-line under each option;
+        // the old parser stopped dead here and lost the whole prompt. Attach it
+        // to the current option when it indents past that option's number
+        // column; anything at-or-left of the number (footer, chrome, ordinary
+        // output) ends the option list.
+        const lead = lines[j].match(/^(\s*)/)[1].length;
+        const last = options[options.length - 1];
+        if (lead > last.indent) {
+          const extra = lines[j].trim();
+          last.description = last.description ? last.description + " " + extra : extra;
+          sawDescription = true;
+          continue;
+        }
         break;
       }
       if (options.length < 2) continue;
+      // Guard the looser description path against false positives: a menu that
+      // carries per-option descriptions must also show a navigation footer
+      // (claude prints "Enter to select · ↑/↓ to navigate · Esc to cancel").
+      // Classic description-less numbered prompts keep the old, footer-free
+      // acceptance so plan-mode / trust-folder / permission shapes don't regress.
+      if (sawDescription) {
+        const navHint = /↑|↓|to select|to navigate|esc to cancel|enter to (?:select|confirm)/i;
+        let hasNav = false;
+        for (let k = i; k < Math.min(lines.length, lastIdx + 3); k++) {
+          if (navHint.test(lines[k])) { hasNav = true; break; }
+        }
+        if (!hasNav) continue;
+      }
       let question = "";
       let questionIdx = -1;
       for (let k = i - 1; k >= 0 && k >= i - PROMPT_SCAN_BACK_LINES; k--) {

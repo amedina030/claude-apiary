@@ -186,3 +186,58 @@ test("signature changes when options differ", () => {
   const b = detectPrompt(TOOL_PERMISSION_BASH);
   assert.notEqual(a.signature, b.signature);
 });
+
+// AskUserQuestion card (real shape, from a GUI capture). Each option carries an
+// indented description sub-line; the card auto-appends a "Type something" (Other)
+// entry and a "Chat about this" entry, and prints a navigation footer. The old
+// parser stopped at the first description line and lost the prompt entirely.
+const ASKUSERQUESTION_CARD = linesOf(`
+Repro test: this very prompt is a deliberate AskUserQuestion. How did it just appear in your GUI?
+
+>  1. Terminal card, arrow keys
+      It showed up in the terminal pane as an arrow-key selection card.
+   2. Clickable banner
+      It appeared as clickable buttons in the chat pane.
+   3. Both / something else
+      It showed up some other way, or behaved oddly.
+   4. Type something.
+
+   5. Chat about this
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`);
+
+// Same option/description shape but with NO navigation footer — must be
+// rejected, so ordinary indented output can't masquerade as a menu.
+const DESCRIPTIONS_NO_FOOTER = linesOf(`
+Some heading
+
+>  1. Option one
+      a description line
+   2. Option two
+      another description
+`);
+
+test("AskUserQuestion card: parses all options with descriptions attached", () => {
+  const r = detectPrompt(ASKUSERQUESTION_CARD);
+  assert.ok(r, "should detect the card");
+  assert.match(r.question, /How did it just appear in your GUI\?$/);
+  assert.equal(r.options.length, 5, "1-3 plus Type-something and Chat-about-this");
+  assert.equal(r.options[0].selected, true);
+  assert.equal(r.options[0].text, "Terminal card, arrow keys");
+  assert.match(r.options[0].description, /arrow-key selection card/);
+  assert.match(r.options[1].description, /clickable buttons/);
+  assert.equal(r.options[3].text, "Type something.");
+  assert.equal(r.options[3].description, "", "no sub-line → empty description");
+  assert.equal(r.options[4].text, "Chat about this");
+});
+
+test("descriptions without a nav footer are rejected (false-positive guard)", () => {
+  const r = detectPrompt(DESCRIPTIONS_NO_FOOTER);
+  assert.equal(r, null);
+});
+
+test("classic numbered prompts keep parsing without a footer", () => {
+  // Regression: the footer requirement must apply only to the description path.
+  assert.ok(detectPrompt(TRUST_FOLDER), "trust-folder has no footer, no descriptions");
+  assert.ok(detectPrompt(PLAN_MODE_APPROVAL), "plan-mode has no footer");
+});

@@ -1751,11 +1751,26 @@
     }
     const row = document.createElement("div");
     row.className = "prompt-options";
+    // When any option carries a description (AskUserQuestion-style cards),
+    // stack the buttons full-width so the sub-text is readable, instead of the
+    // inline wrap used for terse numbered prompts.
+    if (prompt.options.some((o) => o.description)) {
+      row.classList.add("prompt-options-stacked");
+    }
     for (const opt of prompt.options) {
       const btn = document.createElement("button");
       btn.className = "prompt-option" + (opt.selected ? " selected" : "");
       btn.type = "button";
-      btn.textContent = `${opt.number}. ${opt.text}`;
+      const label = document.createElement("span");
+      label.className = "prompt-option-label";
+      label.textContent = `${opt.number}. ${opt.text}`;
+      btn.appendChild(label);
+      if (opt.description) {
+        const desc = document.createElement("span");
+        desc.className = "prompt-option-desc";
+        desc.textContent = opt.description;
+        btn.appendChild(desc);
+      }
       btn.addEventListener("click", () => answerPrompt(opt.number, opt.text));
       row.appendChild(btn);
     }
@@ -2049,7 +2064,13 @@
     // claude into a text-input sub-mode. We send the digit to enter that
     // mode, skip the Enter, hide the banner, and unblock the chat input so
     // the user can type their feedback and submit it with Enter as normal.
-    const isFeedback = /^\s*tell\b|what to change|with this feedback/i.test(optText);
+    // Options that drop claude into a free-text sub-mode rather than resolving
+    // immediately: plan mode's "Tell Claude what to change", and the
+    // AskUserQuestion card's auto-added "Type something" (Other) / "Chat about
+    // this" entries. For these we send the digit to enter the field, skip the
+    // Enter, and unblock the composer so the user can type their answer.
+    const isFeedback =
+      /^\s*tell\b|what to change|with this feedback|type something|chat about/i.test(optText);
     // Permanently mute this signature for the session — claude often leaves
     // the answered prompt rendered in the buffer past DISMISS_COOLDOWN_MS,
     // and we don't want the banner to re-appear after the user has already
