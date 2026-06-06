@@ -70,6 +70,15 @@ def _projects_root_for(cwd: Path) -> Path:
 
 _CLEAR_CMD_RE = re.compile(r"^\s*/clear(\s|$)")
 
+# Terminal bracketed-paste markers (DECSET 2004). Wrapping a prompt body in
+# these makes the Claude Code CLI absorb it in *paste mode* — accumulating the
+# bytes without per-keystroke processing — instead of treating a multi-KB paste
+# as raw typing (which backed up its read loop until the Windows ConPTY input
+# buffer overflowed and silently dropped the head). The CLI enables mode 2004
+# and parses these markers on stdin; this mirrors its own pty-injection pattern.
+_PASTE_START = "\x1b[200~"
+_PASTE_END = "\x1b[201~"
+
 # Env vars that make an inner claude think it's a sub-invocation and auto-
 # approve every tool. Must be scrubbed before pty spawn.
 _CLAUDE_SUBPROC_ENV = (
@@ -351,16 +360,33 @@ class Session:
     # --- pty input surface ----------------------------------------------------
 
     def send_input(self, text: str) -> bool:
-        """Send a complete user prompt: text body, then Enter as a control
-        char (avoids ConPTY bracketed-paste wrapping the \\r).
+        """Send a complete user prompt: the body as a bracketed paste, then
+        Enter as a separate control char.
+
+        The body is wrapped in bracketed-paste markers (ESC[200~ ... ESC[201~)
+        so the CLI absorbs it in paste mode rather than as raw keystrokes. Raw
+        keystrokes made the CLI re-render per character; its read loop backed up
+        and the Windows ConPTY input buffer overflowed, silently dropping the
+        head of large pastes. The Enter is sent as a control char so it lands
+        *after* paste mode ends (ESC[201~) and submits, rather than being folded
+        into the pasted text. Mirrors the CLI's own pty-injection pattern.
         """
         if self.pty is None or not isinstance(text, str):
             return False
         normalized = text.replace("\r\n", "\n").replace("\r", "\n")
         if normalized:
-            if not self.pty.send_text(normalized):
+            baseline = self.pty.last_output_at
+            payload = f"{_PASTE_START}{normalized}{_PASTE_END}"
+            if not self.pty.send_text(payload):
                 return False
-        time.sleep(0.03)
+            # Hold the submit CR until the CLI has finished ingesting the paste.
+            # Sent too soon, the CR races the paste collapse and is swallowed,
+            # forcing the user to press Enter twice. Wait for pty output to go
+            # quiet (machine-speed-adaptive) instead of a fixed sleep; the
+            # timeout is a safety floor if the paste produces no output.
+            self.pty.wait_for_quiet(after=baseline)
+        else:
+            time.sleep(0.03)
         ok = self.pty.send_control("m")
         if ok and _CLEAR_CMD_RE.match(normalized):
             # Re-pin discovery on /clear so the post-clear JSONL gets picked up.
