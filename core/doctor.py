@@ -11,6 +11,9 @@ Subcommands (per MIGRATION-PLAN.md §7.6):
 - ``registry``      — every registry entry: path exists; uid/version present
 - ``mailbox``       — count pending forwarding messages
 - ``versions``      — each registered repo's version vs main-apiary's VERSION
+- ``stale``         — registered repo whose installed slash-command files
+                      differ from current main-apiary source (skill drift
+                      that ``versions`` misses when the version is unchanged)
 - ``orphans``       — folders under ``.repos/<slug>/`` with no registry entry
 - ``duplicates``    — registry entries sharing a ``real_path``
 - ``unreachable``   — registry entries whose ``real_path`` does not exist
@@ -28,6 +31,7 @@ so the doctor can be wired into CI or a pre-commit hook later.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -143,6 +147,71 @@ def check_versions(apiary: Path) -> CheckResult:
     return notes, issues
 
 
+def check_stale(apiary: Path) -> CheckResult:
+    """Flag repos whose installed slash-command files differ from current source.
+
+    Compares each registered repo's recorded ``commands_dir_hashes`` (written
+    into ``bootstrap_state.json`` at install time) against the SHA-256 of the
+    current ``<tool>/commands/*.md`` source in main-apiary. A mismatch means a
+    re-install would change the repo's skills — i.e. the repo is running stale
+    slash commands. This catches doc/skill edits that ``check_versions`` misses
+    because they don't bump the pinned version.
+
+    Reuses install's own hashing helpers so the expected set is byte-identical
+    to what an install would write (no spurious drift from a divergent hash).
+    """
+    from core.install import _hash_file, _slash_command_sources
+
+    notes: list[str] = []
+    issues: list[str] = []
+
+    # Expected: hash every current source command file, keyed by filename —
+    # this is exactly the {name: sha256} map a fresh install would record.
+    expected = {src.name: _hash_file(src) for src in _slash_command_sources(apiary)}
+
+    registry = state._load_registry(apiary)
+    for id_str, entry in registry.items():
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name", "?")
+        real = entry.get("real_path", "")
+        # Unreachable repos are reported by check_unreachable; skip here so we
+        # don't double-flag and so we never hash against a missing tree.
+        if not real or not Path(real).is_dir():
+            continue
+
+        bs_path = state.repos_dir(apiary) / f"{name}-{id_str}" / "bootstrap_state.json"
+        if not bs_path.is_file():
+            notes.append(
+                f"{name} (uid={id_str}): no bootstrap_state.json — pre-v2 install; "
+                f"run `apiary install --target \"{real}\"` to enable drift detection."
+            )
+            continue
+        try:
+            recorded = json.loads(bs_path.read_text(encoding="utf-8")).get("commands_dir_hashes")
+        except (OSError, json.JSONDecodeError) as exc:
+            issues.append(f"{name} (uid={id_str}): unreadable bootstrap_state.json ({exc})")
+            continue
+        if not isinstance(recorded, dict):
+            notes.append(
+                f"{name} (uid={id_str}): bootstrap_state has no commands_dir_hashes — "
+                f"run `apiary install --target \"{real}\"` to enable drift detection."
+            )
+            continue
+
+        changed = sorted(fn for fn, h in expected.items() if recorded.get(fn) != h)
+        removed = sorted(fn for fn in recorded if fn not in expected)
+        drift = changed + [f"{fn} (removed)" for fn in removed]
+        if drift:
+            shown = ", ".join(drift[:5])
+            more = f" (+{len(drift) - 5} more)" if len(drift) > 5 else ""
+            issues.append(
+                f"{name} (uid={id_str}) has {len(drift)} stale slash-command file(s): "
+                f"{shown}{more} — run `apiary install --target \"{real}\"` to update."
+            )
+    return notes, issues
+
+
 def check_orphans(apiary: Path) -> CheckResult:
     """Folders under ``.repos/<slug>/`` whose UID has no registry entry."""
     notes: list[str] = []
@@ -210,6 +279,7 @@ CHECKS = {
     "registry": check_registry,
     "mailbox": check_mailbox,
     "versions": check_versions,
+    "stale": check_stale,
     "orphans": check_orphans,
     "duplicates": check_duplicates,
     "unreachable": check_unreachable,

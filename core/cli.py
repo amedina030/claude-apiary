@@ -160,10 +160,10 @@ def main(argv: list[str] | None = None) -> int:
     p_sb.set_defaults(func=_cmd_self_bootstrap)
 
     p_doctor = sub.add_parser("doctor", help="run consistency checks")
+    from core import doctor as _doctor  # choices derived from the check registry
     p_doctor.add_argument(
         "subcommand", nargs="?",
-        choices=("pointers", "registry", "mailbox", "versions",
-                 "orphans", "duplicates", "unreachable"),
+        choices=tuple(_doctor.CHECKS),
         help="single check to run; omit to run all",
     )
     _add_apiary_repo_arg(p_doctor)
