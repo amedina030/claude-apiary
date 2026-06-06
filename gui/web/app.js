@@ -1708,7 +1708,10 @@
   let mcpPrompt = null;   // { pendingId, payload }
   // Parser lives in prompt_detector.js so it can be Node-tested. If the bundle
   // failed to load, fall back to a no-op stub so the rest of the UI still works.
-  const detectPrompt = (window.apiaryPromptDetector && window.apiaryPromptDetector.detectPrompt) || (() => null);
+  const _promptDetector = window.apiaryPromptDetector || {};
+  const detectPrompt = _promptDetector.detectPrompt || (() => null);
+  const planArrowSteps = _promptDetector.planArrowSteps || (() => null);
+  const highlightedOptionIndex = _promptDetector.highlightedOptionIndex || (() => -1);
 
   const SCREEN_SCAN_ROWS = 200;
   // A row counts as "highlighted" when it carries a run of at least this many
@@ -2112,6 +2115,24 @@
     // and we don't want the banner to re-appear after the user has already
     // committed to a choice.
     answeredSigs.add(activePrompt.signature);
+
+    // Options numbered >9 can't be addressed by a single keypress —
+    // send_text("10") lands as '1' then '0', selecting option 1. Drive those
+    // with the arrow-key driver (verify-then-commit); on failure reveal the
+    // terminal so the user finishes by hand. Feedback/free-text options skip
+    // this: they only need the digit to *enter* the field, handled below.
+    const optIndex = activePrompt.options.findIndex((o) => o.number === digit);
+    if (!isFeedback && digit > 9 && optIndex >= 0) {
+      hidePromptBanner();
+      driveByArrows(optIndex).then((ok) => {
+        if (!ok) {
+          ptyExpand();
+          toast("Couldn't auto-select that option — pick it in the terminal.", "warn");
+        }
+      });
+      return;
+    }
+
     window.pywebview.api.send_text(String(digit));
     if (isFeedback) {
       awaitingFeedback = true;
@@ -2122,6 +2143,48 @@
       setTimeout(() => window.pywebview.api.send_control("m"), 30);
       hidePromptBanner();
     }
+  }
+
+  // --- arrow-key menu driver (Phase 2c) ------------------------------------
+  //
+  // Drives an arrow-navigable menu's cursor to a target option and commits, for
+  // the cases a single digit can't address (>9 options) or menus that ignore
+  // digit shortcuts. SAFETY INVARIANTS:
+  //   - verify-then-commit: re-read the cell-highlight after stepping and only
+  //     press Enter once the INTENDED row is the highlighted one. A miscount
+  //     self-corrects on retry instead of selecting the wrong option.
+  //   - never Ctrl+C, never blind Enter. After ARROW_MAX_ATTEMPTS we give up and
+  //     let the caller reveal the terminal — the worst case is "user finishes by
+  //     hand," never a wrong selection or a killed session.
+  // Stepping math is planArrowSteps(); the verify predicate is
+  // highlightedOptionIndex() — both unit-tested in prompt_detector.
+  const ARROW = { up: [27, 91, 65], down: [27, 91, 66], enter: [13] };
+  const ARROW_KEY_DELAY_MS = 40;   // between keystrokes; bursts sent faster get dropped
+  const ARROW_SETTLE_MS = 140;     // after a step burst, let the TUI repaint before re-reading
+  const ARROW_MAX_ATTEMPTS = 2;
+  const _delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function _sendArrow(bytes) {
+    try { window.pywebview.api.send_bytes(bytes); } catch (_) {}
+    await _delay(ARROW_KEY_DELAY_MS);
+  }
+
+  async function driveByArrows(targetIndex) {
+    if (!bridgeReady() || !activePrompt) return false;
+    const plan = planArrowSteps(activePrompt.options.length, targetIndex);
+    if (!plan) return false;
+    for (let attempt = 0; attempt < ARROW_MAX_ATTEMPTS; attempt++) {
+      for (let i = 0; i < plan.ups; i++) await _sendArrow(ARROW.up);
+      for (let i = 0; i < plan.downs; i++) await _sendArrow(ARROW.down);
+      await _delay(ARROW_SETTLE_MS);
+      const { lines, highlighted } = readScreen();
+      const fresh = detectPrompt(lines, { highlightedRows: highlighted });
+      if (fresh && highlightedOptionIndex(fresh.options) === targetIndex) {
+        try { window.pywebview.api.send_bytes(ARROW.enter); } catch (_) {}
+        return true;
+      }
+    }
+    return false;
   }
 
   function runDetect() {

@@ -4,7 +4,11 @@
 
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { detectPrompt } = require("./prompt_detector");
+const {
+  detectPrompt,
+  planArrowSteps,
+  highlightedOptionIndex,
+} = require("./prompt_detector");
 
 // --- helpers --------------------------------------------------------------
 
@@ -327,6 +331,36 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
 
 test("prose numbered list with a far-below footer is not a menu", () => {
   assert.equal(detectPrompt(PROSE_LIST_FAR_FOOTER), null);
+});
+
+// --- arrow-driver core ----------------------------------------------------
+
+test("planArrowSteps clamps to top then steps down to the target", () => {
+  assert.deepEqual(planArrowSteps(5, 0), { ups: 5, downs: 0 });
+  assert.deepEqual(planArrowSteps(5, 2), { ups: 5, downs: 2 });
+  assert.deepEqual(planArrowSteps(5, 4), { ups: 5, downs: 4 });
+});
+
+test("planArrowSteps rejects out-of-range / invalid input", () => {
+  assert.equal(planArrowSteps(5, 5), null, "index == count is out of range");
+  assert.equal(planArrowSteps(5, -1), null);
+  assert.equal(planArrowSteps(0, 0), null, "no options");
+  assert.equal(planArrowSteps(3, 1.5), null, "non-integer index");
+  assert.equal(planArrowSteps(undefined, 0), null);
+});
+
+test("highlightedOptionIndex returns the sole selected row", () => {
+  const opts = [{ selected: false }, { selected: true }, { selected: false }];
+  assert.equal(highlightedOptionIndex(opts), 1);
+});
+
+test("highlightedOptionIndex is -1 when none or several are selected", () => {
+  assert.equal(highlightedOptionIndex([{ selected: false }, { selected: false }]), -1);
+  assert.equal(
+    highlightedOptionIndex([{ selected: true }, { selected: true }]),
+    -1,
+    "ambiguous multi-highlight must not commit"
+  );
 });
 
 test("classic numbered prompts keep parsing without a footer", () => {

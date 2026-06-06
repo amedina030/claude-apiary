@@ -211,5 +211,42 @@
     return null;
   }
 
-  return { detectPrompt, PROMPT_MAX_OPTIONS, PROMPT_SCAN_BACK_LINES };
+  // --- arrow-key driver core (pure, browser orchestration lives in app.js) ---
+
+  // Plan the keystrokes to move an arrow-navigable menu's cursor to
+  // `targetIndex` (0-based). Strategy: clamp to the top with `optionCount` Up
+  // presses (harmless if already at the top — the cursor saturates), then step
+  // Down to the target. The caller re-reads the grid and only commits (Enter)
+  // once the highlighted row matches, so an over/under-count self-corrects on
+  // retry rather than selecting the wrong option. Returns {ups, downs} or null
+  // for an out-of-range target.
+  function planArrowSteps(optionCount, targetIndex) {
+    if (!Number.isInteger(optionCount) || optionCount <= 0) return null;
+    if (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex >= optionCount) {
+      return null;
+    }
+    return { ups: optionCount, downs: targetIndex };
+  }
+
+  // Which option index does the cell-highlight say is currently selected?
+  // Returns the single highlighted index, or -1 when none or more than one is
+  // marked (ambiguous → the driver must not commit). This is the verify step.
+  function highlightedOptionIndex(options) {
+    let found = -1;
+    for (let i = 0; i < options.length; i++) {
+      if (options[i] && options[i].selected) {
+        if (found !== -1) return -1;   // ambiguous: >1 highlighted
+        found = i;
+      }
+    }
+    return found;
+  }
+
+  return {
+    detectPrompt,
+    planArrowSteps,
+    highlightedOptionIndex,
+    PROMPT_MAX_OPTIONS,
+    PROMPT_SCAN_BACK_LINES,
+  };
 });
