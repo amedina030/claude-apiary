@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from gui.ask_prompt import AskPromptWatcher
+from gui.file_refs import FileRefs
 from gui.permission_mcp import SESSION_ID_ENV, permission_tool_arg, write_mcp_config
 from gui.pty_capture import CaptureWriter
 from gui.pty_wrapper import PtySpawnError, PtyWrapper
@@ -125,6 +126,10 @@ class Session:
         # callback bindings below can close over the right value.
         self.session_id = str(uuid.uuid4())
         self.cwd = Path(cwd)
+        # Per-tab drag-drop / paste registry, keyed by this tab's session_id so
+        # staged files belong to this tab alone (never leak to another tab's
+        # message). Paths only here — no I/O until the first add.
+        self.file_refs = FileRefs(scope=self.session_id)
         sid = self.session_id
         self._on_message = lambda msg: on_message(msg, sid)
         self._on_messages = lambda msgs: on_messages(msgs, sid)

@@ -9,6 +9,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from gui.file_refs import FileRefs
 
@@ -147,6 +148,105 @@ class FileRefsTest(unittest.TestCase):
         out = self.refs.manifest_and_mark()
         self.assertEqual(out["text"], "")
         self.assertEqual(out["files"], [])
+
+    # --- add_pasted_bytes (owned temp files, copy-not-reference) --------------
+
+    def test_paste_materializes_owned_file(self):
+        desc = self.refs.add_pasted_bytes(b"\x89PNG\x0d\x0a", "image/png")
+        self.assertTrue(desc["ok"])
+        self.assertTrue(desc["owned"])
+        self.assertFalse(desc["announced"])
+        self.assertEqual(desc["type"], "image/png")
+        self.assertEqual(desc["size"], 6)
+        p = Path(desc["path"])
+        # Bytes were written under the pasted dir, which sits beside the store.
+        self.assertTrue(p.is_file())
+        self.assertEqual(p.read_bytes(), b"\x89PNG\x0d\x0a")
+        self.assertEqual(p.parent, self.refs.pasted_dir)
+        self.assertEqual(p.suffix, ".png")
+
+    def test_paste_rejects_empty(self):
+        self.assertFalse(self.refs.add_pasted_bytes(b"", "image/png")["ok"])
+        self.assertFalse(self.refs.add_pasted_bytes(None, "image/png")["ok"])
+
+    def test_paste_defaults_extension_when_mime_unknown(self):
+        desc = self.refs.add_pasted_bytes(b"data", "")
+        self.assertTrue(desc["ok"])
+        self.assertEqual(Path(desc["path"]).suffix, ".png")
+
+    def test_drop_is_not_owned(self):
+        desc = self.refs.add(str(self._make("a.txt")))
+        self.assertFalse(desc["owned"])
+
+    def test_remove_deletes_owned_paste_file(self):
+        desc = self.refs.add_pasted_bytes(b"\x89PNG", "image/png")
+        p = Path(desc["path"])
+        self.assertTrue(p.is_file())
+        self.assertTrue(self.refs.remove(desc["id"]))
+        self.assertFalse(p.exists())  # we created it → we delete it
+
+    def test_clear_deletes_owned_but_not_dropped(self):
+        dropped = self._make("keep.txt")
+        self.refs.add(str(dropped))
+        pasted = Path(self.refs.add_pasted_bytes(b"\x89PNG", "image/png")["path"])
+        self.assertTrue(self.refs.clear())
+        self.assertFalse(pasted.exists())   # owned → deleted
+        self.assertTrue(dropped.is_file())  # dropped target → untouched
+
+    def test_reset_wipes_pasted_dir(self):
+        pasted = Path(self.refs.add_pasted_bytes(b"\x89PNG", "image/png")["path"])
+        self.assertTrue(pasted.is_file())
+        self.refs.reset()
+        self.assertEqual(self.refs.list(), [])
+        self.assertFalse(pasted.exists())
+
+    def test_paste_flows_through_manifest(self):
+        desc = self.refs.add_pasted_bytes(b"\x89PNG", "image/png")
+        out = self.refs.manifest_and_mark()
+        self.assertIn(desc["path"], out["text"])
+        self.assertIn("image/png", out["text"])
+        self.assertTrue(out["files"][0]["announced"])
+
+    # --- per-tab scoping (one registry per GUI tab / session_id) -------------
+
+    def test_scope_derives_isolated_paths(self):
+        with mock.patch("gui.file_refs.paths.state_dir", return_value=self.tmp):
+            a = FileRefs(scope="aaa")
+            self.assertEqual(a.store, self.tmp / "file_refs" / "aaa.json")
+            self.assertEqual(a.pasted_dir, self.tmp / "pasted" / "aaa")
+
+    def test_scope_isolates_entries_between_tabs(self):
+        with mock.patch("gui.file_refs.paths.state_dir", return_value=self.tmp):
+            a = FileRefs(scope="aaa")
+            b = FileRefs(scope="bbb")
+            a.add(str(self._make("a.txt")))
+            self.assertEqual(len(a.list()), 1)
+            self.assertEqual(b.list(), [])  # tab b cannot see tab a's staged file
+
+    def test_wipe_all_clears_every_scope(self):
+        with mock.patch("gui.file_refs.paths.state_dir", return_value=self.tmp):
+            a = FileRefs(scope="aaa")
+            a.add_pasted_bytes(b"\x89PNG", "image/png")
+            a.add(str(self._make("a.txt")))
+            self.assertTrue(a.list())
+            # A leftover legacy unscoped store should be cleared too.
+            (self.tmp / "file_refs.json").write_text("[]", encoding="utf-8")
+            FileRefs.wipe_all()
+            self.assertEqual(FileRefs(scope="aaa").list(), [])
+            self.assertFalse((self.tmp / "file_refs").exists())
+            self.assertFalse((self.tmp / "pasted").exists())
+            self.assertFalse((self.tmp / "file_refs.json").exists())
+
+    def test_destroy_removes_scope_files(self):
+        with mock.patch("gui.file_refs.paths.state_dir", return_value=self.tmp):
+            a = FileRefs(scope="aaa")
+            pasted = Path(a.add_pasted_bytes(b"\x89PNG", "image/png")["path"])
+            self.assertTrue(a.store.is_file())
+            self.assertTrue(pasted.is_file())
+            a.destroy()
+            self.assertFalse(a.store.exists())
+            self.assertFalse(pasted.exists())
+            self.assertFalse(a.pasted_dir.exists())
 
 
 if __name__ == "__main__":
