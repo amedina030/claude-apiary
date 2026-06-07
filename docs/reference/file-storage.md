@@ -97,6 +97,7 @@ GUI per-instance state lives under `<main-apiary>/.apiary/gui/apiary_gui/` (defa
 | Theme | `<main-apiary>/.apiary/gui/apiary_gui/theme.json` | CSS variable values (hot-reloads via watchdog) |
 | Launch config | `<main-apiary>/.apiary/gui/apiary_gui/launch.json` | Claude Code spawn args + cwd + feature flags (schema in `docs/reference/config-files.md`) |
 | Captures | `<main-apiary>/.apiary/gui/apiary_gui/captures/<ts>-<label>.bin` | Raw pty-output captures (binary), populated only when `APIARY_GUI_CAPTURE_LABEL` is set |
+| Drag-drop file references | `<main-apiary>/.apiary/gui/apiary_gui/file_refs.json` | JSON list of files dragged onto the composer — path, name, type, size, added-timestamp (`gui/file_refs.py`). References (not copies): pywebview hands the host the real dropped path. Wiped on every GUI startup; the composer appends each new path to the outgoing prompt so Claude can Read the original in place |
 | Permission-MCP config | `<main-apiary>/.apiary/gui/apiary_gui/permission_mcp_config.json` | `--mcp-config` file handed to claude when `APIARY_PERMISSION_MCP=1` (points at `gui/permission_mcp.py`). Rewritten each session start |
 | Permission-MCP log | `<main-apiary>/.apiary/gui/apiary_gui/permission_mcp.log` | Append-only log of START/REQUEST/DECISION/EXIT events from the permission-prompt MCP stdio server |
 
