@@ -2904,7 +2904,7 @@
   });
 
   // --- input wiring ---------------------------------------------------------
-  inputEl.addEventListener("keydown", (e) => {
+  inputEl.addEventListener("keydown", async (e) => {
     if (!bridgeReady()) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -2917,21 +2917,13 @@
       }
       const text = inputEl.value;
       inputEl.value = "";
-      // Append the staged-file manifest (drag-dropped attachments) so claude
-      // sees the on-disk paths and can Read them. Only files not yet shared are
-      // listed — already-announced ones are in the conversation history, so
-      // re-sending their paths every turn is wasteful. Skipped for slash
-      // commands, where extra lines would corrupt the command.
-      const manifest =
-        (!text.startsWith("/") && window.apiaryFileDrop)
-          ? window.apiaryFileDrop.manifest()
-          : "";
-      const outgoing = manifest ? (text ? text + "\n\n" + manifest : manifest) : text;
       // Render optimistically — the tail will reconcile when the real record
-      // lands. Skip empties and slash commands (slash commands shouldn't show
-      // as user messages; claude often handles them differently). Also skip
-      // the tentative render while we're in feedback-submission mode —
-      // claude treats this as input to the plan prompt, not a new user msg.
+      // lands. Uses `text` (not the manifest-augmented payload), so it can run
+      // before we await Python for the manifest below. Skip empties and slash
+      // commands (slash commands shouldn't show as user messages; claude often
+      // handles them differently). Also skip the tentative render while we're
+      // in feedback-submission mode — claude treats this as input to the plan
+      // prompt, not a new user msg.
       if (text && !text.startsWith("/") && !awaitingFeedback) {
         const t = activeTab();
         if (!t.waitingForAssistant) {
@@ -2953,10 +2945,23 @@
         // don't get a normal assistant reply, so we don't arm for them.
         t.waitingForAssistant = true;
       }
+      // Build the drag-dropped-file manifest server-side, the moment we send:
+      // Python re-checks each path's existence NOW and drops any that vanished
+      // since the drop (so we never ship a dead path), then marks the rest
+      // shared so they aren't re-listed next turn. Returns the refreshed list
+      // too, so the panel re-renders dimmed rows / live missing flags in the
+      // same hop. Skipped for slash commands (extra lines corrupt the command)
+      // and when nothing is staged (no needless bridge round-trip).
+      let manifest = "";
+      if (!text.startsWith("/") && window.apiaryFileDrop && window.apiaryFileDrop.hasFiles()) {
+        try {
+          const res = await window.pywebview.api.manifest_and_mark();
+          manifest = (res && res.text) || "";
+          if (res && Array.isArray(res.files)) window.apiaryFileDrop.setFiles(res.files);
+        } catch (_) { manifest = ""; }
+      }
+      const outgoing = manifest ? (text ? text + "\n\n" + manifest : manifest) : text;
       window.pywebview.api.send_input(outgoing);
-      // Mark the just-listed attachments as shared so they aren't re-sent on
-      // later turns — claude already has them from this message onward.
-      if (manifest && window.apiaryFileDrop) window.apiaryFileDrop.markAnnounced();
       if (awaitingFeedback) {
         awaitingFeedback = false;
         inputEl.placeholder = INPUT_PLACEHOLDER_DEFAULT;

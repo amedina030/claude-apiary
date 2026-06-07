@@ -4,20 +4,23 @@
  * absolute path of each dropped file (pywebviewFullPath), so App._on_file_drop
  * records a *reference* (no copy) and pushes the updated list here via
  * setFiles(). This file owns only the UI: the drag overlay, the chip panel
- * above the composer, and the manifest appended to the outgoing prompt so
- * Claude can Read the referenced paths.
+ * above the composer. The outgoing attach-manifest is NOT built here — it's
+ * assembled authoritatively in Python at send time (Api.manifest_and_mark),
+ * which re-checks each path's existence the moment the user sends so a file
+ * that vanished after being dropped is never shipped as a dead path. This
+ * file owns only the UI; `announced` (shared-with-claude) is now a Python-
+ * owned field that arrives on each descriptor.
  *
- * Exposes window.apiaryFileDrop = { setFiles, manifest, markAnnounced,
- *                                   hasFiles, count, clearAll }.
+ * Exposes window.apiaryFileDrop = { setFiles, hasFiles, count, clearAll }.
  */
 (function () {
   "use strict";
 
-  // Reference descriptors from Python: {id, name, path, type, size, added, exists}.
-  // We add a local `announced` flag (sent-to-claude-already) that Python doesn't
-  // track, preserved across setFiles() pushes via this id→announced map.
+  // Reference descriptors from Python: {id, name, path, type, size, added,
+  // exists, announced}. `announced` (already shared with claude) is owned by
+  // Python now — it's set when manifest_and_mark ships a path — so the panel
+  // just reflects whatever the latest push says.
   let files = [];
-  const announcedById = new Map();
 
   // Outline SVG glyphs (currentColor) — matches the rest of the GUI chrome.
   const ICON_IMAGE =
@@ -35,6 +38,11 @@
   let rowsEl = null;   // #refs-rows — the scrollable body
   let titleEl = null;  // #refs-title — "referenced files · N"
   let clearBtnEl = null; // #refs-clear
+  let paneEl = null;   // #refs-pane — carries .collapsed / .has-files
+  let toggleEl = null; // #refs-toggle — the title-as-collapse-button
+  // User-driven collapse of the rows body. Sticky while files are staged;
+  // reset to expanded once the pane empties (see renderPanel).
+  let collapsed = false;
   // dragenter/dragleave fire per child element; count depth so the overlay only
   // hides when the cursor truly leaves the window.
   let dragDepth = 0;
@@ -84,30 +92,33 @@
     });
     // Header count + clear button appear only when there's something staged;
     // the bare "referenced files" header always remains to mark the spot.
+    const has = files.length > 0;
     if (titleEl) {
-      titleEl.textContent =
-        files.length > 0 ? "referenced files · " + files.length : "referenced files";
+      titleEl.textContent = has ? "referenced files · " + files.length : "referenced files";
     }
-    if (clearBtnEl) clearBtnEl.classList.toggle("hidden", files.length === 0);
+    if (clearBtnEl) clearBtnEl.classList.toggle("hidden", !has);
+    // Collapse only makes sense with files staged; an empty pane resets to
+    // expanded so the next drop is visible without a click.
+    if (!has) collapsed = false;
+    if (paneEl) paneEl.classList.toggle("has-files", has);
+    applyCollapsed();
   }
 
-  // Adopt a list pushed from Python, preserving each file's announced flag.
+  // Reflect the collapse state on the pane + the toggle's aria.
+  function applyCollapsed() {
+    if (paneEl) paneEl.classList.toggle("collapsed", collapsed);
+    if (toggleEl) toggleEl.setAttribute("aria-expanded", String(!collapsed));
+  }
+
+  // Adopt a list pushed from Python. `announced` rides along on each
+  // descriptor (Python-owned), so there's nothing local to reconcile.
   function setFiles(list) {
     const incoming = Array.isArray(list) ? list : [];
-    files = incoming.map((f) => ({
-      ...f,
-      announced: announcedById.get(f.id) || false,
-    }));
-    // Forget announced flags for ids no longer present.
-    const live = new Set(files.map((f) => f.id));
-    Array.from(announcedById.keys()).forEach((id) => {
-      if (!live.has(id)) announcedById.delete(id);
-    });
+    files = incoming.map((f) => ({ ...f, announced: !!f.announced }));
     renderPanel();
   }
 
   function removeFile(id) {
-    announcedById.delete(id);
     if (bridgeReady()) {
       Promise.resolve(window.pywebview.api.remove_file(id))
         .then((list) => setFiles(list))
@@ -159,8 +170,17 @@
     rowsEl = document.getElementById("refs-rows");
     titleEl = document.getElementById("refs-title");
     clearBtnEl = document.getElementById("refs-clear");
+    paneEl = document.getElementById("refs-pane");
+    toggleEl = document.getElementById("refs-toggle");
     if (clearBtnEl) {
       clearBtnEl.addEventListener("click", () => window.apiaryFileDrop.clearAll());
+    }
+    if (toggleEl) {
+      toggleEl.addEventListener("click", () => {
+        if (files.length === 0) return; // nothing to collapse on an empty pane
+        collapsed = !collapsed;
+        applyCollapsed();
+      });
     }
     wireDragOverlay();
     // Re-render any references already recorded this run (e.g. after a reload).
@@ -184,34 +204,11 @@
     hasFiles() { return files.length > 0; },
     count() { return files.length; },
     clearAll() {
-      announcedById.clear();
       if (bridgeReady()) {
         try { window.pywebview.api.clear_files(); } catch (_) {}
       }
       files = [];
       renderPanel();
-    },
-    // Manifest block for files claude hasn't been told about yet. Already-shared
-    // ones are skipped — they're in the conversation history. Empty string when
-    // there's nothing new, so app.js can append unconditionally.
-    manifest() {
-      const fresh = files.filter((f) => !f.announced && f.exists !== false);
-      if (fresh.length === 0) return "";
-      const lines = fresh.map((f) => "- " + f.path + " (" + f.type + ")");
-      return "[attached files — read these with the Read tool:]\n" + lines.join("\n");
-    },
-    // Mark every referenced file as shared after a send, so its path isn't
-    // re-listed next turn.
-    markAnnounced() {
-      let changed = false;
-      files.forEach((f) => {
-        if (!f.announced) {
-          f.announced = true;
-          announcedById.set(f.id, true);
-          changed = true;
-        }
-      });
-      if (changed) renderPanel();
     },
   };
 })();

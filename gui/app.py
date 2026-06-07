@@ -154,6 +154,15 @@ class GuiBridge:
         """All current file references (for the initial render / reload)."""
         return self._app._file_refs.list()
 
+    def manifest_and_mark(self) -> dict:
+        """Build the send-time attach manifest authoritatively and mark the
+        listed files shared. Called by the frontend the moment the user sends:
+        existence is re-checked here (not from a stale JS cache), so a
+        reference whose target vanished since it was dropped is dropped from
+        the manifest instead of shipping a dead path. Returns {text, files} so
+        the frontend appends the text and re-renders the panel in one hop."""
+        return self._app._file_refs.manifest_and_mark()
+
     def get_note_body(self, body_path: str) -> str:
         """Frontend calls this when a sidebar note is clicked. Read-only — no scribe writes."""
         if not isinstance(body_path, str):

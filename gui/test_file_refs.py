@@ -103,6 +103,51 @@ class FileRefsTest(unittest.TestCase):
         # And a subsequent add still works (overwrites the garbage).
         self.assertTrue(self.refs.add(str(self._make("a.txt")))["ok"])
 
+    # --- manifest_and_mark (authoritative send-time path, option B) ----------
+
+    def test_add_starts_unannounced(self):
+        desc = self.refs.add(str(self._make("a.txt")))
+        self.assertFalse(desc["announced"])
+
+    def test_manifest_lists_fresh_then_marks_announced(self):
+        src = self._make("shot.png", b"\x89PNG")
+        self.refs.add(str(src))
+        out = self.refs.manifest_and_mark()
+        # Fresh file is listed with path + mime, under the Read-tool header.
+        self.assertIn("read these with the Read tool", out["text"])
+        self.assertIn(f"- {src.resolve()} (image/png)", out["text"])
+        self.assertTrue(out["files"][0]["announced"])
+        # Second send doesn't re-list it — it's in the conversation history now.
+        again = self.refs.manifest_and_mark()
+        self.assertEqual(again["text"], "")
+
+    def test_manifest_skips_missing_target_and_does_not_announce_it(self):
+        src = self._make("gone.txt")
+        self.refs.add(str(src))
+        src.unlink()  # vanished between drop and send — the bug this fixes
+        out = self.refs.manifest_and_mark()
+        # Dead path is never shipped...
+        self.assertEqual(out["text"], "")
+        # ...the reference is retained and flagged missing for the UI...
+        self.assertFalse(out["files"][0]["exists"])
+        # ...and it stays unannounced, so if the file returns it'll be sent.
+        self.assertFalse(out["files"][0]["announced"])
+
+    def test_manifest_returns_only_fresh_when_one_already_shared(self):
+        a = self._make("a.txt")
+        self.refs.add(str(a))
+        self.refs.manifest_and_mark()  # a is now announced
+        b = self._make("b.txt")
+        self.refs.add(str(b))
+        out = self.refs.manifest_and_mark()
+        self.assertNotIn(str(a.resolve()), out["text"])
+        self.assertIn(str(b.resolve()), out["text"])
+
+    def test_manifest_empty_with_no_refs(self):
+        out = self.refs.manifest_and_mark()
+        self.assertEqual(out["text"], "")
+        self.assertEqual(out["files"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

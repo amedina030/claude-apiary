@@ -105,10 +105,15 @@
 
           <!-- Drag-dropped file references (file_drop.js). Header is always
                present to mark the spot; the rows body hides when empty and is
-               height-capped + scrollable so it never crowds the notes above. -->
+               height-capped + scrollable so it never crowds the notes above.
+               Clicking the title (when files are staged) collapses/expands the
+               body — the caret reflects the state. -->
           <div id="refs-pane" class="refs-pane" aria-label="referenced files">
             <div class="refs-head">
-              <span id="refs-title" class="refs-title">referenced files</span>
+              <button id="refs-toggle" type="button" class="refs-toggle" aria-expanded="true" aria-controls="refs-rows">
+                <span class="refs-caret" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg></span>
+                <span id="refs-title" class="refs-title">referenced files</span>
+              </button>
               <button id="refs-clear" type="button" class="refs-clear hidden" aria-label="clear all referenced files">clear</button>
             </div>
             <div id="refs-rows" class="refs-rows"></div>

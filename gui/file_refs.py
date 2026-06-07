@@ -102,10 +102,52 @@ class FileRefs:
             "type": mime or "application/octet-stream",
             "size": size,
             "added": _now_iso(),
+            # Shared-with-claude marker. Owned here (not in JS) so the manifest
+            # can be built authoritatively at send time — see manifest_and_mark.
+            "announced": False,
         }
         entries.append(entry)
         self._write(entries)
         return {"ok": True, **entry}
+
+    def manifest_and_mark(self) -> dict:
+        """Build the outgoing attach-manifest and mark the listed files shared.
+
+        This is the authoritative send-time path (option B): existence is
+        re-checked HERE, the moment the user sends, so a reference whose target
+        vanished since it was dropped is dropped from the manifest rather than
+        shipping a dead path the assistant can't Read. Files already announced
+        on a prior turn are skipped (their paths are in the conversation
+        history). The files that make the cut are flagged ``announced`` so they
+        aren't re-listed next turn.
+
+        Returns ``{"text": <manifest or "">, "files": <list() snapshot>}`` so
+        the frontend can append the text and re-render the panel (dimmed rows,
+        live missing flags) in one round-trip. Never raises.
+        """
+        entries = self._read()
+        fresh: list[dict] = []
+        changed = False
+        for e in entries:
+            p = e.get("path")
+            if not p or not Path(p).is_file():
+                continue  # missing target — never ship a path that can't be Read
+            if e.get("announced"):
+                continue
+            fresh.append(e)
+            e["announced"] = True
+            changed = True
+        if changed:
+            self._write(entries)
+        if fresh:
+            lines = [
+                f"- {e['path']} ({e.get('type', 'application/octet-stream')})"
+                for e in fresh
+            ]
+            text = "[attached files — read these with the Read tool:]\n" + "\n".join(lines)
+        else:
+            text = ""
+        return {"text": text, "files": self.list()}
 
     def remove(self, file_id: str) -> bool:
         """Drop one reference by id. The on-disk file is never touched."""
