@@ -7,6 +7,7 @@ session-discovery; App routes bridge calls and UI pushes to the active one.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -152,6 +153,23 @@ class GuiBridge:
 
     def list_files(self) -> list[dict]:
         """All current file references (for the initial render / reload)."""
+        return self._app._file_refs.list()
+
+    def add_pasted_image(self, data_b64: str, mime: str = "", name: str = "") -> list[dict]:
+        """Frontend pasted an image into the composer. A clipboard bitmap has no
+        source path, so — unlike a drop — Python materializes the bytes into an
+        owned temp file and registers it. ``data_b64`` is the base64 payload of
+        the image (no data-URL prefix). Returns the refreshed list so the panel
+        renders the new row in one hop; bad input leaves the list unchanged."""
+        if not isinstance(data_b64, str) or not data_b64:
+            return self._app._file_refs.list()
+        try:
+            raw = base64.b64decode(data_b64, validate=True)
+        except (ValueError, TypeError):
+            return self._app._file_refs.list()
+        self._app._file_refs.add_pasted_bytes(
+            raw, mime or None, name or None
+        )
         return self._app._file_refs.list()
 
     def manifest_and_mark(self) -> dict:

@@ -148,6 +148,64 @@ class FileRefsTest(unittest.TestCase):
         self.assertEqual(out["text"], "")
         self.assertEqual(out["files"], [])
 
+    # --- add_pasted_bytes (owned temp files, copy-not-reference) --------------
+
+    def test_paste_materializes_owned_file(self):
+        desc = self.refs.add_pasted_bytes(b"\x89PNG\x0d\x0a", "image/png")
+        self.assertTrue(desc["ok"])
+        self.assertTrue(desc["owned"])
+        self.assertFalse(desc["announced"])
+        self.assertEqual(desc["type"], "image/png")
+        self.assertEqual(desc["size"], 6)
+        p = Path(desc["path"])
+        # Bytes were written under the pasted dir, which sits beside the store.
+        self.assertTrue(p.is_file())
+        self.assertEqual(p.read_bytes(), b"\x89PNG\x0d\x0a")
+        self.assertEqual(p.parent, self.refs.pasted_dir)
+        self.assertEqual(p.suffix, ".png")
+
+    def test_paste_rejects_empty(self):
+        self.assertFalse(self.refs.add_pasted_bytes(b"", "image/png")["ok"])
+        self.assertFalse(self.refs.add_pasted_bytes(None, "image/png")["ok"])
+
+    def test_paste_defaults_extension_when_mime_unknown(self):
+        desc = self.refs.add_pasted_bytes(b"data", "")
+        self.assertTrue(desc["ok"])
+        self.assertEqual(Path(desc["path"]).suffix, ".png")
+
+    def test_drop_is_not_owned(self):
+        desc = self.refs.add(str(self._make("a.txt")))
+        self.assertFalse(desc["owned"])
+
+    def test_remove_deletes_owned_paste_file(self):
+        desc = self.refs.add_pasted_bytes(b"\x89PNG", "image/png")
+        p = Path(desc["path"])
+        self.assertTrue(p.is_file())
+        self.assertTrue(self.refs.remove(desc["id"]))
+        self.assertFalse(p.exists())  # we created it → we delete it
+
+    def test_clear_deletes_owned_but_not_dropped(self):
+        dropped = self._make("keep.txt")
+        self.refs.add(str(dropped))
+        pasted = Path(self.refs.add_pasted_bytes(b"\x89PNG", "image/png")["path"])
+        self.assertTrue(self.refs.clear())
+        self.assertFalse(pasted.exists())   # owned → deleted
+        self.assertTrue(dropped.is_file())  # dropped target → untouched
+
+    def test_reset_wipes_pasted_dir(self):
+        pasted = Path(self.refs.add_pasted_bytes(b"\x89PNG", "image/png")["path"])
+        self.assertTrue(pasted.is_file())
+        self.refs.reset()
+        self.assertEqual(self.refs.list(), [])
+        self.assertFalse(pasted.exists())
+
+    def test_paste_flows_through_manifest(self):
+        desc = self.refs.add_pasted_bytes(b"\x89PNG", "image/png")
+        out = self.refs.manifest_and_mark()
+        self.assertIn(desc["path"], out["text"])
+        self.assertIn("image/png", out["text"])
+        self.assertTrue(out["files"][0]["announced"])
+
 
 if __name__ == "__main__":
     unittest.main()

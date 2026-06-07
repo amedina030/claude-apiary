@@ -7,16 +7,24 @@ event as ``pywebviewFullPath`` (see ``webview/util.py``). So we don't copy
 bytes: we just record where the file already lives and let the composer pass
 that path to Claude, who reads the original in place.
 
+Pasted images are the exception. A clipboard bitmap (screenshot, copied image
+region) has *no* source path, so the path-not-copy model can't apply: we
+materialize the bytes into an *owned* temp file under ``<state-dir>/pasted/``
+and register that. Owned entries carry ``owned: True`` so remove/clear/reset
+delete the file we created — a dropped reference's target is never touched.
+
 The registry is a JSON list persisted under the GUI state dir. It's wiped on
-GUI startup (``reset``) so a run never inherits last run's references. Because
-we own no file data — only pointers — clearing is pure bookkeeping and can
-never touch the user's actual files.
+GUI startup (``reset``), which also deletes the owned pasted files, so a run
+never inherits last run's references or temp bytes. For dropped references we
+own no file data — only pointers — so clearing them is pure bookkeeping and
+can never touch the user's actual files.
 """
 
 from __future__ import annotations
 
 import json
 import mimetypes
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,10 +42,17 @@ class FileRefs:
 
     def __init__(self, store: Optional[Path] = None) -> None:
         self._store = store if store is not None else (paths.state_dir() / "file_refs.json")
+        # Owned temp files for pasted clipboard images live alongside the store
+        # (so a test store gets an isolated pasted dir too).
+        self._pasted_dir = self._store.parent / "pasted"
 
     @property
     def store(self) -> Path:
         return self._store
+
+    @property
+    def pasted_dir(self) -> Path:
+        return self._pasted_dir
 
     # --- persistence ---------------------------------------------------------
 
@@ -63,8 +78,29 @@ class FileRefs:
             return False
 
     def reset(self) -> None:
-        """Clear the registry. Called once on GUI startup."""
+        """Clear the registry and wipe owned (pasted) temp files. Called once on
+        GUI startup so a run inherits neither last run's references nor its
+        materialized bytes. Dropped references point at the user's own files, so
+        only the pasted dir — which we created — is deleted."""
         self._write([])
+        try:
+            if self._pasted_dir.exists():
+                shutil.rmtree(self._pasted_dir, ignore_errors=True)
+        except OSError:
+            pass
+
+    def _delete_if_owned(self, entry: dict) -> None:
+        """Delete an entry's on-disk file only if we created it (``owned``).
+        A dropped reference points at a file the user owns — never touch it."""
+        if not entry.get("owned"):
+            return
+        p = entry.get("path")
+        if not p:
+            return
+        try:
+            Path(p).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     # --- mutations -----------------------------------------------------------
 
@@ -105,7 +141,54 @@ class FileRefs:
             # Shared-with-claude marker. Owned here (not in JS) so the manifest
             # can be built authoritatively at send time — see manifest_and_mark.
             "announced": False,
+            # A drop is a pointer to the user's file — we did NOT create it, so
+            # remove/clear/reset must never delete it. Contrast add_pasted_bytes.
+            "owned": False,
         }
+        entries.append(entry)
+        self._write(entries)
+        return {"ok": True, **entry}
+
+    def add_pasted_bytes(
+        self, data: bytes, mime: Optional[str] = None, name: Optional[str] = None
+    ) -> dict:
+        """Materialize a pasted clipboard image into an owned temp file, then
+        register it like a drop.
+
+        A clipboard bitmap has no source path, so — unlike :meth:`add`, which
+        records a pointer — we write the bytes ourselves under ``pasted_dir``
+        and flag the entry ``owned`` so remove/clear/reset delete the file we
+        created. Returns ``{"ok": True, ...descriptor}`` or
+        ``{"ok": False, "error": ...}``. Never raises.
+        """
+        if not isinstance(data, (bytes, bytearray)) or not data:
+            return {"ok": False, "error": "empty data"}
+        # This is the image-paste path; an absent/unknown mime defaults to PNG
+        # (overwhelmingly what clipboard bitmaps are) rather than a generic
+        # octet-stream, so the temp file gets a sensible .png extension.
+        mime = mime if (isinstance(mime, str) and mime) else "image/png"
+        ext = mimetypes.guess_extension(mime) or ".png"
+        file_id = uuid.uuid4().hex[:8]
+        display = name if (isinstance(name, str) and name) else f"pasted-{file_id}{ext}"
+        target = self._pasted_dir / f"{file_id}{ext}"
+        try:
+            self._pasted_dir.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(bytes(data))
+        except OSError:
+            return {"ok": False, "error": "could not write pasted file"}
+
+        entry = {
+            "id": file_id,
+            "name": display,
+            "path": str(target.resolve()),
+            "type": mime,
+            "size": len(data),
+            "added": _now_iso(),
+            "announced": False,
+            # We created this file — remove/clear/reset delete it.
+            "owned": True,
+        }
+        entries = self._read()
         entries.append(entry)
         self._write(entries)
         return {"ok": True, **entry}
@@ -150,17 +233,24 @@ class FileRefs:
         return {"text": text, "files": self.list()}
 
     def remove(self, file_id: str) -> bool:
-        """Drop one reference by id. The on-disk file is never touched."""
+        """Drop one reference by id. A dropped file's target is left alone; an
+        owned (pasted) temp file is deleted, since we created it."""
         if not isinstance(file_id, str) or not file_id:
             return False
         entries = self._read()
         kept = [e for e in entries if e.get("id") != file_id]
         if len(kept) == len(entries):
             return False
+        for e in entries:
+            if e.get("id") == file_id:
+                self._delete_if_owned(e)
         return self._write(kept)
 
     def clear(self) -> bool:
-        """Drop every reference (the user's files are untouched)."""
+        """Drop every reference. Dropped targets are untouched; owned (pasted)
+        temp files are deleted."""
+        for e in self._read():
+            self._delete_if_owned(e)
         return self._write([])
 
     # --- queries -------------------------------------------------------------

@@ -2999,6 +2999,39 @@
     }
   });
 
+  // Paste an image straight into the composer → stage it in the refs panel.
+  // A clipboard bitmap is raw bytes with no path, so (unlike a drop) Python
+  // must materialize it: we ship the base64 payload over the bridge and adopt
+  // the refreshed list it returns. Non-image paste (plain text) is ignored
+  // here so the textarea's native paste still works.
+  inputEl.addEventListener("paste", (e) => {
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    const imgs = Array.from(items).filter(
+      (it) => it.kind === "file" && it.type.indexOf("image/") === 0
+    );
+    if (!imgs.length) return; // text/other — let the textarea handle it
+    e.preventDefault();
+    if (!bridgeReady()) return;
+    imgs.forEach((it) => {
+      const blob = it.getAsFile();
+      if (!blob) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        // result is a data URL: "data:<mime>;base64,<payload>" — ship payload.
+        const res = String(reader.result || "");
+        const comma = res.indexOf(",");
+        if (comma === -1) return;
+        const b64 = res.slice(comma + 1);
+        Promise.resolve(
+          window.pywebview.api.add_pasted_image(b64, blob.type || "image/png", blob.name || "")
+        )
+          .then((list) => { if (window.apiaryFileDrop) window.apiaryFileDrop.setFiles(list); })
+          .catch(() => {});
+      };
+      reader.readAsDataURL(blob);
+    });
+  });
+
   // --- initial state --------------------------------------------------------
   setStatus("Waiting for session…");
   refreshTotalsBadges();
