@@ -1358,6 +1358,36 @@ body.sidebar-hidden #totals {
   border-color: var(--accent);
 }
 
+/* AskUserQuestion-style cards: descriptions present → stack full-width so the
+   sub-text is readable instead of the inline wrap used for terse prompts. */
+.prompt-banner .prompt-options.prompt-options-stacked {
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
+.prompt-banner .prompt-options-stacked .prompt-option {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.prompt-banner .prompt-option-label {
+  display: block;
+}
+
+.prompt-banner .prompt-option-desc {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.prompt-banner .prompt-option:hover .prompt-option-desc {
+  color: var(--bg);
+}
+
 .prompt-banner .prompt-footer {
   color: var(--muted);
   font-size: 11px;

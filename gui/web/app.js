@@ -1706,24 +1706,69 @@
   // being scraped from the xterm buffer. Kept in its own state slot so
   // the two paths can't fight over promptBannerEl.
   let mcpPrompt = null;   // { pendingId, payload }
+  // Transcript-sourced AskUserQuestion. Holds the pending prompt's tool_use_id
+  // while a structured card banner is showing (driven by gui.ask_prompt, NOT
+  // the xterm scrape). While set, the scrape poll (runDetect) defers so the two
+  // can't fight over the banner. Cleared when the user answers/cancels or the
+  // matching tool_result arrives (onAskPromptResolved).
+  let askPromptId = null;
   // Parser lives in prompt_detector.js so it can be Node-tested. If the bundle
   // failed to load, fall back to a no-op stub so the rest of the UI still works.
-  const detectPrompt = (window.apiaryPromptDetector && window.apiaryPromptDetector.detectPrompt) || (() => null);
+  const _promptDetector = window.apiaryPromptDetector || {};
+  const detectPrompt = _promptDetector.detectPrompt || (() => null);
+  const planArrowSteps = _promptDetector.planArrowSteps || (() => null);
+  const highlightedOptionIndex = _promptDetector.highlightedOptionIndex || (() => -1);
 
   const SCREEN_SCAN_ROWS = 200;
-  function readScreenLines() {
+  // A row counts as "highlighted" when it carries a run of at least this many
+  // contiguous cells with reverse-video or a non-default background — the
+  // colored bar claude paints behind the selected option. Small enough to catch
+  // a short option, large enough to ignore single-cell color noise (cursor,
+  // syntax-highlighted tokens in chat output).
+  const HIGHLIGHT_MIN_RUN = 3;
+
+  // Does this xterm buffer line render with a selection-bar highlight? Reads
+  // cell attributes (isInverse / non-default bg) that translateToString drops.
+  // `cell` is an optional reusable IBufferCell to avoid per-cell allocation.
+  function rowIsHighlighted(line, cell) {
+    const cols = line.length;
+    let run = 0;
+    for (let x = 0; x < cols; x++) {
+      const c = cell ? line.getCell(x, cell) : line.getCell(x);
+      if (!c) { run = 0; continue; }
+      if (c.isInverse() || !c.isBgDefault()) {
+        run += 1;
+        if (run >= HIGHLIGHT_MIN_RUN) return true;
+      } else {
+        run = 0;
+      }
+    }
+    return false;
+  }
+
+  // Read the bottom of the scrollback as { lines, highlighted }, where
+  // `highlighted` is a Set of indices INTO `lines` (push-order, since null rows
+  // are skipped) whose cells show the selection bar. The detector consults it
+  // to mark the cursor row on glyph-less menus; the arrow driver re-reads it to
+  // verify a step landed. Single pass so the two stay perfectly aligned.
+  function readScreen() {
     const buf = term.buffer.active;
-    if (!buf) return [];
+    if (!buf) return { lines: [], highlighted: new Set() };
     const total = buf.length;
     const start = Math.max(0, total - SCREEN_SCAN_ROWS);
     const lines = [];
+    const highlighted = new Set();
+    const cell = typeof buf.getNullCell === "function" ? buf.getNullCell() : undefined;
     for (let y = start; y < total; y++) {
       const line = buf.getLine(y);
       if (!line) continue;
+      const idx = lines.length;
       lines.push(line.translateToString(true).replace(/\s+$/, ""));
+      if (rowIsHighlighted(line, cell)) highlighted.add(idx);
     }
-    return lines;
+    return { lines, highlighted };
   }
+  function readScreenLines() { return readScreen().lines; }
 
   function renderPromptBanner(prompt) {
     promptBannerEl.innerHTML = "";
@@ -1751,17 +1796,74 @@
     }
     const row = document.createElement("div");
     row.className = "prompt-options";
+    // When any option carries a description (AskUserQuestion-style cards),
+    // stack the buttons full-width so the sub-text is readable, instead of the
+    // inline wrap used for terse numbered prompts.
+    if (prompt.options.some((o) => o.description)) {
+      row.classList.add("prompt-options-stacked");
+    }
     for (const opt of prompt.options) {
       const btn = document.createElement("button");
       btn.className = "prompt-option" + (opt.selected ? " selected" : "");
       btn.type = "button";
-      btn.textContent = `${opt.number}. ${opt.text}`;
+      const label = document.createElement("span");
+      label.className = "prompt-option-label";
+      label.textContent = `${opt.number}. ${opt.text}`;
+      btn.appendChild(label);
+      if (opt.description) {
+        const desc = document.createElement("span");
+        desc.className = "prompt-option-desc";
+        desc.textContent = opt.description;
+        btn.appendChild(desc);
+      }
       btn.addEventListener("click", () => answerPrompt(opt.number, opt.text));
       row.appendChild(btn);
     }
     promptBannerEl.appendChild(row);
     promptBannerEl.classList.remove("hidden");
     flashWindowIfBackground();
+  }
+
+  // Build the banner from a structured AskUserQuestion payload (the transcript
+  // tool_use record) instead of the xterm scrape. This is exact and complete by
+  // construction — it doesn't depend on how much of the card the pty viewport
+  // happened to render. payload = { tool_use_id, questions:[{ question, header,
+  // multiSelect, options:[{label, description}] }] }.
+  function showAskPrompt(payload) {
+    const tid = payload && payload.tool_use_id;
+    const questions = (payload && payload.questions) || [];
+    const q = questions[0];
+    if (!tid || !q || !Array.isArray(q.options) || q.options.length === 0) return;
+    // v1 covers the common single-question, single-select card. Multi-select
+    // (space-to-toggle) and multi-question sequences need terminal interaction
+    // the banner doesn't drive yet — reveal the terminal so the user answers
+    // there, rather than show a banner that would mis-send a single digit.
+    if (q.multiSelect || questions.length > 1) {
+      ptyExpand();
+      toast("Multi-part question — please answer in the terminal.", "warn");
+      return;
+    }
+    const options = q.options.map((o, i) => ({
+      number: i + 1,
+      text: String((o && o.label) || "").trim(),
+      description: String((o && o.description) || "").trim(),
+      // The TUI cursor starts on the first option, so highlight it. This is the
+      // accurate, deterministic selection the glyph-less scrape path could never
+      // recover (the cell-attribute highlight is dropped by translateToString).
+      selected: i === 0,
+    }));
+    const prompt = {
+      question: String(q.question || "").trim(),
+      context: "",
+      options,
+      signature: "ask:" + tid,
+    };
+    // Already answered this session (e.g. a late duplicate push) → stay quiet.
+    if (answeredSigs.has(prompt.signature)) return;
+    askPromptId = tid;
+    activePrompt = prompt;
+    recordPromptAppeared(prompt);
+    renderPromptBanner(prompt);
   }
 
   // Per-tool banner body renderers. Each takes the tool's `input` object
@@ -1987,6 +2089,7 @@
     promptBannerEl.classList.add("hidden");
     promptBannerEl.innerHTML = "";
     activePrompt = null;
+    askPromptId = null;
     awaitingFeedback = false;
     inputEl.classList.remove("input-blocked");
     inputEl.placeholder = INPUT_PLACEHOLDER_DEFAULT;
@@ -2049,12 +2152,36 @@
     // claude into a text-input sub-mode. We send the digit to enter that
     // mode, skip the Enter, hide the banner, and unblock the chat input so
     // the user can type their feedback and submit it with Enter as normal.
-    const isFeedback = /^\s*tell\b|what to change|with this feedback/i.test(optText);
+    // Options that drop claude into a free-text sub-mode rather than resolving
+    // immediately: plan mode's "Tell Claude what to change", and the
+    // AskUserQuestion card's auto-added "Type something" (Other) / "Chat about
+    // this" entries. For these we send the digit to enter the field, skip the
+    // Enter, and unblock the composer so the user can type their answer.
+    const isFeedback =
+      /^\s*tell\b|what to change|with this feedback|type something|chat about/i.test(optText);
     // Permanently mute this signature for the session — claude often leaves
     // the answered prompt rendered in the buffer past DISMISS_COOLDOWN_MS,
     // and we don't want the banner to re-appear after the user has already
     // committed to a choice.
     answeredSigs.add(activePrompt.signature);
+
+    // Options numbered >9 can't be addressed by a single keypress —
+    // send_text("10") lands as '1' then '0', selecting option 1. Drive those
+    // with the arrow-key driver (verify-then-commit); on failure reveal the
+    // terminal so the user finishes by hand. Feedback/free-text options skip
+    // this: they only need the digit to *enter* the field, handled below.
+    const optIndex = activePrompt.options.findIndex((o) => o.number === digit);
+    if (!isFeedback && digit > 9 && optIndex >= 0) {
+      hidePromptBanner();
+      driveByArrows(optIndex).then((ok) => {
+        if (!ok) {
+          ptyExpand();
+          toast("Couldn't auto-select that option — pick it in the terminal.", "warn");
+        }
+      });
+      return;
+    }
+
     window.pywebview.api.send_text(String(digit));
     if (isFeedback) {
       awaitingFeedback = true;
@@ -2067,8 +2194,56 @@
     }
   }
 
+  // --- arrow-key menu driver (Phase 2c) ------------------------------------
+  //
+  // Drives an arrow-navigable menu's cursor to a target option and commits, for
+  // the cases a single digit can't address (>9 options) or menus that ignore
+  // digit shortcuts. SAFETY INVARIANTS:
+  //   - verify-then-commit: re-read the cell-highlight after stepping and only
+  //     press Enter once the INTENDED row is the highlighted one. A miscount
+  //     self-corrects on retry instead of selecting the wrong option.
+  //   - never Ctrl+C, never blind Enter. After ARROW_MAX_ATTEMPTS we give up and
+  //     let the caller reveal the terminal — the worst case is "user finishes by
+  //     hand," never a wrong selection or a killed session.
+  // Stepping math is planArrowSteps(); the verify predicate is
+  // highlightedOptionIndex() — both unit-tested in prompt_detector.
+  const ARROW = { up: [27, 91, 65], down: [27, 91, 66], enter: [13] };
+  const ARROW_KEY_DELAY_MS = 40;   // between keystrokes; bursts sent faster get dropped
+  const ARROW_SETTLE_MS = 140;     // after a step burst, let the TUI repaint before re-reading
+  const ARROW_MAX_ATTEMPTS = 2;
+  const _delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function _sendArrow(bytes) {
+    try { window.pywebview.api.send_bytes(bytes); } catch (_) {}
+    await _delay(ARROW_KEY_DELAY_MS);
+  }
+
+  async function driveByArrows(targetIndex) {
+    if (!bridgeReady() || !activePrompt) return false;
+    const plan = planArrowSteps(activePrompt.options.length, targetIndex);
+    if (!plan) return false;
+    for (let attempt = 0; attempt < ARROW_MAX_ATTEMPTS; attempt++) {
+      for (let i = 0; i < plan.ups; i++) await _sendArrow(ARROW.up);
+      for (let i = 0; i < plan.downs; i++) await _sendArrow(ARROW.down);
+      await _delay(ARROW_SETTLE_MS);
+      const { lines, highlighted } = readScreen();
+      const fresh = detectPrompt(lines, { highlightedRows: highlighted });
+      if (fresh && highlightedOptionIndex(fresh.options) === targetIndex) {
+        try { window.pywebview.api.send_bytes(ARROW.enter); } catch (_) {}
+        return true;
+      }
+    }
+    return false;
+  }
+
   function runDetect() {
-    const found = detectPrompt(readScreenLines());
+    // A transcript-sourced AskUserQuestion banner owns the prompt UI; the xterm
+    // scrape must not override it. The scrape can't reliably see a card that's
+    // taller than the pty viewport anyway (only the scrolled-in subset is in the
+    // buffer) — sourcing from the structured tool_use record is the whole point.
+    if (askPromptId) return;
+    const { lines, highlighted } = readScreen();
+    const found = detectPrompt(lines, { highlightedRows: highlighted });
     if (!found) {
       if (activePrompt) hidePromptBanner();
       // Also clear the dismiss cooldown — if the prompt is truly gone, a
@@ -2603,6 +2778,37 @@
         renderMcpPromptBanner(mcpPrompt.pendingId, mcpPrompt.payload);
       } catch (e) {
         console.error("onPermissionPrompt parse error", e);
+      }
+    },
+    onAskPrompt(payloadJson, sessionId) {
+      // A pending AskUserQuestion, sourced from the transcript tool_use record
+      // (gui.ask_prompt) — complete and exact, unlike the xterm scrape. Only
+      // surface it for the active tab; a background tab's prompt is re-pushed on
+      // switch (the Python watcher keeps it pending).
+      if (!pushIsForActive(sessionId)) return;
+      try {
+        const payload = typeof payloadJson === "string"
+          ? JSON.parse(payloadJson) : payloadJson;
+        // Don't stack on top of an MCP permission prompt.
+        if (mcpPrompt) return;
+        showAskPrompt(payload || {});
+      } catch (e) {
+        console.error("onAskPrompt parse error", e);
+      }
+    },
+    onAskPromptResolved(toolUseIdJson, sessionId) {
+      // The matching tool_result arrived (answered or cancelled) → clear the
+      // banner if it's still the one showing. No Esc: the prompt is already
+      // resolved on claude's side.
+      if (!pushIsForActive(sessionId)) return;
+      try {
+        const tid = typeof toolUseIdJson === "string"
+          ? toolUseIdJson : String(toolUseIdJson || "");
+        if (askPromptId && tid === askPromptId) {
+          hidePromptBanner();
+        }
+      } catch (e) {
+        console.error("onAskPromptResolved parse error", e);
       }
     },
   };
