@@ -571,6 +571,9 @@
   }
   function clearMessages() {
     messagesEl.innerHTML = "";
+    // innerHTML="" detaches the bubble node; null the ref so a stale detached
+    // node isn't carried around, and record the teardown for the monitor.
+    if (thinkingEl) { thinkingEl = null; activeTab().lastHideReason = "clear"; }
     seen.clear();
     resetTotals();
     sticky = true;
@@ -595,13 +598,36 @@
     // arrived, and re-running here would clobber lastAsstMsgAt with "now".
     if (!isReplay && msg.role === "assistant") {
       const t = getTab(targetSid);
+      // Monitor: snapshot BEFORE the bubble reacts. A live assistant message
+      // means claude was working, so the bubble should be up right now; if it
+      // isn't, record the event + classified cause (see bubble_monitor.js).
+      const anomaly = classifyBubbleAnomaly({
+        role: "assistant",
+        isReplay: false,
+        isActive: targetSid === activeSessionId,
+        bubbleConnected: !!(thinkingEl && thinkingEl.isConnected),
+        shownThisTurn: t.shownThisTurn,
+        lastHideReason: t.lastHideReason,
+      });
+      if (anomaly) reportBubbleAnomaly(anomaly, msg, t, targetSid);
+
       t.lastAsstMsgAt = Date.now();
       if (msg.stop_reason === "end_turn") {
-        hideThinkingBubbleFor(targetSid, true);
+        hideThinkingBubbleFor(targetSid, true, "end_turn");
         flashWindowIfBackground();
       } else {
-        hideThinkingBubbleFor(targetSid, false);
+        hideThinkingBubbleFor(targetSid, false, "transient");
         if (targetSid === activeSessionId) ensureThinkingBubble();
+      }
+    } else if (!isReplay && msg.role === "user") {
+      // Turn start for non-composer turns (terminal-typed input, slash
+      // commands, wakeups). The composer path resets via startThinkingCounter;
+      // here we only reset when NOT already mid-turn, so a late-arriving user
+      // record for a composer turn doesn't clobber an in-progress turn's state.
+      const t = getTab(targetSid);
+      if (!t.waitingForAssistant) {
+        t.shownThisTurn = false;
+        t.lastHideReason = "";
       }
     }
 
@@ -1496,6 +1522,12 @@
       thinkingStartTs: 0,
       lastPtyChunkAt: 0,
       lastAsstMsgAt: 0,
+      // Bubble-anomaly monitor (see bubble_monitor.js). shownThisTurn tracks
+      // whether the thinking bubble has appeared since the current turn began;
+      // lastHideReason records how it most recently went down. Both reset at
+      // turn start, so a missing-bubble event can be classified by cause.
+      shownThisTurn: false,
+      lastHideReason: "",
     };
   }
   const tabs = new Map();
@@ -1523,6 +1555,39 @@
   const PTY_ACTIVE_MS = 2000;
   let thinkingEl = null;   // single shared DOM node — the active tab's bubble
 
+  // --- bubble anomaly monitor ----------------------------------------------
+  // The thinking bubble vanishes intermittently while claude is still working,
+  // and the cause has resisted reproduction. Rather than guess-and-fix (the
+  // trap L-2026-133 documents), we observe: when a live assistant message lands
+  // the bubble should be up, so if it isn't we record the event + WHY (derived
+  // from how it last went down) to a persistent log for later analysis. Healthy
+  // turns log nothing. classifyBubbleAnomaly is pure + Node-tested.
+  const _bubbleMonitor = window.apiaryBubbleMonitor || {};
+  const classifyBubbleAnomaly = _bubbleMonitor.classifyBubbleAnomaly || (() => null);
+
+  function reportBubbleAnomaly(anomaly, msg, t, sid) {
+    const now = Date.now();
+    const payload = {
+      ts: new Date(now).toISOString(),
+      cause: anomaly.cause,
+      sessionId: sid || "",
+      msgUuid: (msg && msg.uuid) || "",
+      msgStopReason: (msg && msg.stop_reason) || "",
+      waitingForAssistant: !!t.waitingForAssistant,
+      shownThisTurn: !!t.shownThisTurn,
+      lastHideReason: t.lastHideReason || "",
+      msSinceLastPtyChunk: t.lastPtyChunkAt ? now - t.lastPtyChunkAt : -1,
+      msSinceLastAsstMsg: t.lastAsstMsgAt ? now - t.lastAsstMsgAt : -1,
+      inPostMessageGrace: inPostMessageGrace(),
+    };
+    console.warn("[apiary] thinking-bubble anomaly", payload);
+    try {
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.log_bubble_anomaly) {
+        window.pywebview.api.log_bubble_anomaly(JSON.stringify(payload));
+      }
+    } catch (_) {}
+  }
+
   function syncThinkingChrome() {
     const t = activeTab();
     if (t.waitingForAssistant && t.thinkingStartTs > 0) {
@@ -1537,7 +1602,12 @@
   }
 
   function startThinkingCounter() {
-    activeTab().thinkingStartTs = Date.now();
+    const t = activeTab();
+    t.thinkingStartTs = Date.now();
+    // Fresh composer-initiated turn — reset the monitor's per-turn state so a
+    // later missing bubble is attributed to this turn, not a stale prior one.
+    t.shownThisTurn = false;
+    t.lastHideReason = "";
     thinkingSecondsEl.textContent = "0s";
     thinkingSecondsEl.classList.remove("hidden");
   }
@@ -1563,6 +1633,7 @@
         '<span class="dot"></span>' +
       '</div>';
     messagesEl.appendChild(thinkingEl);
+    activeTab().shownThisTurn = true;   // monitor: the bubble appeared this turn
     updateThinkingState();
     maybeScroll();
   }
@@ -1571,8 +1642,11 @@
   // one, also remove the DOM node. `endTurn=true` clears the waitingForAssistant
   // flag (real end_turn or 15s idle); `false` is a transient hide between
   // chained assistant messages within the same turn.
-  function hideThinkingBubbleFor(sid, endTurn) {
+  function hideThinkingBubbleFor(sid, endTurn, reason) {
     const t = getTab(sid);
+    // Record WHY the bubble went down (monitor); not cleared until turn start,
+    // so a later missing-bubble event can be attributed to this teardown.
+    if (reason) t.lastHideReason = reason;
     if (endTurn) {
       t.waitingForAssistant = false;
       t.thinkingStartTs = 0;
@@ -1586,7 +1660,7 @@
     }
   }
   // Convenience for callers that always mean the active tab.
-  function hideThinkingBubble(endTurn) { hideThinkingBubbleFor(activeSessionId, endTurn); }
+  function hideThinkingBubble(endTurn, reason) { hideThinkingBubbleFor(activeSessionId, endTurn, reason); }
 
   setInterval(() => {
     const t = activeTab();
@@ -1603,7 +1677,7 @@
       messagesEl.appendChild(thinkingEl);
     }
     if (Date.now() - t.lastPtyChunkAt > THINKING_IDLE_MS) {
-      hideThinkingBubble(true);
+      hideThinkingBubble(true, "idle_timeout");
     }
   }, 1000);
 
@@ -2622,6 +2696,7 @@
       try { clearMessages(); } catch (_) {}
       try { term.reset(); } catch (_) {}
       if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
+      getTab(activeSessionId).lastHideReason = "tab_teardown";  // monitor: distinguish switch from /clear
       if (typeof hidePromptBanner === "function") hidePromptBanner();
       // Drop any active MCP prompt from the outgoing tab. The bridge will
       // time out and deny; a fresh request from the new tab will re-banner.
