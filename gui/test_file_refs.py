@@ -9,6 +9,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from gui.file_refs import FileRefs
 
@@ -205,6 +206,47 @@ class FileRefsTest(unittest.TestCase):
         self.assertIn(desc["path"], out["text"])
         self.assertIn("image/png", out["text"])
         self.assertTrue(out["files"][0]["announced"])
+
+    # --- per-tab scoping (one registry per GUI tab / session_id) -------------
+
+    def test_scope_derives_isolated_paths(self):
+        with mock.patch("gui.file_refs.paths.state_dir", return_value=self.tmp):
+            a = FileRefs(scope="aaa")
+            self.assertEqual(a.store, self.tmp / "file_refs" / "aaa.json")
+            self.assertEqual(a.pasted_dir, self.tmp / "pasted" / "aaa")
+
+    def test_scope_isolates_entries_between_tabs(self):
+        with mock.patch("gui.file_refs.paths.state_dir", return_value=self.tmp):
+            a = FileRefs(scope="aaa")
+            b = FileRefs(scope="bbb")
+            a.add(str(self._make("a.txt")))
+            self.assertEqual(len(a.list()), 1)
+            self.assertEqual(b.list(), [])  # tab b cannot see tab a's staged file
+
+    def test_wipe_all_clears_every_scope(self):
+        with mock.patch("gui.file_refs.paths.state_dir", return_value=self.tmp):
+            a = FileRefs(scope="aaa")
+            a.add_pasted_bytes(b"\x89PNG", "image/png")
+            a.add(str(self._make("a.txt")))
+            self.assertTrue(a.list())
+            # A leftover legacy unscoped store should be cleared too.
+            (self.tmp / "file_refs.json").write_text("[]", encoding="utf-8")
+            FileRefs.wipe_all()
+            self.assertEqual(FileRefs(scope="aaa").list(), [])
+            self.assertFalse((self.tmp / "file_refs").exists())
+            self.assertFalse((self.tmp / "pasted").exists())
+            self.assertFalse((self.tmp / "file_refs.json").exists())
+
+    def test_destroy_removes_scope_files(self):
+        with mock.patch("gui.file_refs.paths.state_dir", return_value=self.tmp):
+            a = FileRefs(scope="aaa")
+            pasted = Path(a.add_pasted_bytes(b"\x89PNG", "image/png")["path"])
+            self.assertTrue(a.store.is_file())
+            self.assertTrue(pasted.is_file())
+            a.destroy()
+            self.assertFalse(a.store.exists())
+            self.assertFalse(pasted.exists())
+            self.assertFalse(a.pasted_dir.exists())
 
 
 if __name__ == "__main__":

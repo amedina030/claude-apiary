@@ -138,48 +138,61 @@ class GuiBridge:
     # Drag-dropped files are added by the native pywebview drop handler
     # (App._on_file_drop), not by the frontend — the webview hands the real
     # path to Python, so JS never sees bytes. These bridge methods cover the
-    # frontend-initiated actions: removing a chip, clearing, and the initial
-    # render (and re-render after a page reload).
+    # frontend-initiated actions: removing a chip, clearing, pasting, the
+    # initial render, and the send-time manifest. All operate on the ACTIVE
+    # tab's registry (Session.file_refs) — the panel only ever shows the active
+    # tab, and a send always comes from it — so staged files never cross tabs.
 
     def remove_file(self, file_id: str) -> list[dict]:
         """Drop one file reference (user clicked its ✕); returns the new list.
-        The on-disk file is never touched — we only hold a pointer."""
-        self._app._file_refs.remove(file_id)
-        return self._app._file_refs.list()
+        An owned (pasted) temp file is deleted; a dropped reference's target is
+        never touched — we only hold a pointer."""
+        s = self._app.active
+        if s is None:
+            return []
+        s.file_refs.remove(file_id)
+        return s.file_refs.list()
 
     def clear_files(self) -> bool:
-        """Drop every file reference."""
-        return self._app._file_refs.clear()
+        """Drop every file reference for the active tab."""
+        s = self._app.active
+        return s.file_refs.clear() if s is not None else False
 
     def list_files(self) -> list[dict]:
-        """All current file references (for the initial render / reload)."""
-        return self._app._file_refs.list()
+        """The active tab's file references (for the initial render / reload)."""
+        s = self._app.active
+        return s.file_refs.list() if s is not None else []
 
     def add_pasted_image(self, data_b64: str, mime: str = "", name: str = "") -> list[dict]:
         """Frontend pasted an image into the composer. A clipboard bitmap has no
         source path, so — unlike a drop — Python materializes the bytes into an
-        owned temp file and registers it. ``data_b64`` is the base64 payload of
-        the image (no data-URL prefix). Returns the refreshed list so the panel
-        renders the new row in one hop; bad input leaves the list unchanged."""
+        owned temp file and registers it on the active tab. ``data_b64`` is the
+        base64 payload of the image (no data-URL prefix). Returns the refreshed
+        list so the panel renders the new row in one hop; bad input leaves the
+        list unchanged."""
+        s = self._app.active
+        if s is None:
+            return []
         if not isinstance(data_b64, str) or not data_b64:
-            return self._app._file_refs.list()
+            return s.file_refs.list()
         try:
             raw = base64.b64decode(data_b64, validate=True)
         except (ValueError, TypeError):
-            return self._app._file_refs.list()
-        self._app._file_refs.add_pasted_bytes(
-            raw, mime or None, name or None
-        )
-        return self._app._file_refs.list()
+            return s.file_refs.list()
+        s.file_refs.add_pasted_bytes(raw, mime or None, name or None)
+        return s.file_refs.list()
 
     def manifest_and_mark(self) -> dict:
-        """Build the send-time attach manifest authoritatively and mark the
-        listed files shared. Called by the frontend the moment the user sends:
-        existence is re-checked here (not from a stale JS cache), so a
-        reference whose target vanished since it was dropped is dropped from
-        the manifest instead of shipping a dead path. Returns {text, files} so
-        the frontend appends the text and re-renders the panel in one hop."""
-        return self._app._file_refs.manifest_and_mark()
+        """Build the active tab's send-time attach manifest authoritatively and
+        mark the listed files shared. Called by the frontend the moment the user
+        sends: existence is re-checked here (not from a stale JS cache), so a
+        reference whose target vanished since it was dropped is dropped from the
+        manifest instead of shipping a dead path. Returns {text, files} so the
+        frontend appends the text and re-renders the panel in one hop."""
+        s = self._app.active
+        if s is None:
+            return {"text": "", "files": []}
+        return s.file_refs.manifest_and_mark()
 
     def get_note_body(self, body_path: str) -> str:
         """Frontend calls this when a sidebar note is clicked. Read-only — no scribe writes."""
@@ -301,11 +314,11 @@ class App:
         self._last_usage: Optional[dict] = None
         self._js_lock = threading.Lock()
         self._services_started = False
-        # Per-run registry of drag-dropped file references (paths, not copies —
-        # see file_refs.py). Wiped now so this run never inherits last run's
-        # references.
-        self._file_refs = file_refs.FileRefs()
-        self._file_refs.reset()
+        # Drag-drop / paste file registries are per tab — each Session owns its
+        # own FileRefs keyed by session_id (see file_refs.py), so staged files
+        # belong to the tab they were added in. Wipe every scope now so this
+        # run never inherits last run's references or pasted temp files.
+        file_refs.FileRefs.wipe_all()
         # Pty capture is opt-in via APIARY_GUI_CAPTURE_LABEL. One CaptureWriter
         # for the lifetime of the process — all sessions write to the same file
         # prefixed by their label.
@@ -540,6 +553,9 @@ class App:
             files = (event or {}).get("dataTransfer", {}).get("files", []) or []
         except AttributeError:
             return
+        sess = self.active
+        if sess is None:
+            return  # a drop with no open tab has nowhere to land
         added = False
         for f in files:
             if not isinstance(f, dict):
@@ -547,13 +563,17 @@ class App:
             path = f.get("pywebviewFullPath")
             if not path:
                 continue
-            if self._file_refs.add(path).get("ok"):
+            if sess.file_refs.add(path).get("ok"):
                 added = True
         if added:
             self._push_file_refs()
 
     def _push_file_refs(self) -> None:
-        payload = json.dumps(self._file_refs.list())
+        """Push the ACTIVE tab's file list to the (single, shared) refs panel.
+        Called on drop and on every tab switch so the panel always reflects the
+        active tab — switching tabs swaps the staged files in view."""
+        sess = self.active
+        payload = json.dumps(sess.file_refs.list() if sess is not None else [])
         self._eval(f"window.apiaryFileDrop && window.apiaryFileDrop.setFiles({payload});")
 
     # --- session lifecycle --------------------------------------------------------
@@ -627,6 +647,10 @@ class App:
         sess = self.active
         sid = json.dumps(sess.session_id if sess else "")
         self._eval(f"window.apiary.setActiveSession({sid});")
+        # Swap the refs panel to the now-active tab's staged files (each tab has
+        # its own registry). Centralized here so open/switch/close/restore all
+        # keep the panel in sync without each repeating the push.
+        self._push_file_refs()
 
     def _persist_tabs(self) -> None:
         tabs_state.save(
@@ -743,6 +767,13 @@ class App:
                         pass
                 try:
                     s.stop()
+                except Exception:
+                    pass
+                # Tear down this tab's file registry: delete its owned (pasted)
+                # temp files, store, and pasted subdir so a closed tab leaves
+                # nothing behind. Dropped references' targets are untouched.
+                try:
+                    s.file_refs.destroy()
                 except Exception:
                     pass
                 self._sessions.pop(i)
