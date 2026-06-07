@@ -485,6 +485,20 @@
     html += renderInline(text.slice(last));
     return html;
   }
+  // The send path appends a drag-dropped-file manifest to the outgoing text
+  // (built authoritatively in Python at send time) so claude sees the on-disk
+  // paths in its context / terminal. That block belongs to claude, not the
+  // chat bubble — strip it from any USER message before display, and before
+  // tentative-match reconciliation so the optimistic (manifest-free) render
+  // still matches the JSONL record. Marker mirrors file_refs.manifest_and_mark.
+  const FILE_MANIFEST_MARKER = "[attached files — read these with the Read tool:]";
+  function stripFileManifest(text) {
+    if (!text) return text;
+    const i = text.indexOf(FILE_MANIFEST_MARKER);
+    if (i === -1) return text;
+    return text.slice(0, i).replace(/\n+$/, "");
+  }
+
   function renderBody(text) {
     const fence = /```([\w-]*)\n([\s\S]*?)```/g;
     let html = "";
@@ -653,9 +667,10 @@
     let inheritedQueued = false;
     if (msg.role === "user" && msg.text) {
       const tentatives = messagesEl.querySelectorAll("li.msg.user.tentative");
+      const matchText = stripFileManifest(msg.text);
       let matched = null;
       for (const el of tentatives) {
-        if (el.dataset.text === msg.text) {
+        if (el.dataset.text === matchText) {
           matched = el;
           break;
         }
@@ -731,7 +746,9 @@
 
     const body = document.createElement("div");
     body.className = "msg-body";
-    body.innerHTML = renderBody(msg.text || "");
+    const displayText =
+      msg.role === "user" ? stripFileManifest(msg.text || "") : (msg.text || "");
+    body.innerHTML = renderBody(displayText);
     li.appendChild(body);
 
     if (insertAnchor && insertAnchor.parentNode === messagesEl) {

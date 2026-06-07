@@ -664,7 +664,7 @@ body.sidebar-hidden #totals {
 
 .usage-title {
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 1px;
   font-size: 10px;
   color: var(--muted);
   cursor: pointer;
@@ -1691,6 +1691,15 @@ body.sidebar-hidden #totals {
    even though files are staged. */
 .refs-pane.collapsed .refs-caret svg { transform: rotate(-90deg); }
 .refs-pane.collapsed .refs-rows { display: none; }
+
+/* Header label typography — matches .sidebar-group-head / .usage-title
+   (10px uppercase, 1px tracking) so all three sidebar section headers read
+   consistently. Without this it inherits .refs-head's 12px lowercase. */
+.refs-title {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
 
 /* With nothing staged the header is just a label — no caret, no pointer. */
 .refs-pane:not(.has-files) .refs-caret { display: none; }
