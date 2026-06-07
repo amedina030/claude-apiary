@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from gui import composer_state, picker, pty_capture, sidebar_state, tabs_state, usage_fetcher
+from gui import composer_state, file_refs, picker, pty_capture, sidebar_state, tabs_state, usage_fetcher
 from gui import permission_mcp
 from gui.permission_bridge import PermissionBridge
 from gui.permission_mcp import BRIDGE_URL_ENV as _PERMISSION_MCP_BRIDGE_URL_ENV
@@ -133,6 +133,35 @@ class GuiBridge:
             print(f"[gui] log_bubble_anomaly failed: {e}", file=sys.stderr)
             return False
         return True
+
+    # Drag-dropped files are added by the native pywebview drop handler
+    # (App._on_file_drop), not by the frontend — the webview hands the real
+    # path to Python, so JS never sees bytes. These bridge methods cover the
+    # frontend-initiated actions: removing a chip, clearing, and the initial
+    # render (and re-render after a page reload).
+
+    def remove_file(self, file_id: str) -> list[dict]:
+        """Drop one file reference (user clicked its ✕); returns the new list.
+        The on-disk file is never touched — we only hold a pointer."""
+        self._app._file_refs.remove(file_id)
+        return self._app._file_refs.list()
+
+    def clear_files(self) -> bool:
+        """Drop every file reference."""
+        return self._app._file_refs.clear()
+
+    def list_files(self) -> list[dict]:
+        """All current file references (for the initial render / reload)."""
+        return self._app._file_refs.list()
+
+    def manifest_and_mark(self) -> dict:
+        """Build the send-time attach manifest authoritatively and mark the
+        listed files shared. Called by the frontend the moment the user sends:
+        existence is re-checked here (not from a stale JS cache), so a
+        reference whose target vanished since it was dropped is dropped from
+        the manifest instead of shipping a dead path. Returns {text, files} so
+        the frontend appends the text and re-renders the panel in one hop."""
+        return self._app._file_refs.manifest_and_mark()
 
     def get_note_body(self, body_path: str) -> str:
         """Frontend calls this when a sidebar note is clicked. Read-only — no scribe writes."""
@@ -254,6 +283,11 @@ class App:
         self._last_usage: Optional[dict] = None
         self._js_lock = threading.Lock()
         self._services_started = False
+        # Per-run registry of drag-dropped file references (paths, not copies —
+        # see file_refs.py). Wiped now so this run never inherits last run's
+        # references.
+        self._file_refs = file_refs.FileRefs()
+        self._file_refs.reset()
         # Pty capture is opt-in via APIARY_GUI_CAPTURE_LABEL. One CaptureWriter
         # for the lifetime of the process — all sessions write to the same file
         # prefixed by their label.
@@ -454,6 +488,55 @@ class App:
         if payload is not None:
             self._last_usage = payload
         self._eval(f"window.apiary.onUsage({json.dumps(payload)});")
+
+    # --- drag-dropped file references ---------------------------------------------
+
+    def _register_file_drop(self) -> None:
+        """Register the native pywebview drop handler on the document.
+
+        Subscribed to ``window.events.loaded`` so it re-arms after a page reload
+        (the DOM element registry and the JS listeners are torn down on reload).
+        Only the ``drop`` event is registered in Python — dragover is cancelled
+        in JS (file_drop.js) to avoid spawning a Python thread per dragover tick.
+        """
+        win = self.window
+        if win is None:
+            return
+        try:
+            from webview.dom import DOMEventHandler  # type: ignore
+
+            # prevent_default stops the webview from navigating to the dropped
+            # file. pywebview stamps each file with pywebviewFullPath before our
+            # handler runs (webview/util.py), giving us the real path for free.
+            win.dom.document.on(
+                "drop", DOMEventHandler(self._on_file_drop, prevent_default=True)
+            )
+        except Exception as e:
+            print(f"[gui] file-drop registration failed: {e}", file=sys.stderr)
+
+    def _on_file_drop(self, event: dict) -> None:
+        """Handle a native file drop: record a reference per dropped file, then
+        push the updated list to the frontend. Runs on a pywebview worker
+        thread; ``_eval`` is thread-safe."""
+        try:
+            files = (event or {}).get("dataTransfer", {}).get("files", []) or []
+        except AttributeError:
+            return
+        added = False
+        for f in files:
+            if not isinstance(f, dict):
+                continue
+            path = f.get("pywebviewFullPath")
+            if not path:
+                continue
+            if self._file_refs.add(path).get("ok"):
+                added = True
+        if added:
+            self._push_file_refs()
+
+    def _push_file_refs(self) -> None:
+        payload = json.dumps(self._file_refs.list())
+        self._eval(f"window.apiaryFileDrop && window.apiaryFileDrop.setFiles({payload});")
 
     # --- session lifecycle --------------------------------------------------------
 
@@ -877,6 +960,9 @@ def main() -> int:
             app.shutdown()
 
         window.events.loaded += _on_loaded
+        # Separate subscriber so the drop handler re-arms on every page (re)load,
+        # not just first boot — start_services is one-shot and wouldn't re-run.
+        window.events.loaded += app._register_file_drop
         window.events.closed += _on_closed
 
         webview.start(debug=bool(os.environ.get("APIARY_GUI_DEBUG")))

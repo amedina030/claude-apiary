@@ -102,6 +102,22 @@
             <input type="search" id="sidebar-search" placeholder="search notes…" />
           </div>
           <div id="sidebar-list" class="sidebar-list"></div>
+
+          <!-- Drag-dropped file references (file_drop.js). Header is always
+               present to mark the spot; the rows body hides when empty and is
+               height-capped + scrollable so it never crowds the notes above.
+               Clicking the title (when files are staged) collapses/expands the
+               body — the caret reflects the state. -->
+          <div id="refs-pane" class="refs-pane" aria-label="referenced files">
+            <div class="refs-head">
+              <button id="refs-toggle" type="button" class="refs-toggle" aria-expanded="true" aria-controls="refs-rows">
+                <span class="refs-caret" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg></span>
+                <span id="refs-title" class="refs-title">referenced files</span>
+              </button>
+              <button id="refs-clear" type="button" class="refs-clear hidden" aria-label="clear all referenced files">clear</button>
+            </div>
+            <div id="refs-rows" class="refs-rows"></div>
+          </div>
         </aside>
         <footer id="composer">
           <textarea id="input" rows="3" placeholder="message Claude Code (Enter to send · Shift+Enter for newline · Ctrl+C to interrupt · Esc to cancel)"></textarea>
@@ -109,6 +125,20 @@
       </main>
 
       <div id="toasts" class="toasts"></div>
+
+      <div id="drop-overlay" class="drop-overlay hidden" aria-hidden="true">
+        <div class="drop-overlay-inner">
+          <span class="drop-overlay-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 16V4" />
+              <path d="M7 9l5-5 5 5" />
+              <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+            </svg>
+          </span>
+          <span class="drop-overlay-text">Drop files to attach</span>
+          <span class="drop-overlay-sub">referenced in place and listed above the composer</span>
+        </div>
+      </div>
 
       <div id="picker" class="picker hidden" role="dialog" aria-modal="true" aria-labelledby="picker-title">
         <div class="picker-backdrop" data-picker-dismiss></div>
@@ -157,6 +187,7 @@
     <script src="vendor/xterm/addon-fit.min.js"></script>
     <script src="prompt_detector.js"></script>
     <script src="bubble_monitor.js"></script>
+    <script src="file_drop.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

@@ -664,7 +664,7 @@ body.sidebar-hidden #totals {
 
 .usage-title {
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 1px;
   font-size: 10px;
   color: var(--muted);
   cursor: pointer;
@@ -1593,6 +1593,205 @@ body.sidebar-hidden #totals {
 .toast.error {
   border-color: #f85149;
   color: #ffa198;
+}
+
+/* --- Drag-and-drop file attachments (file_drop.js) ----------------------- */
+
+/* Full-window overlay shown while a file is dragged over the GUI. */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none; /* never intercept the drop itself */
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.drop-overlay.hidden {
+  display: none;
+}
+
+.drop-overlay-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 40px;
+  border: 2px dashed color-mix(in srgb, var(--accent) 70%, var(--border));
+  border-radius: calc(var(--radius) * 2);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  color: var(--fg);
+  font-family: var(--font-family-ui);
+}
+
+.drop-overlay-icon svg {
+  width: 40px;
+  height: 40px;
+  color: var(--accent);
+}
+
+.drop-overlay-text {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.drop-overlay-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Referenced-files pane — docked at the bottom of the sidebar, below the notes.
+   The header is always present (marks the spot even when empty); the rows body
+   hides when empty and is height-capped + scrollable so it never crowds the
+   notes list above it. Rows use a soft tint (no border) to stay quiet. */
+.refs-pane {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border);
+  padding: 8px 8px 10px;
+}
+
+.refs-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 4px 0;
+}
+
+/* Title doubles as a collapse toggle. Borderless so it reads as the header
+   label, not a button — the caret carries the affordance. */
+.refs-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.refs-caret {
+  display: inline-flex;
+  align-items: center;
+}
+
+.refs-caret svg {
+  width: 11px;
+  height: 11px;
+  transition: transform 0.12s ease;
+}
+
+/* Collapsed: caret points right (from its default down) and the body hides
+   even though files are staged. */
+.refs-pane.collapsed .refs-caret svg { transform: rotate(-90deg); }
+.refs-pane.collapsed .refs-rows { display: none; }
+
+/* Header label typography — matches .sidebar-group-head / .usage-title
+   (10px uppercase, 1px tracking) so all three sidebar section headers read
+   consistently. Without this it inherits .refs-head's 12px lowercase. */
+.refs-title {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* With nothing staged the header is just a label — no caret, no pointer. */
+.refs-pane:not(.has-files) .refs-caret { display: none; }
+.refs-pane:not(.has-files) .refs-toggle { cursor: default; }
+.refs-pane.has-files .refs-toggle:hover .refs-title { color: var(--fg); }
+
+.refs-clear {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.refs-clear:hover { color: var(--fg); }
+.refs-clear.hidden { display: none; }
+
+.refs-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 6px 2px 0;
+}
+
+/* Body collapses entirely when there are no rows — header stays put. */
+.refs-rows:empty { display: none; }
+
+.refs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  font-size: 12px;
+  color: var(--badge-fg);
+}
+
+.refs-row-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--muted);
+}
+
+.refs-row-icon svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
+/* Path truncated from the LEFT so the filename tail stays readable in the
+   narrow column. */
+.refs-row-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  font-family: var(--font-family);
+  font-size: 11.5px;
+}
+
+.refs-row-remove {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.refs-row-remove:hover {
+  opacity: 1;
+  color: #ffa198;
+}
+
+/* Already shared with claude (announced in a prior turn) — dimmed. */
+.refs-row.announced { opacity: 0.45; }
+
+/* Original moved/deleted since it was added (the path-not-copy tradeoff). */
+.refs-row.missing .refs-row-path {
+  color: #ffa198;
+  text-decoration: line-through;
 }
 
 /* Themed folder picker — replaces the native OS folder dialog so the new-session

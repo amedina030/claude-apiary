@@ -485,6 +485,20 @@
     html += renderInline(text.slice(last));
     return html;
   }
+  // The send path appends a drag-dropped-file manifest to the outgoing text
+  // (built authoritatively in Python at send time) so claude sees the on-disk
+  // paths in its context / terminal. That block belongs to claude, not the
+  // chat bubble — strip it from any USER message before display, and before
+  // tentative-match reconciliation so the optimistic (manifest-free) render
+  // still matches the JSONL record. Marker mirrors file_refs.manifest_and_mark.
+  const FILE_MANIFEST_MARKER = "[attached files — read these with the Read tool:]";
+  function stripFileManifest(text) {
+    if (!text) return text;
+    const i = text.indexOf(FILE_MANIFEST_MARKER);
+    if (i === -1) return text;
+    return text.slice(0, i).replace(/\n+$/, "");
+  }
+
   function renderBody(text) {
     const fence = /```([\w-]*)\n([\s\S]*?)```/g;
     let html = "";
@@ -653,9 +667,10 @@
     let inheritedQueued = false;
     if (msg.role === "user" && msg.text) {
       const tentatives = messagesEl.querySelectorAll("li.msg.user.tentative");
+      const matchText = stripFileManifest(msg.text);
       let matched = null;
       for (const el of tentatives) {
-        if (el.dataset.text === msg.text) {
+        if (el.dataset.text === matchText) {
           matched = el;
           break;
         }
@@ -731,7 +746,9 @@
 
     const body = document.createElement("div");
     body.className = "msg-body";
-    body.innerHTML = renderBody(msg.text || "");
+    const displayText =
+      msg.role === "user" ? stripFileManifest(msg.text || "") : (msg.text || "");
+    body.innerHTML = renderBody(displayText);
     li.appendChild(body);
 
     if (insertAnchor && insertAnchor.parentNode === messagesEl) {
@@ -2904,7 +2921,7 @@
   });
 
   // --- input wiring ---------------------------------------------------------
-  inputEl.addEventListener("keydown", (e) => {
+  inputEl.addEventListener("keydown", async (e) => {
     if (!bridgeReady()) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -2918,10 +2935,12 @@
       const text = inputEl.value;
       inputEl.value = "";
       // Render optimistically — the tail will reconcile when the real record
-      // lands. Skip empties and slash commands (slash commands shouldn't show
-      // as user messages; claude often handles them differently). Also skip
-      // the tentative render while we're in feedback-submission mode —
-      // claude treats this as input to the plan prompt, not a new user msg.
+      // lands. Uses `text` (not the manifest-augmented payload), so it can run
+      // before we await Python for the manifest below. Skip empties and slash
+      // commands (slash commands shouldn't show as user messages; claude often
+      // handles them differently). Also skip the tentative render while we're
+      // in feedback-submission mode — claude treats this as input to the plan
+      // prompt, not a new user msg.
       if (text && !text.startsWith("/") && !awaitingFeedback) {
         const t = activeTab();
         if (!t.waitingForAssistant) {
@@ -2943,7 +2962,23 @@
         // don't get a normal assistant reply, so we don't arm for them.
         t.waitingForAssistant = true;
       }
-      window.pywebview.api.send_input(text);
+      // Build the drag-dropped-file manifest server-side, the moment we send:
+      // Python re-checks each path's existence NOW and drops any that vanished
+      // since the drop (so we never ship a dead path), then marks the rest
+      // shared so they aren't re-listed next turn. Returns the refreshed list
+      // too, so the panel re-renders dimmed rows / live missing flags in the
+      // same hop. Skipped for slash commands (extra lines corrupt the command)
+      // and when nothing is staged (no needless bridge round-trip).
+      let manifest = "";
+      if (!text.startsWith("/") && window.apiaryFileDrop && window.apiaryFileDrop.hasFiles()) {
+        try {
+          const res = await window.pywebview.api.manifest_and_mark();
+          manifest = (res && res.text) || "";
+          if (res && Array.isArray(res.files)) window.apiaryFileDrop.setFiles(res.files);
+        } catch (_) { manifest = ""; }
+      }
+      const outgoing = manifest ? (text ? text + "\n\n" + manifest : manifest) : text;
+      window.pywebview.api.send_input(outgoing);
       if (awaitingFeedback) {
         awaitingFeedback = false;
         inputEl.placeholder = INPUT_PLACEHOLDER_DEFAULT;
