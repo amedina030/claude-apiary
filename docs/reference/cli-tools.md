@@ -345,29 +345,65 @@ State is auto-created on first `add` or `register-tag`: `<state-dir>/captures/` 
 Combined validate + assign-IDs script. Preferred over calling validators and assign_ids separately.
 
 ```bash
-echo '<json>' | python harden/validate_and_assign.py findings [--check-files] [--deep] [--sanitize]
-python harden/validate_and_assign.py findings --file findings.json [--check-files] [--deep] [--sanitize]
+echo '<json>' | python harden/validate_and_assign.py findings [--lens NAME] [--check-files] [--deep] [--sanitize]
+python harden/validate_and_assign.py findings --file findings.json --lens security --sanitize [--check-files] [--deep]
 python harden/validate_and_assign.py response --file response.json --expected-ids ATK-001,ATK-002 [--check-files]
+python harden/validate_and_assign.py consolidation --file consolidation.json --source-ids ATK-SEC-001,ATK-COR-002 [--check-files]
+python harden/validate_and_assign.py consolidation --degrade --file merged_findings.json
 ```
 
 ### Subcommands
 
 | Subcommand | Description |
 |------------|-------------|
-| `findings` | Validate and assign ATK-IDs to Attacker findings |
-| `response` | Validate and assign DEF-IDs to Defender response |
+| `findings` | Validate and assign IDs to Attacker findings. Legacy mode → `ATK-NNN`; lens mode (`--lens`) → `ATK-<CODE>-NNN` |
+| `response` | Validate and assign DEF-IDs to Defender response (prefix-agnostic `--expected-ids`) |
+| `consolidation` | Validate Consolidator/referee output and assign `CON-NNN` to accepted findings (multi-lens path) |
 
 ### Flags
 
 | Flag | Applies to | Required | Description |
 |------|-----------|----------|-------------|
-| `--file PATH` | both | no | Read JSON from file instead of stdin |
-| `--check-files` | both | no | Verify referenced files exist (code mode) |
+| `--file PATH` | all | no | Read JSON from file instead of stdin |
+| `--check-files` | all | no | Verify referenced files exist (code mode) |
 | `--deep` | findings | no | Require Given/When/Then scenarios |
-| `--sanitize` | findings | no | Auto-fix common issues (strip unknown fields, map invalid categories) |
-| `--expected-ids IDS` | response | yes | Comma-separated ATK-IDs that must be addressed |
+| `--sanitize` | findings | no | Auto-fix common issues (strip unknown fields, map categories; in lens mode inject `lens`) |
+| `--lens NAME` | findings | no | Per-lens mode: validate against the 7-lens vocab and assign `ATK-<CODE>-NNN` |
+| `--expected-ids IDS` | response | yes | Comma-separated finding IDs (`ATK-NNN`, `ATK-<CODE>-NNN`, or `CON-NNN`) that must be addressed |
+| `--source-ids IDS` | consolidation | no | Comma-separated `ATK-<CODE>-NNN` ids dispatched; enables exact coverage checking |
+| `--degrade` | consolidation | no | Deterministic fallback: dedup raw merged findings by location, assign `CON-NNN`, no adjudication |
 
 Exit 0 + validated JSON with IDs on success. Exit 1 + error details on failure.
+
+## harden/lenses.py
+
+Single source of truth for the 7-lens taxonomy used by the multi-lens harden flow: lens names, their 3-letter ID codes (`ATK-<CODE>-NNN`), one-line briefs, and the seam rules. Read by the orchestrator to build per-lens attacker prompts.
+
+```bash
+python harden/lenses.py list    # canonical lens names, one per line
+python harden/lenses.py codes   # name=CODE pairs (correctness=COR, security=SEC, ...)
+python harden/lenses.py json    # full taxonomy: lenses, briefs, seam_rules
+```
+
+The seven lenses: `correctness` (COR), `security` (SEC), `robustness` (ROB), `resilience` (RES), `complexity` (CPX), `architecture` (ARC), `testing` (TST).
+
+## harden/validate_consolidation.py
+
+Validate Consolidator (referee) output for the multi-lens path: `accepted`/`rejected` arrays, severity enum, that every dispatched source finding is accounted for exactly once (with `--source-ids`), dedup integrity, and optional file existence. Also exposes the `--degrade` fallback that merges raw per-lens findings by location.
+
+```bash
+python harden/validate_consolidation.py --file consolidation.json --source-ids ATK-SEC-001,ATK-COR-002 [--check-files]
+python harden/validate_consolidation.py --degrade --file merged_findings.json
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--source-ids IDS` | no | Comma-separated `ATK-<CODE>-NNN` ids dispatched to the consolidator; enables coverage checking |
+| `--check-files` | no | Verify accepted-finding files exist (code mode) |
+| `--degrade` | no | Fallback: dedup raw merged findings by location instead of validating |
+| `--file PATH` | no | Read JSON from file instead of stdin |
+
+Exit 0 + validated JSON on success. Exit 1 + error details on failure.
 
 ## harden/assign_ids.py
 
@@ -375,12 +411,12 @@ Assign deterministic sequential IDs to harden agent output. Reads JSON array fro
 
 ```bash
 echo '<json_array>' | python harden/assign_ids.py --prefix ATK
-python harden/assign_ids.py --prefix ATK --file findings.json
+python harden/assign_ids.py --prefix ATK-SEC --file findings.json
 ```
 
 | Flag | Required | Description |
 |------|----------|-------------|
-| `--prefix PREFIX` | yes | ID prefix: `ATK` (findings) or `DEF` (responses) |
+| `--prefix PREFIX` | yes | ID prefix: `ATK` (legacy findings), `ATK-<CODE>` (per-lens findings), `CON` (consolidated), or `DEF` (responses) |
 | `--file PATH` | no | Read JSON from file instead of stdin |
 
 ## harden/validate_findings.py
@@ -876,5 +912,7 @@ python budgeter/test_hooks.py
 python scribe/test_notes.py
 python harden/test_validators.py
 python harden/test_assign_ids.py
+python harden/test_validate_consolidation.py
+python harden/test_validate_and_assign.py
 python -m runner.test_orchestrator
 ```

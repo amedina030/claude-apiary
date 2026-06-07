@@ -11,9 +11,24 @@ Usage:
 """
 import argparse
 import json
+import re
 import sys
 
 from validate_common import read_json_input
+
+# Accepted ID prefixes: ATK (legacy findings), ATK-<CODE> (per-lens findings,
+# e.g. ATK-SEC), CON (consolidated findings), DEF (defender responses). The
+# <CODE> group matches the 3-letter lens codes from lenses.py without importing
+# it here — assign_ids stays a dumb, lens-agnostic ID stamper.
+PREFIX_RE = re.compile(r"^(ATK(-[A-Z]{2,4})?|CON|DEF)$")
+
+
+def _prefix(value: str) -> str:
+    if not PREFIX_RE.match(value):
+        raise argparse.ArgumentTypeError(
+            f"invalid prefix {value!r} (expected ATK, ATK-<CODE>, CON, or DEF)"
+        )
+    return value
 
 
 def assign_ids(items: list, prefix: str) -> list:
@@ -25,8 +40,8 @@ def assign_ids(items: list, prefix: str) -> list:
 
 def main():
     parser = argparse.ArgumentParser(description="Assign sequential IDs to harden output")
-    parser.add_argument("--prefix", required=True, choices=["ATK", "DEF"],
-                        help="ID prefix (ATK for findings, DEF for responses)")
+    parser.add_argument("--prefix", required=True, type=_prefix,
+                        help="ID prefix: ATK, ATK-<CODE> (per-lens), CON, or DEF")
     parser.add_argument("--file", dest="file_path",
                         help="Read JSON from file instead of stdin")
     args = parser.parse_args()

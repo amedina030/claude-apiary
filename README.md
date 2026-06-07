@@ -81,20 +81,24 @@ Adversarial spec-writing tool that turns fuzzy ideas into structured handoff doc
 
 Adversarial code hardening loop that stress-tests code or plans.
 
-An automated attack-defend loop where an Attacker agent finds weaknesses (edge cases, vulnerabilities, design flaws) and a Defender agent fixes them. Iterates until the code or plan is hardened, producing a paper trail of what was found, fixed, and deferred.
+An automated attack-defend loop where Attacker agents find weaknesses (edge cases, vulnerabilities, design flaws) and a Defender agent fixes them. Iterates until the code or plan is hardened, producing a paper trail of what was found, fixed, and deferred.
 
 **What it does:**
-- **Attacker** reads code/plan and produces structured findings with severity ratings
-- **Defender** addresses each finding: fixes, refactors, or defers with justification
-- **Validators** ensure structured output — required fields, valid enums, file existence
-- **IDs assigned by Python** (ATK-001, DEF-001) — deterministic, not LLM-generated
+- **Multi-lens attackers** (code mode default) — one read-only specialist per lens from a 7-lens taxonomy (`correctness, security, robustness, resilience, complexity, architecture, testing`), run in parallel for broad coverage
+- **Consolidator/referee** dedups overlapping findings across lenses, then adjudicates accept/reject with a default-accept posture, so the Defender acts on a clean, deduped set instead of raw multi-lens noise
+- **Defender** addresses each accepted finding: fixes, refactors, or defers with justification
+- **Validators** ensure structured output — required fields, valid enums, file existence, referee coverage
+- **IDs assigned by Python** (`ATK-SEC-001` → `CON-001` → `DEF-001`) — deterministic, not LLM-generated
+- **Single-lens / legacy bypass** — one lens (or `--focus`) skips the referee and runs the original single-attacker→defender flow
 - Works on code files (with worktree isolation) or scribe plan notes
 
 **Commands:**
 ```
-/harden file1.py file2.py           # harden code files
-/harden --plan 79                   # harden a scribe plan/spec note
-/harden --focus security --deep     # focused deep analysis
+/harden file1.py file2.py                     # all 7 lenses → referee → defender
+/harden app.py --lenses security,correctness  # only these lenses
+/harden util.py --lenses complexity           # single lens, referee skipped
+/harden --plan 79                             # harden a scribe plan/spec note (legacy path)
+/harden app.py --focus security --deep        # legacy single-attacker path
 ```
 
 ---
@@ -245,14 +249,18 @@ claude-apiary/
 │
 ├── harden/                      # Adversarial code hardening tool
 │   ├── agents/
-│   │   ├── attacker.md          # Attacker agent prompt template
+│   │   ├── attacker.md          # Legacy single-attacker prompt template
+│   │   ├── attacker_lens.md     # Per-lens specialist attacker prompt (multi-lens path)
+│   │   ├── consolidator.md      # Referee: dedup + default-accept adjudication
 │   │   └── defender.md          # Defender agent prompt template
 │   ├── commands/
 │   │   └── harden.md            # /harden slash command definition
-│   ├── assign_ids.py            # Post-processor: assigns ATK-NNN / DEF-NNN IDs
-│   ├── validate_findings.py     # Validates Attacker output structure
+│   ├── lenses.py                # 7-lens taxonomy: names, codes, briefs, seam rules
+│   ├── assign_ids.py            # Post-processor: assigns ATK / ATK-<CODE> / CON / DEF IDs
+│   ├── validate_findings.py     # Validates Attacker output (legacy + lens mode)
+│   ├── validate_consolidation.py # Validates Consolidator output + degrade fallback
 │   ├── validate_response.py     # Validates Defender output structure
-│   ├── validate_and_assign.py   # Combined validate + assign-IDs step
+│   ├── validate_and_assign.py   # Combined validate + assign-IDs step (findings/response/consolidation)
 │   ├── round_counter.py         # Round tracking for harden loops
 │   └── tmp/                     # Runtime — round state files (git-ignored)
 │
