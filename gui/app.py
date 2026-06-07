@@ -45,6 +45,13 @@ def _web_dir() -> Path:
 WEB_DIR = _web_dir()
 INDEX_HTML = WEB_DIR / "index.html"
 
+# Persistent diagnostic log for the thinking-bubble anomaly monitor. The
+# frontend (bubble_monitor.js) detects when the bubble is wrongly absent and
+# posts a classified snapshot here for later analysis — the bug is intermittent
+# and unreproducible on demand, so we capture occurrences as they happen rather
+# than guess at the cause. Same home-dir location convention as permission_mcp.
+BUBBLE_ANOMALY_LOG = Path.home() / ".claude" / "apiary_gui" / "bubble_anomalies.jsonl"
+
 
 class GuiBridge:
     """JS → Python surface (frontend calls `pywebview.api.<method>()`).
@@ -101,6 +108,31 @@ class GuiBridge:
         if r <= 0 or c <= 0:
             return False
         return sess.pty_resize(r, c)
+
+    def log_bubble_anomaly(self, payload: str) -> bool:
+        """Append one thinking-bubble anomaly record (JSON string from the
+        frontend monitor) to BUBBLE_ANOMALY_LOG as a JSONL line.
+
+        Best-effort and never raises into the bridge: a diagnostic write must
+        not be able to disrupt the UI. Validates that the payload is a JSON
+        object before writing so the log stays parseable.
+        """
+        if not isinstance(payload, str) or not payload:
+            return False
+        try:
+            obj = json.loads(payload)
+        except (ValueError, TypeError):
+            return False
+        if not isinstance(obj, dict):
+            return False
+        try:
+            BUBBLE_ANOMALY_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with BUBBLE_ANOMALY_LOG.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(obj, separators=(",", ":")) + "\n")
+        except OSError as e:
+            print(f"[gui] log_bubble_anomaly failed: {e}", file=sys.stderr)
+            return False
+        return True
 
     def get_note_body(self, body_path: str) -> str:
         """Frontend calls this when a sidebar note is clicked. Read-only — no scribe writes."""
