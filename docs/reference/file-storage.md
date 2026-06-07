@@ -87,7 +87,7 @@ The dimensions config (`compass/dimensions.json`) ships in the apiary repo, not 
 
 ## GUI data
 
-GUI per-instance state lives under `<main-apiary>/.apiary/gui/apiary_gui/` (default profile). Setting `APIARY_GUI_PROFILE=<name>` re-roots everything to `<main-apiary>/.apiary/gui/apiary_gui_<name>/`, isolating a "dev" build from the main one. Path resolution is centralized in `gui/paths.py` (`state_dir()`, `mutex_name()`, `window_title()`); `_MAIN_APIARY` is computed from `gui/paths.py`'s own location, so the GUI always reads from the apiary checkout it shipped from.
+GUI per-instance state lives under `<main-apiary>/.apiary/gui/apiary_gui/` (default profile). Setting `APIARY_GUI_PROFILE=<name>` re-roots everything to `<main-apiary>/.apiary/gui/apiary_gui_<name>/`, isolating a "dev" build from the main one. Path resolution is centralized in `gui/paths.py` (`state_dir()`, `mutex_name()`, `window_title()`). Resolving `<main-apiary>` depends on the build: a **source** build uses `gui/paths.py`'s grandparent (the checkout root); a **frozen** PyInstaller build can't trust `__file__` (it points inside `_internal/`, which is wiped on every rebuild), so it walks up from the exe (`sys.executable`) to find the apiary checkout the build sits in — the first ancestor containing both `.git` and `gui/`. If the build was shipped outside any checkout, it falls back to a per-user data dir (`%LOCALAPPDATA%` on Windows, `Application Support` on macOS, `$XDG_DATA_HOME` elsewhere) so state still survives rebuilds.
 
 | File | Path | Description |
 |------|------|-------------|
