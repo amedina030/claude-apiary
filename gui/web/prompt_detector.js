@@ -23,10 +23,28 @@
   // How far above a navigation footer we'll hunt for the menu's first option in
   // the glyph-less fallback pass.
   const FOOTER_LOOKBACK_LINES = 30;
-  // claude prints this under arrow-navigable menus. It's the strongest
-  // menu-specific signal we have, so it gates the looser detection paths
-  // (per-option descriptions, and the glyph-less shape) against false positives.
-  const NAV_HINT = /↑|↓|to select|to navigate|esc to cancel|enter to (?:select|confirm)/i;
+  // The navigation footer claude prints under arrow-navigable menus is the
+  // strongest menu-specific signal we have, so it gates the looser detection
+  // paths (per-option descriptions, and the glyph-less shape) against false
+  // positives. But a genuine footer is a STANDALONE hint line, not prose that
+  // merely mentions one of these phrases — claude discussing a menu in chat
+  // ("the footer reads 'Enter to select'") rendered a numbered list above it
+  // into a false menu. So require a footer SHAPE: either the arrow-navigation
+  // glyphs (which essentially never appear in claude's own prose) or at least
+  // two distinct, non-overlapping navigation signals on the one line.
+  const NAV_SIGNALS = [
+    /↑|↓/,                          // arrow glyphs
+    /to navigate/i,
+    /esc to (?:cancel|exit)/i,
+    /enter to (?:select|confirm)/i,
+    /·/,                            // the middot the footer uses to join hints
+  ];
+  function isNavFooterLine(line) {
+    if (/↑|↓/.test(line)) return true;       // arrows alone are decisive
+    let n = 0;
+    for (const re of NAV_SIGNALS) if (re.test(line)) n++;
+    return n >= 2;
+  }
   // A column-0 line that is TUI chrome (box borders, dividers, block/selector
   // glyphs, the input composer) rather than the hard-wrapped tail of a prose
   // description. Used to stop a description from swallowing the frame around it.
@@ -74,7 +92,14 @@
     let lastIdx = i;
     for (let j = i + 1; j < lines.length && options.length < PROMPT_MAX_OPTIONS; j++) {
       lastIdx = j;
-      const m = lines[j].match(/^(\s+)(\d+)\.\s+(.+)$/);
+      // `\s*` not `\s+`: the real AskUserQuestion card renders its option
+      // numbers flush at COLUMN 0 (no leading space), while the first option is
+      // matched out-of-loop with the same tolerance. Requiring leading
+      // whitespace here dropped every option after the first on a column-0 card
+      // → single option → null → the "couldn't parse" fallback. The strict
+      // `=== expected` sequence check below is what actually guards against a
+      // stray numbered line in prose being mistaken for the next option.
+      const m = lines[j].match(/^(\s*)(\d+)\.\s+(.+)$/);
       if (m && parseInt(m[2], 10) === expected) {
         options.push({
           number: expected,
@@ -128,7 +153,21 @@
   // Does any line in [from, to) carry the navigation footer?
   function hasNavFooter(lines, from, to) {
     for (let k = Math.max(0, from); k < Math.min(lines.length, to); k++) {
-      if (NAV_HINT.test(lines[k])) return true;
+      if (isNavFooterLine(lines[k])) return true;
+    }
+    return false;
+  }
+
+  // The footer must be the FIRST non-blank line after the option block. A real
+  // menu prints its footer immediately under the options (intervening blank
+  // lines are fine); a numbered list in prose has ordinary text there instead.
+  // Checking the first non-blank line — rather than a fixed +N window — rejects
+  // "one line of prose, then a footer" without breaking a max-option menu whose
+  // parse loop stops before reaching the footer line.
+  function footerFollowsOptions(lines, lastOptionIdx) {
+    for (let k = lastOptionIdx + 1; k < lines.length; k++) {
+      if (lines[k].trim() === "") continue;
+      return isNavFooterLine(lines[k]);
     }
     return false;
   }
@@ -139,7 +178,7 @@
   // or -1.
   function findGlyphlessAnchor(lines) {
     for (let f = lines.length - 1; f >= 0; f--) {
-      if (!NAV_HINT.test(lines[f])) continue;
+      if (!isNavFooterLine(lines[f])) continue;
       for (let k = f - 1; k >= 0 && k >= f - FOOTER_LOOKBACK_LINES; k--) {
         if (/^\s*1\.\s+\S/.test(lines[k])) return k;
       }
@@ -215,16 +254,15 @@
     const anchor = findGlyphlessAnchor(lines);
     if (anchor >= 0) {
       const parsed = parseOptionsFrom(lines, anchor, highlight);
-      // Proximity gate: the nav footer must sit immediately after the option
-      // block. A real menu always prints its footer on the line that ends the
-      // options (blank lines are skipped during parsing, so parsed.lastIdx
-      // lands on that footer). The claude TUI renders the whole conversation —
-      // including the assistant's own chat messages — into this same buffer, so
-      // a stray "1./2./3." numbered list in prose would otherwise be anchored to
-      // claude's input-hint footer many lines below and mis-rendered as a menu.
-      // Such prose has ordinary text after the list, not a footer, so it fails
-      // here. (parsed.lastIdx is the line that broke the option loop.)
-      if (parsed && hasNavFooter(lines, parsed.lastIdx, parsed.lastIdx + 2)) {
+      // Proximity gate: the nav footer must be the first non-blank line after
+      // the option block. A real menu always prints its footer right under the
+      // options; the claude TUI renders the whole conversation — including the
+      // assistant's own chat messages — into this same buffer, so a stray
+      // "1./2./3." numbered list in prose would otherwise be anchored to a
+      // footer-shaped line elsewhere and mis-rendered as a menu. Such prose has
+      // ordinary text between the list and any footer, so it fails here.
+      if (parsed &&
+          footerFollowsOptions(lines, parsed.options[parsed.options.length - 1].lineIdx)) {
         return buildResult(lines, anchor, parsed);
       }
     }

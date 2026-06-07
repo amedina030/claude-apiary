@@ -18,6 +18,7 @@ import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
+from gui.ask_prompt import AskPromptWatcher
 from gui.permission_mcp import SESSION_ID_ENV, permission_tool_arg, write_mcp_config
 from gui.pty_capture import CaptureWriter
 from gui.pty_wrapper import PtySpawnError, PtyWrapper
@@ -110,6 +111,8 @@ class Session:
         on_toast: Callable,
         on_notes: Callable,
         on_agents: Callable,
+        on_ask_prompt: Optional[Callable] = None,
+        on_ask_prompt_resolved: Optional[Callable] = None,
         capture: Optional[CaptureWriter] = None,
         command: str = "claude",
         args: Optional[list] = None,
@@ -132,6 +135,16 @@ class Session:
         self._on_toast = lambda text, kind="": on_toast(text, kind, sid)
         self._on_notes = lambda notes, warnings: on_notes(notes, warnings, sid)
         self._on_agents = lambda agents: on_agents(agents, sid)
+        # Transcript-sourced AskUserQuestion banner. The watcher reads the
+        # structured tool_use/tool_result records (no xterm scraping), and these
+        # callbacks route the pending prompt / its resolution to the active tab.
+        _noop = lambda *_a, **_k: None
+        _push_ask = on_ask_prompt or _noop
+        _push_ask_resolved = on_ask_prompt_resolved or _noop
+        self.ask_watcher = AskPromptWatcher(
+            on_prompt=lambda payload: _push_ask(payload, sid),
+            on_resolved=lambda tool_use_id: _push_ask_resolved(tool_use_id, sid),
+        )
         self._capture = capture
         self._command = command
         self._args = list(args or [])
@@ -316,15 +329,30 @@ class Session:
         # The fast-forward below means new records otherwise miss everything
         # prior to now.
         tracker = self.subagent_tracker
+        records = list(iter_jsonl_records(text))
         if tracker is not None:
-            for rec in iter_jsonl_records(text):
+            for rec in records:
                 tracker.note_parent_record(rec)
-        on_record = tracker.note_parent_record if tracker is not None else None
+        # Replay history into the ask-watcher silently so an already-answered
+        # prompt doesn't flash a banner; a still-pending one is surfaced once.
+        # Reset first so a prior transcript's pending state (e.g. across /clear)
+        # can't leak into this one.
+        self.ask_watcher.reset()
+        self.ask_watcher.replay(records)
+
+        def _on_record(rec):
+            if tracker is not None:
+                try:
+                    tracker.note_parent_record(rec)
+                except Exception:
+                    pass
+            self.ask_watcher.note_record(rec)
+
         tail = TranscriptTail(
             path,
             on_message=self._on_message,
             poll_interval=0.1,
-            on_record=on_record,
+            on_record=_on_record,
         )
         try:
             tail._pos = path.stat().st_size  # private but intentional fast-forward

@@ -1706,6 +1706,12 @@
   // being scraped from the xterm buffer. Kept in its own state slot so
   // the two paths can't fight over promptBannerEl.
   let mcpPrompt = null;   // { pendingId, payload }
+  // Transcript-sourced AskUserQuestion. Holds the pending prompt's tool_use_id
+  // while a structured card banner is showing (driven by gui.ask_prompt, NOT
+  // the xterm scrape). While set, the scrape poll (runDetect) defers so the two
+  // can't fight over the banner. Cleared when the user answers/cancels or the
+  // matching tool_result arrives (onAskPromptResolved).
+  let askPromptId = null;
   // Parser lives in prompt_detector.js so it can be Node-tested. If the bundle
   // failed to load, fall back to a no-op stub so the rest of the UI still works.
   const _promptDetector = window.apiaryPromptDetector || {};
@@ -1816,6 +1822,48 @@
     promptBannerEl.appendChild(row);
     promptBannerEl.classList.remove("hidden");
     flashWindowIfBackground();
+  }
+
+  // Build the banner from a structured AskUserQuestion payload (the transcript
+  // tool_use record) instead of the xterm scrape. This is exact and complete by
+  // construction — it doesn't depend on how much of the card the pty viewport
+  // happened to render. payload = { tool_use_id, questions:[{ question, header,
+  // multiSelect, options:[{label, description}] }] }.
+  function showAskPrompt(payload) {
+    const tid = payload && payload.tool_use_id;
+    const questions = (payload && payload.questions) || [];
+    const q = questions[0];
+    if (!tid || !q || !Array.isArray(q.options) || q.options.length === 0) return;
+    // v1 covers the common single-question, single-select card. Multi-select
+    // (space-to-toggle) and multi-question sequences need terminal interaction
+    // the banner doesn't drive yet — reveal the terminal so the user answers
+    // there, rather than show a banner that would mis-send a single digit.
+    if (q.multiSelect || questions.length > 1) {
+      ptyExpand();
+      toast("Multi-part question — please answer in the terminal.", "warn");
+      return;
+    }
+    const options = q.options.map((o, i) => ({
+      number: i + 1,
+      text: String((o && o.label) || "").trim(),
+      description: String((o && o.description) || "").trim(),
+      // The TUI cursor starts on the first option, so highlight it. This is the
+      // accurate, deterministic selection the glyph-less scrape path could never
+      // recover (the cell-attribute highlight is dropped by translateToString).
+      selected: i === 0,
+    }));
+    const prompt = {
+      question: String(q.question || "").trim(),
+      context: "",
+      options,
+      signature: "ask:" + tid,
+    };
+    // Already answered this session (e.g. a late duplicate push) → stay quiet.
+    if (answeredSigs.has(prompt.signature)) return;
+    askPromptId = tid;
+    activePrompt = prompt;
+    recordPromptAppeared(prompt);
+    renderPromptBanner(prompt);
   }
 
   // Per-tool banner body renderers. Each takes the tool's `input` object
@@ -2041,6 +2089,7 @@
     promptBannerEl.classList.add("hidden");
     promptBannerEl.innerHTML = "";
     activePrompt = null;
+    askPromptId = null;
     awaitingFeedback = false;
     inputEl.classList.remove("input-blocked");
     inputEl.placeholder = INPUT_PLACEHOLDER_DEFAULT;
@@ -2188,6 +2237,11 @@
   }
 
   function runDetect() {
+    // A transcript-sourced AskUserQuestion banner owns the prompt UI; the xterm
+    // scrape must not override it. The scrape can't reliably see a card that's
+    // taller than the pty viewport anyway (only the scrolled-in subset is in the
+    // buffer) — sourcing from the structured tool_use record is the whole point.
+    if (askPromptId) return;
     const { lines, highlighted } = readScreen();
     const found = detectPrompt(lines, { highlightedRows: highlighted });
     if (!found) {
@@ -2724,6 +2778,37 @@
         renderMcpPromptBanner(mcpPrompt.pendingId, mcpPrompt.payload);
       } catch (e) {
         console.error("onPermissionPrompt parse error", e);
+      }
+    },
+    onAskPrompt(payloadJson, sessionId) {
+      // A pending AskUserQuestion, sourced from the transcript tool_use record
+      // (gui.ask_prompt) — complete and exact, unlike the xterm scrape. Only
+      // surface it for the active tab; a background tab's prompt is re-pushed on
+      // switch (the Python watcher keeps it pending).
+      if (!pushIsForActive(sessionId)) return;
+      try {
+        const payload = typeof payloadJson === "string"
+          ? JSON.parse(payloadJson) : payloadJson;
+        // Don't stack on top of an MCP permission prompt.
+        if (mcpPrompt) return;
+        showAskPrompt(payload || {});
+      } catch (e) {
+        console.error("onAskPrompt parse error", e);
+      }
+    },
+    onAskPromptResolved(toolUseIdJson, sessionId) {
+      // The matching tool_result arrived (answered or cancelled) → clear the
+      // banner if it's still the one showing. No Esc: the prompt is already
+      // resolved on claude's side.
+      if (!pushIsForActive(sessionId)) return;
+      try {
+        const tid = typeof toolUseIdJson === "string"
+          ? toolUseIdJson : String(toolUseIdJson || "");
+        if (askPromptId && tid === askPromptId) {
+          hidePromptBanner();
+        }
+      } catch (e) {
+        console.error("onAskPromptResolved parse error", e);
       }
     },
   };

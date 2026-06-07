@@ -341,6 +341,29 @@ class App:
             ");"
         )
 
+    def _push_ask_prompt(self, payload: dict, session_id: str = "") -> None:
+        """Surface a pending AskUserQuestion to the frontend banner.
+
+        Sourced from the transcript tool_use record (gui.ask_prompt), NOT the
+        xterm scrape — so the option list is complete and exact regardless of
+        the pty viewport height. The JS side routes by session_id and ignores
+        prompts for non-active tabs.
+        """
+        self._eval(
+            "window.apiary.onAskPrompt("
+            f"{json.dumps(payload)}, {json.dumps(session_id)}"
+            ");"
+        )
+
+    def _push_ask_prompt_resolved(self, tool_use_id: str, session_id: str = "") -> None:
+        """Tell the frontend a pending AskUserQuestion was answered/cancelled so
+        it can clear the banner (the matching tool_result arrived)."""
+        self._eval(
+            "window.apiary.onAskPromptResolved("
+            f"{json.dumps(tool_use_id)}, {json.dumps(session_id)}"
+            ");"
+        )
+
     def _start_permission_bridge(self) -> None:
         if not permission_mcp.mcp_enabled(load_launch()):
             return
@@ -420,6 +443,8 @@ class App:
             on_toast=self._push_toast,
             on_notes=self._push_notes,
             on_agents=self._push_agents,
+            on_ask_prompt=self._push_ask_prompt,
+            on_ask_prompt_resolved=self._push_ask_prompt_resolved,
             capture=self._capture,
             command=launch.get("command", "claude"),
             args=list(launch.get("args", [])),

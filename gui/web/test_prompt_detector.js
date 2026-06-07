@@ -281,6 +281,44 @@ test("wrapped descriptions: column-0 overflow folds back, all options parse", ()
   assert.equal(r.options[4].text, "Chat about this");
 });
 
+// Real failure captured live (#H-2026-242 re-verify, 2026-06-06): the actual
+// AskUserQuestion card renders its option NUMBERS flush at column 0 (no leading
+// space), with each description indented under them and wrapping with a hanging
+// indent. The earlier fixtures used a 1-space option indent, so they never hit
+// the `\s+` subsequent-option matcher that rejected column-0 numbers — every
+// option after the first was dropped (and the b910219 fold-back then swallowed
+// them into option 1's description) → single option → null → fallback toast.
+const ASKUSERQUESTION_COL0 = linesOf(`
+This is the Phase 2 re-verify test — does the prompt banner render this card?
+
+1. Renders perfectly
+   The card shows up in the banner with a visible accent border on this first
+   option, all five options are listed in full, and there is no fallback toast.
+2. Card shows, option 1 not highlighted
+   The banner card renders and all options are present, but the accent border is
+   missing or sitting on the wrong option.
+3. Truncated option list
+   The banner appears but is missing some options or cuts off mid-description.
+4. Type something.
+
+5. Chat about this
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`);
+
+test("column-0 card: option numbers flush at col 0 still parse every option", () => {
+  const r = detectPrompt(ASKUSERQUESTION_COL0);
+  assert.ok(r, "must detect a card whose option numbers sit at column 0");
+  assert.equal(r.options.length, 5, "1-3 plus Type-something and Chat-about-this");
+  assert.equal(r.options[0].text, "Renders perfectly");
+  assert.match(r.options[0].description, /no fallback toast\.$/);
+  assert.equal(r.options[1].text, "Card shows, option 1 not highlighted");
+  assert.match(r.options[1].description, /wrong option\.$/);
+  assert.equal(r.options[2].text, "Truncated option list");
+  assert.equal(r.options[3].text, "Type something.");
+  assert.equal(r.options[3].description, "");
+  assert.equal(r.options[4].text, "Chat about this");
+});
+
 // A description-less option followed by column-0 TUI chrome (the input
 // composer) must NOT have that chrome folded into it — the fold only extends an
 // already-started description that directly abuts its tail.
@@ -385,6 +423,79 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
 
 test("prose numbered list with a far-below footer is not a menu", () => {
   assert.equal(detectPrompt(PROSE_LIST_FAR_FOOTER), null);
+});
+
+// --- false-positive hardening (stress battery, 2026-06-06) -----------------
+// Found by throwing realistic chat-buffer shapes at the detector: a numbered
+// list in claude's OWN prose, sitting near anything footer-like, was being
+// mis-read as a selectable menu. Two distinct leaks, both now closed.
+
+// Leak 1: the footer gate matched any line that merely *mentioned* a nav phrase
+// ("to select"), so claude explaining a menu in chat turned the list above it
+// into a phantom menu. The gate now demands a footer SHAPE (arrow glyphs, or
+// >=2 distinct nav signals), not a stray phrase in a sentence.
+const FOOTER_PHRASE_IN_PROSE = linesOf(`
+Steps:
+1. Open the file
+2. Make the edit
+The footer reads "Enter to select" at the bottom.
+`);
+
+test("a nav phrase embedded in a prose sentence is not a footer", () => {
+  assert.equal(detectPrompt(FOOTER_PHRASE_IN_PROSE), null);
+});
+
+// Leak 2: the proximity gate scanned a fixed 2-line window, so a single line of
+// prose between the list and a real footer still slipped through. The gate now
+// requires the footer to be the FIRST non-blank line after the options.
+const PROSE_LINE_THEN_FOOTER = linesOf(`
+I'll proceed with:
+1. step one
+2. step two
+3. step three
+Done. Let me know if that works.
+Enter to select · ↑/↓ to navigate · Esc to cancel
+and more chatter after.
+`);
+
+test("one prose line between the list and a footer is not a menu", () => {
+  assert.equal(detectPrompt(PROSE_LINE_THEN_FOOTER), null);
+});
+
+// A markdown blockquote ordered list (claude quoting docs). The '>' begins each
+// line, so only the first option anchors pass 1; the continuation lines keep
+// their '>' and never match the glyph-less subsequent-option matcher → bails.
+const BLOCKQUOTE_LIST = linesOf(`
+As the docs say:
+> 1. First do this
+> 2. Then do that
+> 3. Finally this
+`);
+
+test("markdown blockquote ordered list is not a menu", () => {
+  assert.equal(detectPrompt(BLOCKQUOTE_LIST), null);
+});
+
+// KNOWN LIMITATION (do not "fix" by loosening real-menu detection): a bare
+// numbered list immediately followed by the EXACT navigation footer is
+// byte-for-byte identical to a real compact menu (see GLYPHLESS_COMPACT) — there
+// is no scrape-level signal that distinguishes claude QUOTING the footer from
+// the TUI PRINTING it. This is the architectural reason the AskUserQuestion
+// banner is sourced from the transcript tool_use record, not the scrape; the
+// scrape path here is only a fallback for non-AskUserQuestion menus. Asserting
+// the current (unavoidable) behavior so a future change to it is deliberate.
+const BARE_LIST_EXACT_FOOTER = linesOf(`
+The compact menu looks like this:
+1. First choice
+2. Second choice
+3. Third choice
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`);
+
+test("bare list + exact footer is indistinguishable from a real menu (known)", () => {
+  const r = detectPrompt(BARE_LIST_EXACT_FOOTER);
+  assert.ok(r, "scrape cannot tell this from GLYPHLESS_COMPACT — transcript path is the real defense");
+  assert.equal(r.options.length, 3);
 });
 
 // --- arrow-driver core ----------------------------------------------------
