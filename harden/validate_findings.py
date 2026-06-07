@@ -19,9 +19,13 @@ import re
 import sys
 from pathlib import Path
 
+from lenses import LENSES, is_valid_lens
 from validate_common import check_path_escape, read_json_input, report_errors
 
 REQUIRED_FIELDS = ["category", "description", "severity", "location"]
+# In lens mode the per-agent lens replaces the free-form category, so category
+# is neither required nor validated against the legacy enum.
+LENS_REQUIRED_FIELDS = ["description", "severity", "location"]
 VALID_SEVERITIES = {"critical", "high", "medium", "low"}
 VALID_CATEGORIES = {"general", "security", "input", "logic", "complexity", "resilience"}
 
@@ -43,10 +47,29 @@ CATEGORY_MAP = {
 ALLOWED_FIELDS = {"category", "description", "severity", "location", "scenario"}
 
 
-def sanitize(findings: list, deep: bool = False) -> list:
-    """Auto-fix common Attacker output issues: strip unknown fields, map invalid categories."""
+def sanitize(findings: list, deep: bool = False, lens: str = None) -> list:
+    """Auto-fix common Attacker output issues: strip unknown fields, map invalid categories.
+
+    In lens mode (``lens`` set), each finding is reduced to the lens-mode fields
+    and stamped with its ``lens`` so the merged multi-lens set is self-describing
+    for the consolidator. The legacy category-mapping path is skipped.
+    """
     if not isinstance(findings, list):
         return findings
+
+    if lens is not None:
+        allowed = {"severity", "description", "location", "lens"}
+        if deep:
+            allowed.add("scenario")
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            for key in list(finding.keys()):
+                if key not in allowed:
+                    del finding[key]
+            finding["lens"] = lens.lower()
+        return findings
+
     for finding in findings:
         if not isinstance(finding, dict):
             continue
@@ -92,9 +115,18 @@ def _resolve_filepath(location: str) -> str:
     return location
 
 
-def validate(findings: list, check_files: bool = False, deep: bool = False) -> list[str]:
-    """Validate findings and return a list of error strings (empty = valid)."""
+def validate(findings: list, check_files: bool = False, deep: bool = False,
+             lens: str = None) -> list[str]:
+    """Validate findings and return a list of error strings (empty = valid).
+
+    When ``lens`` is set, validates lens-mode findings: the per-agent lens
+    replaces ``category`` (no category enum check), and any ``lens`` field
+    carried on a finding must match the attacker's assigned lens.
+    """
     errors = []
+
+    if lens is not None and not is_valid_lens(lens):
+        return [f"invalid lens '{lens}' (expected one of: {', '.join(sorted(LENSES))})"]
 
     if not isinstance(findings, list):
         return ["Expected a JSON array of findings"]
@@ -105,6 +137,8 @@ def validate(findings: list, check_files: bool = False, deep: bool = False) -> l
     # ATK-010: cap findings count to prevent O(n) DoS via huge arrays
     if len(findings) > MAX_FINDINGS:
         return [f"Too many findings: {len(findings)} (maximum {MAX_FINDINGS})"]
+
+    required = LENS_REQUIRED_FIELDS if lens is not None else REQUIRED_FIELDS
 
     for i, finding in enumerate(findings):
         # ATK-002: type guard BEFORE any attribute access
@@ -120,7 +154,7 @@ def validate(findings: list, check_files: bool = False, deep: bool = False) -> l
             errors.append(f"{label}: findings must not include an 'id' field (assigned by post-processor)")
 
         # Required fields present and non-empty
-        for field in REQUIRED_FIELDS:
+        for field in required:
             val = finding.get(field)
             if val is None:
                 errors.append(f"{label}: missing required field '{field}'")
@@ -135,9 +169,15 @@ def validate(findings: list, check_files: bool = False, deep: bool = False) -> l
         if isinstance(severity, str) and severity not in VALID_SEVERITIES:
             errors.append(f"{label}: invalid severity '{severity}' (expected: {', '.join(sorted(VALID_SEVERITIES))})")
 
-        category = finding.get("category")
-        if isinstance(category, str) and category not in VALID_CATEGORIES:
-            errors.append(f"{label}: invalid category '{category}' (expected: {', '.join(sorted(VALID_CATEGORIES))})")
+        if lens is None:
+            category = finding.get("category")
+            if isinstance(category, str) and category not in VALID_CATEGORIES:
+                errors.append(f"{label}: invalid category '{category}' (expected: {', '.join(sorted(VALID_CATEGORIES))})")
+        else:
+            # Lens mode: a carried 'lens' must match the attacker's assigned lens.
+            fl = finding.get("lens")
+            if fl is not None and (not isinstance(fl, str) or fl.lower() != lens.lower()):
+                errors.append(f"{label}: lens '{fl}' does not match attacker lens '{lens}'")
 
         # File existence check (code mode)
         if check_files:
@@ -186,12 +226,15 @@ def main():
                         help="Read JSON from file instead of stdin")
     parser.add_argument("--sanitize", action="store_true",
                         help="Auto-fix common issues (strip unknown fields, map invalid categories)")
+    parser.add_argument("--lens",
+                        help="Validate as lens-mode findings for the given lens "
+                             "(replaces the legacy category field)")
     args = parser.parse_args()
 
     raw, findings = read_json_input(file_path=args.file_path)
     if args.sanitize:
-        findings = sanitize(findings, deep=args.deep)
-    errors = validate(findings, check_files=args.check_files, deep=args.deep)
+        findings = sanitize(findings, deep=args.deep, lens=args.lens)
+    errors = validate(findings, check_files=args.check_files, deep=args.deep, lens=args.lens)
     report_errors(errors)
 
     # When sanitized, output the cleaned version; otherwise echo original

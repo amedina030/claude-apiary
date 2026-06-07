@@ -77,6 +77,32 @@ class TestAssignIds(unittest.TestCase):
         self.assertEqual(output[9]["id"], "ATK-010")
         self.assertEqual(output[11]["id"], "ATK-012")
 
+    def test_lens_prefix_assigns_lens_tagged_ids(self):
+        items = [{"lens": "security"}, {"lens": "security"}]
+        result = run_assign(json.dumps(items), "ATK-SEC")
+        self.assertEqual(result.returncode, 0)
+        output = json.loads(result.stdout)
+        self.assertEqual(output[0]["id"], "ATK-SEC-001")
+        self.assertEqual(output[1]["id"], "ATK-SEC-002")
+
+    def test_con_prefix_assigns_sequential_ids(self):
+        items = [{"description": "merged finding"}, {"description": "another"}]
+        result = run_assign(json.dumps(items), "CON")
+        self.assertEqual(result.returncode, 0)
+        output = json.loads(result.stdout)
+        self.assertEqual(output[0]["id"], "CON-001")
+        self.assertEqual(output[1]["id"], "CON-002")
+
+    def test_invalid_prefix_rejected(self):
+        result = run_assign('[{"x": 1}]', "BOGUS")
+        self.assertEqual(result.returncode, 2)  # argparse type error
+        self.assertIn("invalid prefix", result.stderr)
+
+    def test_lowercase_lens_prefix_rejected(self):
+        result = run_assign('[{"x": 1}]', "ATK-sec")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid prefix", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

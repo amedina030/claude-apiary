@@ -11,13 +11,28 @@ RESPONSE_SCRIPT = str(Path(__file__).parent / "validate_response.py")
 PYTHON = sys.executable
 
 
-def run_validate_findings(input_json: str, check_files: bool = False, deep: bool = False) -> subprocess.CompletedProcess:
+def run_validate_findings(input_json: str, check_files: bool = False, deep: bool = False,
+                          lens: str = None, sanitize: bool = False) -> subprocess.CompletedProcess:
     cmd = [PYTHON, FINDINGS_SCRIPT]
     if check_files:
         cmd.append("--check-files")
     if deep:
         cmd.append("--deep")
+    if lens:
+        cmd += ["--lens", lens]
+    if sanitize:
+        cmd.append("--sanitize")
     return subprocess.run(cmd, input=input_json, text=True, capture_output=True)
+
+
+def make_lens_finding(**overrides):
+    base = {
+        "severity": "high",
+        "description": "Unbounded recursion on deeply nested input",
+        "location": "app/parse.py:30-42",
+    }
+    base.update(overrides)
+    return base
 
 
 def run_validate_response(input_json: str, expected_ids: str, check_files: bool = False) -> subprocess.CompletedProcess:
@@ -163,6 +178,52 @@ class TestValidateFindings(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         # Should report both errors
         self.assertIn("2 errors", result.stderr)
+
+
+class TestValidateFindingsLensMode(unittest.TestCase):
+
+    def test_lens_finding_without_category_passes(self):
+        result = run_validate_findings(json.dumps([make_lens_finding()]), lens="resilience")
+        self.assertEqual(result.returncode, 0)
+
+    def test_all_seven_lenses_valid(self):
+        for lens in ("correctness", "security", "robustness", "resilience",
+                     "complexity", "architecture", "testing"):
+            result = run_validate_findings(json.dumps([make_lens_finding()]), lens=lens)
+            self.assertEqual(result.returncode, 0, f"Lens '{lens}' should be valid")
+
+    def test_invalid_lens_name_fails(self):
+        result = run_validate_findings(json.dumps([make_lens_finding()]), lens="performance")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("invalid lens", result.stderr)
+
+    def test_lens_mode_does_not_require_category(self):
+        # category is simply ignored in lens mode; an odd category does not fail
+        f = make_lens_finding(category="whatever")
+        result = run_validate_findings(json.dumps([f]), lens="security")
+        self.assertEqual(result.returncode, 0)
+
+    def test_mismatched_lens_field_fails(self):
+        f = make_lens_finding(lens="security")
+        result = run_validate_findings(json.dumps([f]), lens="resilience")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("does not match attacker lens", result.stderr)
+
+    def test_lens_mode_still_requires_severity(self):
+        f = make_lens_finding()
+        del f["severity"]
+        result = run_validate_findings(json.dumps([f]), lens="security")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("missing required field 'severity'", result.stderr)
+
+    def test_sanitize_strips_category_and_injects_lens(self):
+        f = make_lens_finding(category="security", title="bogus extra field")
+        result = run_validate_findings(json.dumps([f]), lens="security", sanitize=True)
+        self.assertEqual(result.returncode, 0)
+        out = json.loads(result.stdout)
+        self.assertEqual(out[0]["lens"], "security")
+        self.assertNotIn("category", out[0])
+        self.assertNotIn("title", out[0])
 
 
 class TestValidateResponse(unittest.TestCase):
