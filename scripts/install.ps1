@@ -7,24 +7,25 @@
     way to a working install, handling the Windows-specific snags that derail an
     agent doing it step by step:
 
-      * No Python at all          -> optionally winget-installs Python 3.12.
       * The WindowsApps stub      -> the `python` / `python3` app-execution alias
                                      under WindowsApps exits 9009 and hijacks
                                      Poetry's interpreter discovery. This script
                                      finds a REAL interpreter and runs every child
                                      process with WindowsApps stripped from PATH.
+      * Python installed but lost  -> discovers it via the `py` launcher and the
+                                     registry, not directory guessing, so an
+                                     install in a non-standard location is found.
       * Poetry missing            -> installs it via `pip install --user poetry`.
       * git-bash launcher shebang -> never invokes the `apiary` console script;
                                      drives the CLI as `python -m core.cli`, which
                                      is shell-agnostic.
 
+    A Python 3.11+ interpreter must already be installed; if none is found the
+    script stops with instructions rather than installing one itself.
+
     Because YOU run this script, the whole chain (poetry install ->
     self-bootstrap -> repo hooks -> doctor) is a single user action, so the
     Claude Code safety classifier never blocks the bootstrap mid-way.
-
-.PARAMETER AutoInstallPython
-    If no suitable Python is found, install Python 3.12 via winget without
-    prompting. Without this switch the script prompts first.
 
 .PARAMETER SkipBootstrap
     Stop after `poetry install`. Skips self-bootstrap, repo hooks, and doctor.
@@ -40,12 +41,11 @@
     .\scripts\install.ps1
 
 .EXAMPLE
-    # Fully unattended on a bare machine:
-    .\scripts\install.ps1 -AutoInstallPython -Yes
+    # Non-interactive:
+    .\scripts\install.ps1 -Yes
 #>
 [CmdletBinding()]
 param(
-    [switch]$AutoInstallPython,
     [switch]$SkipBootstrap,
     [switch]$Yes,
     [switch]$DryRun
@@ -205,20 +205,6 @@ function Find-RealPython {
 }
 
 # --------------------------------------------------------------------------- #
-# Step 1b: install Python via winget if none was found.
-# --------------------------------------------------------------------------- #
-function Install-PythonViaWinget {
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-Die "No suitable Python and winget is unavailable. Install Python 3.11+ from https://www.python.org/downloads/ and re-run."
-    }
-    Write-Step "Installing Python 3.12 via winget (user scope)"
-    if ($DryRun) { Write-Ok "[dry-run] winget install Python.Python.3.12"; return }
-    winget install --id Python.Python.3.12 -e --source winget `
-        --accept-source-agreements --accept-package-agreements --scope user
-    if ($LASTEXITCODE -ne 0) { Write-Die "winget Python install failed (exit $LASTEXITCODE)." }
-}
-
-# --------------------------------------------------------------------------- #
 # Step 2: ensure Poetry, return the path to poetry.exe.
 # --------------------------------------------------------------------------- #
 function Ensure-Poetry($pythonExe) {
@@ -281,23 +267,21 @@ Write-Host ""
 Write-Step "Locating a real Python >= $MinPython (ignoring the WindowsApps stub)"
 $py = Find-RealPython
 if (-not $py) {
-    Write-Warn2 "No suitable Python found on this machine."
-    $doInstall = $AutoInstallPython -or (Confirm-Or-Exit "Install Python 3.12 via winget now?")
-    if (-not $doInstall) { Write-Die "Python 3.11+ is required. Aborting." }
-    Install-PythonViaWinget
-    $py = Find-RealPython
-    if (-not $py -and -not $DryRun) {
-        Write-Die "Python still not found after install. Open a NEW shell and re-run (PATH may need a refresh)."
-    }
+    Write-Host ""
+    Write-Die @"
+No Python 3.11+ found on this machine.
+
+Install one, then re-run this script:
+  * Download: https://www.python.org/downloads/windows/
+  * During install, tick 'Add python.exe to PATH'.
+  * Already installed? It may be hidden behind the Microsoft Store
+    'python' alias. Turn it off in Settings > Apps > Advanced app
+    settings > App execution aliases, then open a NEW terminal.
+"@
 }
-if ($py) {
-    Write-Ok "Python $($py.Version): $($py.Exe)"
-    $pythonExe = $py.Exe
-    $pythonDir = Split-Path -Parent $pythonExe
-} else {
-    # dry-run with no python present
-    $pythonExe = 'python'; $pythonDir = ''
-}
+Write-Ok "Python $($py.Version): $($py.Exe)"
+$pythonExe = $py.Exe
+$pythonDir = Split-Path -Parent $pythonExe
 
 # --- Poetry --------------------------------------------------------------- #
 Write-Step "Ensuring Poetry is installed"

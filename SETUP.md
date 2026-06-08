@@ -128,6 +128,45 @@ Toggles persist per-repo at `<repo>/.claude/apiary/flags/<flag-name>-enabled`.
 
 ---
 
+## The desktop GUI (optional)
+
+Apiary ships an optional desktop app (`gui/`) — a PyWebView window that wraps a
+Claude Code session with a clean chat view, token counts, and a scribe sidebar.
+It is **not** part of the base install; it has its own dependency group and a few
+native prerequisites that a fresh machine often lacks. These gaps are the usual
+reason "the GUI won't start after install."
+
+### Requirements (read before installing)
+
+- **Python 3.11 or 3.12 — not 3.13+.** The GUI's `pythonnet` dependency only has
+  wheels for `>=3.11,<3.13`. On Python 3.13/3.14 `poetry install --with gui`
+  resolves *without* `pythonnet` and the window fails to open. If your default
+  interpreter is newer, install a 3.12 alongside it and point Poetry at it:
+  `poetry env use /path/to/python3.12` before installing the group.
+- **Microsoft Edge WebView2 Runtime** (Windows). PyWebView renders through it; if
+  it's absent the window creation fails with a cryptic error. Most Windows 11
+  machines have it; if not, install the Evergreen runtime from
+  <https://developer.microsoft.com/microsoft-edge/webview2/>.
+- **Claude Code on `PATH` as a real executable.** The GUI spawns `claude` in a
+  pty. A bare npm shim can fail to spawn on Windows (`[WinError 193]`); if the
+  window opens but tabs won't start, point it at a real binary via the
+  `command`/`args` keys in `<main-apiary>/.apiary/gui/apiary_gui/launch.json`.
+
+### Install and run
+
+```bash
+poetry install --with gui          # adds pywebview, pythonnet, pywinpty, watchdog
+poetry run python -m gui.app
+```
+
+Windows V1 only (the pty backend is `pywinpty`). See `gui/README.md` for profiles,
+hot-reload, and the permission-prompt MCP path.
+
+> The GUI does not hot-reload changes to its own source — after editing
+> `gui/web/*` or the Python backend, fully restart the `gui.app` process.
+
+---
+
 ## Updating
 
 ```bash
