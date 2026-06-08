@@ -631,6 +631,17 @@
         flashWindowIfBackground();
       } else {
         hideThinkingBubbleFor(targetSid, false, "transient");
+        // A live, non-end_turn assistant message is definitive proof claude is
+        // mid-turn. Turns NOT started via the composer (slash commands, terminal-
+        // pane typing, wakeups/continuations) never set waitingForAssistant, so
+        // ensureThinkingBubble() would bail on its guard and the bubble would
+        // silently never appear — the 'arming_gap' anomaly the monitor flagged.
+        // Arm the turn here so the bubble can show; seed the elapsed counter if
+        // this is the first we knew of the turn.
+        if (!t.waitingForAssistant) {
+          t.waitingForAssistant = true;
+          if (!t.thinkingStartTs) t.thinkingStartTs = Date.now();
+        }
         if (targetSid === activeSessionId) ensureThinkingBubble();
       }
     } else if (!isReplay && msg.role === "user") {
@@ -642,6 +653,13 @@
       if (!t.waitingForAssistant) {
         t.shownThisTurn = false;
         t.lastHideReason = "";
+        // Arm the turn at its start so the bubble can show as soon as claude's
+        // pty output flows. Composer turns arm via startThinkingCounter, but
+        // terminal-typed / slash / wakeup turns have no composer send, so without
+        // this they stay unarmed until the first assistant message — the window
+        // the monitor flagged as 'arming_gap'. thinkingStartTs seeds the counter.
+        t.waitingForAssistant = true;
+        t.thinkingStartTs = Date.now();
       }
     }
 
