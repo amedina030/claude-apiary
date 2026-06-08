@@ -176,21 +176,7 @@ Also capture the session working directory (the directory Claude Code is running
 
 **IMPORTANT:** The Agent tool has no `env` parameter, so `APIARY_REQUEST_ID` cannot be injected by the LLM via environment. Instead, embed the request_id in every Agent `description` field using the tag `[rid:<request_id>]` (e.g. `Harden Attacker round 1 [rid:harden-abc12345-1712345678-a1b2]`). The `post_tool_use.py` hook parses this tag from the agent description to attribute cost to this run. Do not omit the tag — without it, token spend will not be counted and budget tracking will silently return 0.
 
-### Start round counter
-
-```bash
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" harden/round_counter.py start --session-id <session_id>
-```
-
-### Create worktree (code mode only)
-
-For code mode, create a single worktree that persists across all rounds. All Defenders will edit files here cumulatively, and Attackers in rounds 2+ will read from here to see the accumulated fixes.
-
-```bash
-git worktree add .claude/worktrees/harden-<session_id> -b harden-<session_id> HEAD
-```
-
-Save the worktree path (`.claude/worktrees/harden-<session_id>`) and branch name (`harden-<session_id>`) for use throughout the loop.
+> **Nothing that mutates state runs in Step 0.** The round counter and the git worktree are created in **Step 1.5**, *after* the Step 1 confirmation gate — generating `request_id` above is pure string computation with no side effect, so it is fine here. This keeps the decline path in Step 1 honest: if the user does not choose Proceed, no counter file and no worktree branch are ever created.
 
 ---
 
@@ -240,10 +226,42 @@ WARNING: Estimated cost (<estimated>) exceeds budget (<budget_tokens>). Forcing 
 ```
 
 Use AskUserQuestion to confirm:
-- **Proceed** → continue to Step 2
+- **Proceed** → continue to Step 1.5 (create the round counter + worktree), then Step 2
 - **Adjust** → user modifies settings, re-show confirmation
 
-If the user declines (does not choose Proceed), stop immediately — do not start the round counter, do not create the worktree, do not spawn any Agent.
+If the user declines (does not choose Proceed), stop immediately — do not start the round counter, do not create the worktree, do not spawn any Agent. Because both side effects live in Step 1.5 below, declining here leaves no state to clean up.
+
+---
+
+## Step 1.5: Commit to the run (post-confirmation side effects)
+
+Only reached once the user chose **Proceed** in Step 1. Run these in order — the worktree-readiness check comes first so a bad target aborts before any state is created.
+
+### Worktree-readiness check (code mode only)
+
+The worktree is created from `HEAD`, so a target file that is untracked (or whose latest edits are uncommitted) will not exist — or will be stale — inside the worktree, and the Defender's worktree-path edits will fail or operate on the wrong content. For each resolved target file, check `git status --porcelain <file>`: if any is non-empty (untracked or uncommitted changes), abort with:
+
+```
+Target <file> has uncommitted changes or is untracked. Commit or stash it first — /harden operates on a worktree created from HEAD.
+```
+
+Do not start the round counter or create the worktree. (Plan mode has no worktree, so skip this check.)
+
+### Start round counter
+
+```bash
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" harden/round_counter.py start --session-id <session_id>
+```
+
+### Create worktree (code mode only)
+
+For code mode, create a single worktree that persists across all rounds. All Defenders will edit files here cumulatively, and Attackers in rounds 2+ will read from here to see the accumulated fixes.
+
+```bash
+git worktree add .claude/worktrees/harden-<session_id> -b harden-<session_id> HEAD
+```
+
+Save the worktree path (`.claude/worktrees/harden-<session_id>`) and branch name (`harden-<session_id>`) for use throughout the loop.
 
 ---
 
