@@ -1,11 +1,11 @@
 ---
 id: load_apiary_context
-title: Load apiary context at session start
+title: Apiary toolkit — recovery pointer
 category: behavioral
 requires: []
 ---
-### Load apiary context at session start
+### Apiary context
 
-At the start of every session, invoke the `/apiary-context` skill to load the apiary toolkit rules (scribe, budgeter, runner conventions, portability, etc.). Do this before any other work.
+This repo uses the apiary toolkit. Its rules (launcher convention, scribe/budgeter/runner, portability, compass profile) normally load automatically at session start via the `startup_prompt_hook` — you don't need to invoke anything.
 
-If `/apiary-context` is not available (e.g. skills not installed), proceed without it — the session is still usable, just without apiary-specific guidance.
+If that context is **missing** (the hook didn't run — e.g. a fresh/untrusted clone, a broken launcher, or a surface that doesn't execute hooks), run the `/apiary-context` skill to load it manually.

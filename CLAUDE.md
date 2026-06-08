@@ -1,11 +1,11 @@
 <!-- apiary-context-rules-start -->
 
-<!-- apiary-context-rule:load_apiary_context hash=549a3ad693c4b267b66ab5f3469ff4c563d9a9cabb2501218599e082cdcc4f1a -->
-### Load apiary context at session start
+<!-- apiary-context-rule:load_apiary_context hash=61c8d65a2fb3a78752f3977d97a598f4c0fc5fdb95fcb40bdab34474add29c6c -->
+### Apiary context
 
-At the start of every session, invoke the `/apiary-context` skill to load the apiary toolkit rules (scribe, budgeter, runner conventions, portability, etc.). Do this before any other work.
+This repo uses the apiary toolkit. Its rules (launcher convention, scribe/budgeter/runner, portability, compass profile) normally load automatically at session start via the `startup_prompt_hook` — you don't need to invoke anything.
 
-If `/apiary-context` is not available (e.g. skills not installed), proceed without it — the session is still usable, just without apiary-specific guidance.
+If that context is **missing** (the hook didn't run — e.g. a fresh/untrusted clone, a broken launcher, or a surface that doesn't execute hooks), run the `/apiary-context` skill to load it manually.
 <!-- /apiary-context-rule:load_apiary_context -->
 
 <!-- apiary-context-rules-end -->
