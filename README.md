@@ -4,6 +4,22 @@ A unified ecosystem of tools that extend and optimize the [Claude Code](https://
 
 ---
 
+## Install & update
+
+One command for each, from inside the clone. They handle Python discovery, the
+Windows Store python-alias trap, Poetry, the bootstrap chain, and (with the GUI
+flag) the desktop app — so there's no manual multi-step recovery.
+
+| | Windows (PowerShell) | macOS / Linux |
+|---|---|---|
+| **First install** | `.\scripts\install.ps1` | `./scripts/install.sh` |
+| **+ desktop GUI** | `.\scripts\install.ps1 -Gui` | `./scripts/install.sh --gui` |
+| **Update** | `.\scripts\update.ps1 [-Gui]` | `./scripts/update.sh [--gui]` |
+
+Full prerequisites, the desktop GUI, and troubleshooting live in [`SETUP.md`](SETUP.md).
+
+---
+
 ## Requirements
 
 - **Python >= 3.11** (declared minimum supported version)

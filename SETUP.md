@@ -192,12 +192,36 @@ hot-reload, and the permission-prompt MCP path.
 
 ## Updating
 
+Updates are frequent during development. The simplest path is the updater — it
+pulls the latest code and re-runs the idempotent install chain (`poetry install`,
+`self-bootstrap` to refresh hooks + slash commands, repo hooks, `doctor`). Use
+the **same flags you installed with**:
+
+```powershell
+.\scripts\update.ps1            # Windows: update CLI
+.\scripts\update.ps1 -Gui       # Windows: update CLI + desktop GUI
+```
+
+```bash
+./scripts/update.sh             # macOS / Linux: update CLI
+./scripts/update.sh --gui       # macOS / Linux: update CLI + desktop GUI
+```
+
+The updater only touches main-apiary itself. To refresh **another** bootstrapped
+repo (new hooks/commands after an upgrade), re-run the install for it:
+
+```bash
+poetry run apiary install --target /path/to/repo
+poetry run apiary doctor                               # validate registry + pin files
+```
+
+Doing it fully by hand is equivalent to:
+
 ```bash
 git pull
-poetry install
+poetry install                                         # add --with gui for the GUI
 poetry run apiary self-bootstrap                       # refresh main-apiary
-poetry run apiary install --target /path/to/repo       # refresh each bootstrapped repo
-poetry run apiary doctor                               # validate registry + pin files
+poetry run apiary doctor
 ```
 
 If main-apiary's pinned version (`<main-apiary>/VERSION`) advanced past a repo's pinned version (`<repo>/.claude/apiary/version.json`), `apiary doctor versions` flags it. The versioned migration runner under `<main-apiary>/migrations/` chains the upgrade scripts.
