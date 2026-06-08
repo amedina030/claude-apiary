@@ -9,6 +9,7 @@ from __future__ import annotations
 import threading
 import time
 import unittest
+from unittest import mock
 
 from gui import pty_wrapper
 from gui.pty_wrapper import PtyWrapper
@@ -123,6 +124,56 @@ class WaitForQuietTests(unittest.TestCase):
         wrapper = PtyWrapper()
         wrapper._stop.set()
         self.assertFalse(wrapper.wait_for_quiet(after=0.0, quiet=0.05, timeout=5.0))
+
+
+class ResolveClaudeCommandTests(unittest.TestCase):
+    """T-2026-232: a .cmd npm shim must be wrapped through cmd.exe, and a real
+    .exe preferred, so ConPTY does not fail with WinError 193."""
+
+    def _patch(self, *, os_name: str, which_map: dict):
+        which_patch = mock.patch.object(
+            pty_wrapper.shutil, "which", side_effect=lambda n: which_map.get(n)
+        )
+        os_patch = mock.patch.object(pty_wrapper.os, "name", os_name)
+        return which_patch, os_patch
+
+    def test_missing_returns_none(self) -> None:
+        wp, op = self._patch(os_name="nt", which_map={})
+        with wp, op:
+            self.assertIsNone(pty_wrapper._resolve_claude_command("claude"))
+
+    def test_windows_cmd_shim_wrapped_through_cmd_exe(self) -> None:
+        wp, op = self._patch(
+            os_name="nt",
+            which_map={"claude.exe": None, "claude": r"C:\npm\claude.cmd"},
+        )
+        with wp, op:
+            self.assertEqual(
+                pty_wrapper._resolve_claude_command("claude"),
+                ["cmd", "/c", r"C:\npm\claude.cmd"],
+            )
+
+    def test_windows_prefers_real_exe_over_shim(self) -> None:
+        wp, op = self._patch(
+            os_name="nt",
+            which_map={"claude.exe": r"C:\Program Files\claude\claude.exe",
+                       "claude": r"C:\npm\claude.cmd"},
+        )
+        with wp, op:
+            self.assertEqual(
+                pty_wrapper._resolve_claude_command("claude"),
+                [r"C:\Program Files\claude\claude.exe"],
+            )
+
+    def test_posix_returns_path_as_is(self) -> None:
+        wp, op = self._patch(
+            os_name="posix", which_map={"claude": "/usr/local/bin/claude"}
+        )
+        with wp, op:
+            self.assertEqual(
+                pty_wrapper._resolve_claude_command("claude"),
+                ["/usr/local/bin/claude"],
+            )
 
 
 if __name__ == "__main__":
