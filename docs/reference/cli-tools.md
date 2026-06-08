@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-04-23"
+last_verified: "2026-06-08"
 ---
 
 # CLI Tools
@@ -32,6 +32,14 @@ Core note and learning management.
 | `unlearn` | `notes.py unlearn <ID>` | Remove a learning (e.g. `L-2026-3`) |
 | `handoff-sessions` | `notes.py handoff-sessions` | List sessions with handoffs |
 | `migrate` | `notes.py migrate` | Run data migrations |
+| `drop` | `notes.py drop <ID>` | Close a note without marking it done (status → dropped) |
+| `unarchive` | `notes.py unarchive <ID>` | Move a note back from its year's archive to active |
+| `show` | `notes.py show <ID>` | Alias of `get` |
+| `template` | `notes.py template show <type>` | Inspect per-type formatting templates that gate `add` (sub-actions: `show`, `path`, `list`) |
+| `supersede` | `notes.py supersede <ID> --content "<text>"` | Archive a learning and write a replacement |
+| `archive-learning` | `notes.py archive-learning <ID>` | Archive a learning by ID (e.g. `L-2026-5`) |
+| `repair` | `notes.py repair [--dry-run]` | Repair index/data inconsistencies |
+| `backfill-brief` | `notes.py backfill-brief [--dry-run] [--force]` | Populate `brief_summary` on entries that lack one |
 
 > **Note IDs** use TYPE-YEAR-seq format (e.g. `T-2026-1`, `L-2026-3`). Legacy bare integers are accepted via migration lookup. See `scribe/CLAUDE.md` for the full prefix table.
 
@@ -54,6 +62,18 @@ Core note and learning management.
 | `--role ROLE` | add, list, learn | Session role filter |
 | `--mission MISSION` | add, list, learn | Session mission filter |
 | `--before DATE` | archive | Archive notes before this date |
+| `--content-file PATH` | add | Read content from a UTF-8 file instead of `--content` (avoids shell-substitution issues with backticks/slashes) |
+| `--summary TEXT` | add | One-line abstract shown in lists and startup. Required for `--type handoff` |
+| `--brief-summary TEXT` | add, update, learn | One-sentence GUI-sidebar headline; auto-derived if omitted |
+| `--ack-template HASH` | add | Acknowledge the current template hash; required when a non-empty `templates/<type>.md` exists |
+| `--session SESSION` | list | Filter by session ID |
+| `--index` | learnings | Compact tag-grouped output for startup injection |
+| `--tag TAG` | learnings | Filter learnings by tag (substring, case-insensitive) |
+| `--tags LIST` | learn, supersede | Comma-separated tag list; omit to infer via `claude -p` |
+| `--area GLOB` | learn, supersede, learnings | Area glob — repeatable on `learn`/`supersede`; exact-match filter on `learnings` |
+| `--supersedes ID` | learn | ID of a prior learning this one replaces (e.g. `L-2026-5`) |
+| `--dry-run` | repair, backfill-brief | Report what would change without writing |
+| `--force` | backfill-brief | Re-derive `brief_summary` even for entries that already have one |
 
 ## scribe/backup_indexes.py
 
@@ -111,6 +131,7 @@ python core/doctor.py [subcommand] [--apiary-repo PATH]
 | `registry` | Walk every registered repo: path exists; uid/version fields present |
 | `mailbox` | Count pending forwarding messages at `<apiary>/.apiary/forwarding/` |
 | `versions` | Compare each repo's pinned version against `<apiary>/VERSION` |
+| `stale` | Registered repos whose installed slash-command files differ from current main-apiary source (skill drift) |
 | `orphans` | Folders under `.repos/<slug>/` whose UID has no registry entry |
 | `duplicates` | Registry entries sharing a `real_path` |
 | `unreachable` | Registry entries whose `real_path` does not exist on disk |
@@ -385,6 +406,14 @@ python harden/lenses.py codes   # name=CODE pairs (correctness=COR, security=SEC
 python harden/lenses.py json    # full taxonomy: lenses, briefs, seam_rules
 ```
 
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `list` | Print the canonical lens names, one per line |
+| `codes` | Print `name=CODE` pairs, one per line |
+| `json` | Print the full taxonomy (names, codes, briefs, seams) as JSON |
+
 The seven lenses: `correctness` (COR), `security` (SEC), `robustness` (ROB), `resilience` (RES), `complexity` (CPX), `architecture` (ARC), `testing` (TST).
 
 ## harden/validate_consolidation.py
@@ -434,6 +463,7 @@ python harden/validate_findings.py --file findings.json [--check-files] [--deep]
 | `--deep` | no | Require Given/When/Then scenarios |
 | `--file PATH` | no | Read JSON from file instead of stdin |
 | `--sanitize` | no | Auto-fix common issues before validation |
+| `--lens NAME` | no | Validate as lens-mode findings for the given lens (replaces the legacy category field) |
 
 Exit 0 + validated JSON on success. Exit 1 + error details on failure.
 
@@ -533,6 +563,15 @@ python -m runner.run runner/intake/<uuid>.json --target-repo /path/to/other/repo
 |-----------------|----------|-------------|
 | `intake_path` | yes | Path to intake JSON file (`runner/intake/<uuid>.json`) |
 | `--target-repo PATH` | no | Run against a non-apiary git repo. Precedence: CLI flag > intake `target_repo` field > config `runner.target_repo` > apiary fallback. Path must exist and contain a `.git` entry. |
+| `--resume-from STAGE` | no | Resume from a specific stage (skip earlier stages) |
+| `--detached` | no | Detached (cron) mode: pick from backlog, branch, commit, log |
+| `--token-cap N` | no | Per-run token cap (detached mode); default from config `detached.token_cap` |
+| `--max-unreviewed N` | no | Max unmerged runner branches before skipping (detached mode) |
+| `--cleanup UUID` | no | Delete runner branch(es) / worktree for the given uuid |
+| `--abort UUID` | no | Abort a crashed run: archive artifacts, remove worktree |
+| `--prune-failed` | no | Prune failed/abandoned runner branches (with `--older-than`) |
+| `--older-than DAYS` | no | Age threshold for `--prune-failed` (default 7) |
+| `--dry-run` | no | List prune candidates without deleting anything |
 
 Stages run in order: validate_intake → auto_refine → auto_plan → executor → auto_harden → approval. Each stage's input path is derived from the UUID. Prints per-stage status and elapsed time. Exit 0 if all stages pass; exit 1 on first failure.
 
