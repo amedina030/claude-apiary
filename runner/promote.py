@@ -6,6 +6,7 @@ Validates, assigns a UUID, copies to intake/, and removes the backlog file.
 Usage:
     promote.py <slug>
 """
+import argparse
 import json
 import subprocess
 import sys
@@ -22,11 +23,14 @@ REPO_ROOT = SCRIPT_DIR.parent
 
 
 def main():
-    if len(sys.argv) < 2:
-        print('Usage: promote.py <slug>', file=sys.stderr)
-        sys.exit(1)
-
-    slug = sys.argv[1]
+    parser = argparse.ArgumentParser(
+        description="Promote a backlog ticket to runner intake.",
+    )
+    parser.add_argument(
+        "slug",
+        help="Backlog ticket slug — the filename without directory or .json extension",
+    )
+    slug = parser.parse_args().slug
     # Prevent path traversal: slug must be a plain filename with no separators
     if (
         '/' in slug
