@@ -903,6 +903,21 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" core/targets.
 
 Spec: scribe note `C-2026-46`.
 
+## docs/check_cli_claims.py
+
+Reconcile the CLI claims in `cli-tools.md` against each tool's real argparse — reports drift when a documented subcommand/flag no longer exists, or a real one is undocumented. Sibling to `docs/check.py`; report-only, never rewrites the doc. Shells out to each tool's `--help`. Mark intentional omissions with an inline `<!-- cli-claims: ignore: --some-flag, somesubcmd -->` anywhere in a tool's section.
+
+```bash
+python docs/check_cli_claims.py
+python docs/check_cli_claims.py --only scribe/notes.py
+```
+
+| Flag | Description |
+|------|-------------|
+| `--only HEADER` | Check a single tool section by its `## ` header (e.g. `scribe/notes.py`) |
+
+Exit codes: `0` no drift; `1` drift found; `2` `cli-tools.md` not found.
+
 ## Test scripts
 
 All tests use `unittest` and are run directly:
@@ -910,6 +925,7 @@ All tests use `unittest` and are run directly:
 ```bash
 python budgeter/test_hooks.py
 python scribe/test_notes.py
+python docs/test_check_cli_claims.py
 python harden/test_validators.py
 python harden/test_assign_ids.py
 python harden/test_validate_consolidation.py
