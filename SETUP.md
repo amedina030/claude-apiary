@@ -29,19 +29,27 @@ What lives where after bootstrap:
 
 ### Quick install (recommended)
 
-After cloning, run the one-command installer for your OS. It finds a real
-Python, ensures Poetry, installs dependencies, and runs the whole bootstrap
-chain (`self-bootstrap` → repo hooks → `doctor`) as a single user action:
+After cloning, run the one-command installer for your OS. It runs a preflight
+environment check (reporting any blockers up front), finds a real Python,
+ensures Poetry, installs dependencies, and runs the whole bootstrap chain
+(`self-bootstrap` → repo hooks → `doctor`) as a single user action:
 
 ```powershell
 # Windows (PowerShell), from inside the clone:
-.\scripts\install.ps1
+.\scripts\install.ps1            # CLI only
+.\scripts\install.ps1 -Gui       # CLI + desktop GUI
 ```
 
 ```bash
 # macOS / Linux, from inside the clone:
-./scripts/install.sh
+./scripts/install.sh             # CLI only
+./scripts/install.sh --gui       # CLI + desktop GUI
 ```
+
+Add `-Gui` / `--gui` to also set up the desktop app: it pulls the `gui` Poetry
+group and prefers a GUI-compatible interpreter (Python 3.11/3.12 — see
+[The desktop GUI](#the-desktop-gui-optional)). Want to inspect first? The Windows
+installer takes `-DryRun` to print every step without changing anything.
 
 Why a script instead of running the steps by hand: on Windows the installer
 finds Python the robust way (the `py` launcher + the registry, not a directory
@@ -147,12 +155,27 @@ reason "the GUI won't start after install."
   it's absent the window creation fails with a cryptic error. Most Windows 11
   machines have it; if not, install the Evergreen runtime from
   <https://developer.microsoft.com/microsoft-edge/webview2/>.
-- **Claude Code on `PATH` as a real executable.** The GUI spawns `claude` in a
-  pty. A bare npm shim can fail to spawn on Windows (`[WinError 193]`); if the
-  window opens but tabs won't start, point it at a real binary via the
-  `command`/`args` keys in `<main-apiary>/.apiary/gui/apiary_gui/launch.json`.
+- **Claude Code on `PATH`.** The GUI spawns `claude` in a pty. It prefers a real
+  `claude.exe` and automatically wraps an npm batch shim through `cmd.exe` (so
+  the old `[WinError 193]` spawn failure no longer bites), but `claude` must be
+  resolvable. If the window opens but tabs won't start, confirm Claude Code is
+  installed, or set explicit `command`/`args` keys in
+  `<main-apiary>/.apiary/gui/apiary_gui/launch.json`.
+
+The GUI prints a startup warning to the terminal if WebView2 or `claude` is
+missing — launch it from a shell the first time so you see those.
 
 ### Install and run
+
+The simplest path is the installer's `-Gui` / `--gui` flag, which installs the
+group and picks a GUI-compatible interpreter for you:
+
+```powershell
+.\scripts\install.ps1 -Gui        # Windows
+./scripts/install.sh --gui        # macOS / Linux
+```
+
+Or set it up by hand inside an existing install:
 
 ```bash
 poetry install --with gui          # adds pywebview, pythonnet, pywinpty, watchdog

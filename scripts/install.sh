@@ -10,7 +10,7 @@
 # covers.
 #
 # Usage:
-#   ./scripts/install.sh [--skip-bootstrap] [--yes]
+#   ./scripts/install.sh [--gui] [--skip-bootstrap] [--yes]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,8 +20,10 @@ MIN_MINOR=11
 
 SKIP_BOOTSTRAP=0
 ASSUME_YES=0
+WITH_GUI=0
 for arg in "$@"; do
     case "$arg" in
+        --gui) WITH_GUI=1 ;;
         --skip-bootstrap) SKIP_BOOTSTRAP=1 ;;
         --yes|-y) ASSUME_YES=1 ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
@@ -42,7 +44,13 @@ is_good_python() {
 
 find_python() {
     # Explicit version names first, then generic, then pyenv's active shim.
-    for name in python3.13 python3.12 python3.11 python3 python; do
+    # With --gui, prefer 3.12/3.11 (pythonnet has no 3.13+ wheel) before any
+    # generic name that might resolve to a newer interpreter.
+    local names="python3.13 python3.12 python3.11 python3 python"
+    if [ "$WITH_GUI" -eq 1 ]; then
+        names="python3.12 python3.11 python3 python"
+    fi
+    for name in $names; do
         local p
         p="$(command -v "$name" 2>/dev/null || true)"
         if [ -n "$p" ] && is_good_python "$p"; then echo "$p"; return 0; fi
@@ -62,6 +70,13 @@ if [ -z "$PY" ]; then
 fi
 ok "Python $("$PY" -c 'import sys;print("%d.%d.%d"%sys.version_info[:3])'): $PY"
 
+step "Running pre-install environment check"
+if [ "$WITH_GUI" -eq 1 ]; then
+    "$PY" "$REPO_ROOT/scripts/preflight.py" --gui || die "Preflight found blockers (above). Resolve them and re-run."
+else
+    "$PY" "$REPO_ROOT/scripts/preflight.py" || die "Preflight found blockers (above). Resolve them and re-run."
+fi
+
 step "Ensuring Poetry is installed"
 if command -v poetry >/dev/null 2>&1; then
     ok "Poetry already installed: $(command -v poetry)"
@@ -80,8 +95,13 @@ fi
 cd "$REPO_ROOT"
 step "Pointing Poetry at $PY and installing dependencies"
 "$POETRY" env use "$PY"
-"$POETRY" install
-ok "poetry install complete"
+if [ "$WITH_GUI" -eq 1 ]; then
+    "$POETRY" install --with gui
+    ok "poetry install complete (with gui)"
+else
+    "$POETRY" install
+    ok "poetry install complete"
+fi
 
 if [ "$SKIP_BOOTSTRAP" -eq 1 ]; then
     printf '\033[33m    !   --skip-bootstrap set; stopping after dependency install.\033[0m\n'
@@ -101,3 +121,6 @@ step "Validating the install"
 
 printf '\033[32m\nDone. Restart Claude Code in a session rooted at this repo so its hooks\n'
 printf 'and slash commands load. Then run /apiary-context if anything is missing.\033[0m\n'
+if [ "$WITH_GUI" -eq 1 ]; then
+    printf '\033[32mLaunch the desktop GUI with:  poetry run python -m gui.app\033[0m\n'
+fi

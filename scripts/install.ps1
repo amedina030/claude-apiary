@@ -27,6 +27,11 @@
     self-bootstrap -> repo hooks -> doctor) is a single user action, so the
     Claude Code safety classifier never blocks the bootstrap mid-way.
 
+.PARAMETER Gui
+    Also install the desktop GUI: adds the `gui` Poetry group and prefers a
+    GUI-compatible interpreter (Python 3.11/3.12, since pythonnet has no 3.13+
+    wheel). If only a newer Python exists it is used anyway, with a loud warning.
+
 .PARAMETER SkipBootstrap
     Stop after `poetry install`. Skips self-bootstrap, repo hooks, and doctor.
 
@@ -37,15 +42,16 @@
     Print every step that would run without changing the system. Safe to inspect.
 
 .EXAMPLE
-    # From inside the cloned repo, in PowerShell:
+    # CLI only, from inside the cloned repo:
     .\scripts\install.ps1
 
 .EXAMPLE
-    # Non-interactive:
-    .\scripts\install.ps1 -Yes
+    # CLI + desktop GUI:
+    .\scripts\install.ps1 -Gui
 #>
 [CmdletBinding()]
 param(
+    [switch]$Gui,
     [switch]$SkipBootstrap,
     [switch]$Yes,
     [switch]$DryRun
@@ -160,7 +166,9 @@ function Get-RegistryPythonPaths {
     return $found
 }
 
-function Find-RealPython {
+$GuiPyMaxExclusive = [version]'3.13'   # pythonnet has no wheel for 3.13+
+
+function Find-RealPython([bool]$preferGuiCompat = $false) {
     $candidates = New-Object System.Collections.Generic.List[string]
     $add = { param($p) if ($p) { $candidates.Add($p) } }
 
@@ -190,18 +198,28 @@ function Find-RealPython {
             ForEach-Object { & $add $_.FullName }
     }
 
-    # Probe candidates in priority order; return the first real one >= MinPython
+    # Probe candidates in priority order, collecting every real one >= MinPython.
     $seen = @{}
+    $valid = New-Object System.Collections.Generic.List[object]
     foreach ($c in $candidates) {
         $norm = $c.ToLower()
         if ($seen.ContainsKey($norm)) { continue }
         $seen[$norm] = $true
         $ver = Get-PythonVersion $c
         if ($ver -and $ver -ge $MinPython) {
-            return [pscustomobject]@{ Exe = $c; Version = $ver }
+            $valid.Add([pscustomobject]@{ Exe = $c; Version = $ver })
         }
     }
-    return $null
+    if ($valid.Count -eq 0) { return $null }
+
+    # For the GUI, prefer a 3.11/3.12 interpreter when one exists; otherwise fall
+    # through to the highest-priority valid interpreter (caller warns loudly).
+    if ($preferGuiCompat) {
+        foreach ($v in $valid) {
+            if ($v.Version -lt $GuiPyMaxExclusive) { return $v }
+        }
+    }
+    return $valid[0]
 }
 
 # --------------------------------------------------------------------------- #
@@ -265,7 +283,7 @@ Write-Host ""
 
 # --- Python --------------------------------------------------------------- #
 Write-Step "Locating a real Python >= $MinPython (ignoring the WindowsApps stub)"
-$py = Find-RealPython
+$py = Find-RealPython $Gui.IsPresent
 if (-not $py) {
     Write-Host ""
     Write-Die @"
@@ -282,6 +300,21 @@ Install one, then re-run this script:
 Write-Ok "Python $($py.Version): $($py.Exe)"
 $pythonExe = $py.Exe
 $pythonDir = Split-Path -Parent $pythonExe
+if ($Gui -and $py.Version -ge $GuiPyMaxExclusive) {
+    Write-Warn2 "Python $($py.Version) is newer than the GUI supports (needs < 3.13)."
+    Write-Warn2 "Installing the GUI anyway, but its window may fail to open."
+    Write-Warn2 "For a working GUI, install Python 3.12 and re-run with -Gui."
+}
+
+# --- Preflight ------------------------------------------------------------- #
+Write-Step "Running pre-install environment check"
+$preflight = Join-Path $RepoRoot 'scripts\preflight.py'
+$pfArgs = @($preflight)
+if ($Gui) { $pfArgs += '--gui' }
+& $pythonExe @pfArgs
+if ($LASTEXITCODE -ne 0 -and -not $DryRun) {
+    Write-Die "Preflight found blockers (above). Resolve them and re-run."
+}
 
 # --- Poetry --------------------------------------------------------------- #
 Write-Step "Ensuring Poetry is installed"
@@ -292,8 +325,9 @@ Write-Step "Pointing Poetry at the real interpreter and installing dependencies"
 Push-Location $RepoRoot
 try {
     Invoke-Clean $poetry @('env', 'use', $pythonExe) $pythonDir
-    Invoke-Clean $poetry @('install') $pythonDir
-    Write-Ok "poetry install complete"
+    $installArgs = if ($Gui) { @('install', '--with', 'gui') } else { @('install') }
+    Invoke-Clean $poetry $installArgs $pythonDir
+    Write-Ok "poetry install complete$(if ($Gui) { ' (with gui)' })"
 
     if ($SkipBootstrap) {
         Write-Warn2 "-SkipBootstrap set; stopping after dependency install."
@@ -320,4 +354,7 @@ Write-Host "Done." -ForegroundColor Green
 if (-not $SkipBootstrap) {
     Write-Host "Next: restart Claude Code in a session rooted at this repo so its hooks" -ForegroundColor Green
     Write-Host "and slash commands load. Then run /apiary-context if anything is missing." -ForegroundColor Green
+}
+if ($Gui) {
+    Write-Host "Launch the desktop GUI with:  poetry run python -m gui.app" -ForegroundColor Green
 }
