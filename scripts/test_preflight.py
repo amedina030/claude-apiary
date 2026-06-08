@@ -36,7 +36,7 @@ class GuiPythonStatusTests(unittest.TestCase):
 
 class PathFlagTests(unittest.TestCase):
     def test_clean_path_has_no_flags(self) -> None:
-        self.assertEqual(preflight._path_flags("/home/amedi", "/opt/claude-apiary/scripts/x.py"), [])
+        self.assertEqual(preflight._path_flags("/home/user", "/opt/claude-apiary/scripts/x.py"), [])
 
     def test_apostrophe_is_flagged(self) -> None:
         flags = preflight._path_flags(r"C:\Users\Nelson's PC", r"D:\repo\x.py")
