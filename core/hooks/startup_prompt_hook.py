@@ -2,7 +2,12 @@
 """
 UserPromptSubmit hook — injects startup context on the first user message.
 
-Always injects: identity, notes summary, learnings, CLI reference.
+Always injects: identity, notes summary, learnings, CLI reference, the
+apiary toolkit rules (the same content the /apiary-context skill serves,
+read from core/commands/apiary-context.md), and — when the session cwd is a
+registered git repo — the compass personality profile. The latter two used
+to depend on the model invoking /apiary-context; injecting them here makes
+them deterministic. The skill remains for on-demand reload (e.g. /clear).
 
 Runner subprocesses (auto_refine, auto_plan, auto_harden, executor,
 approval) set ``APIARY_RUNNER_SUBPROCESS=1`` to skip injection — they
@@ -23,7 +28,26 @@ from core.session import SessionId
 from core.hook_context import context_block, hook_allow, read_payload
 from core.sanitizer import sanitize_and_report
 from core.startup import run_init, run_summary
+from core.utils.state import find_state_dir
 from scribe.notes import _git_repo_root
+
+
+def _strip_frontmatter(md: str) -> str:
+    """Drop a leading YAML frontmatter block (``--- ... ---``) from markdown.
+
+    Returns the body (leading blank lines trimmed) when frontmatter is
+    present, or the input unchanged when it is not. Used to inject the
+    apiary-context skill's *content* without its skill header.
+    """
+    if not md.startswith("---"):
+        return md
+    close = md.find("\n---", 3)
+    if close == -1:
+        return md
+    body_start = md.find("\n", close + 1)
+    if body_start == -1:
+        return ""
+    return md[body_start + 1:].lstrip("\n")
 
 # Sanitizer hit log lives in the umbrella state directory. With the
 # centralized .repos/ layout, this resolves to
@@ -138,7 +162,10 @@ def _run():
             "surface: this session is running inside the apiary GUI (a pywebview "
             "desktop app), not a raw terminal. The user reads your output in the "
             "GUI chat pane and types into the GUI composer. Edits to gui/web/* "
-            "require a full GUI restart (not a reload) to take effect."
+            "require a full GUI restart (not a reload) to take effect. Do NOT use "
+            "the AskUserQuestion multiple-choice tool in this surface — its "
+            "option-picker does not render reliably in the GUI; ask any questions "
+            "as plain text in your reply instead."
         )
 
     # --- 2. Summary: active notes, latest handoff ---
@@ -192,6 +219,48 @@ def _run():
         parts.append(scrubbed)
     except Exception:
         pass
+
+    # --- 5. Apiary toolkit rules (static guardrails) ---
+    # Injected from the same markdown the /apiary-context skill serves, so the
+    # launcher convention, portability, scribe decision tree, and reference
+    # subsystems are guaranteed present before the first tool call — instead of
+    # depending on the model remembering to invoke the skill. The skill remains
+    # for on-demand reload (e.g. after /clear).
+    try:
+        ctx_md = (PROJECT_ROOT / "core" / "commands" / "apiary-context.md").read_text(encoding="utf-8")
+        ctx_body = _strip_frontmatter(ctx_md.strip())
+        if ctx_body:
+            scrubbed, hits = sanitize_and_report(ctx_body)
+            _log_sanitizer_hits("apiary_context", hits, sid.full)
+            parts.append("")
+            parts.append("--- apiary toolkit rules (also available on demand via /apiary-context) ---")
+            parts.append(scrubbed)
+    except Exception:
+        pass
+
+    # --- 6. Compass personality profile (dynamic, per-target) ---
+    # The only runtime-resolved piece of apiary-context. Read directly here so
+    # the profile that shapes tone/verbosity/autonomy is guaranteed loaded,
+    # rather than relying on the skill's cat-if-exists snippet. find_state_dir
+    # is read-only (no auto-registration), so it is safe to call from a hook.
+    if not skip_notes_injection:
+        try:
+            state_dir = find_state_dir(session_repo_root)
+            if state_dir is not None:
+                compass_path = state_dir / "compass" / "personality.md"
+                if compass_path.is_file():
+                    scrubbed, hits = sanitize_and_report(
+                        compass_path.read_text(encoding="utf-8").strip()
+                    )
+                    _log_sanitizer_hits("compass", hits, sid.full)
+                    parts.append("")
+                    parts.append(
+                        "--- compass personality profile (soft guidance; "
+                        "explicit user statements and feedback memory override) ---"
+                    )
+                    parts.append(scrubbed)
+        except Exception:
+            pass
 
     hook_allow(context_block("startup", *parts), event="UserPromptSubmit")
 

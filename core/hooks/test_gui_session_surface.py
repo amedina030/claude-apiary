@@ -21,6 +21,10 @@ HOOKS_DIR = Path(__file__).resolve().parent
 PYTHON = sys.executable
 SAMPLE_SID = "abcd1234-1111-2222-3333-444444444444"
 SURFACE_MARKER = "running inside the apiary GUI"
+RULES_MARKER = "apiary toolkit rules"
+LAUNCHER_MARKER = "git rev-parse --show-toplevel"
+# GUI-only guidance: the AskUserQuestion picker doesn't render in the GUI.
+NO_MULTICHOICE_MARKER = "AskUserQuestion"
 
 
 def _run_hook(home: Path, *, gui_session: bool) -> subprocess.CompletedProcess:
@@ -53,11 +57,24 @@ class TestGuiSessionSurface(unittest.TestCase):
         result = _run_hook(self.home, gui_session=True)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn(SURFACE_MARKER, result.stdout)
+        # GUI sessions also get the no-multiple-choice-questions guidance.
+        self.assertIn(NO_MULTICHOICE_MARKER, result.stdout)
 
     def test_terminal_session_omits_surface_line(self):
         result = _run_hook(self.home, gui_session=False)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertNotIn(SURFACE_MARKER, result.stdout)
+        # The GUI-only guidance must not leak into terminal sessions.
+        self.assertNotIn(NO_MULTICHOICE_MARKER, result.stdout)
+
+    def test_apiary_rules_block_injected(self):
+        """The apiary toolkit rules (formerly loaded via /apiary-context) are
+        injected by the hook itself. This block is NOT git-gated, so it appears
+        even for the non-git cwd this harness uses."""
+        result = _run_hook(self.home, gui_session=False)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn(RULES_MARKER, result.stdout)
+        self.assertIn(LAUNCHER_MARKER, result.stdout)
 
 
 if __name__ == "__main__":
