@@ -27,6 +27,40 @@ What lives where after bootstrap:
 
 ## New Machine Install
 
+### Quick install (recommended)
+
+After cloning, run the one-command installer for your OS. It finds a real
+Python, ensures Poetry, installs dependencies, and runs the whole bootstrap
+chain (`self-bootstrap` → repo hooks → `doctor`) as a single user action:
+
+```powershell
+# Windows (PowerShell), from inside the clone:
+.\scripts\install.ps1
+```
+
+```bash
+# macOS / Linux, from inside the clone:
+./scripts/install.sh
+```
+
+Why a script instead of running the steps by hand: on Windows the installer
+finds Python the robust way (the `py` launcher + the registry, not a directory
+guess) so an install in a non-standard location is still found, and it runs
+every step with the WindowsApps alias stripped from PATH so Poetry's interpreter
+discovery can't get hijacked (see [Troubleshooting](#troubleshooting)). Bundling
+the steps into one user-run script also means the Claude Code safety classifier
+won't block the bootstrap halfway through — see the permission note below.
+
+> **Heads-up if an agent is doing the install for you.** `apiary self-bootstrap`
+> runs code from a freshly cloned repo, so Claude Code's auto-approval classifier
+> will (correctly) refuse to run it on its own — and an agent *cannot* grant
+> itself the permission either (that's flagged as self-modification). The clean
+> way through is to run `scripts/install.ps1` / `scripts/install.sh` **yourself**
+> (e.g. `! .\scripts\install.ps1` in the composer), so the whole chain is clearly
+> your action. The manual steps below work the same way.
+
+The rest of this section documents the manual steps the installer automates.
+
 ### 1. Clone and install dependencies
 
 ```bash
@@ -42,6 +76,15 @@ poetry run apiary self-bootstrap
 ```
 
 This creates `<main-apiary>/.claude/apiary/{launch.py, main-apiary-pointer.json, self-pointer.json, version.json}`, registers main-apiary at `uid=1` in `<main-apiary>/.repos/registry.json`, and installs hooks into `<main-apiary>/.claude/settings.json`.
+
+> **git-bash on Windows:** the `apiary` console script has a `#!...python.exe`
+> shebang that git-bash can't honor (it tries to run the Python as shell and
+> fails with `import: command not found`). Use the module form instead — it is
+> shell-agnostic and works everywhere:
+>
+> ```bash
+> poetry run python -m core.cli self-bootstrap
+> ```
 
 ### 3. Bootstrap any other repo you want apiary in
 
@@ -135,6 +178,26 @@ Uninstall each repo (above), then delete the `claude-apiary` checkout. Apiary wr
 ---
 
 ## Troubleshooting
+
+**Windows: "Python was not found" even though Python is installed**
+Two distinct things bite here. (1) Bare `python` / `python3` on Windows often
+resolves to the **WindowsApps app-execution alias** — a stub that opens the
+Microsoft Store and exits with code `9009`, which breaks Poetry's interpreter
+discovery (`returned non-zero exit status 9009`). (2) A real install in a
+non-standard location (the Store package, a custom dir, the newer
+`%LOCALAPPDATA%\Programs\Python\…` / `%LOCALAPPDATA%\Python\…` layouts, or conda)
+won't be found by guessing at directories. `scripts\install.ps1` handles both:
+it enumerates interpreters via the `py` launcher and the registry
+(`HKLM/HKCU\SOFTWARE\Python\PythonCore`), rejects the WindowsApps stub, and runs
+every child process with WindowsApps stripped from PATH. To do it by hand, point
+Poetry at the real interpreter and strip the alias for the session:
+
+```powershell
+$py = (py -3 -c "import sys; print(sys.executable)")
+$env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notlike '*WindowsApps*' }) -join ';'
+poetry env use $py
+poetry install
+```
 
 **Hooks not firing in a repo**
 Confirm `<repo>/.claude/apiary/launch.py` exists. If not, run `apiary install --target <repo>` and start a new Claude session.
