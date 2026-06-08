@@ -185,25 +185,40 @@ class TestCheck(InstallerTestCase):
 
 
 class TestTamperEnforcement(InstallerTestCase):
+    # A sentinel that won't collide with any rule body. Inserted inside the
+    # managed rule body so the stored hash no longer matches — wording-
+    # independent, so a reworded rule body never breaks these tests.
+    _TAMPER = "HAND-EDITED-BY-TEST"
+
+    @classmethod
+    def _tamper_body(cls, text: str) -> str:
+        """Insert a sentinel line inside the first managed rule body.
+
+        Lands between the rule's open ``hash=`` marker and its closing marker,
+        which is exactly the region ``compute_drift`` re-hashes, so the edit is
+        detected as a body tamper regardless of the rule's prose.
+        """
+        open_marker = "<!-- apiary-context-rule:"
+        start = text.index(open_marker)
+        body_start = text.index("-->", start) + len("-->")
+        return text[:body_start] + f"\n{cls._TAMPER}" + text[body_start:]
+
     def test_body_tamper_blocks_install(self):
         run(*self._common("--install-all"))
-        text = self._read()
-        # Tamper the load_apiary_context body
-        tampered = text.replace("invoke the `/apiary-context` skill", "TAMPERED HERE")
-        self._write(tampered)
+        self._write(self._tamper_body(self._read()))
         result = run(*self._common("--install-all"))
         self.assertEqual(result.exit_code, ir.EXIT_TAMPER)
         self.assertIn("hand-edited", result.stderr)
 
     def test_force_overrides_tamper(self):
         run(*self._common("--install-all"))
-        text = self._read()
-        tampered = text.replace("invoke the `/apiary-context` skill", "TAMPERED HERE")
-        self._write(tampered)
+        self._write(self._tamper_body(self._read()))
         result = run(*self._common("--install-all", "--force"))
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("invoke the `/apiary-context` skill", self._read())
-        self.assertNotIn("TAMPERED HERE", self._read())
+        # --force rebuilds the zone from source: the tamper is gone and a fresh
+        # --check passes (canonical content restored), without asserting prose.
+        self.assertNotIn(self._TAMPER, self._read())
+        self.assertEqual(run(*self._common("--check")).exit_code, 0)
 
     def test_zone_tamper_blocks(self):
         run(*self._common("--install-all"))
@@ -215,9 +230,7 @@ class TestTamperEnforcement(InstallerTestCase):
 
     def test_check_reports_tamper_exit_code(self):
         run(*self._common("--install-all"))
-        text = self._read()
-        tampered = text.replace("invoke the `/apiary-context` skill", "TAMPERED HERE")
-        self._write(tampered)
+        self._write(self._tamper_body(self._read()))
         result = run(*self._common("--check"))
         self.assertEqual(result.exit_code, ir.EXIT_TAMPER)
         self.assertIn("TAMPERED", result.stdout)
