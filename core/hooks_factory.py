@@ -75,6 +75,7 @@ def build_core_hooks() -> dict:
     stop_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install_stop.py", PYTHON, **kw)
     error_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "context_rule_error_reminder.py", PYTHON, **kw)
     learnings_inject_cmd = hook_cmd(CORE_DIR / "hooks" / "learnings_inject_hook.py", PYTHON, **kw)
+    research_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "research_capture_reminder.py", PYTHON, **kw)
     return {
         "UserPromptSubmit": [
             {"hooks": [{"type": "command", "command": prompt_startup_cmd}]},
@@ -86,6 +87,12 @@ def build_core_hooks() -> dict:
             {"matcher": "Edit", "hooks": [{"type": "command", "command": learnings_inject_cmd}]},
             {"matcher": "Write", "hooks": [{"type": "command", "command": learnings_inject_cmd}]},
             {"matcher": "Bash", "hooks": [{"type": "command", "command": learnings_inject_cmd}]},
+            # Research-capture reminder: nudge to persist durable findings via
+            # the researcher. Matches web-research tools plus the subagent tool
+            # (Agent here, Task in stock Claude Code) so research run inside a
+            # subagent is still caught — the hook fires in the parent at spawn.
+            {"matcher": "WebSearch|WebFetch|Agent|Task",
+             "hooks": [{"type": "command", "command": research_reminder_cmd}]},
         ],
         "PostToolUse": [
             {"matcher": "Bash", "hooks": [{"type": "command", "command": error_reminder_cmd}]},
