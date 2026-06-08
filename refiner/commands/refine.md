@@ -41,7 +41,7 @@ If the user provided a `docs:<path>` prefix:
 2. Read `<apiary_repo>/docs/<path>`. If the file does not exist, tell the user and continue without it.
 3. Use the document as architectural context during refinement. Do NOT quote it verbatim in the handoff.
 
-If no `docs:` prefix was given, perform **zero file reads**. Operate from conversation only. **Never read source code files under any circumstance.**
+If no `docs:` prefix was given, perform **zero file reads during Steps 1–2**. Assessment and questioning operate from conversation only — do not read source code while interrogating the idea. Codebase grounding happens later, in its own read-only pass (Step 2.5), once the *what* is settled.
 
 ---
 
@@ -81,7 +81,7 @@ When the user cannot state the problem this solves:
 
 ### Classification
 
-- **Already clear** — purpose, behavior, and boundaries are all specified. Skip to Step 3.
+- **Already clear** — purpose, behavior, and boundaries are all specified. Skip to Step 2.5.
 - **Partially clear** — some dimensions obvious, others missing. 1 round of questions.
 - **Fuzzy** — a direction, not a spec. 2–3 rounds.
 
@@ -125,9 +125,46 @@ Systematically check these dimensions, skipping any already clear:
 
 ---
 
+## Step 2.5: Ground in the codebase
+
+Once the *what* is settled, anchor the spec to the real codebase **before** writing the handoff. This is a read-only verification pass — it confirms what already exists so the spec cites real functions, paths, and patterns. It does **not** design the implementation (still "what, not how").
+
+### When to run
+
+- **Run** for any idea that touches code in the session's repo (a new tool, a change to an existing module, a behavior that plugs into existing code).
+- **Skip** for ideas with no codebase footprint (a pure process/workflow change, a docs-only task, external infra). If you skip, write the handoff from conversation and tag would-be code references as `(new)`.
+
+### How to ground
+
+Dispatch a **single read-only `Explore` subagent** (agentType `Explore`) against the session repo. Give it the settled idea and ask it to return, as a structured summary:
+
+1. **Integration point** — the real file(s)/module(s) where this would plug in, by path.
+2. **Existing patterns** — established patterns, base classes, helpers, or conventions this should follow, each with the file/symbol that exemplifies it.
+3. **Real symbols and paths** — concrete function/class/constant names and file paths the acceptance criteria can reference.
+4. **Adjacent prior art** — anything already in the repo that overlaps, or that this change must not break.
+5. **Conflicts & surprises** — anything that contradicts the idea as described, makes it redundant (already solved by existing code), exposes a cleaner approach, or reveals an invariant the change would break. Ask for this explicitly — it is the signal that decides whether you write or loop back.
+
+The subagent is read-only — it must not edit anything. If it finds nothing relevant (genuinely greenfield), treat the idea as a `(new)` pattern and proceed.
+
+### When grounding changes the picture
+
+Grounding can invalidate what questioning settled. Judge the findings before writing — do **not** paper over a conflict to keep moving:
+
+- **Confirms or enriches** (the common case) — the idea holds; the facts just make it concrete. Carry them into Step 3.
+- **Contradicts a premise** — a pattern, module, or symbol the user assumed doesn't exist or works differently. Loop back to Step 2: tick the round counter, state the contradiction in plain language, and resolve it with the user before writing.
+- **Already solved / strong prior art** — existing code already does most of this. Surface it; if it's fully covered, run the idea-kill flow; if only partial, re-scope with the user to the remaining gap.
+- **A cleaner approach appears** — grounding reveals a better integration point or an existing helper to build on. Propose it with reasoning (Step 2's "don't just accept the premise" rule) and let the user choose.
+- **New hard constraint or scope blowup** — the change must preserve an invariant the user never mentioned, or it touches far more than assumed. Fold a genuine invariant into Boundaries > Must not break; if scope explodes, trigger the too-large split.
+
+Re-ground only if the resolution materially moves the integration point or pattern — otherwise carry the original facts forward. The 15-round cap still backstops any loop.
+
+---
+
 ## Step 3: Write the handoff
 
 Produce the handoff in **exactly** this format. Every section and sub-field is required. Do not omit or leave any field empty.
+
+**Use the grounding facts from Step 2.5.** Shape > Integration point, Pattern, and Dependencies must name the real files/symbols/patterns found; acceptance criteria must reference real paths and symbols wherever the scenario touches existing code. Anything that does not yet exist must be tagged `(new)` so it is unambiguous which references are real and which are to-be-built.
 
 ```
 ## Goal
@@ -162,7 +199,7 @@ Produce the handoff in **exactly** this format. Every section and sub-field is r
 (one per happy-path scenario, one per error case, one per edge case)
 ```
 
-### Self-check: 8 validation rules
+### Self-check: 9 validation rules
 
 **Before presenting the handoff to the user, verify every rule below. If any rule fails, fix the handoff — do not present it yet.**
 
@@ -174,6 +211,7 @@ Produce the handoff in **exactly** this format. Every section and sub-field is r
 6. Boundaries > Out of scope has a reason for each exclusion
 7. Goal > Problem describes a current pain, not a desired future state
 8. No field is left empty or filled with a placeholder
+9. Every file, symbol, or pattern named in Shape or Acceptance criteria either resolves to real code found during grounding (Step 2.5) or is explicitly tagged `(new)` — no invented or unverified references
 
 ---
 
