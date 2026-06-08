@@ -76,6 +76,7 @@ def build_core_hooks() -> dict:
     error_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "context_rule_error_reminder.py", PYTHON, **kw)
     learnings_inject_cmd = hook_cmd(CORE_DIR / "hooks" / "learnings_inject_hook.py", PYTHON, **kw)
     research_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "research_capture_reminder.py", PYTHON, **kw)
+    pre_push_conformer_cmd = hook_cmd(CORE_DIR / "hooks" / "pre_push_doc_conformer.py", PYTHON, **kw)
     return {
         "UserPromptSubmit": [
             {"hooks": [{"type": "command", "command": prompt_startup_cmd}]},
@@ -93,6 +94,12 @@ def build_core_hooks() -> dict:
             # subagent is still caught — the hook fires in the parent at spawn.
             {"matcher": "WebSearch|WebFetch|Agent|Task",
              "hooks": [{"type": "command", "command": research_reminder_cmd}]},
+            # Pre-push doc-conformer gate: blocks a `git push` when the repo's
+            # docs/check_cli_claims.py reports CLI-doc drift. No-op in repos
+            # that don't ship the conformer (guarded by file existence), so
+            # it's inert in target repos.
+            {"matcher": "Bash",
+             "hooks": [{"type": "command", "command": pre_push_conformer_cmd}]},
         ],
         "PostToolUse": [
             {"matcher": "Bash", "hooks": [{"type": "command", "command": error_reminder_cmd}]},
