@@ -27,6 +27,48 @@ What lives where after bootstrap:
 
 ## New Machine Install
 
+### Quick install (recommended)
+
+After cloning, run the one-command installer for your OS. It runs a preflight
+environment check (reporting any blockers up front), finds a real Python,
+ensures Poetry, installs dependencies, and runs the whole bootstrap chain
+(`self-bootstrap` → repo hooks → `doctor`) as a single user action:
+
+```powershell
+# Windows (PowerShell), from inside the clone:
+.\scripts\install.ps1            # CLI only
+.\scripts\install.ps1 -Gui       # CLI + desktop GUI
+```
+
+```bash
+# macOS / Linux, from inside the clone:
+./scripts/install.sh             # CLI only
+./scripts/install.sh --gui       # CLI + desktop GUI
+```
+
+Add `-Gui` / `--gui` to also set up the desktop app: it pulls the `gui` Poetry
+group and prefers a GUI-compatible interpreter (Python 3.11/3.12 — see
+[The desktop GUI](#the-desktop-gui-optional)). Want to inspect first? The Windows
+installer takes `-DryRun` to print every step without changing anything.
+
+Why a script instead of running the steps by hand: on Windows the installer
+finds Python the robust way (the `py` launcher + the registry, not a directory
+guess) so an install in a non-standard location is still found, and it runs
+every step with the WindowsApps alias stripped from PATH so Poetry's interpreter
+discovery can't get hijacked (see [Troubleshooting](#troubleshooting)). Bundling
+the steps into one user-run script also means the Claude Code safety classifier
+won't block the bootstrap halfway through — see the permission note below.
+
+> **Heads-up if an agent is doing the install for you.** `apiary self-bootstrap`
+> runs code from a freshly cloned repo, so Claude Code's auto-approval classifier
+> will (correctly) refuse to run it on its own — and an agent *cannot* grant
+> itself the permission either (that's flagged as self-modification). The clean
+> way through is to run `scripts/install.ps1` / `scripts/install.sh` **yourself**
+> (e.g. `! .\scripts\install.ps1` in the composer), so the whole chain is clearly
+> your action. The manual steps below work the same way.
+
+The rest of this section documents the manual steps the installer automates.
+
 ### 1. Clone and install dependencies
 
 ```bash
@@ -42,6 +84,15 @@ poetry run apiary self-bootstrap
 ```
 
 This creates `<main-apiary>/.claude/apiary/{launch.py, main-apiary-pointer.json, self-pointer.json, version.json}`, registers main-apiary at `uid=1` in `<main-apiary>/.repos/registry.json`, and installs hooks into `<main-apiary>/.claude/settings.json`.
+
+> **git-bash on Windows:** the `apiary` console script has a `#!...python.exe`
+> shebang that git-bash can't honor (it tries to run the Python as shell and
+> fails with `import: command not found`). Use the module form instead — it is
+> shell-agnostic and works everywhere:
+>
+> ```bash
+> poetry run python -m core.cli self-bootstrap
+> ```
 
 ### 3. Bootstrap any other repo you want apiary in
 
@@ -85,14 +136,92 @@ Toggles persist per-repo at `<repo>/.claude/apiary/flags/<flag-name>-enabled`.
 
 ---
 
+## The desktop GUI (optional)
+
+Apiary ships an optional desktop app (`gui/`) — a PyWebView window that wraps a
+Claude Code session with a clean chat view, token counts, and a scribe sidebar.
+It is **not** part of the base install; it has its own dependency group and a few
+native prerequisites that a fresh machine often lacks. These gaps are the usual
+reason "the GUI won't start after install."
+
+### Requirements (read before installing)
+
+- **Python 3.11 or 3.12 — not 3.13+.** The GUI's `pythonnet` dependency only has
+  wheels for `>=3.11,<3.13`. On Python 3.13/3.14 `poetry install --with gui`
+  resolves *without* `pythonnet` and the window fails to open. If your default
+  interpreter is newer, install a 3.12 alongside it and point Poetry at it:
+  `poetry env use /path/to/python3.12` before installing the group.
+- **Microsoft Edge WebView2 Runtime** (Windows). PyWebView renders through it; if
+  it's absent the window creation fails with a cryptic error. Most Windows 11
+  machines have it; if not, install the Evergreen runtime from
+  <https://developer.microsoft.com/microsoft-edge/webview2/>.
+- **Claude Code on `PATH`.** The GUI spawns `claude` in a pty. It prefers a real
+  `claude.exe` and automatically wraps an npm batch shim through `cmd.exe` (so
+  the old `[WinError 193]` spawn failure no longer bites), but `claude` must be
+  resolvable. If the window opens but tabs won't start, confirm Claude Code is
+  installed, or set explicit `command`/`args` keys in
+  `<main-apiary>/.apiary/gui/apiary_gui/launch.json`.
+
+The GUI prints a startup warning to the terminal if WebView2 or `claude` is
+missing — launch it from a shell the first time so you see those.
+
+### Install and run
+
+The simplest path is the installer's `-Gui` / `--gui` flag, which installs the
+group and picks a GUI-compatible interpreter for you:
+
+```powershell
+.\scripts\install.ps1 -Gui        # Windows
+./scripts/install.sh --gui        # macOS / Linux
+```
+
+Or set it up by hand inside an existing install:
+
+```bash
+poetry install --with gui          # adds pywebview, pythonnet, pywinpty, watchdog
+poetry run python -m gui.app
+```
+
+Windows V1 only (the pty backend is `pywinpty`). See `gui/README.md` for profiles,
+hot-reload, and the permission-prompt MCP path.
+
+> The GUI does not hot-reload changes to its own source — after editing
+> `gui/web/*` or the Python backend, fully restart the `gui.app` process.
+
+---
+
 ## Updating
+
+Updates are frequent during development. The simplest path is the updater — it
+pulls the latest code and re-runs the idempotent install chain (`poetry install`,
+`self-bootstrap` to refresh hooks + slash commands, repo hooks, `doctor`). Use
+the **same flags you installed with**:
+
+```powershell
+.\scripts\update.ps1            # Windows: update CLI
+.\scripts\update.ps1 -Gui       # Windows: update CLI + desktop GUI
+```
+
+```bash
+./scripts/update.sh             # macOS / Linux: update CLI
+./scripts/update.sh --gui       # macOS / Linux: update CLI + desktop GUI
+```
+
+The updater only touches main-apiary itself. To refresh **another** bootstrapped
+repo (new hooks/commands after an upgrade), re-run the install for it:
+
+```bash
+poetry run apiary install --target /path/to/repo
+poetry run apiary doctor                               # validate registry + pin files
+```
+
+Doing it fully by hand is equivalent to:
 
 ```bash
 git pull
-poetry install
+poetry install                                         # add --with gui for the GUI
 poetry run apiary self-bootstrap                       # refresh main-apiary
-poetry run apiary install --target /path/to/repo       # refresh each bootstrapped repo
-poetry run apiary doctor                               # validate registry + pin files
+poetry run apiary doctor
 ```
 
 If main-apiary's pinned version (`<main-apiary>/VERSION`) advanced past a repo's pinned version (`<repo>/.claude/apiary/version.json`), `apiary doctor versions` flags it. The versioned migration runner under `<main-apiary>/migrations/` chains the upgrade scripts.
@@ -135,6 +264,26 @@ Uninstall each repo (above), then delete the `claude-apiary` checkout. Apiary wr
 ---
 
 ## Troubleshooting
+
+**Windows: "Python was not found" even though Python is installed**
+Two distinct things bite here. (1) Bare `python` / `python3` on Windows often
+resolves to the **WindowsApps app-execution alias** — a stub that opens the
+Microsoft Store and exits with code `9009`, which breaks Poetry's interpreter
+discovery (`returned non-zero exit status 9009`). (2) A real install in a
+non-standard location (the Store package, a custom dir, the newer
+`%LOCALAPPDATA%\Programs\Python\…` / `%LOCALAPPDATA%\Python\…` layouts, or conda)
+won't be found by guessing at directories. `scripts\install.ps1` handles both:
+it enumerates interpreters via the `py` launcher and the registry
+(`HKLM/HKCU\SOFTWARE\Python\PythonCore`), rejects the WindowsApps stub, and runs
+every child process with WindowsApps stripped from PATH. To do it by hand, point
+Poetry at the real interpreter and strip the alias for the session:
+
+```powershell
+$py = (py -3 -c "import sys; print(sys.executable)")
+$env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notlike '*WindowsApps*' }) -join ';'
+poetry env use $py
+poetry install
+```
 
 **Hooks not firing in a repo**
 Confirm `<repo>/.claude/apiary/launch.py` exists. If not, run `apiary install --target <repo>` and start a new Claude session.

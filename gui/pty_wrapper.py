@@ -22,13 +22,32 @@ from typing import Callable, Optional, Sequence
 _SEND_CHUNK_SIZE = 1024
 
 
-def _resolve_claude_executable(name: str = "claude") -> Optional[str]:
-    """Return the absolute path to the `claude` CLI on PATH, or None."""
+def _resolve_claude_command(name: str = "claude") -> Optional[list[str]]:
+    """Resolve the `claude` CLI to a spawnable argv prefix, or None if absent.
+
+    Windows installs Claude Code via npm as a batch shim (`claude.cmd`). Handing
+    a `.cmd`/`.bat` straight to ConPTY/winpty fails with WinError 193 ("%1 is not
+    a valid Win32 application"), because a batch file is not an executable image.
+    So:
+
+    - Prefer a real `claude.exe` if one is on PATH (the native installer ships
+      one), even when a shim would otherwise sort first.
+    - If only a batch shim is found, wrap it through `cmd.exe /c` so it spawns.
+    - On non-Windows, return the resolved path as-is.
+
+    Resolves T-2026-232.
+    """
+    # Prefer a real executable on Windows even if a shim sorts first under PATHEXT.
+    if os.name == "nt" and not name.lower().endswith((".exe", ".cmd", ".bat", ".ps1")):
+        exe = shutil.which(name + ".exe")
+        if exe:
+            return [exe]
     found = shutil.which(name)
-    if found:
-        return found
-    # Windows ships .cmd shims for many JS-based CLIs; shutil.which finds them with PATHEXT.
-    return None
+    if not found:
+        return None
+    if os.name == "nt" and os.path.splitext(found)[1].lower() in (".cmd", ".bat"):
+        return ["cmd", "/c", found]
+    return [found]
 
 
 class PtySpawnError(RuntimeError):
@@ -130,14 +149,17 @@ class PtyWrapper:
         except ImportError as e:
             raise PtySpawnError(f"pywinpty not installed: {e}") from e
 
-        # Resolve `claude` exe. shutil.which honors PATHEXT, so .cmd/.exe/.bat all work.
+        # Resolve `claude` to a spawnable argv prefix — prefers a real .exe and
+        # wraps a .cmd/.bat shim through cmd.exe (avoids WinError 193).
         argv = list(self.argv)
-        resolved = _resolve_claude_executable(argv[0])
-        if resolved is None:
+        prefix = _resolve_claude_command(argv[0])
+        if prefix is None:
             raise PtySpawnError(
-                f"could not find {argv[0]!r} on PATH — install Claude Code or set launch.json command"
+                f"could not find {argv[0]!r} on PATH. Install Claude Code "
+                f"(https://claude.ai/claude-code), or set an explicit 'command' "
+                f"in launch.json."
             )
-        argv[0] = resolved
+        argv = prefix + argv[1:]
 
         try:
             self._proc = PtyProcess.spawn(

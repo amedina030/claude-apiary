@@ -95,11 +95,16 @@ def hook_cmd(
         rel = script_path.relative_to(repo_root).as_posix()
         if per_repo_launcher:
             return f'python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" {rel}'
-        return f"python ~/.claude/apiary_launch.py {rel}"
+        # $HOME (double-quoted) rather than a bare ~ so a home dir with a space
+        # or apostrophe (e.g. C:\Users\Nelson's PC) survives shell word-splitting.
+        # A bare ~ cannot be quoted without suppressing its expansion.
+        return f'python "$HOME/.claude/apiary_launch.py" {rel}'
     if per_repo_launcher:
         raise ValueError("per_repo_launcher=True requires repo_root")
     exe = python_exe or Path(sys.executable)
-    return f"{to_bash_path(exe)} {to_bash_path(script_path)}"
+    # Quote both paths — the interpreter or script can live under a home dir
+    # with a space/apostrophe, which would otherwise break the unquoted command.
+    return f'"{to_bash_path(exe)}" "{to_bash_path(script_path)}"'
 
 
 def load_settings(path: Path) -> Dict[str, Any]:

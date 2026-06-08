@@ -550,6 +550,21 @@ python scripts/install_context_rules.py --diff <id>
 
 Exit codes: `0` clean, `1` drift detected, `2` tampering detected, `64` usage error.
 
+## scripts/preflight.py
+
+Pre-install environment check, run by `scripts/install.ps1` / `scripts/install.sh` (and usable standalone) before `poetry install`. Reports every missing or fragile prerequisite at once — Python version, git, install-path sanity (spaces / apostrophes / non-ASCII), and the `claude` CLI — instead of surfacing them one cryptic failure at a time. With `--gui` it also checks the GUI's Python pin (3.11/3.12, since pythonnet has no 3.13+ wheel) and the Edge WebView2 runtime. Stdlib only and imports nothing from apiary, so it runs on a bare clone whose dependencies are not installed yet.
+
+```bash
+python scripts/preflight.py            # base install checks
+python scripts/preflight.py --gui      # also check desktop GUI prerequisites
+```
+
+| Flag | Description |
+|------|-------------|
+| `--gui` | Also check desktop GUI prerequisites (pythonnet Python pin, WebView2 runtime) |
+
+Exit codes: `0` no hard blockers (warnings allowed; install can proceed), `1` a blocker must be fixed first.
+
 ## runner/run.py
 
 End-to-end runner orchestrator. Sequences all 6 stages, passes artifact paths via UUID convention, stops on any stage failure.

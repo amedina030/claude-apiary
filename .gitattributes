@@ -1,0 +1,8 @@
+# Shell scripts must keep LF line endings so they run on macOS/Linux even when
+# cloned on a machine with core.autocrlf=true. A CRLF shebang breaks execution
+# (`/usr/bin/env bash^M: bad interpreter`).
+*.sh text eol=lf
+
+# Repo-local git hooks (no extension) are POSIX shell — same requirement.
+docs/hooks/* text eol=lf
+runner/hooks/* text eol=lf

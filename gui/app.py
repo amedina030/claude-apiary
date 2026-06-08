@@ -935,6 +935,58 @@ class App:
             os.environ.pop(_PERMISSION_MCP_BRIDGE_URL_ENV, None)
 
 
+def _webview2_installed() -> bool:
+    """True if the Edge WebView2 Evergreen runtime is registered (Windows).
+
+    pywebview renders through WebView2; a missing runtime is a common cause of
+    "the window won't open" on a fresh machine. Mirrors scripts/preflight.py,
+    kept independent so neither has to import the other.
+    """
+    if os.name != "nt":
+        return True  # not applicable; don't warn on non-Windows
+    try:
+        import winreg
+    except ImportError:
+        return True
+    client = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    locations = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\\" + client),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\EdgeUpdate\Clients\\" + client),
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\EdgeUpdate\Clients\\" + client),
+    ]
+    for hive, subkey in locations:
+        try:
+            with winreg.OpenKey(hive, subkey) as k:
+                version, _ = winreg.QueryValueEx(k, "pv")
+                if version and version != "0.0.0.0":
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def _environment_warnings() -> list[str]:
+    """Non-fatal startup checks for the two things most likely to make the
+    window fail to render or tabs fail to spawn. Returned with remediation so a
+    terminal launch shows the user exactly what to fix."""
+    warnings: list[str] = []
+    if not _webview2_installed():
+        warnings.append(
+            "Edge WebView2 runtime not detected — the window may fail to render. "
+            "Install it: https://developer.microsoft.com/microsoft-edge/webview2/"
+        )
+    try:
+        from gui.pty_wrapper import _resolve_claude_command
+        if _resolve_claude_command("claude") is None:
+            warnings.append(
+                "the `claude` CLI was not found on PATH — sessions can't start "
+                "until Claude Code is installed (https://claude.ai/claude-code)."
+            )
+    except Exception:
+        pass
+    return warnings
+
+
 def main() -> int:
     # Frozen-bundle MCP dispatch: claude-code spawns the MCP server via the
     # config written by `write_mcp_config()`, which in a PyInstaller build
@@ -976,6 +1028,9 @@ def main() -> int:
         if not INDEX_HTML.is_file():
             print(f"missing frontend bundle at {INDEX_HTML}", file=sys.stderr)
             return 1
+
+        for _w in _environment_warnings():
+            print(f"warning: {_w}", file=sys.stderr)
 
         app = App()
         bridge = GuiBridge(app)
