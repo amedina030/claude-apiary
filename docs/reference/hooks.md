@@ -4,7 +4,7 @@ title: Hooks
 scope: project
 description: All registered hooks, their lifecycle events, and what each does
 framework_version: "1.0"
-last_verified: 2026-04-21
+last_verified: 2026-06-08
 ---
 
 # Hooks
@@ -41,6 +41,7 @@ Hooks are Python scripts registered in `~/.claude/settings.json` that fire at Cl
 | Context-rules drift detector | PreToolUse | `core/hooks/startup_hook.py` | Reports context-rules drift if `~/.claude/CLAUDE.md` has an installed managed zone whose rule hashes diverge from source. Gated by `auto-startup` flag. |
 | Context-rule error reminder | PostToolUse | `core/hooks/context_rule_error_reminder.py` | On Bash failure (non-zero exit, traceback, interrupted, is_error), injects the `recover_from_trivial_errors` behavioral rule and the `Errors Signal Doc Gaps` principle. Skips successes and hook denials. |
 | Learnings injector | PreToolUse | `core/hooks/learnings_inject_hook.py` | Injects the top-3 most-relevant learnings before Edit/Write/Bash, scored against the tool call payload (file paths, command text, tags). Fail-open on any error path — tool call still proceeds. |
+| Research-capture reminder | PreToolUse | `core/hooks/research_capture_reminder.py` | On the first `WebSearch`/`WebFetch`/subagent (`Agent`/`Task`) call of a session, injects a one-time nudge to persist durable findings via the researcher rather than leaving them only in chat. Matching the subagent tool catches research run *inside* a subagent (fires in the parent at spawn). Once per session, keyed on session_id. Fail-open. |
 | Per-repo drift check | PreToolUse | `core/hooks/per_repo_drift_check.py` | Detects whether the bootstrapped repo has been moved or copied since last bootstrap; queues a mailbox message to main-apiary so the registry catches up. Fails silent on errors (must never block tool calls). Installed by `apiary install --target <repo>`. |
 
 ## Hook execution order
