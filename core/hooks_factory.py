@@ -77,6 +77,7 @@ def build_core_hooks() -> dict:
     learnings_inject_cmd = hook_cmd(CORE_DIR / "hooks" / "learnings_inject_hook.py", PYTHON, **kw)
     research_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "research_capture_reminder.py", PYTHON, **kw)
     pre_push_conformer_cmd = hook_cmd(CORE_DIR / "hooks" / "pre_push_doc_conformer.py", PYTHON, **kw)
+    pre_push_secret_cmd = hook_cmd(CORE_DIR / "hooks" / "pre_push_secret_scan.py", PYTHON, **kw)
     return {
         "UserPromptSubmit": [
             {"hooks": [{"type": "command", "command": prompt_startup_cmd}]},
@@ -100,6 +101,12 @@ def build_core_hooks() -> dict:
             # it's inert in target repos.
             {"matcher": "Bash",
              "hooks": [{"type": "command", "command": pre_push_conformer_cmd}]},
+            # Pre-push secret-scan gate: blocks a `git push` when the outgoing
+            # diff's added lines contain high-signal secrets (API keys, private
+            # keys, bearer tokens, high-entropy credential assignments). Runs
+            # in every repo (secret hygiene is universal); fails open on error.
+            {"matcher": "Bash",
+             "hooks": [{"type": "command", "command": pre_push_secret_cmd}]},
         ],
         "PostToolUse": [
             {"matcher": "Bash", "hooks": [{"type": "command", "command": error_reminder_cmd}]},
