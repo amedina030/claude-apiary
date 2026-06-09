@@ -4,7 +4,7 @@ title: Hooks
 scope: project
 description: All registered hooks, their lifecycle events, and what each does
 framework_version: "1.0"
-last_verified: 2026-06-08
+last_verified: 2026-06-09
 ---
 
 # Hooks
@@ -43,6 +43,7 @@ Hooks are Python scripts registered in `~/.claude/settings.json` that fire at Cl
 | Learnings injector | PreToolUse | `core/hooks/learnings_inject_hook.py` | Injects the top-3 most-relevant learnings before Edit/Write/Bash, scored against the tool call payload (file paths, command text, tags). Fail-open on any error path — tool call still proceeds. |
 | Research-capture reminder | PreToolUse | `core/hooks/research_capture_reminder.py` | On the first `WebSearch`/`WebFetch`/subagent (`Agent`/`Task`) call of a session, injects a one-time nudge to persist durable findings via the researcher rather than leaving them only in chat. Matching the subagent tool catches research run *inside* a subagent (fires in the parent at spawn). Once per session, keyed on session_id. Fail-open. |
 | Pre-push doc-conformer gate | PreToolUse | `core/hooks/pre_push_doc_conformer.py` | On a Bash `git push`, runs the pushed repo's `docs/check_cli_claims.py` and **blocks the push** (with the drift report as the reason) if it exits nonzero. No-op unless that repo ships the conformer, so it's inert in target repos. Fails open on any internal error — only a clean nonzero conformer exit blocks. This is the enforcement half of the doc-conformance loop. |
+| Pre-push secret-scan gate | PreToolUse | `core/hooks/pre_push_secret_scan.py` | On a Bash `git push`, scans the *outgoing* diff (commits on `HEAD` but on no remote) and **blocks the push** if an added line contains a high-signal secret — API keys (AWS/GitHub/OpenAI-Anthropic/Slack/Google), private-key blocks, bearer tokens, or a high-entropy credential assignment (`client_secret`/`password`/… with a value clearing a Shannon-entropy gate). Findings report `file:line` with the value redacted so the gate never re-leaks it. Append `pragma: allowlist secret` to a line to whitelist an intentional fixture. Runs in every repo (secret hygiene is universal); fails open on any internal error. |
 | Per-repo drift check | PreToolUse | `core/hooks/per_repo_drift_check.py` | Detects whether the bootstrapped repo has been moved or copied since last bootstrap; queues a mailbox message to main-apiary so the registry catches up. Fails silent on errors (must never block tool calls). Installed by `apiary install --target <repo>`. |
 
 ## Hook execution order
