@@ -94,11 +94,19 @@ function Test-IsStub($exePath) {
     return $exePath -like '*WindowsApps*'
 }
 
-# Probe a candidate interpreter: returns its [version] if it's a real,
-# runnable Python >= MinPython, else $null. Never throws.
-function Get-PythonVersion($exePath) {
-    if (Test-IsStub $exePath) { return $null }
-    if (-not (Test-Path $exePath)) { return $null }
+# Run a candidate interpreter and return its [version], or $null if it isn't
+# runnable. Does NOT apply the WindowsApps stub fast-path -- callers that have
+# already decided to trust the path (an explicit APIARY_PYTHON override) use
+# this directly so a real Store interpreter living under WindowsApps is
+# honored, matching core/hooks_lib.resolve_python()'s no-questions trust of the
+# override. NB: when Store Python is installed and its app-execution alias is
+# enabled, even the 0-byte alias runs (it forwards to the real runtime), so a
+# user who points the override straight at the alias is taken at their word --
+# that is deliberate intent, the same as resolve_python() would honor. The
+# substring veto is kept only for blind PATH discovery (Get-PythonVersion).
+# Never throws.
+function Get-PythonVersionByRun($exePath) {
+    if (-not $exePath -or -not (Test-Path $exePath)) { return $null }
     try {
         $out = & $exePath -c "import sys; print('%d.%d.%d' % sys.version_info[:3])" 2>$null
         if ($LASTEXITCODE -ne 0 -or -not $out) { return $null }
@@ -106,6 +114,15 @@ function Get-PythonVersion($exePath) {
     } catch {
         return $null
     }
+}
+
+# Probe a candidate interpreter: returns its [version] if it's a real,
+# runnable Python >= MinPython, else $null. Applies the substring stub
+# fast-path so plain-PATH discovery never spawns the Store-opening alias.
+# Never throws.
+function Get-PythonVersion($exePath) {
+    if (Test-IsStub $exePath) { return $null }
+    return Get-PythonVersionByRun $exePath
 }
 
 # --------------------------------------------------------------------------- #
@@ -180,7 +197,10 @@ function Find-RealPython([bool]$preferGuiCompat = $false) {
             $resolved = (Get-Command $ov -ErrorAction SilentlyContinue).Source
             if ($resolved) { $ov = $resolved }
         }
-        $ovVer = Get-PythonVersion $ov
+        # Validate by running, not via the stub fast-path: an explicit override
+        # is deliberate user intent, so a real Store interpreter under
+        # WindowsApps must be honored rather than vetoed by Test-IsStub.
+        $ovVer = Get-PythonVersionByRun $ov
         if ($ovVer -and $ovVer -ge $MinPython) {
             return [pscustomobject]@{ Exe = $ov; Version = $ovVer }
         }
@@ -202,10 +222,14 @@ function Find-RealPython([bool]$preferGuiCompat = $false) {
         if ($src) { & $add $src }
     }
 
-    # 4. common install locations, incl. Store real exe and conda
+    # 4. common install locations (conda + standard installers). Microsoft
+    # Store installs are NOT globbed here: their only real interpreter lives in
+    # the ACL-locked C:\Program Files\WindowsApps\... and is reached via the
+    # registry's ExecutablePath (step 2). A glob under %LOCALAPPDATA%\...\
+    # WindowsApps would only ever match alias reparse points, which Test-IsStub
+    # correctly rejects -- so it was dead weight (T-2026-244).
     $globs = @(
         (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python3*\python.exe'),
-        (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3*\python.exe'),
         'C:\Python3*\python.exe',
         (Join-Path $env:PROGRAMFILES 'Python3*\python.exe'),
         (Join-Path $env:USERPROFILE 'anaconda3\python.exe'),
