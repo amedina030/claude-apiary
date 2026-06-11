@@ -3,6 +3,7 @@
 from __future__ import annotations
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -52,6 +53,44 @@ class HostnameRegistryPathTests(unittest.TestCase):
     def test_empty_hostname_falls_back_to_unknown(self):
         with mock.patch("platform.node", return_value=""):
             self.assertEqual(cron_health._hostname(), "unknown")
+
+
+class CommandPlaceholderTests(unittest.TestCase):
+    """RegistryEntry.from_raw resolves <python> / <apiary_repo> in commands so
+    a registry stays portable instead of hardcoding a bare interpreter name."""
+
+    APIARY_ROOT = Path("/apiary")
+
+    def _command_of(self, command: list[str]) -> list[str]:
+        raw = {
+            "id": "x", "command": command, "cwd": "<apiary_repo>",
+            "schedule": {"type": "daily", "time": "02:00"},
+        }
+        return cron_health.RegistryEntry.from_raw(raw, self.APIARY_ROOT).command
+
+    def test_python_placeholder_resolves_to_running_interpreter(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("APIARY_PYTHON", None)
+            command = self._command_of(["<python>", "-m", "runner.run"])
+        self.assertEqual(Path(command[0]), Path(sys.executable))
+        self.assertEqual(command[1:], ["-m", "runner.run"])
+
+    def test_python_placeholder_honors_override(self):
+        override = "/opt/py3/bin/python3"
+        with mock.patch.dict(os.environ, {"APIARY_PYTHON": override}):
+            command = self._command_of(["<python>", "-m", "runner.run"])
+        self.assertEqual(Path(command[0]), Path(override))
+
+    def test_literal_python_token_left_unchanged(self):
+        # Legacy registries that hardcode "python" must keep working.
+        self.assertEqual(
+            self._command_of(["python", "-m", "runner.run"]),
+            ["python", "-m", "runner.run"],
+        )
+
+    def test_apiary_repo_placeholder_in_command(self):
+        command = self._command_of(["<python>", "<apiary_repo>/x.py"])
+        self.assertEqual(command[1], f"{self.APIARY_ROOT}/x.py")
 
 
 class FakeBackend(SchedulerBackend):

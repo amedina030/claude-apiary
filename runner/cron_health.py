@@ -41,6 +41,7 @@ from typing import Iterable, Optional
 from .schedulers.base import (
     ObservedEntry, SchedulerBackend, SchedulerError, UnsupportedPlatformError,
 )
+from core.hooks_lib import resolve_python
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 APIARY_REPO_ROOT = SCRIPT_DIR.parent
@@ -89,7 +90,7 @@ class RegistryEntry:
         return cls(
             entry_id=entry_id,
             description=raw.get("description", ""),
-            command=list(raw["command"]),
+            command=[_resolve_placeholders(tok, apiary_root) for tok in raw["command"]],
             cwd=_resolve_placeholders(raw.get("cwd", ""), apiary_root),
             schedule=dict(raw.get("schedule", {})),
             disabled=bool(raw.get("disabled", False)),
@@ -110,10 +111,25 @@ class RegistryError(RuntimeError):
 
 
 def _resolve_placeholders(value: str, apiary_root: Path) -> str:
-    """Replace ``<apiary_repo>`` with the live apiary root path."""
+    """Replace registry placeholders with live, machine-specific values.
+
+    - ``<apiary_repo>`` → the live apiary root path.
+    - ``<python>``      → the resolved Python 3 interpreter (honors the
+      ``APIARY_PYTHON`` override; see ``core/hooks_lib.resolve_python``).
+
+    The ``<python>`` token keeps a registry portable: a scheduled task fires
+    in a fresh process with no inherited interpreter, and no bare name is
+    present on every OS (``python`` is absent on macOS Homebrew, ``python3``
+    on stock Windows). ``<python>`` resolves to whatever this machine has —
+    a native absolute path, since the OS scheduler runs the action directly,
+    not through a shell. A literal token (the legacy ``"python"``) is left
+    untouched, so existing registries keep working unchanged.
+    """
     if not value:
         return ""
-    return value.replace("<apiary_repo>", str(apiary_root))
+    value = value.replace("<apiary_repo>", str(apiary_root))
+    value = value.replace("<python>", str(resolve_python()))
+    return value
 
 
 def load_registry(

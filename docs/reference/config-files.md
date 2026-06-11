@@ -4,7 +4,7 @@ title: Config Files
 scope: project
 description: All configuration files, their location, format, and editable fields
 framework_version: "1.0"
-last_verified: 2026-04-22
+last_verified: 2026-06-11
 ---
 
 # Config Files
@@ -43,14 +43,14 @@ Canonical list of scheduled OS-scheduler entries that apiary owns on a given mac
       "id": "overnight-runner",
       "description": "Nightly detached runner pass",
       "schedule": {"type": "daily", "time": "02:00"},
-      "command": ["python", "-m", "runner.run", "--detached"],
+      "command": ["<python>", "-m", "runner.run", "--detached"],
       "cwd": "<apiary_repo>"
     },
     {
       "id": "compass-weekly-synthesis",
       "description": "Weekly compass synthesis (self-throttled to 7-day cadence via --cron)",
       "schedule": {"type": "daily", "time": "03:00"},
-      "command": ["python", "-m", "compass.synthesize", "--cron"],
+      "command": ["<python>", "-m", "compass.synthesize", "--cron"],
       "cwd": "<apiary_repo>"
     }
   ]
@@ -63,7 +63,7 @@ Canonical list of scheduled OS-scheduler entries that apiary owns on a given mac
 | `description` | string | no | Human-readable label shown in the `check` table |
 | `schedule.type` | string | yes | `"daily"` is the only type implemented this release |
 | `schedule.time` | string | yes | 24-hour `HH:MM` |
-| `command` | list of strings | yes | List-form command; rendered with backend-specific quoting at register time |
+| `command` | list of strings | yes | List-form command; rendered with backend-specific quoting at register time. Use the `<python>` placeholder for the interpreter (resolves per-machine to a real Python 3, honoring `APIARY_PYTHON`) rather than a literal `python`/`python3`, which isn't present on every OS. Also supports `<apiary_repo>`. |
 | `cwd` | string | no | Working directory; supports the `<apiary_repo>` placeholder |
 | `disabled` | bool | no | `true` means the entry must NOT exist in the scheduler; `repair --apply` deletes any matching entry |
 

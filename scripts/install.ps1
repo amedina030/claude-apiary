@@ -169,6 +169,24 @@ function Get-RegistryPythonPaths {
 $GuiPyMaxExclusive = [version]'3.13'   # pythonnet has no wheel for 3.13+
 
 function Find-RealPython([bool]$preferGuiCompat = $false) {
+    # The APIARY_PYTHON override wins outright -- explicit user intent over
+    # discovery, matching core/hooks_lib.resolve_python() so the pre-install
+    # layer resolves the same interpreter as every other apiary layer. Accepts
+    # an absolute path or a bare command name on PATH; bypasses the GUI-compat
+    # preference because an explicit override is a deliberate choice.
+    if ($env:APIARY_PYTHON) {
+        $ov = $env:APIARY_PYTHON
+        if (-not (Test-Path $ov)) {
+            $resolved = (Get-Command $ov -ErrorAction SilentlyContinue).Source
+            if ($resolved) { $ov = $resolved }
+        }
+        $ovVer = Get-PythonVersion $ov
+        if ($ovVer -and $ovVer -ge $MinPython) {
+            return [pscustomobject]@{ Exe = $ov; Version = $ovVer }
+        }
+        Write-Warn2 "APIARY_PYTHON=$($env:APIARY_PYTHON) is not a usable Python >= $MinPython; falling back to discovery."
+    }
+
     $candidates = New-Object System.Collections.Generic.List[string]
     $add = { param($p) if ($p) { $candidates.Add($p) } }
 

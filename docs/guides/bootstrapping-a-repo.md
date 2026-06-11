@@ -4,7 +4,7 @@ title: Bootstrapping a Repo
 scope: project
 description: Apply an apiary profile to a new or existing repo's .claude/settings.json, and how to author a new profile
 framework_version: "1.0"
-last_verified: 2026-04-23
+last_verified: 2026-06-11
 ---
 
 # Bootstrapping a Repo
@@ -16,6 +16,15 @@ Apiary ships a profile-based bootstrap that writes a target repo's `.claude/sett
 - Onboarding a new repo to apiary-managed Claude Code configuration
 - Updating an existing repo after a profile changes
 - Migrating a hand-maintained `.claude/settings.json` into a profile
+
+## Prerequisites
+
+The machine running `apiary install` needs **Python 3 reachable** and **Poetry**. There is no single bare interpreter name that works on every OS — a stock macOS Homebrew box exposes only `python3`, a stock Windows box exposes the `py` launcher or `python` — so apiary never hardcodes one. Two layers resolve the interpreter, both through the same single choke point (`core/hooks_lib.py:resolve_python()`):
+
+- **Claude Code hooks** (`.claude/settings.json`): `apiary install` bakes the *current* interpreter's (`sys.executable`) absolute, bash-converted path into each command. Portable across OSes, but the generated `settings.json` is **machine-specific** — re-run `apiary install` after moving the repo to a new machine rather than copying `settings.json` across.
+- **Git hooks** (`.git/hooks/pre-commit`, `post-merge`): bash scripts that probe `py -3` → `python3` → `python` at run time, picking the first that is actually Python 3.
+
+**Override.** Set the `APIARY_PYTHON` environment variable to an interpreter path (or command name) and *both* layers use it instead of auto-detecting — the single knob for non-standard setups (a specific venv, an unusual install). Leave it unset for the normal auto-resolved behavior. If `apiary install` itself can't find Python, fix that first — see `scripts/install.sh` / `scripts/install.ps1`, which probe `python3.x` → `python3` → `python` and report what they found.
 
 ## Quick start
 

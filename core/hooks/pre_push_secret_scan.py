@@ -31,6 +31,16 @@ from __future__ import annotations
 
 import math
 import re
+import sys
+from pathlib import Path
+
+# Make the repo root importable before any cross-import from `core` — this hook
+# is the only one with a top-level `core` import, so the sys.path setup that
+# other hooks defer into their functions must happen here at module scope
+# (stdlib → sys.path.insert → internal, per docs/standards/code-style.md).
+# Without it a fresh install crashes with `ModuleNotFoundError: No module
+# named 'core'` at import time, before main()'s own sys.path.insert runs.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 # The push detector is identical to the doc-conformer's; reuse it so the two
 # gates can never disagree about what counts as a push.

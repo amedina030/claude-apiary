@@ -4,14 +4,14 @@
       "id": "overnight-runner",
       "description": "Nightly detached runner pass",
       "schedule": {"type": "daily", "time": "02:00"},
-      "command": ["python", "-m", "runner.run", "--detached"],
+      "command": ["<python>", "-m", "runner.run", "--detached"],
       "cwd": "<apiary_repo>"
     },
     {
       "id": "compass-weekly-synthesis",
       "description": "Weekly compass synthesis (self-throttled to 7-day cadence via --cron)",
       "schedule": {"type": "daily", "time": "03:00"},
-      "command": ["python", "-m", "compass.synthesize", "--cron"],
+      "command": ["<python>", "-m", "compass.synthesize", "--cron"],
       "cwd": "<apiary_repo>"
     }
   ]

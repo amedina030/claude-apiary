@@ -18,9 +18,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.hooks_lib import hook_cmd
+from core.hooks_lib import hook_cmd, resolve_python
 
-PYTHON = Path(sys.executable)
+# Honors the APIARY_PYTHON override; falls back to the running interpreter.
+PYTHON = resolve_python()
 
 BUDGETER_DIR = REPO_ROOT / "budgeter"
 SCRIBE_DIR = REPO_ROOT / "scribe"

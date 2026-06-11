@@ -32,7 +32,9 @@ REPO_ROOT = DOCS_DIR.parent
 FRAMEWORK_FILE = DOCS_DIR / "_framework.md"
 INDEX_FILE = DOCS_DIR / "_index.md"
 SKIP_FILES = {"_framework.md", "_index.md"}
-SKIP_DIRS = {"commands", "hooks"}  # Not docs — command defs and hook scripts
+SKIP_DIRS = {"commands", "hooks", "reports"}  # Not framework docs — command defs,
+#                          hook scripts, and post-mortem reports (own schema:
+#                          docs/standards/report-style.md, not this checker's types)
 
 VALID_TYPES = {"reference", "architecture", "standard", "guide"}
 VALID_SCOPES = {"budgeter", "scribe", "core", "project", "docs"}
