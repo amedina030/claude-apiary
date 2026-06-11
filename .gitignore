@@ -37,6 +37,11 @@ runner/reports/*
 !runner/reports/.gitkeep
 !runner/reports/.gitkeep
 
+# Post-mortem / validation reports (docs/standards/report-style.md). These are
+# local-only by default; the rare load-bearing report that must be tracked can
+# still be added with `git add -f`.
+docs/reports/
+
 # Runner runtime logs, history, and crash recovery
 runner/logs/
 runner/locks/
