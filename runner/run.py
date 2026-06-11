@@ -62,6 +62,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 LOG_AGENT_COST_SCRIPT = REPO_ROOT / 'budgeter' / 'log_agent_cost.py'
 
+# Interpreter token for operator-facing "to resume / remove / abort" hints.
+# A bare `python` is wrong advice on macOS Homebrew (only `python3` exists),
+# so we print the exact interpreter running the runner — copy-pasteable as-is
+# and already has the deps, no `poetry run` needed. Quoted when the path has
+# spaces (e.g. a venv under "Application Support").
+_PY_HINT = f'"{sys.executable}"' if " " in sys.executable else sys.executable
+
 # Stage definitions: (name, module, input_artifact_key)
 # input_artifact_key maps to the artifact path dict
 # Which executor module to drive stage 4. ``monolithic`` spawns one Claude
@@ -875,7 +882,7 @@ def _run_detached_impl(cli_args) -> int:
                 exit_status = 'worktree_remove_failed'
         else:
             print(f'Worktree preserved for inspection: {wt_path}', file=sys.stderr)
-            print(f'  To remove: python -m runner.run --cleanup {uuid}', file=sys.stderr)
+            print(f'  To remove: {_PY_HINT} -m runner.run --cleanup {uuid}', file=sys.stderr)
         run_lock.delete(uuid)
 
     # Record this attempt in the cross-invocation tracker. Tokens from
@@ -1281,7 +1288,7 @@ def main():
             age_s = time.time() - entry.get("started_at", time.time())
             print(f"  {uid}  stage={stage}  step={step}  age={age_s / 60:.0f}m",
                   file=sys.stderr)
-        print(f"\nRun: python -m runner.run --abort <uuid>  (or --abort all)",
+        print(f"\nRun: {_PY_HINT} -m runner.run --abort <uuid>  (or --abort all)",
               file=sys.stderr)
         sys.exit(1)
 
@@ -1454,7 +1461,7 @@ def main():
                         except Exception:
                             pass
                         print(
-                            f"To resume: python -m runner.run {intake_path_abs} "
+                            f"To resume: {_PY_HINT} -m runner.run {intake_path_abs} "
                             f"--resume-from {name}",
                             file=sys.stderr,
                         )
@@ -1485,14 +1492,14 @@ def main():
                         print_cost_summary(stage_costs)
                     except Exception:
                         pass
-                    print(f"To resume: python -m runner.run {intake_path_abs} --resume-from {name}", file=sys.stderr)  # ATK-007
+                    print(f"To resume: {_PY_HINT} -m runner.run {intake_path_abs} --resume-from {name}", file=sys.stderr)  # ATK-007
                     sys.exit(1)
 
         except KeyboardInterrupt:
             print(f"\n\nInterrupted during stage {current_stage_idx}: {current_stage_name}")  # ATK-004
             print(f"Stages completed: {stages_completed}/{len(STAGES)}")
             print_cost_summary(stage_costs)
-            print(f"To resume: python -m runner.run {intake_path_abs} --resume-from {current_stage_name}", file=sys.stderr)  # ATK-007
+            print(f"To resume: {_PY_HINT} -m runner.run {intake_path_abs} --resume-from {current_stage_name}", file=sys.stderr)  # ATK-007
             sys.exit(1)
 
         # All stages completed

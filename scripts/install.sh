@@ -43,6 +43,19 @@ is_good_python() {
 }
 
 find_python() {
+    # The APIARY_PYTHON override wins outright — explicit user intent over
+    # discovery, matching core/hooks_lib.resolve_python() so the pre-install
+    # layer resolves the same interpreter as every other apiary layer. Accepts
+    # an absolute path or a bare command name on PATH.
+    if [ -n "${APIARY_PYTHON:-}" ]; then
+        if is_good_python "$APIARY_PYTHON"; then
+            local ov="$APIARY_PYTHON"
+            # Normalize a bare name to its resolved path for clean logging.
+            command -v "$ov" >/dev/null 2>&1 && ov="$(command -v "$ov")"
+            echo "$ov"; return 0
+        fi
+        echo "    !   APIARY_PYTHON=$APIARY_PYTHON is not a usable Python >= ${MIN_MAJOR}.${MIN_MINOR}; falling back to discovery." >&2
+    fi
     # Explicit version names first, then generic, then pyenv's active shim.
     # With --gui, prefer 3.12/3.11 (pythonnet has no 3.13+ wheel) before any
     # generic name that might resolve to a newer interpreter.
