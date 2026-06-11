@@ -12,6 +12,19 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-python -m runner.close_source_todo
+# Resolve a Python 3 interpreter portably (see docs/hooks/pre-commit for the
+# rationale). Override with $APIARY_PYTHON. This hook is advisory housekeeping,
+# so a missing interpreter is a silent no-op — it must never block a merge.
+_is_py3() { "$@" -c 'import sys; sys.exit(0 if sys.version_info[0]==3 else 1)' >/dev/null 2>&1; }
+if [ -n "$APIARY_PYTHON" ]; then
+    PY=("$APIARY_PYTHON")
+elif command -v py      >/dev/null 2>&1 && _is_py3 py -3;   then PY=(py -3)
+elif command -v python3 >/dev/null 2>&1 && _is_py3 python3; then PY=(python3)
+elif command -v python  >/dev/null 2>&1 && _is_py3 python;  then PY=(python)
+else
+    exit 0
+fi
+
+"${PY[@]}" -m runner.close_source_todo
 # Never block the merge; this is advisory housekeeping.
 exit 0

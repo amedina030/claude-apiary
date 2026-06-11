@@ -5,10 +5,34 @@ Used by setup.py to install/update hooks in Claude Code settings.json files
 and by scripts/uninstall_hooks.py (todo #261) to take them back out again.
 """
 import json
+import os
 import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
+
+# Env override for the Python interpreter baked into generated commands.
+# No single bare name (`python` / `python3` / `py`) is portable across
+# macOS, Linux, and Windows, so callers never hardcode one — they resolve
+# through resolve_python(), and a user with a non-standard setup can point
+# every layer at one interpreter by exporting this single variable.
+APIARY_PYTHON_ENV = "APIARY_PYTHON"
+
+
+def resolve_python() -> Path:
+    """Return the Python 3 interpreter to bake into generated hook commands.
+
+    Honors the ``APIARY_PYTHON`` env override (an absolute path or a bare
+    command name on PATH); otherwise falls back to the interpreter currently
+    running this code (``sys.executable``) — which is by definition a working
+    Python 3, since apiary can't run without one. Centralized so every layer
+    that emits a Python invocation (``hooks_factory``, the bash git hooks via
+    the same env var) resolves identically and one override reaches them all.
+    """
+    override = os.environ.get(APIARY_PYTHON_ENV, "").strip()
+    if override:
+        return Path(override)
+    return Path(sys.executable)
 
 # Marker string that setup.py writes into absolute-path hook commands so
 # they can be recognized on re-run. Historical marker — entries using
@@ -93,15 +117,23 @@ def hook_cmd(
     """
     if repo_root is not None:
         rel = script_path.relative_to(repo_root).as_posix()
+        # Embed the resolved interpreter (bash-converted absolute path) rather
+        # than a bare `python`. `python` is absent on a stock macOS Homebrew box
+        # (only `python3` exists) and `python3` is absent on a stock Windows box
+        # (only `python`), so no single bare command is portable. settings.json
+        # is regenerated per-machine by `apiary install`, so the absolute path is
+        # always valid on the machine that wrote it. The script path stays
+        # portable via $CLAUDE_PROJECT_DIR / $HOME.
+        exe = to_bash_path(python_exe or resolve_python())
         if per_repo_launcher:
-            return f'python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" {rel}'
+            return f'"{exe}" "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" {rel}'
         # $HOME (double-quoted) rather than a bare ~ so a home dir with a space
         # or apostrophe (e.g. C:\Users\Nelson's PC) survives shell word-splitting.
         # A bare ~ cannot be quoted without suppressing its expansion.
-        return f'python "$HOME/.claude/apiary_launch.py" {rel}'
+        return f'"{exe}" "$HOME/.claude/apiary_launch.py" {rel}'
     if per_repo_launcher:
         raise ValueError("per_repo_launcher=True requires repo_root")
-    exe = python_exe or Path(sys.executable)
+    exe = python_exe or resolve_python()
     # Quote both paths — the interpreter or script can live under a home dir
     # with a space/apostrophe, which would otherwise break the unquoted command.
     return f'"{to_bash_path(exe)}" "{to_bash_path(script_path)}"'

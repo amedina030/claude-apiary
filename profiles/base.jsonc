@@ -9,9 +9,9 @@
   "$schema_version": 1,
   "permissions": {
     "allow": [
-      "Bash(python *scribe/notes.py *)",
-      "Bash(python *core/hooks/extract_transcript.py *)",
-      "Bash(python -c *session-identity*)",
+      "Bash(*python* *scribe/notes.py *)",
+      "Bash(*python* *core/hooks/extract_transcript.py *)",
+      "Bash(*python* -c *session-identity*)",
       "Read(*/.claude/.session-history.json)",
       "Read(*/.claude/.session-identity-*)",
       "Read(*/core/config/session-registry.json)"
