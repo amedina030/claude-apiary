@@ -385,6 +385,21 @@ def cmd_add(args):
             )
             sys.exit(1)
 
+    # Tag handling + --unique-tag dedup guard (spec §5.14). --unique-tag skips
+    # the add (exit 0) when any active note already carries the tag; otherwise
+    # the tag is added to this note.
+    tags_csv = (getattr(args, 'tags', '') or '').strip()
+    tags = [t.strip() for t in tags_csv.split(',') if t.strip()] if tags_csv else []
+    unique_tag = (getattr(args, 'unique_tag', '') or '').strip()
+    if unique_tag:
+        existing = store.find_active_with_tag(unique_tag)
+        if existing is not None:
+            brief = existing.get('brief_summary') or existing.get('summary') or ''
+            print(f"skipped (active {_format_id(existing)} already carries tag '{unique_tag}'): {brief}")
+            return
+        if unique_tag not in tags:
+            tags.append(unique_tag)
+
     # Build metadata dict for extra fields
     metadata = {}
     if getattr(args, 'auto', False):
@@ -393,6 +408,8 @@ def cmd_add(args):
         metadata['role'] = args.role
     if getattr(args, 'mission', ''):
         metadata['mission'] = args.mission
+    if tags:
+        metadata['tags'] = tags
 
     entry = store.add_note(
         note_type=args.type,
@@ -683,8 +700,12 @@ def cmd_unarchive(args):
 
 def cmd_update(args):
     brief_override = (getattr(args, 'brief_summary', '') or '').strip()
-    if args.content is None and args.session_id is None and not brief_override:
-        print('Error: provide --content, --session-id, and/or --brief-summary', file=sys.stderr)
+    add_tags = [t for t in (getattr(args, 'add_tag', None) or []) if t]
+    remove_tags = [t for t in (getattr(args, 'remove_tag', None) or []) if t]
+    if (args.content is None and args.session_id is None and not brief_override
+            and not add_tags and not remove_tags):
+        print('Error: provide --content, --session-id, --brief-summary, --add-tag, and/or --remove-tag',
+              file=sys.stderr)
         sys.exit(1)
     if args.content is not None and len(args.content.encode('utf-8')) > MAX_CONTENT_LENGTH:
         print(f'Error: content exceeds {MAX_CONTENT_LENGTH} bytes', file=sys.stderr)
@@ -704,8 +725,10 @@ def cmd_update(args):
     if not note:
         print(f'Note {args.id} not found.', file=sys.stderr)
         sys.exit(1)
-    if note.get('status') == 'done':
-        print(f'Error: note {args.id} is already done and cannot be updated.', file=sys.stderr)
+    # A done note's content is frozen, but tag/brief/session mutation is still
+    # allowed — the Asana tool flips status tags on closed mirrors (spec §5.14).
+    if note.get('status') == 'done' and args.content is not None:
+        print(f'Error: note {args.id} is already done; cannot edit content.', file=sys.stderr)
         sys.exit(1)
     kwargs = {}
     if args.content is not None:
@@ -715,6 +738,10 @@ def cmd_update(args):
         kwargs['session'] = args.session_id
     if brief_override:
         kwargs['brief_summary'] = brief_override
+    if add_tags:
+        kwargs['add_tags'] = add_tags
+    if remove_tags:
+        kwargs['remove_tags'] = remove_tags
     store.update_note(note_type, year, seq, **kwargs)
     print(f'Updated {args.id}.')
 
@@ -1294,6 +1321,11 @@ def main():
                         help="Only add if no handoff exists for this session ID")
     p_add.add_argument("--role", default="", help="Session role (e.g. user, attacker)")
     p_add.add_argument("--mission", default="", help="Session mission (e.g. general, project-x)")
+    p_add.add_argument("--tags", default="",
+                        help="Comma-separated tags stored on the note (e.g. 'ticket:K-2026-99,priority:high').")
+    p_add.add_argument("--unique-tag", default="", dest="unique_tag",
+                        help="Add this tag only if no active note already carries it; "
+                             "otherwise skip the add and exit 0.")
     p_add.add_argument("--ack-template", default="", dest="ack_template",
                         help="Acknowledge the current template hash. Required "
                              "when a non-empty templates/<type>.md exists. The "
@@ -1357,6 +1389,10 @@ def main():
     p_update.add_argument("--session-id", default=None)
     p_update.add_argument("--brief-summary", default="", dest="brief_summary",
                           help=f"Replace brief_summary (<={BRIEF_SUMMARY_MAX} chars).")
+    p_update.add_argument("--add-tag", action="append", default=[], dest="add_tag",
+                          help="Add a tag (repeatable). Idempotent; order-preserving.")
+    p_update.add_argument("--remove-tag", action="append", default=[], dest="remove_tag",
+                          help="Remove a tag (repeatable). Applied before --add-tag.")
 
     # archive
     p_archive = sub.add_parser("archive")
