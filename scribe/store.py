@@ -5,8 +5,10 @@ individual .md files organized into type folders, each with its own
 index.jsonl for fast listing.
 """
 import json
+import os
 import re
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -179,6 +181,20 @@ def derive_brief_summary(content: str) -> str:
     return window.rstrip() + '…'
 
 
+def derive_summary(content: str) -> str:
+    """First non-empty, stripped line of *content*, truncated to 300 chars.
+
+    The summary rule adopted from the source scribe (spec §5.6). Distinct from
+    ``derive_brief_summary`` (the GUI sidebar's <=120-char heuristic), which is
+    intentionally left unchanged.
+    """
+    for line in (content or '').splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:300]
+    return ''
+
+
 class ScribeStore:
     """Folder-per-type storage engine for notes and learnings.
 
@@ -247,26 +263,48 @@ class ScribeStore:
         return entries
 
     @staticmethod
+    def _atomic_write(path: Path, text: str) -> None:
+        """Write *text* to *path* atomically: temp file in the same dir, then
+        ``os.replace``. A process kill mid-write leaves either the old file or
+        the new one intact — never a torn line. Cleans up the temp file if the
+        replace doesn't happen. Caller holds the FileLock on *path*.
+        """
+        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix='.' + path.name + '.', suffix='.tmp')
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(text)
+            os.replace(tmp_name, path)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
+
+    @staticmethod
     def _write_index(type_dir: Path, entries: list[dict]) -> None:
         """Overwrite a folder's index.jsonl with the given entries.
 
-        Uses FileLock on the index file for concurrent safety.
+        Atomic (temp + os.replace) under a FileLock for concurrent safety.
         """
         idx_path = type_dir / INDEX_FILENAME
         with FileLock(idx_path):
             lines = [json.dumps(e, separators=(',', ':')) for e in entries]
-            idx_path.write_text('\n'.join(lines) + ('\n' if lines else ''), encoding='utf-8')
+            ScribeStore._atomic_write(idx_path, '\n'.join(lines) + ('\n' if lines else ''))
 
     @staticmethod
     def _append_index(type_dir: Path, entry: dict) -> None:
         """Append a single entry to a folder's index.jsonl.
 
-        Uses FileLock on the index file for concurrent safety.
+        Read-modify-write under a FileLock, flushed atomically (temp +
+        os.replace) so a crash mid-append cannot leave a partial line.
         """
         idx_path = type_dir / INDEX_FILENAME
         with FileLock(idx_path):
-            with open(idx_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(entry, separators=(',', ':')) + '\n')
+            existing = idx_path.read_text(encoding='utf-8') if idx_path.exists() else ''
+            if existing and not existing.endswith('\n'):
+                existing += '\n'
+            ScribeStore._atomic_write(idx_path, existing + json.dumps(entry, separators=(',', ':')) + '\n')
 
     # --- Per-(type,year) sequence counter ---
 
@@ -359,6 +397,30 @@ class ScribeStore:
             return None
         return md_path.read_text(encoding='utf-8')
 
+    def _read_body_any(self, note_type: str, year: int, seq: int) -> str | None:
+        """Read a note body from the active dir, falling back to archive. None if absent.
+
+        Used only by the search path (lazy body match) — never on the hot
+        index/startup path, which does not pass a search term.
+        """
+        try:
+            type_dir = self._type_dir(note_type)
+        except ValueError:
+            return None
+        year_dir = type_dir / str(year)
+        body = self._read_note_file(year_dir, seq)
+        if body is not None:
+            return body
+        return self._read_note_file(year_dir / ARCHIVE_DIRNAME, seq)
+
+    def _read_learning_body_any(self, year: int, seq: int) -> str | None:
+        """Read a learning body (frontmatter included) from active, then archive."""
+        year_dir = self._learning_dir() / str(year)
+        body = self._read_note_file(year_dir, seq)
+        if body is not None:
+            return body
+        return self._read_note_file(year_dir / ARCHIVE_DIRNAME, seq)
+
     # --- CRUD operations: Notes ---
 
     def add_note(self, note_type: str, content: str, session_id: str,
@@ -375,14 +437,17 @@ class ScribeStore:
         year_dir = self._ensure_year_dir(type_dir, year)
         seq = self._increment_seq(year_dir)
         timestamp = now.isoformat()
-        # If no summary provided, use first 120 chars of content
+        # If no summary provided, derive it (first non-empty line, <=300 chars).
         if not summary:
-            summary = content[:120].replace('\n', ' ').strip()
+            summary = derive_summary(content)
         brief = brief_summary.strip() if brief_summary else derive_brief_summary(content)
         if len(brief) > BRIEF_SUMMARY_MAX:
             brief = brief[:BRIEF_SUMMARY_MAX].rstrip()
         prefix = TYPE_PREFIXES.get(note_type, 'G')
         display_id = f"{prefix}-{year}-{seq}"
+        # Tags are stored only when non-empty (spec §5.3) — popped here so an
+        # empty list passed by a caller doesn't write a bare `tags: []`.
+        tags = metadata.pop('tags', None)
         entry = {
             'display_id': display_id,
             'type': note_type,
@@ -396,6 +461,8 @@ class ScribeStore:
             'has_body': bool(content),
             **metadata,
         }
+        if tags:
+            entry['tags'] = list(tags)
         self._append_index(year_dir, entry)
         self._write_note_file(year_dir, seq, content)
         return entry
@@ -466,14 +533,43 @@ class ScribeStore:
                         # and from the presence of 'archived_at'.
                         results.append({**entry})
 
-        # Filter by search term (case-insensitive in summary)
+        # Filter by search term — case-insensitive over metadata first
+        # (display_id, summary, brief_summary, session, tags), then lazily the
+        # body file only if the metadata missed. Body reads happen only on the
+        # search path, never on the hot index/startup path (spec §5.6).
         if search:
             search_lower = search.lower()
-            results = [e for e in results if search_lower in e.get('summary', '').lower()]
+
+            def _matches(e: dict) -> bool:
+                hay = ' '.join([
+                    str(e.get('display_id', '')),
+                    str(e.get('summary', '')),
+                    str(e.get('brief_summary', '')),
+                    str(e.get('session', '') or ''),
+                    ' '.join(str(t) for t in (e.get('tags') or [])),
+                ]).lower()
+                if search_lower in hay:
+                    return True
+                body = self._read_body_any(e.get('type'), e.get('year'), e.get('seq'))
+                return body is not None and search_lower in body.lower()
+
+            results = [e for e in results if _matches(e)]
 
         # Sort by timestamp descending
         results.sort(key=lambda e: e.get('timestamp', ''), reverse=True)
         return results
+
+    def find_active_with_tag(self, tag: str) -> dict | None:
+        """Return the newest active note (any type) carrying *tag* exactly.
+
+        "Active" means status ``active`` and not archived — archived or
+        done/dropped/deferred notes are ignored. Backs ``--unique-tag`` and the
+        Asana tool's mirror-dedup (spec §5.14). Returns None when no match.
+        """
+        for entry in self.list_notes(status='active'):
+            if entry.get('status') == 'active' and tag in (entry.get('tags') or []):
+                return entry
+        return None
 
     def update_note(self, note_type: str, year: int, seq: int, **kwargs) -> dict | None:
         """Update fields on an existing note's index entry.
@@ -485,6 +581,8 @@ class ScribeStore:
         or None if not found.
         """
         content_update = kwargs.pop('content', None)
+        add_tags = kwargs.pop('add_tags', None)
+        remove_tags = kwargs.pop('remove_tags', None)
         type_dir = self._type_dir(note_type)
         year_dir = type_dir / str(year)
         if not year_dir.exists():
@@ -493,6 +591,22 @@ class ScribeStore:
         for i, entry in enumerate(entries):
             if entry.get('seq') == seq:
                 entries[i] = {**entry, **kwargs}
+                # Stamp status_changed_at on any status transition (done/drop/
+                # defer/resume), but never on a content-only edit. Mirrors the
+                # source scribe oracle (spec §5.6).
+                if 'status' in kwargs:
+                    entries[i]['status_changed_at'] = datetime.now(timezone.utc).isoformat()
+                # Tag mutation: remove-all-occurrences then add-if-absent, so
+                # the result is a dedup'd, order-preserving list (spec §5.14).
+                if add_tags or remove_tags:
+                    tags = list(entries[i].get('tags') or [])
+                    if remove_tags:
+                        rm = set(remove_tags)
+                        tags = [t for t in tags if t not in rm]
+                    for t in (add_tags or []):
+                        if t not in tags:
+                            tags.append(t)
+                    entries[i]['tags'] = tags
                 if content_update is not None:
                     self._write_note_file(year_dir, seq, content_update)
                     entries[i]['has_body'] = bool(content_update)
@@ -601,7 +715,7 @@ class ScribeStore:
         seq = self._increment_seq(year_dir)
         timestamp = now.isoformat()
         if not summary:
-            summary = content[:120].replace('\n', ' ').strip()
+            summary = derive_summary(content)
         brief = brief_summary.strip() if brief_summary else derive_brief_summary(content)
         if len(brief) > BRIEF_SUMMARY_MAX:
             brief = brief[:BRIEF_SUMMARY_MAX].rstrip()
@@ -658,7 +772,18 @@ class ScribeStore:
                         entries.append({**entry, '_from_archive': True})
         if search:
             search_lower = search.lower()
-            entries = [e for e in entries if search_lower in e.get('summary', '').lower()]
+
+            def _lmatches(e: dict) -> bool:
+                hay = ' '.join([
+                    str(e.get('summary', '')),
+                    ' '.join(str(t) for t in (e.get('tags') or [])),
+                ]).lower()
+                if search_lower in hay:
+                    return True
+                body = self._read_learning_body_any(e.get('year'), e.get('seq'))
+                return body is not None and search_lower in body.lower()
+
+            entries = [e for e in entries if _lmatches(e)]
         if tag:
             tag_lower = tag.lower()
             entries = [e for e in entries

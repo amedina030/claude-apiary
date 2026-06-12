@@ -32,7 +32,7 @@ from pathlib import Path as _PathImport
 # Add project root to path for core.utils import
 sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
 from core.session import SessionId
-from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME, BRIEF_SUMMARY_MAX, derive_brief_summary
+from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME, BRIEF_SUMMARY_MAX, derive_brief_summary, derive_summary
 
 from pathlib import Path
 
@@ -57,6 +57,10 @@ VALID_TYPES = ["todo", "handoff", "decision", "wishlist", "reference", "blocker"
 # the write is allowed. See T-2026-212.
 TEMPLATES_DIRNAME = "templates"
 TEMPLATE_HASH_LEN = 12
+# Bundled default templates shipped with apiary (tracked). Bootstrap may copy
+# these into a target's live <state-dir>/scribe/templates/ — see
+# scaffold_handoff_template. Not the live template dir.
+DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parent / "default_templates"
 
 _PREFIX_TO_TYPE: dict[str, str] = {
     'T': 'todo', 'H': 'handoff', 'D': 'decision', 'W': 'wishlist',
@@ -204,6 +208,53 @@ def template_hash(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()[:TEMPLATE_HASH_LEN]
 
 
+def template_required_sections(text: str) -> list:
+    """Return the ``required:`` section names declared in a template's frontmatter.
+
+    Empty list when there is no ``required:`` key or it isn't a list. Reuses the
+    tolerant frontmatter parser, so a malformed template never raises here.
+    """
+    from scribe.store import _parse_learning_content  # tolerant, shared frontmatter parser
+    fm, _ = _parse_learning_content(text)
+    req = fm.get('required')
+    if isinstance(req, list):
+        return [str(s).strip() for s in req if str(s).strip()]
+    return []
+
+
+def _section_present(content: str, name: str) -> bool:
+    """True if *content* contains section *name* as a Markdown heading (any
+    level 1-6) or a bold inline label (``**Name:**`` / ``**Name**``)."""
+    esc = re.escape(name)
+    if re.search(rf'(?im)^\s*#{{1,6}}\s+{esc}\b', content):
+        return True
+    return bool(re.search(rf'(?i)\*\*\s*{esc}\s*:?\s*\*\*', content))
+
+
+def missing_required_sections(content: str, required: list) -> list:
+    """Return the subset of *required* sections absent from *content*."""
+    return [s for s in required if not _section_present(content, s)]
+
+
+def scaffold_handoff_template(state_dir: Path, *, force: bool = False) -> bool:
+    """Copy the bundled default handoff template into ``<state-dir>/templates/``.
+
+    Idempotent — skips when ``handoff.md`` already exists unless *force*. Returns
+    True when it wrote the file. **Not** called automatically: turning the
+    handoff gate on repo-wide first requires the handoff writers (``/wrapup``) to
+    ack the template hash and conform (see MIGRATION_NOTES).
+    """
+    src = DEFAULT_TEMPLATES_DIR / "handoff.md"
+    dst = Path(state_dir) / TEMPLATES_DIRNAME / "handoff.md"
+    if dst.exists() and not force:
+        return False
+    if not src.is_file():
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text(src.read_text(encoding='utf-8'), encoding='utf-8')
+    return True
+
+
 def _now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -237,11 +288,39 @@ def format_age(ts):
     days = hours // 24
     if days < 7:
         return f"{days}d ago"
-    weeks = days // 7
-    if weeks < 5:
-        return f"{weeks}w ago"
-    months = days // 30
-    return f"{months}mo ago"
+    if days < 30:
+        return f"{days // 7}w ago"
+    if days < 365:
+        return f"{days // 30}mo ago"
+    return f"{days // 365}y ago"
+
+
+_ANSI_RESET = '\x1b[0m'
+_STATUS_TAG_COLORS = {'[DONE]': '32', '[DROPPED]': '31', '[DEFERRED]': '33', '[ARCHIVED]': '35'}
+
+
+def _color_enabled() -> bool:
+    """True when colored output is requested: FORCE_COLOR set and NO_COLOR unset.
+
+    Deliberately never gates on stdout.isatty(): this tool runs inside the GUI
+    (a non-TTY pipe) where isatty misreports and raw ANSI escapes would render
+    as literal garbage in the chat pane (spec §5.13, decision #4).
+    """
+    return bool(os.environ.get('FORCE_COLOR')) and not os.environ.get('NO_COLOR')
+
+
+def _c(text: str, *codes: str) -> str:
+    """Wrap *text* in ANSI SGR *codes* when color is enabled, else return as-is."""
+    if not codes or not _color_enabled():
+        return text
+    return f'\x1b[{";".join(codes)}m{text}{_ANSI_RESET}'
+
+
+def _color_status_tag(label: str) -> str:
+    """Colorize a ' [STATUS]' label by kind; pass through when unknown/empty."""
+    key = label.strip()
+    code = _STATUS_TAG_COLORS.get(key)
+    return f' {_c(key, code)}' if code else label
 
 
 def _run_auto_archive_store(store) -> int:
@@ -365,11 +444,13 @@ def cmd_add(args):
         )
         sys.exit(1)
 
-    # Template gate — if the user has defined a per-type template, the
-    # caller must ack its current hash before the write proceeds. See
-    # T-2026-212.
+    # Template gate (T-2026-212 hash-ack + spec §5.8 required-sections, layered).
+    # When a per-type template exists, the caller must (a) ack its current hash
+    # and (b) include every `required:` section the template declares. --force
+    # bypasses BOTH. A template with no `required:` keeps pure hash-ack behavior.
     tpl_text = template_text(store.state_dir, args.type)
-    if tpl_text is not None:
+    force = bool(getattr(args, 'force', False))
+    if tpl_text is not None and not force:
         expected = template_hash(tpl_text)
         provided = (getattr(args, 'ack_template', '') or '').strip()
         if provided != expected:
@@ -384,6 +465,31 @@ def cmd_add(args):
                 file=sys.stderr,
             )
             sys.exit(1)
+        required = template_required_sections(tpl_text)
+        missing = missing_required_sections(content, required) if required else []
+        if missing:
+            print(
+                f'content missing required section(s): {", ".join(missing)}\n'
+                f'  template: {template_path(store.state_dir, args.type)}\n'
+                f'  pass --force to bypass',
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    # Tag handling + --unique-tag dedup guard (spec §5.14). --unique-tag skips
+    # the add (exit 0) when any active note already carries the tag; otherwise
+    # the tag is added to this note.
+    tags_csv = (getattr(args, 'tags', '') or '').strip()
+    tags = [t.strip() for t in tags_csv.split(',') if t.strip()] if tags_csv else []
+    unique_tag = (getattr(args, 'unique_tag', '') or '').strip()
+    if unique_tag:
+        existing = store.find_active_with_tag(unique_tag)
+        if existing is not None:
+            brief = existing.get('brief_summary') or existing.get('summary') or ''
+            print(f"skipped (active {_format_id(existing)} already carries tag '{unique_tag}'): {brief}")
+            return
+        if unique_tag not in tags:
+            tags.append(unique_tag)
 
     # Build metadata dict for extra fields
     metadata = {}
@@ -393,6 +499,8 @@ def cmd_add(args):
         metadata['role'] = args.role
     if getattr(args, 'mission', ''):
         metadata['mission'] = args.mission
+    if tags:
+        metadata['tags'] = tags
 
     entry = store.add_note(
         note_type=args.type,
@@ -465,6 +573,7 @@ def cmd_list(args):
         print(f'No {source} notes found.')
         return
 
+    color = _color_enabled()
     for n in notes_list:
         ntype = n.get('type', '?')[:8]
         age = format_age(n.get('timestamp', ''))
@@ -472,8 +581,13 @@ def cmd_list(args):
         status_label = f' [{st.upper()}]' if st in ('done', 'dropped', 'deferred') else ''
         # For store entries, content is in 'summary' field; read full content for display
         content = n.get('summary', '').replace('\n', ' ')[:80]
-        line = f'{_format_id(n):<12} {ntype:<10} ({age:<9}) {content}{status_label}'
-        print(line.encode('ascii', errors='replace').decode('ascii'))
+        did = _format_id(n)
+        if color:
+            print(f"{_c(f'{did:<12}', '1', '36')} {_c(f'{ntype:<10}', '90')} "
+                  f"{_c(f'({age:<9})', '2')} {content}{_color_status_tag(status_label)}")
+        else:
+            line = f'{did:<12} {ntype:<10} ({age:<9}) {content}{status_label}'
+            print(line.encode('ascii', errors='replace').decode('ascii'))
 
 
 def _format_id(entry: dict) -> str:
@@ -591,6 +705,26 @@ def cmd_get(args):
     print(note.get('content', ''))
 
 
+def _external_ticket_links(note: dict) -> list:
+    """Return the external canonical-ticket refs (``ticket:K-<id>`` tags) on a note.
+
+    These name tickets owned by the external Asana tool, not apiary. Marking the
+    linked todo done is the mirror→canonical *close signal*; apiary holds no
+    local ``K`` tickets, so it takes no local action. Only ``K``-prefixed refs
+    are returned — apiary NEVER cascades ``done`` into a local note (spec
+    §5.14 / A2 hazard guard), and the external id is never parsed, so a missing
+    or unparseable ticket can't raise.
+    """
+    refs = []
+    for tag in (note.get('tags') or []):
+        if not isinstance(tag, str) or not tag.startswith('ticket:'):
+            continue
+        ref = tag.split(':', 1)[1].strip()
+        if ref.upper().startswith('K-'):
+            refs.append(ref)
+    return refs
+
+
 def cmd_done(args):
     store = args.store
     note_type, year, seq = _parse_id_arg(str(args.id), store)
@@ -605,6 +739,13 @@ def cmd_done(args):
         print(f'Note {args.id} is already marked done.')
         return
     store.update_note(note_type, year, seq, status='done')
+    # External-ticket close signal (spec §5.14 / A2). Non-destructive: surfaces
+    # the link for the Asana tool to observe; never closes a local note.
+    if note_type == 'todo':
+        links = _external_ticket_links(note)
+        if links:
+            print(f'[external ticket link(s) {", ".join(links)}: close observed by the Asana tool]',
+                  file=sys.stderr)
     print(f'Marked {args.id} as done.')
 
 
@@ -683,8 +824,12 @@ def cmd_unarchive(args):
 
 def cmd_update(args):
     brief_override = (getattr(args, 'brief_summary', '') or '').strip()
-    if args.content is None and args.session_id is None and not brief_override:
-        print('Error: provide --content, --session-id, and/or --brief-summary', file=sys.stderr)
+    add_tags = [t for t in (getattr(args, 'add_tag', None) or []) if t]
+    remove_tags = [t for t in (getattr(args, 'remove_tag', None) or []) if t]
+    if (args.content is None and args.session_id is None and not brief_override
+            and not add_tags and not remove_tags):
+        print('Error: provide --content, --session-id, --brief-summary, --add-tag, and/or --remove-tag',
+              file=sys.stderr)
         sys.exit(1)
     if args.content is not None and len(args.content.encode('utf-8')) > MAX_CONTENT_LENGTH:
         print(f'Error: content exceeds {MAX_CONTENT_LENGTH} bytes', file=sys.stderr)
@@ -704,17 +849,23 @@ def cmd_update(args):
     if not note:
         print(f'Note {args.id} not found.', file=sys.stderr)
         sys.exit(1)
-    if note.get('status') == 'done':
-        print(f'Error: note {args.id} is already done and cannot be updated.', file=sys.stderr)
+    # A done note's content is frozen, but tag/brief/session mutation is still
+    # allowed — the Asana tool flips status tags on closed mirrors (spec §5.14).
+    if note.get('status') == 'done' and args.content is not None:
+        print(f'Error: note {args.id} is already done; cannot edit content.', file=sys.stderr)
         sys.exit(1)
     kwargs = {}
     if args.content is not None:
         kwargs['content'] = args.content
-        kwargs['summary'] = args.content[:120].replace('\n', ' ').strip()
+        kwargs['summary'] = derive_summary(args.content)
     if args.session_id is not None:
         kwargs['session'] = args.session_id
     if brief_override:
         kwargs['brief_summary'] = brief_override
+    if add_tags:
+        kwargs['add_tags'] = add_tags
+    if remove_tags:
+        kwargs['remove_tags'] = remove_tags
     store.update_note(note_type, year, seq, **kwargs)
     print(f'Updated {args.id}.')
 
@@ -1163,7 +1314,7 @@ def cmd_repair(args):
                     content = md_path.read_text(encoding='utf-8')
                     st_mtime = md_path.stat().st_mtime
                     ts = datetime.fromtimestamp(st_mtime, tz=timezone.utc).isoformat()
-                    summary = content[:200].replace('\n', ' ').strip()
+                    summary = derive_summary(content)
                     prefix = TYPE_PREFIXES.get(note_type, 'G')
                     display_id = f"{prefix}-{year}-{seq}"
                     entry = {
@@ -1294,6 +1445,13 @@ def main():
                         help="Only add if no handoff exists for this session ID")
     p_add.add_argument("--role", default="", help="Session role (e.g. user, attacker)")
     p_add.add_argument("--mission", default="", help="Session mission (e.g. general, project-x)")
+    p_add.add_argument("--tags", default="",
+                        help="Comma-separated tags stored on the note (e.g. 'ticket:K-2026-99,priority:high').")
+    p_add.add_argument("--unique-tag", default="", dest="unique_tag",
+                        help="Add this tag only if no active note already carries it; "
+                             "otherwise skip the add and exit 0.")
+    p_add.add_argument("--force", action="store_true",
+                        help="Bypass the template gate (both hash-ack and required-section checks).")
     p_add.add_argument("--ack-template", default="", dest="ack_template",
                         help="Acknowledge the current template hash. Required "
                              "when a non-empty templates/<type>.md exists. The "
@@ -1357,6 +1515,10 @@ def main():
     p_update.add_argument("--session-id", default=None)
     p_update.add_argument("--brief-summary", default="", dest="brief_summary",
                           help=f"Replace brief_summary (<={BRIEF_SUMMARY_MAX} chars).")
+    p_update.add_argument("--add-tag", action="append", default=[], dest="add_tag",
+                          help="Add a tag (repeatable). Idempotent; order-preserving.")
+    p_update.add_argument("--remove-tag", action="append", default=[], dest="remove_tag",
+                          help="Remove a tag (repeatable). Applied before --add-tag.")
 
     # archive
     p_archive = sub.add_parser("archive")

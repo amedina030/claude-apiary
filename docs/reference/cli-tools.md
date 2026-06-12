@@ -66,14 +66,17 @@ Core note and learning management.
 | `--summary TEXT` | add | One-line abstract shown in lists and startup. Required for `--type handoff` |
 | `--brief-summary TEXT` | add, update, learn | One-sentence GUI-sidebar headline; auto-derived if omitted |
 | `--ack-template HASH` | add | Acknowledge the current template hash; required when a non-empty `templates/<type>.md` exists |
+| `--unique-tag TAG` | add | Add the tag only if no active note already carries it; otherwise skip the add (exit 0) |
+| `--add-tag TAG` | update | Add a tag (repeatable, order-preserving, idempotent) |
+| `--remove-tag TAG` | update | Remove a tag (repeatable; applied before `--add-tag`) |
 | `--session SESSION` | list | Filter by session ID |
 | `--index` | learnings | Compact tag-grouped output for startup injection |
 | `--tag TAG` | learnings | Filter learnings by tag (substring, case-insensitive) |
-| `--tags LIST` | learn, supersede | Comma-separated tag list; omit to infer via `claude -p` |
+| `--tags LIST` | add, learn, supersede | Comma-separated tag list. Stored verbatim on `add`; on `learn`/`supersede`, omit to infer via `claude -p` |
 | `--area GLOB` | learn, supersede, learnings | Area glob — repeatable on `learn`/`supersede`; exact-match filter on `learnings` |
 | `--supersedes ID` | learn | ID of a prior learning this one replaces (e.g. `L-2026-5`) |
 | `--dry-run` | repair, backfill-brief | Report what would change without writing |
-| `--force` | backfill-brief | Re-derive `brief_summary` even for entries that already have one |
+| `--force` | add, backfill-brief | On `add`, bypass the template gate (hash-ack + required sections); on `backfill-brief`, re-derive `brief_summary` even for entries that already have one |
 
 ## scribe/backup_indexes.py
 

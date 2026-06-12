@@ -10,6 +10,7 @@ Framework version: **1.0** | Last updated: 2026-04-02
 - [Hooks](reference/hooks.md) — All hooks, lifecycle events, and what each does
 - [Config Files](reference/config-files.md) — Configuration and state files
 - [File Storage](reference/file-storage.md) — Runtime data locations and paths
+- [Legacy Scribe Format](reference/legacy-scribe-format.md) — Sanitized .scribe/ format reference for the legacy importer
 
 ## Architecture
 

@@ -1,0 +1,3 @@
+{"display_id":"T-2026-1","type":"todo","year":2026,"seq":1,"status":"active","session":"sess-4444","timestamp":"2026-01-05T00:00:00+00:00","summary":"mirror todo","brief_summary":"mirror todo","has_body":true,"tags":["ticket:K-2026-99"]}
+{"display_id":"T-2026-2","type":"todo","year":2026,"seq":2,"status":"active","session":"sess-5555","timestamp":"2026-01-06T00:00:00+00:00","summary":"role mission todo","brief_summary":"role mission todo","has_body":true,"role":"dev","mission":"projx"}
+{"display_id":"T-2026-3","type":"todo","year":2026,"seq":3,"status":"dropped","session":null,"timestamp":"2026-01-07T00:00:00+00:00","summary":"dropped empty","brief_summary":"dropped empty","has_body":false}
