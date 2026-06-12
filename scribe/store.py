@@ -383,6 +383,30 @@ class ScribeStore:
             return None
         return md_path.read_text(encoding='utf-8')
 
+    def _read_body_any(self, note_type: str, year: int, seq: int) -> str | None:
+        """Read a note body from the active dir, falling back to archive. None if absent.
+
+        Used only by the search path (lazy body match) — never on the hot
+        index/startup path, which does not pass a search term.
+        """
+        try:
+            type_dir = self._type_dir(note_type)
+        except ValueError:
+            return None
+        year_dir = type_dir / str(year)
+        body = self._read_note_file(year_dir, seq)
+        if body is not None:
+            return body
+        return self._read_note_file(year_dir / ARCHIVE_DIRNAME, seq)
+
+    def _read_learning_body_any(self, year: int, seq: int) -> str | None:
+        """Read a learning body (frontmatter included) from active, then archive."""
+        year_dir = self._learning_dir() / str(year)
+        body = self._read_note_file(year_dir, seq)
+        if body is not None:
+            return body
+        return self._read_note_file(year_dir / ARCHIVE_DIRNAME, seq)
+
     # --- CRUD operations: Notes ---
 
     def add_note(self, note_type: str, content: str, session_id: str,
@@ -495,10 +519,27 @@ class ScribeStore:
                         # and from the presence of 'archived_at'.
                         results.append({**entry})
 
-        # Filter by search term (case-insensitive in summary)
+        # Filter by search term — case-insensitive over metadata first
+        # (display_id, summary, brief_summary, session, tags), then lazily the
+        # body file only if the metadata missed. Body reads happen only on the
+        # search path, never on the hot index/startup path (spec §5.6).
         if search:
             search_lower = search.lower()
-            results = [e for e in results if search_lower in e.get('summary', '').lower()]
+
+            def _matches(e: dict) -> bool:
+                hay = ' '.join([
+                    str(e.get('display_id', '')),
+                    str(e.get('summary', '')),
+                    str(e.get('brief_summary', '')),
+                    str(e.get('session', '') or ''),
+                    ' '.join(str(t) for t in (e.get('tags') or [])),
+                ]).lower()
+                if search_lower in hay:
+                    return True
+                body = self._read_body_any(e.get('type'), e.get('year'), e.get('seq'))
+                return body is not None and search_lower in body.lower()
+
+            results = [e for e in results if _matches(e)]
 
         # Sort by timestamp descending
         results.sort(key=lambda e: e.get('timestamp', ''), reverse=True)
@@ -717,7 +758,18 @@ class ScribeStore:
                         entries.append({**entry, '_from_archive': True})
         if search:
             search_lower = search.lower()
-            entries = [e for e in entries if search_lower in e.get('summary', '').lower()]
+
+            def _lmatches(e: dict) -> bool:
+                hay = ' '.join([
+                    str(e.get('summary', '')),
+                    ' '.join(str(t) for t in (e.get('tags') or [])),
+                ]).lower()
+                if search_lower in hay:
+                    return True
+                body = self._read_learning_body_any(e.get('year'), e.get('seq'))
+                return body is not None and search_lower in body.lower()
+
+            entries = [e for e in entries if _lmatches(e)]
         if tag:
             tag_lower = tag.lower()
             entries = [e for e in entries

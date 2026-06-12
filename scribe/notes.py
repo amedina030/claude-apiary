@@ -608,6 +608,26 @@ def cmd_get(args):
     print(note.get('content', ''))
 
 
+def _external_ticket_links(note: dict) -> list:
+    """Return the external canonical-ticket refs (``ticket:K-<id>`` tags) on a note.
+
+    These name tickets owned by the external Asana tool, not apiary. Marking the
+    linked todo done is the mirror→canonical *close signal*; apiary holds no
+    local ``K`` tickets, so it takes no local action. Only ``K``-prefixed refs
+    are returned — apiary NEVER cascades ``done`` into a local note (spec
+    §5.14 / A2 hazard guard), and the external id is never parsed, so a missing
+    or unparseable ticket can't raise.
+    """
+    refs = []
+    for tag in (note.get('tags') or []):
+        if not isinstance(tag, str) or not tag.startswith('ticket:'):
+            continue
+        ref = tag.split(':', 1)[1].strip()
+        if ref.upper().startswith('K-'):
+            refs.append(ref)
+    return refs
+
+
 def cmd_done(args):
     store = args.store
     note_type, year, seq = _parse_id_arg(str(args.id), store)
@@ -622,6 +642,13 @@ def cmd_done(args):
         print(f'Note {args.id} is already marked done.')
         return
     store.update_note(note_type, year, seq, status='done')
+    # External-ticket close signal (spec §5.14 / A2). Non-destructive: surfaces
+    # the link for the Asana tool to observe; never closes a local note.
+    if note_type == 'todo':
+        links = _external_ticket_links(note)
+        if links:
+            print(f'[external ticket link(s) {", ".join(links)}: close observed by the Asana tool]',
+                  file=sys.stderr)
     print(f'Marked {args.id} as done.')
 
 
