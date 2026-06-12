@@ -1,0 +1,4 @@
+{"display_id":"L-2026-1","type":"learning","year":2026,"seq":1,"status":"active","session":"sess-1111","timestamp":"2026-01-02T00:00:00+00:00","summary":"alpha learning","brief_summary":"alpha learning","has_body":true,"tags":["alpha"],"areas":["src/a.py"]}
+{"display_id":"L-2026-2","type":"learning","year":2026,"seq":2,"status":"active","session":"sess-2222","timestamp":"2026-02-02T00:00:00+00:00","summary":"beta supersedes alpha","brief_summary":"beta","has_body":true,"tags":["beta"],"supersedes":"L-2026-1"}
+this line is deliberately not valid json {{{
+{"display_id":"L-2026-3","type":"learning","year":2026,"seq":3,"status":"active","session":"sess-3333","timestamp":"2026-03-02T00:00:00+00:00","summary":"gamma no frontmatter","brief_summary":"gamma","has_body":true}
