@@ -32,7 +32,7 @@ from pathlib import Path as _PathImport
 # Add project root to path for core.utils import
 sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
 from core.session import SessionId
-from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME, BRIEF_SUMMARY_MAX, derive_brief_summary
+from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME, BRIEF_SUMMARY_MAX, derive_brief_summary, derive_summary
 
 from pathlib import Path
 
@@ -288,11 +288,39 @@ def format_age(ts):
     days = hours // 24
     if days < 7:
         return f"{days}d ago"
-    weeks = days // 7
-    if weeks < 5:
-        return f"{weeks}w ago"
-    months = days // 30
-    return f"{months}mo ago"
+    if days < 30:
+        return f"{days // 7}w ago"
+    if days < 365:
+        return f"{days // 30}mo ago"
+    return f"{days // 365}y ago"
+
+
+_ANSI_RESET = '\x1b[0m'
+_STATUS_TAG_COLORS = {'[DONE]': '32', '[DROPPED]': '31', '[DEFERRED]': '33', '[ARCHIVED]': '35'}
+
+
+def _color_enabled() -> bool:
+    """True when colored output is requested: FORCE_COLOR set and NO_COLOR unset.
+
+    Deliberately never gates on stdout.isatty(): this tool runs inside the GUI
+    (a non-TTY pipe) where isatty misreports and raw ANSI escapes would render
+    as literal garbage in the chat pane (spec §5.13, decision #4).
+    """
+    return bool(os.environ.get('FORCE_COLOR')) and not os.environ.get('NO_COLOR')
+
+
+def _c(text: str, *codes: str) -> str:
+    """Wrap *text* in ANSI SGR *codes* when color is enabled, else return as-is."""
+    if not codes or not _color_enabled():
+        return text
+    return f'\x1b[{";".join(codes)}m{text}{_ANSI_RESET}'
+
+
+def _color_status_tag(label: str) -> str:
+    """Colorize a ' [STATUS]' label by kind; pass through when unknown/empty."""
+    key = label.strip()
+    code = _STATUS_TAG_COLORS.get(key)
+    return f' {_c(key, code)}' if code else label
 
 
 def _run_auto_archive_store(store) -> int:
@@ -545,6 +573,7 @@ def cmd_list(args):
         print(f'No {source} notes found.')
         return
 
+    color = _color_enabled()
     for n in notes_list:
         ntype = n.get('type', '?')[:8]
         age = format_age(n.get('timestamp', ''))
@@ -552,8 +581,13 @@ def cmd_list(args):
         status_label = f' [{st.upper()}]' if st in ('done', 'dropped', 'deferred') else ''
         # For store entries, content is in 'summary' field; read full content for display
         content = n.get('summary', '').replace('\n', ' ')[:80]
-        line = f'{_format_id(n):<12} {ntype:<10} ({age:<9}) {content}{status_label}'
-        print(line.encode('ascii', errors='replace').decode('ascii'))
+        did = _format_id(n)
+        if color:
+            print(f"{_c(f'{did:<12}', '1', '36')} {_c(f'{ntype:<10}', '90')} "
+                  f"{_c(f'({age:<9})', '2')} {content}{_color_status_tag(status_label)}")
+        else:
+            line = f'{did:<12} {ntype:<10} ({age:<9}) {content}{status_label}'
+            print(line.encode('ascii', errors='replace').decode('ascii'))
 
 
 def _format_id(entry: dict) -> str:
@@ -823,7 +857,7 @@ def cmd_update(args):
     kwargs = {}
     if args.content is not None:
         kwargs['content'] = args.content
-        kwargs['summary'] = args.content[:120].replace('\n', ' ').strip()
+        kwargs['summary'] = derive_summary(args.content)
     if args.session_id is not None:
         kwargs['session'] = args.session_id
     if brief_override:
@@ -1280,7 +1314,7 @@ def cmd_repair(args):
                     content = md_path.read_text(encoding='utf-8')
                     st_mtime = md_path.stat().st_mtime
                     ts = datetime.fromtimestamp(st_mtime, tz=timezone.utc).isoformat()
-                    summary = content[:200].replace('\n', ' ').strip()
+                    summary = derive_summary(content)
                     prefix = TYPE_PREFIXES.get(note_type, 'G')
                     display_id = f"{prefix}-{year}-{seq}"
                     entry = {

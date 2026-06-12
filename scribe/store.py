@@ -181,6 +181,20 @@ def derive_brief_summary(content: str) -> str:
     return window.rstrip() + '…'
 
 
+def derive_summary(content: str) -> str:
+    """First non-empty, stripped line of *content*, truncated to 300 chars.
+
+    The summary rule adopted from the source scribe (spec §5.6). Distinct from
+    ``derive_brief_summary`` (the GUI sidebar's <=120-char heuristic), which is
+    intentionally left unchanged.
+    """
+    for line in (content or '').splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:300]
+    return ''
+
+
 class ScribeStore:
     """Folder-per-type storage engine for notes and learnings.
 
@@ -423,9 +437,9 @@ class ScribeStore:
         year_dir = self._ensure_year_dir(type_dir, year)
         seq = self._increment_seq(year_dir)
         timestamp = now.isoformat()
-        # If no summary provided, use first 120 chars of content
+        # If no summary provided, derive it (first non-empty line, <=300 chars).
         if not summary:
-            summary = content[:120].replace('\n', ' ').strip()
+            summary = derive_summary(content)
         brief = brief_summary.strip() if brief_summary else derive_brief_summary(content)
         if len(brief) > BRIEF_SUMMARY_MAX:
             brief = brief[:BRIEF_SUMMARY_MAX].rstrip()
@@ -701,7 +715,7 @@ class ScribeStore:
         seq = self._increment_seq(year_dir)
         timestamp = now.isoformat()
         if not summary:
-            summary = content[:120].replace('\n', ' ').strip()
+            summary = derive_summary(content)
         brief = brief_summary.strip() if brief_summary else derive_brief_summary(content)
         if len(brief) > BRIEF_SUMMARY_MAX:
             brief = brief[:BRIEF_SUMMARY_MAX].rstrip()
