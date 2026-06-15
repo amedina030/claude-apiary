@@ -14,7 +14,7 @@ This repo was spawned by `/incubator` and ships with the apiary toolkit wired up
 python .claude/apiary/launch.py <subsystem>/<script>.py [args]
 ```
 
-Per-repo state lives under `.apiary/`. Common entry points:
+This repo's apiary state (scribe notes, budgeter data, etc.) is managed centrally by the main apiary install — it lives under the main apiary's `.repos/<name>-<id>/` store, not in this repo. The launcher resolves it automatically, so you invoke tools the same way regardless of where the data sits. Common entry points:
 
 ```bash
 python .claude/apiary/launch.py scribe/notes.py list             # operational notes for this project

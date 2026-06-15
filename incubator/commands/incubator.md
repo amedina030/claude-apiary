@@ -64,7 +64,7 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" incubator/cli
 The CLI will:
 1. Re-validate the path (absolute, doesn't exist, parent exists, not inside another git repo).
 2. `git init` the new directory.
-3. Drop `.gitignore`, `pyproject.toml` (poetry), `CLAUDE.md`, and an empty `.apiary/` dir.
+3. Drop `.gitignore`, `pyproject.toml` (poetry), and `CLAUDE.md`.
 4. Migrate the spec note from apiary's scribe into the new repo's scribe and close the original.
 
 Exit codes from the CLI:

@@ -159,7 +159,10 @@ class SkeletonLayoutTests(unittest.TestCase):
             self.assertTrue((target / ".gitignore").is_file())
             self.assertTrue((target / "pyproject.toml").is_file())
             self.assertTrue((target / "CLAUDE.md").is_file())
-            self.assertTrue((target / ".apiary").is_dir())
+            # No local .apiary/ dir is created — per-repo state is centralized
+            # under the main apiary's .repos/<name>-<id>/ store (resolved by the
+            # launcher), so the spawned repo holds no apiary state dir.
+            self.assertFalse((target / ".apiary").exists())
 
             pyproject_text = (target / "pyproject.toml").read_text(encoding="utf-8")
             self.assertIn('name = "spawn-target"', pyproject_text)
