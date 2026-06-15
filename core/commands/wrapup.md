@@ -1,22 +1,36 @@
 ---
 name: wrapup
-description: Commit, push, and generate a session handoff note
+description: Commit, capture learnings + TODOs, and generate a session handoff note
 user-invocable: true
 ---
 
-End-of-session wrap-up. Perform these three steps in order:
+End-of-session wrap-up. Perform these steps in order:
 
 ## Step 1: Commit
 
 Follow the standard git commit flow from your system instructions (git status, git diff, git log, then stage and commit). If there are no changes to commit, skip to Step 2.
 
-## Step 2: Push
+## Step 2: Capture learnings and TODOs
 
-Push the current branch to the remote. If the branch has no upstream, use `git push -u origin <branch>`.
+Review the **entire session** for non-obvious discoveries and deferred work, and write them down **before** the handoff — this is the primary knowledge-capture mechanism, so do not skip it.
+
+**Learnings** — for each workaround, non-obvious project pattern, tool quirk, or better approach you discovered this session, write a learning:
+
+```bash
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py learn --content "<what you learned>" --session-id <session_id_8char>
+```
+
+Write a learning when you hit an error and found a workaround, found a better approach mid-task, a tool/API behaved unexpectedly and you figured out why, or you found a non-obvious project-specific pattern or constraint. Do **not** write one when the fix was obvious from the error message, it's general programming knowledge, it's already documented in the codebase/`docs/`/`CLAUDE.md`, or it duplicates an existing learning (update that one instead).
+
+**TODOs** — file any deferred or untracked work (including bugs found but not fixed) as todos:
+
+```bash
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py add --type todo --session-id <session_id_8char> --content "<deferred work, with enough context to resume>"
+```
 
 ## Step 3: Handoff
 
-Review the **entire session** for deferred work and untracked bugs. File any missing TODOs first, then generate a handoff note:
+Generate a handoff note summarizing the session:
 
 ```bash
 python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py add --type handoff --session-id <session_id_8char> --summary "<one-line abstract>" --content "<handoff>"
