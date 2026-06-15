@@ -2,9 +2,9 @@
 """Incubator CLI — spawn a new side-project repo wired up with the apiary toolkit.
 
 The ``spawn`` subcommand creates a fresh git repo at a target path, lays down a
-Python+poetry skeleton (``pyproject.toml``, ``.gitignore``, ``CLAUDE.md``, an
-empty ``.apiary/`` directory), and migrates a ``/refine``-produced spec note from
-claude-apiary's scribe into the new repo's scribe.
+Python+poetry skeleton (``pyproject.toml``, ``.gitignore``, ``CLAUDE.md``), and
+migrates a ``/refine``-produced spec note from claude-apiary's scribe into the
+new repo's scribe.
 
 Usage:
     cli.py spawn --path <abs-path> --spec-note-id <id> [--author "<name>"]
@@ -167,7 +167,7 @@ def _run_git_init(target: Path) -> tuple[bool, str]:
 
 def _lay_down_skeleton(target: Path, project_slug: str, project_name: str,
                        author: str, spec_content: str) -> None:
-    """Write .gitignore, pyproject.toml, CLAUDE.md, and create .apiary/ skeleton."""
+    """Write .gitignore, pyproject.toml, and CLAUDE.md."""
     problem, solution, value = _parse_goal_lines(spec_content)
     description = solution or f"{project_name} side project"
 
@@ -194,8 +194,6 @@ def _lay_down_skeleton(target: Path, project_slug: str, project_name: str,
         },
     )
     _write_file(target / "CLAUDE.md", claude_md)
-
-    (target / ".apiary").mkdir(parents=True, exist_ok=True)
 
 
 def _migrate_spec(target: Path, spec_content: str, spec_note_id: str,
