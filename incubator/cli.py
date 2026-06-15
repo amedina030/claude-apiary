@@ -26,6 +26,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Make the apiary repo root importable so ``from core import install`` works
+# when this CLI runs under the per-repo launcher (mirrors scribe/notes.py:33).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core import install as core_install
+
 EXIT_OK = 0
 EXIT_VALIDATION = 2
 EXIT_SPEC_NOT_FOUND = 3
@@ -35,12 +40,19 @@ EXIT_MIGRATION_FAILED = 5
 INCUBATOR_DIR = Path(__file__).resolve().parent
 APIARY_REPO = INCUBATOR_DIR.parent
 TEMPLATES_DIR = INCUBATOR_DIR / "templates"
-LAUNCHER = Path.home() / ".claude" / "apiary_launch.py"
+LAUNCHER = APIARY_REPO / ".claude" / "apiary" / "launch.py"
 
 
-def _run_scribe(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    """Invoke scribe via the launcher with a fixed cwd."""
-    cmd = [sys.executable, str(LAUNCHER), "scribe/notes.py", *args]
+def _run_scribe(
+    args: list[str], cwd: Path, launcher: Path | None = None
+) -> subprocess.CompletedProcess:
+    """Invoke scribe via a launcher with a fixed cwd.
+
+    ``launcher`` defaults to apiary's own launcher (``LAUNCHER``); pass a
+    specific repo's ``.claude/apiary/launch.py`` to target that repo's scribe
+    store. Resolved at call time so the ``LAUNCHER`` global stays patchable.
+    """
+    cmd = [sys.executable, str(launcher or LAUNCHER), "scribe/notes.py", *args]
     return subprocess.run(
         cmd,
         cwd=str(cwd),
@@ -188,11 +200,18 @@ def _lay_down_skeleton(target: Path, project_slug: str, project_name: str,
 
 def _migrate_spec(target: Path, spec_content: str, spec_note_id: str,
                   session_id: str | None) -> tuple[bool, str]:
-    """Add the spec to the new repo's scribe, then close the original in apiary."""
+    """Add the spec to the new repo's scribe, then close the original in apiary.
+
+    The ``add`` runs through the **new repo's** launcher so the spec lands in the
+    new repo's store; the ``done`` runs through apiary's launcher (default) so the
+    original closes in apiary's store. The new launcher exists only because
+    ``cmd_spawn`` installs apiary into the target before calling this.
+    """
+    new_launcher = target / ".claude" / "apiary" / "launch.py"
     add_args = ["add", "--type", "context", "--content", spec_content]
     if session_id:
         add_args.extend(["--session-id", session_id])
-    add_result = _run_scribe(add_args, cwd=target)
+    add_result = _run_scribe(add_args, cwd=target, launcher=new_launcher)
     if add_result.returncode != 0:
         return False, (add_result.stderr or add_result.stdout or "scribe add failed").strip()
 
@@ -239,6 +258,19 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         print(f"error: failed to write skeleton: {exc}", file=sys.stderr)
         return EXIT_SPAWN_FAILED
 
+    # Bootstrap the new repo (install apiary tooling) BEFORE migrating the spec.
+    # Migration writes into the new repo's store via ITS launcher, which install
+    # creates — so install is a hard precondition, not best-effort. On failure
+    # the repo is left intact for manual recovery and migration is skipped.
+    try:
+        install_result = core_install.install(target, apiary_repo=APIARY_REPO)
+    except core_install.InstallError as exc:
+        _report_bootstrap_failure(target, str(exc))
+        return EXIT_MIGRATION_FAILED
+    except Exception as exc:  # noqa: BLE001 — surface, don't crash the CLI
+        _report_bootstrap_failure(target, f"unexpected {exc.__class__.__name__}: {exc}")
+        return EXIT_MIGRATION_FAILED
+
     migrated, msg = _migrate_spec(target, spec_content, args.spec_note_id, args.session_id)
     if not migrated:
         print(
@@ -248,10 +280,10 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         print(f"  detail: {msg}", file=sys.stderr)
         print(
             f"  recover: cd into {target} and re-run "
-            f"`python ~/.claude/apiary_launch.py scribe/notes.py add --type context "
-            f"--content <spec-body>` (auto-registers the new repo and lands the "
-            f"spec under <apiary>/.repos/<name>-<id>/scribe/), then close the "
-            f"original via `scribe/notes.py done {args.spec_note_id}`.",
+            f"`python .claude/apiary/launch.py scribe/notes.py add --type context "
+            f"--content <spec-body>` (lands the spec under "
+            f"<apiary>/.repos/<name>-<id>/scribe/), then close the original via "
+            f"apiary's launcher: `scribe/notes.py done {args.spec_note_id}`.",
             file=sys.stderr,
         )
         return EXIT_MIGRATION_FAILED
@@ -259,42 +291,31 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     print(f"spawned: {target}")
     print(f"  slug:    {project_slug}")
     print(f"  author:  {author}")
+    print(f"  bootstrap: per-repo install OK "
+          f"(uid={install_result.uid} slug={install_result.slug})")
     print(f"  spec:    migrated from apiary {args.spec_note_id} -> new repo scribe")
-
-    bootstrap_msg = _per_repo_bootstrap(target)
-    if bootstrap_msg:
-        print(f"  bootstrap: {bootstrap_msg}")
     print()
     print("next steps:")
     print(f"  cd {target}")
     print("  poetry install")
-    print(
-        "  python ~/.claude/apiary_launch.py scribe/notes.py list --type context"
-    )
+    print("  python .claude/apiary/launch.py scribe/notes.py list --type context")
     return EXIT_OK
 
 
-def _per_repo_bootstrap(target: Path) -> str:
-    """Best-effort: invoke ``apiary install --target <new repo>`` so the
-    new repo gets per-repo hooks / pin files alongside any global install
-    the user already has. Failures here do NOT fail incubator (returns a
-    short status string for the spawn report).
-
-    Per MIGRATION-PLAN.md §13.11 + phase 6 polish — every newly-spawned
-    repo should have apiary integration without the user having to run
-    install separately.
-    """
-    try:
-        from core import install as install_mod
-    except ImportError as exc:
-        return f"skipped (core.install not importable: {exc})"
-    try:
-        result = install_mod.install(target)
-    except install_mod.InstallError as exc:
-        return f"skipped ({exc})"
-    except Exception as exc:  # noqa: BLE001 — best-effort wrapper
-        return f"skipped (unexpected error: {exc.__class__.__name__})"
-    return f"per-repo install OK (uid={result.uid} slug={result.slug})"
+def _report_bootstrap_failure(target: Path, detail: str) -> None:
+    """Print the per-repo install failure + recovery hint to stderr."""
+    print(
+        f"warning: spawn created the repo at {target} but per-repo apiary "
+        f"install failed; spec NOT migrated.",
+        file=sys.stderr,
+    )
+    print(f"  detail: {detail}", file=sys.stderr)
+    print(
+        f"  recover: fix the install issue, then re-run `incubator spawn` "
+        f"(remove {target} first) or install manually with "
+        f"`apiary install --target {target}` and migrate the spec by hand.",
+        file=sys.stderr,
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:

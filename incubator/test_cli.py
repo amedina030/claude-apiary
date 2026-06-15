@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import re
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,19 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from incubator import cli
+from core import install as install_mod
+# Reuse the throwaway-apiary fixture from the install tests so the end-to-end
+# spawn test never touches the real registry under <apiary>/.repos.
+from core.test_install import _make_fake_apiary, _git_init
+
+
+def _fake_install_result(target: Path) -> install_mod.InstallResult:
+    return install_mod.InstallResult(
+        uid=42, name=target.name, slug=f"{target.name}-42",
+        target_repo=target, apiary_repo=Path("/apiary"),
+        state_dir=Path("/apiary/.repos") / f"{target.name}-42",
+        apiary_version="0.1.0", is_first_install=True,
+    )
 
 
 class SlugifyTests(unittest.TestCase):
@@ -136,7 +150,8 @@ class SkeletonLayoutTests(unittest.TestCase):
 
             with mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)), \
                  mock.patch.object(cli, "_run_scribe", side_effect=[fake_add, fake_done]), \
-                 mock.patch.object(cli, "_per_repo_bootstrap", return_value="mocked"):
+                 mock.patch.object(cli.core_install, "install",
+                                   return_value=_fake_install_result(target)):
                 rc = cli.cmd_spawn(args)
 
             self.assertEqual(rc, cli.EXIT_OK, msg="spawn should succeed")
@@ -184,12 +199,36 @@ class SkeletonLayoutTests(unittest.TestCase):
                 args=[], returncode=1, stdout="", stderr="scribe blew up"
             )
             with mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)), \
+                 mock.patch.object(cli.core_install, "install",
+                                   return_value=_fake_install_result(target)), \
                  mock.patch.object(cli, "_run_scribe", return_value=fake_add_fail), \
                  mock.patch.object(sys, "stderr", new_callable=io.StringIO):
                 rc = cli.cmd_spawn(args)
             self.assertEqual(rc, cli.EXIT_MIGRATION_FAILED)
             self.assertTrue(target.exists(), "repo should be left intact for manual recovery")
             self.assertTrue((target / ".git").is_dir())
+
+    def test_spawn_bootstrap_failure_aborts_before_migration(self):
+        """If per-repo install fails, migration must NOT run and the repo is
+        left intact for recovery (EXIT_MIGRATION_FAILED)."""
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "bootstrap-fail"
+            args = argparse.Namespace(
+                path=str(target),
+                spec_note_id="C-2026-999",
+                author="x",
+                session_id=None,
+            )
+            migrate = mock.Mock()
+            with mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)), \
+                 mock.patch.object(cli.core_install, "install",
+                                   side_effect=install_mod.InstallError("no go")), \
+                 mock.patch.object(cli, "_migrate_spec", migrate), \
+                 mock.patch.object(sys, "stderr", new_callable=io.StringIO):
+                rc = cli.cmd_spawn(args)
+            self.assertEqual(rc, cli.EXIT_MIGRATION_FAILED)
+            migrate.assert_not_called()
+            self.assertTrue(target.exists(), "repo left intact for manual recovery")
 
 
 class SpecFetchErrorTests(unittest.TestCase):
@@ -209,42 +248,93 @@ class SpecFetchErrorTests(unittest.TestCase):
             self.assertFalse(target.exists())
 
 
-class PerRepoBootstrapTests(unittest.TestCase):
-    """``_per_repo_bootstrap`` is best-effort — failures must not raise
-    or affect the return value of cmd_spawn. They surface as a short
-    status message in the spawn report instead."""
+class CoreImportTests(unittest.TestCase):
+    """The sys.path fix at the top of cli.py must make ``from core import
+    install`` resolvable in cli's own process (Bug 2 regression guard)."""
 
-    def test_install_failure_returns_status_string(self):
-        target = Path("/nonexistent/target")
-        # Make install raise InstallError → wrapper returns "skipped (...)"
-        from core import install as install_mod
-        with mock.patch.object(
-            install_mod, "install",
-            side_effect=install_mod.InstallError("not a directory"),
-        ):
-            msg = cli._per_repo_bootstrap(target)
-        self.assertIn("skipped", msg)
-        self.assertIn("not a directory", msg)
+    def test_cli_exposes_core_install(self):
+        self.assertTrue(hasattr(cli, "core_install"))
+        self.assertTrue(hasattr(cli.core_install, "install"))
 
-    def test_unexpected_exception_returns_status_string(self):
-        from core import install as install_mod
-        with mock.patch.object(install_mod, "install", side_effect=RuntimeError("boom")):
-            msg = cli._per_repo_bootstrap(Path("/x"))
-        self.assertIn("skipped", msg)
-        self.assertIn("RuntimeError", msg)
+    def test_launcher_constant_points_at_per_repo_launcher(self):
+        # Bug 1 regression: must be <apiary>/.claude/apiary/launch.py, never
+        # the long-gone ~/.claude/apiary_launch.py.
+        self.assertEqual(cli.LAUNCHER, cli.APIARY_REPO / ".claude" / "apiary" / "launch.py")
 
-    def test_success_returns_uid_and_slug(self):
-        from core import install as install_mod
-        fake_result = install_mod.InstallResult(
-            uid=42, name="demo", slug="demo-42",
-            target_repo=Path("/x"), apiary_repo=Path("/apiary"),
-            state_dir=Path("/apiary/.repos/demo-42"),
-            apiary_version="0.1.0", is_first_install=True,
+
+class SpawnEndToEndTests(unittest.TestCase):
+    """Hermetic end-to-end spawn against a throwaway fake apiary: real install
+    + real scribe subprocesses. Proves the spec lands in the NEW repo's store
+    (not apiary's) and the original is closed in apiary — the core regression
+    for the bootstrap/migration-order bugs.
+
+    Spec content is kept ASCII to avoid the launcher's PYTHONUTF8 dependency.
+    """
+
+    SPEC = (
+        "## Goal\n"
+        "- **Problem:** Bootstrapping is repetitive.\n"
+        "- **Solution:** Scaffold new repos in one shot.\n"
+        "- **Value:** Faster starts.\n"
+    )
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.apiary = _make_fake_apiary(self.root)
+        _git_init(self.apiary)
+        # Self-install so apiary has its own launcher + scribe state dir.
+        install_mod.install(self.apiary, apiary_repo=self.apiary)
+        self.launcher = self.apiary / ".claude" / "apiary" / "launch.py"
+        for attr, val in (("APIARY_REPO", self.apiary), ("LAUNCHER", self.launcher)):
+            p = mock.patch.object(cli, attr, val)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _scribe(self, args, cwd, launcher=None):
+        return cli._run_scribe(args, cwd=cwd, launcher=launcher)
+
+    def test_spec_lands_in_new_repo_and_original_closed(self):
+        # Seed the spec into apiary's own store.
+        seeded = self._scribe(
+            ["add", "--type", "context", "--content", self.SPEC, "--session-id", "seed"],
+            cwd=self.apiary,
         )
-        with mock.patch.object(install_mod, "install", return_value=fake_result):
-            msg = cli._per_repo_bootstrap(Path("/x"))
-        self.assertIn("uid=42", msg)
-        self.assertIn("demo-42", msg)
+        self.assertEqual(seeded.returncode, 0, seeded.stderr or seeded.stdout)
+        m = re.search(r"C-\d{4}-\d+", seeded.stdout)
+        self.assertIsNotNone(m, f"could not parse note id from: {seeded.stdout!r}")
+        note_id = m.group(0)
+
+        target = self.root / "spawned-proj"
+        args = argparse.Namespace(
+            path=str(target), spec_note_id=note_id,
+            author="x <x@example.com>", session_id="sess",
+        )
+        with mock.patch.object(sys, "stdout", new_callable=io.StringIO):
+            rc = cli.cmd_spawn(args)
+        self.assertEqual(rc, cli.EXIT_OK)
+
+        # Bootstrap ran: the new repo has its own launcher.
+        new_launcher = target / ".claude" / "apiary" / "launch.py"
+        self.assertTrue(new_launcher.is_file(), "per-repo install should create launcher")
+
+        # Spec present in the NEW repo's store.
+        new_list = self._scribe(
+            ["list", "--type", "context"], cwd=target, launcher=new_launcher
+        )
+        self.assertEqual(new_list.returncode, 0, new_list.stderr or new_list.stdout)
+        self.assertRegex(new_list.stdout, r"C-\d{4}-\d+",
+                         "migrated spec should be active in the new repo")
+
+        # Spec ABSENT from apiary's active store (original was closed).
+        apiary_list = self._scribe(["list", "--type", "context"], cwd=self.apiary)
+        self.assertNotIn(note_id, apiary_list.stdout,
+                         "migrated spec must not remain active in apiary")
+
+        # Original is marked done in apiary.
+        got = self._scribe(["get", note_id], cwd=self.apiary)
+        self.assertIn("done", got.stdout.lower())
 
 
 if __name__ == "__main__":
