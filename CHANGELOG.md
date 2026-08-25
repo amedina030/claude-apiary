@@ -30,6 +30,11 @@ commit time.
   Re-running `scripts/install_repo_hooks.py` upgrades an older hook in place.
 - **Escape hatches:** an inline `apiary:allow-secret` comment, a repo-root
   `.secretsallow` regex file, or `git commit --no-verify`.
+- **`core/secret_patterns.py`** — the literal-credential table, shared by the
+  commit-time and push-time gates so they cannot drift apart. Each gate keeps
+  its own generic `key = value` heuristic: the push gate bars on entropy, the
+  commit gate filters placeholders and prose. Both honour both allowlist
+  spellings, and a parity suite asserts they agree on every rule.
 
 Deliberately **not** built on `gitleaks`: it needs a per-machine binary, so a
 fresh clone would silently skip the check. See `PORTABILITY.md`.

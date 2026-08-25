@@ -42,6 +42,8 @@ from pathlib import Path
 # named 'core'` at import time, before main()'s own sys.path.insert runs.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from core import secret_patterns  # noqa: E402
+
 # The push detector is identical to the doc-conformer's; reuse it so the two
 # gates can never disagree about what counts as a push.
 from core.hooks.pre_push_doc_conformer import command_pushes
@@ -52,26 +54,18 @@ _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 # detect-secrets-style inline allowlist marker. A line carrying this is an
 # intentional fixture/example and is skipped.
-_ALLOW_PRAGMA = re.compile(r"pragma:\s*allowlist\s+secret", re.IGNORECASE)
+# Both allowlist spellings: this gate shipped with the detect-secrets form,
+# the commit-time gate added its own, and each honours both so a line silenced
+# for one is silenced for the other.
+_ALLOW_PRAGMA = secret_patterns.PRAGMA_RE
 
-
-# ---------------------------------------------------------------------------
-# Secret patterns. Each entry is (rule-name, compiled-regex). They are
-# deliberately high-signal: a hit should almost always be a real credential,
-# because a false positive blocks a push. Lower-signal "looks secret-ish"
-# matching is handled separately by the entropy gate below.
-# ---------------------------------------------------------------------------
-_PATTERNS = [
-    ("aws-access-key-id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
-    ("openai-anthropic-key", re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}\b")),
-    ("slack-token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
-    ("google-api-key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
-    ("private-key-block",
-     re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----")),
-    ("bearer-token",
-     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{20,}")),
-]
+# The literal-credential table is shared with scripts/secret_scan.py so the two
+# gates cannot drift (#T-2026-260). The generic key=value rule below stays
+# local: it gates on entropy, while the commit-time gate filters placeholders
+# and prose instead. Both are defensible and tuned against different
+# false-positive pressures, so unifying them would change what this gate
+# blocks rather than merely de-duplicate.
+_PATTERNS = [(p.name, p.regex) for p in secret_patterns.PATTERNS]
 
 # Generic ``name = "value"`` / ``name: value`` assignments whose *name* names a
 # credential. These fire only when the value also clears the entropy gate, so

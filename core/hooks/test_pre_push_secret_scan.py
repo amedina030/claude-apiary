@@ -96,7 +96,7 @@ class ScanDiffTest(unittest.TestCase):
         path, lineno, rule, _preview = findings[0]
         self.assertEqual(path, "src/cfg.py")
         self.assertEqual(lineno, 2)            # second added line
-        self.assertEqual(rule, "aws-access-key-id")
+        self.assertEqual(rule, "aws-access-key")
 
     def test_removed_lines_are_ignored(self):
         # A secret on a removed (-) line is not being introduced → no finding.
