@@ -26,18 +26,41 @@ sys.path.insert(0, str(REPO_ROOT))
 DOCS_DIR = REPO_ROOT / "docs"
 RUNNER_DIR = REPO_ROOT / "runner"
 
+from scripts.install_git_hooks import hooks_dir  # noqa: E402
+
+
+def _git_hooks_dir() -> Path:
+    """Where git actually looks for this repo's hooks.
+
+    Honours ``core.hooksPath``: installing into ``.git/hooks`` while that is
+    set writes a hook git never runs, and the installer would report success
+    over a dead gate.
+    """
+    target, warning = hooks_dir(REPO_ROOT)
+    if warning:
+        print(f"  WARNING: {warning}")
+    return target
+
 
 def install_pre_commit_hook() -> None:
     """Install ``docs/hooks/pre-commit`` into ``.git/hooks/pre-commit``.
 
-    The hook runs ``docs/check.py`` before commits. Skipped silently if
-    ``.git/hooks/`` doesn't exist (e.g. on a sparse checkout). If a non-
-    apiary pre-commit hook is already present, the installer leaves it
-    alone — the operator should investigate before overwriting.
+    The hook chains two checks before a commit: ``docs/check.py`` (framework
+    doc conformance) and ``scripts/secret_scan.py --staged`` (credentials in
+    the staged diff). Either failing blocks. Skipped silently if
+    ``.git/hooks/`` doesn't exist (e.g. on a sparse checkout).
+
+    Conflict policy: a pre-commit hook that doesn't reference ``docs/check.py``
+    is treated as somebody else's and left alone. An older apiary hook (doc
+    check only) still matches, so re-running upgrades it in place to the
+    combined version.
+
+    Side projects get the secret scan on its own via
+    ``scripts/install_git_hooks.py`` — they have no framework docs to check.
     """
-    git_hooks_dir = REPO_ROOT / ".git" / "hooks"
+    git_hooks_dir = _git_hooks_dir()
     if not git_hooks_dir.is_dir():
-        print(f"  Pre-commit hook  : skipped (.git/hooks/ not found)")
+        print(f"  Pre-commit hook  : skipped ({git_hooks_dir} not found)")
         return
 
     target = git_hooks_dir / "pre-commit"
@@ -61,9 +84,9 @@ def install_post_merge_hook() -> None:
     Skipped when source is missing (older clones). Same conflict policy
     as pre-commit: leave non-apiary hooks alone.
     """
-    git_hooks_dir = REPO_ROOT / ".git" / "hooks"
+    git_hooks_dir = _git_hooks_dir()
     if not git_hooks_dir.is_dir():
-        print(f"  Post-merge hook  : skipped (.git/hooks/ not found)")
+        print(f"  Post-merge hook  : skipped ({git_hooks_dir} not found)")
         return
 
     target = git_hooks_dir / "post-merge"

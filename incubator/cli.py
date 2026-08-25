@@ -30,6 +30,7 @@ from pathlib import Path
 # when this CLI runs under the per-repo launcher (mirrors scribe/notes.py:33).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core import install as core_install
+from scripts import install_git_hooks
 
 EXIT_OK = 0
 EXIT_VALIDATION = 2
@@ -196,6 +197,21 @@ def _lay_down_skeleton(target: Path, project_slug: str, project_name: str,
     _write_file(target / "CLAUDE.md", claude_md)
 
 
+def _install_secret_scan_hook(target: Path) -> tuple[bool, str]:
+    """Install the commit-time secret-scan pre-commit hook into the new repo.
+
+    Best-effort: a spawned repo without the hook is still a usable repo, so a
+    failure here warns rather than failing the spawn. It is reported either
+    way, because a hook the operator *thinks* is installed but isn't is the
+    worst outcome — the whole point is that it can't be forgotten.
+    """
+    try:
+        rc = install_git_hooks.install(target)
+    except Exception as exc:  # noqa: BLE001 - never crash a spawn over a hook
+        return False, f"unexpected {exc.__class__.__name__}: {exc}"
+    return rc == 0, "installed" if rc == 0 else "installer refused (see output above)"
+
+
 def _migrate_spec(target: Path, spec_content: str, spec_note_id: str,
                   session_id: str | None) -> tuple[bool, str]:
     """Add the spec to the new repo's scribe, then close the original in apiary.
@@ -269,6 +285,8 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         _report_bootstrap_failure(target, f"unexpected {exc.__class__.__name__}: {exc}")
         return EXIT_MIGRATION_FAILED
 
+    hook_ok, hook_msg = _install_secret_scan_hook(target)
+
     migrated, msg = _migrate_spec(target, spec_content, args.spec_note_id, args.session_id)
     if not migrated:
         print(
@@ -291,6 +309,11 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     print(f"  author:  {author}")
     print(f"  bootstrap: per-repo install OK "
           f"(uid={install_result.uid} slug={install_result.slug})")
+    if hook_ok:
+        print("  git hooks: secret-scan pre-commit installed")
+    else:
+        print(f"  git hooks: WARNING - secret-scan pre-commit NOT installed ({hook_msg});"
+              " retrofit with `python .claude/apiary/launch.py scripts/install_git_hooks.py`")
     print(f"  spec:    migrated from apiary {args.spec_note_id} -> new repo scribe")
     print()
     print("next steps:")

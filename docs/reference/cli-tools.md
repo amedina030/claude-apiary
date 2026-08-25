@@ -975,6 +975,50 @@ python docs/check_cli_claims.py --only scribe/notes.py
 
 Exit codes: `0` no drift; `1` drift found; `2` `cli-tools.md` not found.
 
+## scripts/secret_scan.py
+
+Commit-time secret scanner. Stdlib only — no `gitleaks` or other external binary, which would break the portability contract. Reads the **staged** diff (added lines only), so it checks exactly what a commit would introduce, and reports file, line, and which pattern matched. Also blocks filenames that hold credentials by convention (`.env`, `id_rsa`, `*.pem`, ...) even when `git add -f` bypasses `.gitignore`.
+
+Wired up as a pre-commit hook by `scripts/install_repo_hooks.py` (main-apiary) and `scripts/install_git_hooks.py` (every other managed repo).
+
+```bash
+python scripts/secret_scan.py --staged             # what a commit would add
+python scripts/secret_scan.py --path some/dir      # ad-hoc scan of a tree
+python scripts/secret_scan.py --staged --entropy   # + high-entropy strings
+```
+
+| Flag | Description |
+|------|-------------|
+| `--staged` | Scan the staged diff (pre-commit mode) |
+| `--path PATH` | Scan a file or directory tree instead |
+| `--entropy` | Also flag high-entropy strings; noisier, off by default |
+| `--quiet` | Print nothing on a clean scan |
+
+Exit codes: `0` clean; `1` findings; `2` bad arguments or not a git repo.
+
+False positives have three escape hatches, in order of preference: an inline `apiary:allow-secret` comment on the offending line; a regex in the repo-root `.secretsallow` file (matched against both path and line); or `git commit --no-verify`, which skips every pre-commit hook. See [config files](config-files.md#secretsallow).
+
+## scripts/install_git_hooks.py
+
+Install the secret-scan pre-commit hook into the **current** repo. Sibling of `install_repo_hooks.py`, which targets main-apiary's own checkout and installs the combined doc-check + secret-scan hook; this one targets any other apiary-managed repo. The incubator runs it for every newly spawned repo, so use it by hand only to retrofit a repo that predates the feature.
+
+```bash
+python .claude/apiary/launch.py scripts/install_git_hooks.py
+python .claude/apiary/launch.py scripts/install_git_hooks.py --list
+python .claude/apiary/launch.py scripts/install_git_hooks.py --uninstall
+```
+
+| Flag | Description |
+|------|-------------|
+| `--uninstall` | Remove the hook, if we own it |
+| `--list` | Report install status without changing anything |
+| `--force` | Replace an existing non-apiary pre-commit hook |
+| `--repo PATH` | Target repo (default: the git repo containing the working directory) |
+
+Exit codes: `0` success or nothing to do; `1` refused (foreign hook in the way, main-apiary targeted, or not a git repo); `2` bad arguments.
+
+A pre-commit hook that isn't ours is never clobbered — inspect it first, then re-run with `--force`.
+
 ## Test scripts
 
 All tests use `unittest` and are run directly:
