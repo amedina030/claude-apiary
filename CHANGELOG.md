@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### Commit-time secret scanning (2026-08)
+
+Every apiary-managed repo can now block a *commit* that would introduce a
+credential. This complements the push-time gate added in T-2026-241
+(`core/hooks/pre_push_secret_scan.py`), which covers a different half of the
+problem: that one is a Claude Code PreToolUse hook, so it never fires for a
+commit made by hand in a terminal, and never fires at all in a repo with no
+remote — precisely the case that motivated this work. Until now, main-apiary's
+pre-commit hook checked only doc conformance and spawned repos got no git hooks
+at all, leaving `.gitignore` and human diff review as the only protection at
+commit time.
+
+- **`scripts/secret_scan.py`** — stdlib scanner over the *staged* diff (added
+  lines only), reporting file, line, and matched pattern. Covers PEM private
+  keys, AWS/Anthropic/OpenAI/GitHub/Slack/Google keys, credentials in URLs, and
+  a filtered generic `key = value` rule. Also blocks credential-by-convention
+  filenames (`.env`, `id_rsa`, `*.pem`) even when `git add -f` bypasses
+  `.gitignore`. `--path` runs an ad-hoc scan; `--entropy` adds high-entropy
+  matching (off by default — noisy).
+- **`scripts/install_git_hooks.py`** — installs the hook into any managed repo.
+  The incubator wires it into every newly spawned repo; run it by hand to
+  retrofit an existing one. Never clobbers a pre-commit hook it doesn't own.
+- **main-apiary's own pre-commit** now chains doc-check *and* secret-scan.
+  Re-running `scripts/install_repo_hooks.py` upgrades an older hook in place.
+- **Escape hatches:** an inline `apiary:allow-secret` comment, a repo-root
+  `.secretsallow` regex file, or `git commit --no-verify`.
+
+Deliberately **not** built on `gitleaks`: it needs a per-machine binary, so a
+fresh clone would silently skip the check. See `PORTABILITY.md`.
+
+The per-repo hook **fails closed** — if main-apiary can't be reached the commit
+is blocked with instructions, rather than passing unscanned. A security control
+that quietly stops working is worse than one that is loudly broken.
+
 ### Per-repo install migration (2026-05)
 
 Apiary moved from a single global install in `~/.claude/` to a fully

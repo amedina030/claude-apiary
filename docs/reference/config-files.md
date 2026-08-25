@@ -161,3 +161,22 @@ Current session identity. Written by `/startup`, read by hooks. Located at repo 
   "mission": "general"
 }
 ```
+
+## .secretsallow
+
+Per-repo allowlist for `scripts/secret_scan.py`. Lives at the repo root and is
+committed, so the exemption travels with the repo. One regex per line, tested
+against both the repo-relative path and the offending line; blank lines and
+lines starting with `#` are ignored. An invalid regex is skipped with a warning
+rather than failing the scan.
+
+```
+# The scanner's own pattern table and fixtures are credential-shaped by
+# definition; scanning them would block every commit that touches the feature.
+^scripts/secret_scan\.py$
+^scripts/test_secret_scan\.py$
+```
+
+Prefer the inline `apiary:allow-secret` pragma for a one-off line — an entry
+here exempts an entire file from every pattern, which is a wider hole than it
+looks. `git commit --no-verify` remains the last-resort bypass.

@@ -117,7 +117,34 @@ Idempotent — re-running refreshes generated files and updates hash records in 
 python scripts/install_repo_hooks.py
 ```
 
-This installs `.git/hooks/pre-commit` (runs `docs/check.py`) and `.git/hooks/post-merge` (closes scribe TODOs linked to merged runner branches) into main-apiary's own `.git/hooks/`. Repo-local — unrelated to Claude Code hooks.
+This installs `.git/hooks/pre-commit` and `.git/hooks/post-merge` into main-apiary's own `.git/hooks/`. Repo-local — unrelated to Claude Code hooks.
+
+The pre-commit hook chains two checks, and either one failing blocks the commit:
+
+- `docs/check.py` — framework doc conformance.
+- `scripts/secret_scan.py --staged` — credentials in the staged diff (API keys,
+  private keys, credential-shaped assignments), plus filenames that hold secrets
+  by convention (`.env`, `id_rsa`, `*.pem`) even when `git add -f` bypasses
+  `.gitignore`.
+
+The post-merge hook closes scribe TODOs linked to merged runner branches.
+
+If the secret scan flags a false positive, add an inline `apiary:allow-secret`
+comment on that line, or a regex to the repo-root `.secretsallow` file.
+`git commit --no-verify` bypasses every pre-commit hook as a last resort.
+
+### 4b. Install the secret-scan hook in other repos
+
+Newly spawned repos get this automatically from the incubator. Retrofit an
+existing bootstrapped repo by running, from inside it:
+
+```bash
+python .claude/apiary/launch.py scripts/install_git_hooks.py
+```
+
+Side projects get the secret scan alone — they have no framework docs to check.
+An existing pre-commit hook that isn't apiary's is never overwritten; the
+installer refuses and tells you, so inspect it and re-run with `--force`.
 
 ### 5. Start a new Claude Code session
 
@@ -256,6 +283,14 @@ poetry run apiary uninstall --target /path/to/repo --remove-data # also delete t
 ```
 
 This removes `<repo>/.claude/apiary/`, the apiary-installed slash commands, the apiary hook entries from `<repo>/.claude/settings.json`, and the apiary-managed zone in `<repo>/CLAUDE.md`. Without `--remove-data`, the `<main-apiary>/.repos/<slug>/` per-target state stays put for archival.
+
+Repo-local **git** hooks are separate — `apiary uninstall` doesn't touch them,
+because they live in `.git/hooks/` rather than in the managed zone. Remove the
+secret-scan hook explicitly if you want it gone:
+
+```bash
+python .claude/apiary/launch.py scripts/install_git_hooks.py --uninstall
+```
 
 **Everything:**
 

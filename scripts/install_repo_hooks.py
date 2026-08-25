@@ -30,10 +30,18 @@ RUNNER_DIR = REPO_ROOT / "runner"
 def install_pre_commit_hook() -> None:
     """Install ``docs/hooks/pre-commit`` into ``.git/hooks/pre-commit``.
 
-    The hook runs ``docs/check.py`` before commits. Skipped silently if
-    ``.git/hooks/`` doesn't exist (e.g. on a sparse checkout). If a non-
-    apiary pre-commit hook is already present, the installer leaves it
-    alone — the operator should investigate before overwriting.
+    The hook chains two checks before a commit: ``docs/check.py`` (framework
+    doc conformance) and ``scripts/secret_scan.py --staged`` (credentials in
+    the staged diff). Either failing blocks. Skipped silently if
+    ``.git/hooks/`` doesn't exist (e.g. on a sparse checkout).
+
+    Conflict policy: a pre-commit hook that doesn't reference ``docs/check.py``
+    is treated as somebody else's and left alone. An older apiary hook (doc
+    check only) still matches, so re-running upgrades it in place to the
+    combined version.
+
+    Side projects get the secret scan on its own via
+    ``scripts/install_git_hooks.py`` — they have no framework docs to check.
     """
     git_hooks_dir = REPO_ROOT / ".git" / "hooks"
     if not git_hooks_dir.is_dir():
