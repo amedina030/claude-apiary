@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -309,6 +310,56 @@ class RepoRegistryTests(unittest.TestCase):
                 repos, err = repo_registry.load(cfg)
             self.assertEqual(repos, [])
             self.assertIsNotNone(err)
+
+    def test_registry_path_source_build_is_checkout_root(self):
+        # gui/repo_registry.py lives at <checkout>/gui/, so the registry is
+        # <checkout>/.repos/registry.json for a source run.
+        checkout = Path(repo_registry.__file__).resolve().parent.parent
+        self.assertEqual(
+            repo_registry._registry_path(), checkout / ".repos" / "registry.json"
+        )
+
+    def test_registry_path_frozen_anchors_to_checkout_not_bundle(self):
+        # #T-2026-248: the packaged picker's "Recent" rail was always empty
+        # because the registry path was this file's grandparent, which in a
+        # PyInstaller bundle is <bundle>/_internal — no registry there.
+        import unittest.mock as _mock
+        with tempfile.TemporaryDirectory() as tmp:
+            checkout = Path(tmp)
+            (checkout / ".git").mkdir()
+            (checkout / "gui").mkdir()
+            exe = checkout / "dist" / "apiary-gui" / "apiary-gui.exe"
+            exe.parent.mkdir(parents=True)
+            exe.touch()
+            with _mock.patch.object(sys, "frozen", True, create=True),                     _mock.patch.object(sys, "executable", str(exe)):
+                self.assertEqual(
+                    repo_registry._registry_path(),
+                    checkout / ".repos" / "registry.json",
+                )
+
+    def test_load_reads_registry_from_frozen_checkout(self):
+        # End-to-end shape of the bug: a frozen build must surface the repos
+        # registered in the checkout it ships from, not an empty list.
+        import unittest.mock as _mock
+        with tempfile.TemporaryDirectory() as tmp:
+            checkout = Path(tmp)
+            (checkout / ".git").mkdir()
+            (checkout / "gui").mkdir()
+            exe = checkout / "dist" / "apiary-gui" / "apiary-gui.exe"
+            exe.parent.mkdir(parents=True)
+            exe.touch()
+            registered = checkout / "some-repo"
+            registered.mkdir()
+            reg = checkout / ".repos" / "registry.json"
+            reg.parent.mkdir()
+            reg.write_text(
+                json.dumps({"1": {"real_path": str(registered)}}), encoding="utf-8"
+            )
+            cfg = checkout / "unused-legacy.json"
+            with _mock.patch.object(sys, "frozen", True, create=True),                     _mock.patch.object(sys, "executable", str(exe)):
+                repos, err = repo_registry.load(cfg)
+            self.assertIsNone(err)
+            self.assertEqual([r.resolve() for r in repos], [registered.resolve()])
 
 
 if __name__ == "__main__":
