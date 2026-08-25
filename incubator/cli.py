@@ -19,6 +19,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -30,6 +31,7 @@ from pathlib import Path
 # when this CLI runs under the per-repo launcher (mirrors scribe/notes.py:33).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core import install as core_install
+from core.utils import state
 from scripts import install_git_hooks
 
 EXIT_OK = 0
@@ -37,6 +39,7 @@ EXIT_VALIDATION = 2
 EXIT_SPEC_NOT_FOUND = 3
 EXIT_SPAWN_FAILED = 4
 EXIT_MIGRATION_FAILED = 5
+EXIT_VERIFY_FAILED = 6
 
 INCUBATOR_DIR = Path(__file__).resolve().parent
 APIARY_REPO = INCUBATOR_DIR.parent
@@ -197,6 +200,111 @@ def _lay_down_skeleton(target: Path, project_slug: str, project_name: str,
     _write_file(target / "CLAUDE.md", claude_md)
 
 
+def verify_spawn(target: Path) -> list[tuple[str, bool, str]]:
+    """Check that a spawn actually produced a working repo (#T-2026-254).
+
+    Returns ``[(label, passed, detail), ...]``.
+
+    This exists because the failure mode was never a code bug. "Hexworld
+    Rebuilt" was believed to be incubator-created, but the CLI had never run:
+    a session read the skill's intent and hand-authored the files it describes
+    instead of executing it. No .git, no launcher, no registry entry — and
+    nothing surfaced the gap for a month. Prose in a skill can be paraphrased
+    into a no-op; a command that inspects the filesystem cannot.
+    """
+    checks: list[tuple[str, bool, str]] = []
+
+    git_dir = target / ".git"
+    checks.append(("git repo", git_dir.exists(), str(git_dir)))
+
+    launcher = target / ".claude" / "apiary" / "launch.py"
+    checks.append(("apiary launcher", launcher.is_file(), str(launcher)))
+
+    for name in ("pyproject.toml", "CLAUDE.md", ".gitignore"):
+        path = target / name
+        checks.append((name, path.is_file(), str(path)))
+
+    # Registered: main-apiary's registry has an entry whose real_path is this
+    # repo. Deliberately NOT find_state_dir() — that reads <target>/.apiary/
+    # pointer, and a spawned repo carries no local .apiary/ dir at all
+    # (55ae7ba), so it would report every healthy repo as unregistered.
+    try:
+        registry = json.loads(
+            state.registry_path(APIARY_REPO).read_text(encoding="utf-8")
+        )
+        entry = state._find_entry_by_path(registry, target)
+    except (OSError, json.JSONDecodeError, AttributeError) as exc:
+        entry, detail = None, f"registry unreadable: {exc}"
+    else:
+        detail = f"uid={entry[0]}" if entry else "no registry entry for this path"
+    checks.append(("registered with apiary", entry is not None, detail))
+
+    # Commit-time secret scan (#T-2026-253 AC6). The incubator installs this on
+    # spawn; verifying it here is what makes that claim checkable.
+    try:
+        from scripts import install_git_hooks as _igh
+
+        hook = _igh.hook_path(target)
+        installed = _igh._classify(hook) == "ours"
+        hook_detail = str(hook)
+    except Exception as exc:  # noqa: BLE001
+        installed, hook_detail = False, f"check failed: {exc}"
+    checks.append(("secret-scan pre-commit hook", installed, hook_detail))
+
+    return checks
+
+
+def _report_verify(target: Path, checks: list[tuple[str, bool, str]]) -> bool:
+    """Print the check table. Returns True when everything passed."""
+    failed = [c for c in checks if not c[1]]
+    print(f"verify: {target}")
+    for label, passed, detail in checks:
+        mark = "ok  " if passed else "MISS"
+        print(f"  [{mark}] {label:<28} {detail}")
+    if failed:
+        missing = {label for label, _, _ in failed}
+        print()
+        print(f"  {len(failed)} check(s) failed — this target is NOT a complete spawn.")
+        # Only suggest steps that address what actually failed. A blanket
+        # recipe telling you to `git init` a repo that already has .git reads
+        # as boilerplate, and boilerplate gets skimmed past.
+        hints = []
+        if "git repo" in missing:
+            hints.append(f"git init {target}")
+        if {"apiary launcher", "registered with apiary"} & missing:
+            hints.append(f"poetry run apiary install --target {target}")
+        if "secret-scan pre-commit hook" in missing:
+            hints.append(
+                "python .claude/apiary/launch.py scripts/install_git_hooks.py"
+                "   (run from inside the repo)"
+            )
+        skeleton = missing & {"pyproject.toml", "CLAUDE.md", ".gitignore"}
+        if skeleton:
+            hints.append(
+                f"write the missing skeleton file(s) by hand: {', '.join(sorted(skeleton))}"
+                "   (spawn only creates these for a NEW directory; it will not"
+                " adopt an existing one)"
+            )
+        if hints:
+            print("  Recover with:")
+            for hint in hints:
+                print(f"    {hint}")
+        if {"git repo", "apiary launcher", "registered with apiary"} & missing:
+            print()
+            print("  Missing all three of .git / launcher / registration usually means")
+            print("  the spawn CLI never ran, even if /incubator reported success.")
+    return not failed
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    target = Path(args.path).expanduser()
+    if not target.is_dir():
+        print(f"verify: no such directory: {target}", file=sys.stderr)
+        return EXIT_VALIDATION
+    ok = _report_verify(target, verify_spawn(target))
+    return EXIT_OK if ok else EXIT_VERIFY_FAILED
+
+
 def _install_secret_scan_hook(target: Path) -> tuple[bool, str]:
     """Install the commit-time secret-scan pre-commit hook into the new repo.
 
@@ -304,6 +412,16 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         )
         return EXIT_MIGRATION_FAILED
 
+    # Assert the spawn actually produced what it claims before reporting
+    # success (#T-2026-254). Cheap, and it turns "the CLI printed spawned:"
+    # into evidence rather than a promise.
+    checks = verify_spawn(target)
+    if not all(passed for _, passed, _ in checks):
+        print(file=sys.stderr)
+        print("spawn reported success but verification failed:", file=sys.stderr)
+        _report_verify(target, checks)
+        return EXIT_VERIFY_FAILED
+
     print(f"spawned: {target}")
     print(f"  slug:    {project_slug}")
     print(f"  author:  {author}")
@@ -315,6 +433,7 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         print(f"  git hooks: WARNING - secret-scan pre-commit NOT installed ({hook_msg});"
               " retrofit with `python .claude/apiary/launch.py scripts/install_git_hooks.py`")
     print(f"  spec:    migrated from apiary {args.spec_note_id} -> new repo scribe")
+    print("  verify:  all post-spawn checks passed")
     print()
     print("next steps:")
     print(f"  cd {target}")
@@ -363,11 +482,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--session-id",
         help="Optional session ID stamped on the migrated spec note",
     )
+    p_verify = subparsers.add_parser(
+        "verify",
+        help="Check that a target path is a complete, working spawn",
+    )
+    p_verify.add_argument("--path", required=True, help="Target directory to verify")
+
     return parser
 
 
 COMMANDS = {
     "spawn": cmd_spawn,
+    "verify": cmd_verify,
 }
 
 

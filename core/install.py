@@ -338,28 +338,65 @@ def _write_claude_md_zone(target_root: Path, apiary: Path) -> str:
     return hashlib.sha256(rendered_zone.encode("utf-8")).hexdigest()
 
 
-def _ensure_gitignore_entry(target_root: Path) -> None:
-    """Append ``.claude/`` to ``<target>/.gitignore`` if not already present.
+# Written into a freshly-bootstrapped repo's .gitignore. Excludes the same
+# thing a bare `.claude/` would, but one level at a time, because git cannot
+# re-include a file whose PARENT DIRECTORY is excluded. A repo that ships its
+# own slash commands needs that seam: under a blanket `.claude/`, its command
+# files are silently untracked — they work locally and vanish on clone, with
+# no warning from git (#T-2026-258).
+_GITIGNORE_BLOCK = """# Apiary-managed Claude Code install — per-machine, not tracked.
+# Widened stepwise so this repo can re-include slash commands it owns:
+# git can't un-ignore a file inside an ignored directory.
+.claude/*
+!.claude/commands/
+.claude/commands/*
+# To track a command this repo owns, list it here:
+# !.claude/commands/<name>.md
+"""
 
-    Idempotent — preserves existing entries verbatim. If ``.gitignore``
-    doesn't exist, creates it with a single ``.claude/`` line.
+# Forms that already exclude .claude, in either the old blanket spelling or
+# the stepwise one. Presence of any means we leave the file alone.
+_GITIGNORE_PRESENT = (".claude/", "/.claude/", ".claude", "/.claude",
+                      ".claude/*", "/.claude/*")
+
+# The old spelling, which works but offers no way to track repo-owned commands.
+_GITIGNORE_BLANKET = (".claude/", "/.claude/", ".claude", "/.claude")
+
+
+def _ensure_gitignore_entry(target_root: Path) -> None:
+    """Ensure ``<target>/.gitignore`` excludes the apiary-managed ``.claude/``.
+
+    Idempotent, and never rewrites entries that are already there: a repo
+    bootstrapped before #T-2026-258 keeps its blanket ``.claude/`` line rather
+    than having its .gitignore edited underneath it. That form still excludes
+    the right things — it just can't re-include repo-owned commands — so this
+    prints how to widen it instead of doing it unasked.
+
+    A .gitignore with no .claude entry at all (new or pre-existing) gets the
+    stepwise block.
     """
     gi = target_root / ".gitignore"
-    needle = ".claude/"
     if gi.is_file():
         existing = gi.read_text(encoding="utf-8")
-        # Match `.claude/` or `.claude/*` or `/.claude/` — close-enough check
-        # to avoid duplicates without a full glob parser.
-        for line in existing.splitlines():
-            stripped = line.strip()
-            if stripped in (".claude/", "/.claude/", ".claude", "/.claude"):
-                return
+        lines = [line.strip() for line in existing.splitlines()]
+        if any(line in _GITIGNORE_PRESENT for line in lines):
+            if any(line in _GITIGNORE_BLANKET for line in lines):
+                print(
+                    "  .gitignore       : has a blanket `.claude/` entry; slash "
+                    "commands this repo owns cannot be tracked under it.\n"
+                    "                     To allow them, replace that line with:\n"
+                    "                       .claude/*\n"
+                    "                       !.claude/commands/\n"
+                    "                       .claude/commands/*\n"
+                    "                       !.claude/commands/<name>.md"
+                )
+            return
         new_text = existing
         if not new_text.endswith("\n"):
             new_text += "\n"
-        new_text += needle + "\n"
+        new_text += "\n" + _GITIGNORE_BLOCK
     else:
-        new_text = needle + "\n"
+        new_text = _GITIGNORE_BLOCK
     gi.write_text(new_text, encoding="utf-8")
 
 
