@@ -20,13 +20,9 @@
 })(typeof self !== "undefined" ? self : this, function () {
   const PROMPT_MAX_OPTIONS = 9;
   const PROMPT_SCAN_BACK_LINES = 6;
-  // How far above a navigation footer we'll hunt for the menu's first option in
-  // the glyph-less fallback pass.
-  const FOOTER_LOOKBACK_LINES = 30;
   // The navigation footer claude prints under arrow-navigable menus is the
   // strongest menu-specific signal we have, so it gates the looser detection
-  // paths (per-option descriptions, and the glyph-less shape) against false
-  // positives. But a genuine footer is a STANDALONE hint line, not prose that
+  // path (per-option descriptions) against false positives. But a genuine footer is a STANDALONE hint line, not prose that
   // merely mentions one of these phrases — claude discussing a menu in chat
   // ("the footer reads 'Enter to select'") rendered a numbered list above it
   // into a false menu. So require a footer SHAPE: either the arrow-navigation
@@ -158,34 +154,6 @@
     return false;
   }
 
-  // The footer must be the FIRST non-blank line after the option block. A real
-  // menu prints its footer immediately under the options (intervening blank
-  // lines are fine); a numbered list in prose has ordinary text there instead.
-  // Checking the first non-blank line — rather than a fixed +N window — rejects
-  // "one line of prose, then a footer" without breaking a max-option menu whose
-  // parse loop stops before reaching the footer line.
-  function footerFollowsOptions(lines, lastOptionIdx) {
-    for (let k = lastOptionIdx + 1; k < lines.length; k++) {
-      if (lines[k].trim() === "") continue;
-      return isNavFooterLine(lines[k]);
-    }
-    return false;
-  }
-
-  // Locate the first option line of a glyph-less menu: when claude omits the
-  // selector glyph entirely, the only reliable anchor is the navigation footer,
-  // so we find it and walk up to the menu's "1." line. Returns the anchor index
-  // or -1.
-  function findGlyphlessAnchor(lines) {
-    for (let f = lines.length - 1; f >= 0; f--) {
-      if (!isNavFooterLine(lines[f])) continue;
-      for (let k = f - 1; k >= 0 && k >= f - FOOTER_LOOKBACK_LINES; k--) {
-        if (/^\s*1\.\s+\S/.test(lines[k])) return k;
-      }
-    }
-    return -1;
-  }
-
   function buildResult(lines, i, parsed) {
     const { options, lastIdx } = parsed;
     let question = "";
@@ -247,25 +215,15 @@
       return buildResult(lines, i, parsed);
     }
 
-    // Pass 2 — glyph-less menu (AskUserQuestion). No glyph means no per-row
-    // anchor, so we key off the navigation footer (a strong menu-specific
-    // signal) and walk up to the "1." line. Always footer-gated, so ordinary
-    // numbered output can't masquerade as a menu.
-    const anchor = findGlyphlessAnchor(lines);
-    if (anchor >= 0) {
-      const parsed = parseOptionsFrom(lines, anchor, highlight);
-      // Proximity gate: the nav footer must be the first non-blank line after
-      // the option block. A real menu always prints its footer right under the
-      // options; the claude TUI renders the whole conversation — including the
-      // assistant's own chat messages — into this same buffer, so a stray
-      // "1./2./3." numbered list in prose would otherwise be anchored to a
-      // footer-shaped line elsewhere and mis-rendered as a menu. Such prose has
-      // ordinary text between the list and any footer, so it fails here.
-      if (parsed &&
-          footerFollowsOptions(lines, parsed.options[parsed.options.length - 1].lineIdx)) {
-        return buildResult(lines, anchor, parsed);
-      }
-    }
+    // No second pass. A glyph-less menu is an AskUserQuestion card, and those
+    // are sourced from the structured tool_use record in the transcript
+    // (gui/ask_prompt.py) rather than scraped — runDetect() already yields to
+    // that banner, and GUI sessions are told not to use the tool at all
+    // (core/hooks/startup_prompt_hook.py). The footer-anchored fallback that
+    // used to catch them could not distinguish a real card from an ordinary
+    // numbered list that happened to sit above a nav-hint line, so dropping it
+    // removes a class of false banners rather than any working detection
+    // (#T-2026-252).
     return null;
   }
 

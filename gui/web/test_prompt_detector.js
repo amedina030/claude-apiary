@@ -224,25 +224,34 @@ Some heading
     another description
 `);
 
-test("AskUserQuestion card: parses all options with descriptions attached", () => {
-  const r = detectPrompt(ASKUSERQUESTION_CARD);
-  assert.ok(r, "should detect the card");
-  assert.match(r.question, /How did it just appear in your GUI\?$/);
-  assert.equal(r.options.length, 5, "1-3 plus Type-something and Chat-about-this");
-  // Glyph-less shape: selection lives in cell attributes the buffer drops, so
-  // no option is marked selected (clicking drives by number regardless).
-  assert.equal(r.options[0].selected, false);
-  assert.equal(r.options[0].text, "Terminal card, arrow keys");
-  assert.match(r.options[0].description, /arrow-key selection card/);
-  assert.match(r.options[1].description, /clickable buttons/);
-  assert.equal(r.options[3].text, "Type something.");
-  assert.equal(r.options[3].description, "", "no sub-line → empty description");
-  assert.equal(r.options[4].text, "Chat about this");
+test("AskUserQuestion card is no longer scraped (transcript path owns it)", () => {
+  // #T-2026-252: the glyph-less pass that used to catch this was removed. The
+  // banner for a real card is built from the tool_use record (gui/ask_prompt.py),
+  // which sees the whole card even when it overflows the pty viewport — the
+  // scrape never could. Kept as a fixture so the contract is explicit.
+  assert.equal(detectPrompt(ASKUSERQUESTION_CARD), null);
 });
 
 test("descriptions without a nav footer are rejected (false-positive guard)", () => {
   const r = detectPrompt(DESCRIPTIONS_NO_FOOTER);
   assert.equal(r, null);
+});
+
+// The description path is the one remaining loose acceptance, and its footer
+// gate is what keeps indented prose under a glyphed line from parsing as a
+// rich menu. DESCRIPTIONS_NO_FOOTER above is glyph-LESS, so since #T-2026-252
+// it fails for the wrong reason (no glyph) and no longer reaches the gate.
+// This glyphed variant does.
+const GLYPHED_DESCRIPTIONS_NO_FOOTER = linesOf(`
+Some heading
+❯ 1. Option one
+    a description line
+  2. Option two
+    another description
+`);
+
+test("glyphed menu with descriptions but no footer is still rejected", () => {
+  assert.equal(detectPrompt(GLYPHED_DESCRIPTIONS_NO_FOOTER), null);
 });
 
 // Real failure captured live (#H-2026-241 verify): a glyphed AskUserQuestion
@@ -305,18 +314,9 @@ This is the Phase 2 re-verify test — does the prompt banner render this card?
 Enter to select · ↑/↓ to navigate · Esc to cancel
 `);
 
-test("column-0 card: option numbers flush at col 0 still parse every option", () => {
-  const r = detectPrompt(ASKUSERQUESTION_COL0);
-  assert.ok(r, "must detect a card whose option numbers sit at column 0");
-  assert.equal(r.options.length, 5, "1-3 plus Type-something and Chat-about-this");
-  assert.equal(r.options[0].text, "Renders perfectly");
-  assert.match(r.options[0].description, /no fallback toast\.$/);
-  assert.equal(r.options[1].text, "Card shows, option 1 not highlighted");
-  assert.match(r.options[1].description, /wrong option\.$/);
-  assert.equal(r.options[2].text, "Truncated option list");
-  assert.equal(r.options[3].text, "Type something.");
-  assert.equal(r.options[3].description, "");
-  assert.equal(r.options[4].text, "Chat about this");
+test("column-0 card is no longer scraped either", () => {
+  // Same removal as above — column-0 numbering is still a glyph-less card.
+  assert.equal(detectPrompt(ASKUSERQUESTION_COL0), null);
 });
 
 // A description-less option followed by column-0 TUI chrome (the input
@@ -362,41 +362,49 @@ Which one?
 Enter to select · ↑/↓ to navigate · Esc to cancel
 `);
 
-test("glyph-less compact menu (footer, no descriptions) is detected", () => {
-  const r = detectPrompt(GLYPHLESS_COMPACT);
-  assert.ok(r, "footer-anchored pass should catch it");
-  assert.equal(r.question, "Which one?");
-  assert.equal(r.options.length, 3);
-  assert.equal(r.options[2].text, "Third choice");
+test("glyph-less compact menu is not scraped", () => {
+  // The footer-anchored pass is gone: a footer under a numbered list is not
+  // enough to call it a menu (see the bare-list case below, which is
+  // byte-identical to this one).
+  assert.equal(detectPrompt(GLYPHLESS_COMPACT), null);
 });
 
-// Phase 2: cell-attribute highlight hint. GLYPHLESS_COMPACT option lines are at
-// buffer indices 3,4,5 (leading blank line shifts everything by one). The
-// browser passes the highlighted row index derived from xterm cell attributes;
-// here row 4 = the second option.
-test("highlight hint marks the cursor row on a glyph-less menu", () => {
-  const r = detectPrompt(GLYPHLESS_COMPACT, { highlightedRows: [4] });
+// Cell-attribute highlight hint. The browser derives it from xterm cell
+// attributes and the arrow driver re-reads it after stepping; it is the verify
+// half of verify-then-commit. Exercised on a GLYPHED menu now that the
+// glyph-less pass is gone — option rows sit at buffer indices 2,3,4 (the
+// leading blank line shifts everything by one).
+const GLYPHED_HIGHLIGHT = linesOf(`
+Pick one:
+❯ 1. First choice
+  2. Second choice
+  3. Third choice
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`);
+
+test("highlight hint marks rows below the glyph anchor", () => {
+  const r = detectPrompt(GLYPHED_HIGHLIGHT, { highlightedRows: [4] });
   assert.ok(r);
-  assert.deepEqual(
-    r.options.map((o) => o.selected),
-    [false, true, false],
-    "only the highlighted row (option 2) is selected"
-  );
+  // Both signals are honored: the glyph marks option 1, the hint marks option 3.
+  assert.deepEqual(r.options.map((o) => o.selected), [true, false, true]);
   // lineIdx is exposed so the arrow driver can re-verify after stepping.
-  assert.deepEqual(r.options.map((o) => o.lineIdx), [3, 4, 5]);
+  assert.deepEqual(r.options.map((o) => o.lineIdx), [2, 3, 4]);
+  // Two rows claiming selection is ambiguous, and the driver must refuse to
+  // commit rather than guess — that guard is what makes a miscount safe.
+  assert.equal(highlightedOptionIndex(r.options), -1);
 });
 
 test("highlight hint accepts a Set and survives a non-option index", () => {
-  // Index 6 is the footer, not an option — must be ignored, not crash.
-  const r = detectPrompt(GLYPHLESS_COMPACT, { highlightedRows: new Set([5, 6]) });
+  // Index 5 is the footer, not an option — must be ignored, not crash.
+  const r = detectPrompt(GLYPHED_HIGHLIGHT, { highlightedRows: new Set([5]) });
   assert.ok(r);
-  assert.deepEqual(r.options.map((o) => o.selected), [false, false, true]);
+  assert.deepEqual(r.options.map((o) => o.selected), [true, false, false]);
+  assert.equal(highlightedOptionIndex(r.options), 0);
 });
 
-test("glyph-less menu without a highlight hint leaves all rows unselected", () => {
-  // Back-compat: omitting the hint preserves pre-Phase-2 behavior.
-  const r = detectPrompt(GLYPHLESS_COMPACT);
-  assert.deepEqual(r.options.map((o) => o.selected), [false, false, false]);
+test("omitting the highlight hint leaves glyph selection alone", () => {
+  const r = detectPrompt(GLYPHED_HIGHLIGHT);
+  assert.deepEqual(r.options.map((o) => o.selected), [true, false, false]);
 });
 
 test("glyph selection still wins when no highlight hint is supplied", () => {
@@ -476,14 +484,12 @@ test("markdown blockquote ordered list is not a menu", () => {
   assert.equal(detectPrompt(BLOCKQUOTE_LIST), null);
 });
 
-// KNOWN LIMITATION (do not "fix" by loosening real-menu detection): a bare
-// numbered list immediately followed by the EXACT navigation footer is
-// byte-for-byte identical to a real compact menu (see GLYPHLESS_COMPACT) — there
-// is no scrape-level signal that distinguishes claude QUOTING the footer from
-// the TUI PRINTING it. This is the architectural reason the AskUserQuestion
-// banner is sourced from the transcript tool_use record, not the scrape; the
-// scrape path here is only a fallback for non-AskUserQuestion menus. Asserting
-// the current (unavoidable) behavior so a future change to it is deliberate.
+// Was a KNOWN false positive: a bare numbered list immediately followed by the
+// EXACT navigation footer is byte-for-byte identical to a real compact
+// glyph-less menu, and no scrape-level signal distinguishes claude QUOTING the
+// footer from the TUI PRINTING it. Removing the glyph-less pass (#T-2026-252)
+// closes it — the ambiguity only ever existed for cards the transcript path now
+// owns outright. A real (glyphed) menu is unaffected.
 const BARE_LIST_EXACT_FOOTER = linesOf(`
 The compact menu looks like this:
 1. First choice
@@ -492,10 +498,8 @@ The compact menu looks like this:
 Enter to select · ↑/↓ to navigate · Esc to cancel
 `);
 
-test("bare list + exact footer is indistinguishable from a real menu (known)", () => {
-  const r = detectPrompt(BARE_LIST_EXACT_FOOTER);
-  assert.ok(r, "scrape cannot tell this from GLYPHLESS_COMPACT — transcript path is the real defense");
-  assert.equal(r.options.length, 3);
+test("bare list + exact footer is no longer mistaken for a menu", () => {
+  assert.equal(detectPrompt(BARE_LIST_EXACT_FOOTER), null);
 });
 
 // --- arrow-driver core ----------------------------------------------------
