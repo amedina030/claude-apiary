@@ -289,6 +289,24 @@ Exit codes: `0` success; `2` validation error (bad path); `3` spec note not foun
 
 Templates that get written into the new repo live under `incubator/templates/` (`gitignore.tmpl`, `pyproject.toml.tmpl`, `CLAUDE.md.tmpl`).
 
+## incubator/cli.py verify
+
+Check that a target path is a complete, working spawn. Prints a pass/miss table and exits non-zero if anything is missing.
+
+```bash
+python .claude/apiary/launch.py incubator/cli.py verify --path /abs/path/to/repo
+```
+
+| Flag | Description |
+|------|-------------|
+| `--path PATH` | Target directory to verify (required) |
+
+Checks: `.git/`, `.claude/apiary/launch.py`, `pyproject.toml`, `CLAUDE.md`, `.gitignore`, a registry entry in main-apiary whose `real_path` is this repo, and the secret-scan pre-commit hook.
+
+Exit codes: `0` all checks pass; `2` no such directory; `6` one or more checks failed.
+
+`spawn` runs the same checks before reporting success, so it also exits `6` when a freshly-created repo fails them.
+
 ## refiner/round_counter.py
 
 Track refinement round counts per session. Used by the `/refine` skill to enforce the 15-round soft limit.

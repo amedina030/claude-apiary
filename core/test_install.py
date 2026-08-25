@@ -97,9 +97,13 @@ class InstallTests(unittest.TestCase):
         gi = self.target / ".gitignore"
         gi.write_text("*.pyc\n", encoding="utf-8")
         install_mod.install(self.target, apiary_repo=self.apiary)
-        text = gi.read_text(encoding="utf-8")
-        self.assertIn(".claude/", text)
-        self.assertIn("*.pyc", text)  # preserved
+        lines = [ln.strip() for ln in gi.read_text(encoding="utf-8").splitlines()]
+        # Stepwise, not blanket: a repo must be able to re-include its own
+        # slash commands, and git can't un-ignore inside an ignored dir.
+        self.assertIn(".claude/*", lines)
+        self.assertIn("!.claude/commands/", lines)
+        self.assertIn(".claude/commands/*", lines)
+        self.assertIn("*.pyc", lines)  # preserved
 
     def test_gitignore_idempotent_when_already_present(self):
         gi = self.target / ".gitignore"
@@ -167,3 +171,99 @@ class InstallTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GitignoreDotClaudeTests(unittest.TestCase):
+    """#T-2026-258 — the exclusion must leave room for repo-owned commands.
+
+    The ticket blamed incubator/templates/gitignore.tmpl, but that file has
+    never contained a .claude entry; core/install.py writes it, so this
+    affects every bootstrapped repo rather than only incubated ones.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = Path(self._tmp.name)
+
+    def _gitignore(self):
+        return (self.repo / ".gitignore").read_text(encoding="utf-8")
+
+    def test_creates_stepwise_block_when_no_gitignore(self):
+        install_mod._ensure_gitignore_entry(self.repo)
+        lines = [ln.strip() for ln in self._gitignore().splitlines()]
+        self.assertIn(".claude/*", lines)
+        self.assertIn("!.claude/commands/", lines)
+
+    def test_is_idempotent_on_the_stepwise_block(self):
+        install_mod._ensure_gitignore_entry(self.repo)
+        first = self._gitignore()
+        install_mod._ensure_gitignore_entry(self.repo)
+        self.assertEqual(self._gitignore(), first, "second run must not duplicate")
+
+    def test_leaves_a_pre_existing_blanket_entry_untouched(self):
+        # A repo bootstrapped before this change keeps its file byte-for-byte;
+        # rewriting somebody's .gitignore unasked is worse than the limitation.
+        original = "*.pyc\n.claude/\n"
+        (self.repo / ".gitignore").write_text(original, encoding="utf-8")
+        install_mod._ensure_gitignore_entry(self.repo)
+        self.assertEqual(self._gitignore(), original)
+
+
+@unittest.skipIf(shutil.which("git") is None, "git not on PATH")
+class GitignoreSemanticsTests(unittest.TestCase):
+    """Ask git itself whether the block does what it claims.
+
+    The stepwise widening is easy to get subtly wrong by reading, so these
+    assert against `git check-ignore` rather than against the text.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = Path(self._tmp.name)
+        subprocess.run(["git", "init", "-q"], cwd=str(self.repo), check=False)
+        install_mod._ensure_gitignore_entry(self.repo)
+        (self.repo / ".claude" / "commands").mkdir(parents=True)
+
+    def _ignored(self, rel: str) -> bool:
+        proc = subprocess.run(
+            ["git", "check-ignore", "-q", rel],
+            cwd=str(self.repo), capture_output=True, check=False,
+        )
+        return proc.returncode == 0
+
+    def test_apiary_machinery_is_ignored(self):
+        (self.repo / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+        self.assertTrue(self._ignored(".claude/settings.json"))
+
+    def test_commands_are_ignored_by_default(self):
+        # Apiary installs its own commands here; they stay untracked unless
+        # the repo owner opts a specific file back in.
+        (self.repo / ".claude" / "commands" / "apiary-note.md").write_text("x", encoding="utf-8")
+        self.assertTrue(self._ignored(".claude/commands/apiary-note.md"))
+
+    def test_a_named_command_can_be_re_included(self):
+        # The whole point of the stepwise form. Under a blanket `.claude/`
+        # this re-include is inert, because git will not descend into an
+        # ignored directory to reconsider a file.
+        gi = self.repo / ".gitignore"
+        gi.write_text(
+            gi.read_text(encoding="utf-8") + "!.claude/commands/mine.md\n",
+            encoding="utf-8",
+        )
+        (self.repo / ".claude" / "commands" / "mine.md").write_text("x", encoding="utf-8")
+        self.assertFalse(self._ignored(".claude/commands/mine.md"))
+
+    def test_blanket_form_cannot_re_include(self):
+        # Pins the reason the stepwise form exists, so nobody "simplifies" it
+        # back to one line.
+        gi = self.repo / ".gitignore"
+        gi.write_text(".claude/\n!.claude/commands/mine.md\n", encoding="utf-8")
+        (self.repo / ".claude" / "commands" / "mine.md").write_text("x", encoding="utf-8")
+        self.assertTrue(
+            self._ignored(".claude/commands/mine.md"),
+            "a blanket .claude/ should defeat the re-include — if this fails, "
+            "git's semantics changed and the stepwise block may be unnecessary",
+        )
+

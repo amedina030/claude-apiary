@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import re
 import subprocess
 import sys
@@ -21,6 +22,55 @@ from core import install as install_mod
 # Reuse the throwaway-apiary fixture from the install tests so the end-to-end
 # spawn test never touches the real registry under <apiary>/.repos.
 from core.test_install import _make_fake_apiary, _git_init
+from scripts import install_git_hooks
+
+
+def _minimal_apiary(root: Path) -> Path:
+    """An apiary root with just a registry — enough for the post-spawn checks.
+
+    Cheaper than _make_fake_apiary's copytree, and sufficient wherever
+    core_install.install is mocked: the only thing cli.py reads from
+    APIARY_REPO during verification is .repos/registry.json.
+    """
+    apiary = root / "apiary_min"
+    (apiary / ".repos").mkdir(parents=True, exist_ok=True)
+    (apiary / ".repos" / "registry.json").write_text("{}", encoding="utf-8")
+    return apiary
+
+
+def _fake_install(apiary: Path):
+    """A stand-in for core_install.install that also leaves behind what a real
+    one does — the launcher, and a registry entry for the target.
+
+    The old return_value version touched no filesystem, so the fixture
+    described a repo that could not exist: no launcher, nothing registered.
+    Harmless while nothing looked, and immediately wrong once spawn began
+    verifying its own output (#T-2026-254). Note it writes NO local .apiary/
+    dir: spawned repos deliberately carry none (55ae7ba), and registration
+    lives in main-apiary's registry instead.
+    """
+
+    def _install(target, apiary_repo=None, **kwargs):
+        target = Path(target)
+        launcher = target / ".claude" / "apiary" / "launch.py"
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        launcher.write_text("# stub launcher\n", encoding="utf-8")
+
+        result = _fake_install_result(target)
+        reg_path = Path(apiary) / ".repos" / "registry.json"
+        reg_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            registry = json.loads(reg_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            registry = {}
+        registry[str(result.uid)] = {
+            "name": result.name,
+            "real_path": str(Path(target).resolve()),
+        }
+        reg_path.write_text(json.dumps(registry), encoding="utf-8")
+        return result
+
+    return _install
 
 
 def _fake_install_result(target: Path) -> install_mod.InstallResult:
@@ -148,10 +198,12 @@ class SkeletonLayoutTests(unittest.TestCase):
                 args=[], returncode=0, stdout="Marked C-2026-999 done.\n", stderr=""
             )
 
+            apiary = _minimal_apiary(Path(td))
             with mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)), \
                  mock.patch.object(cli, "_run_scribe", side_effect=[fake_add, fake_done]), \
+                 mock.patch.object(cli, "APIARY_REPO", apiary), \
                  mock.patch.object(cli.core_install, "install",
-                                   return_value=_fake_install_result(target)):
+                                   side_effect=_fake_install(apiary)):
                 rc = cli.cmd_spawn(args)
 
             self.assertEqual(rc, cli.EXIT_OK, msg="spawn should succeed")
@@ -201,9 +253,11 @@ class SkeletonLayoutTests(unittest.TestCase):
             fake_add_fail = subprocess.CompletedProcess(
                 args=[], returncode=1, stdout="", stderr="scribe blew up"
             )
+            apiary = _minimal_apiary(Path(td))
             with mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)), \
+                 mock.patch.object(cli, "APIARY_REPO", apiary), \
                  mock.patch.object(cli.core_install, "install",
-                                   return_value=_fake_install_result(target)), \
+                                   side_effect=_fake_install(apiary)), \
                  mock.patch.object(cli, "_run_scribe", return_value=fake_add_fail), \
                  mock.patch.object(sys, "stderr", new_callable=io.StringIO):
                 rc = cli.cmd_spawn(args)
@@ -342,3 +396,105 @@ class SpawnEndToEndTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VerifySpawnTests(unittest.TestCase):
+    """#T-2026-254 — assert a spawn happened instead of trusting that it did.
+
+    The failure this guards against was not a code bug: the CLI worked, but a
+    session paraphrased the skill instead of running it, hand-authored the
+    files the skill describes, and reported success. Nothing noticed for a
+    month. These pin the shape of that repo as detectably incomplete.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.target = self.root / "proj"
+        self.target.mkdir()
+        self.apiary = _minimal_apiary(self.root)
+
+    def _labels(self, passed: bool):
+        checks = cli.verify_spawn(self.target)
+        return {label for label, ok, _ in checks if ok is passed}
+
+    def _complete_spawn(self):
+        """Lay down everything a real spawn leaves behind."""
+        _git_init(self.target)
+        launcher = self.target / ".claude" / "apiary" / "launch.py"
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        launcher.write_text("# stub\n", encoding="utf-8")
+        for name in ("pyproject.toml", "CLAUDE.md", ".gitignore"):
+            (self.target / name).write_text("x\n", encoding="utf-8")
+        reg = self.apiary / ".repos" / "registry.json"
+        reg.write_text(
+            json.dumps({"7": {"name": "proj", "real_path": str(self.target.resolve())}}),
+            encoding="utf-8",
+        )
+        install_git_hooks.install(self.target)
+
+    def test_hand_authored_directory_fails_the_checks(self):
+        # The Hexworld Rebuilt shape: docs written by hand, CLI never run.
+        (self.target / "README.md").write_text("# proj\n", encoding="utf-8")
+        (self.target / "CLAUDE.md").write_text("# ctx\n", encoding="utf-8")
+        with mock.patch.object(cli, "APIARY_REPO", self.apiary):
+            failed = self._labels(passed=False)
+        self.assertIn("git repo", failed)
+        self.assertIn("apiary launcher", failed)
+        self.assertIn("registered with apiary", failed)
+
+    def test_complete_spawn_passes_every_check(self):
+        self._complete_spawn()
+        with mock.patch.object(cli, "APIARY_REPO", self.apiary):
+            checks = cli.verify_spawn(self.target)
+        failed = [(label, detail) for label, ok, detail in checks if not ok]
+        self.assertEqual(failed, [], f"unexpected failures: {failed}")
+
+    def test_secret_scan_hook_is_part_of_the_contract(self):
+        # Closes the acceptance criterion left open in #T-2026-253: the
+        # incubator claims it installs this hook, and now that claim is checked.
+        self._complete_spawn()
+        install_git_hooks.main(["--repo", str(self.target), "--uninstall"])
+        with mock.patch.object(cli, "APIARY_REPO", self.apiary):
+            failed = self._labels(passed=False)
+        self.assertIn("secret-scan pre-commit hook", failed)
+
+    def test_unregistered_repo_is_detected(self):
+        self._complete_spawn()
+        (self.apiary / ".repos" / "registry.json").write_text("{}", encoding="utf-8")
+        with mock.patch.object(cli, "APIARY_REPO", self.apiary):
+            failed = self._labels(passed=False)
+        self.assertIn("registered with apiary", failed)
+
+    def test_unreadable_registry_reports_rather_than_raising(self):
+        self._complete_spawn()
+        (self.apiary / ".repos" / "registry.json").write_text("{not json", encoding="utf-8")
+        with mock.patch.object(cli, "APIARY_REPO", self.apiary):
+            checks = cli.verify_spawn(self.target)
+        detail = next(d for label, _, d in checks if label == "registered with apiary")
+        self.assertIn("registry unreadable", detail)
+
+
+class VerifyCommandTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+
+    def test_missing_directory_is_a_validation_error(self):
+        args = argparse.Namespace(path=str(self.root / "nope"))
+        self.assertEqual(cli.cmd_verify(args), cli.EXIT_VALIDATION)
+
+    def test_incomplete_target_exits_verify_failed(self):
+        target = self.root / "proj"
+        target.mkdir()
+        args = argparse.Namespace(path=str(target))
+        with mock.patch.object(sys, "stdout", new_callable=io.StringIO):
+            rc = cli.cmd_verify(args)
+        self.assertEqual(rc, cli.EXIT_VERIFY_FAILED)
+
+    def test_verify_is_a_registered_subcommand(self):
+        # Guards the skill's Step 5 invocation from silently 404-ing.
+        self.assertIn("verify", cli.COMMANDS)
+

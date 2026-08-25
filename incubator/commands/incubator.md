@@ -73,10 +73,35 @@ Exit codes from the CLI:
 - `3` — spec note not found
 - `4` — spawn failure (rolled back automatically)
 - `5` — partial success (repo created, migration failed; user must recover manually)
+- `6` — the repo was created but failed its own post-spawn checks
 
 ---
 
-## Step 5: Hand off
+## Step 5: Verify the spawn actually happened
+
+**Run this. Do not skip it, and do not report success without its output.**
+
+```bash
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" incubator/cli.py verify \
+  --path "<absolute target path>"
+```
+
+Why this step exists: the CLI works, but this skill has been silently no-opped
+before. A session read the steps above, hand-authored the files they describe,
+never called the CLI, and reported success. The result had no `.git`, no
+launcher, and no registry entry — and nobody noticed for a month. Prose can be
+paraphrased into a no-op; a command that inspects the filesystem cannot.
+
+`spawn` runs the same checks itself and exits `6` if they fail, so a clean
+`spawn` already implies a clean `verify`. Running it explicitly is what proves
+the spawn path executed at all.
+
+If any check reports `MISS`, surface the output verbatim and stop. The command
+prints the recovery commands; do not improvise a repair.
+
+---
+
+## Step 6: Hand off
 
 On success, print the new repo path to the user and suggest next steps:
 
