@@ -63,8 +63,14 @@ def _user_data_base() -> Path:
     return Path(xdg) if xdg else Path.home() / ".local" / "share"
 
 
-def _main_apiary() -> Path:
-    """Resolve the main-apiary root that GUI state hangs off of."""
+def main_apiary() -> Path:
+    """Resolve the main-apiary root that per-repo apiary state hangs off of.
+
+    Public because it is the single source of truth for source-vs-frozen
+    root resolution: ``repo_registry`` needs the same answer, and a second
+    copy of the logic is exactly how the packaged build ended up reading
+    ``<bundle>/.repos/registry.json`` (#T-2026-248).
+    """
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).resolve().parent
         found = _find_apiary_checkout(exe_dir)
@@ -76,7 +82,7 @@ def state_dir() -> Path:
     """Per-profile state directory under ``<main-apiary>/.apiary/gui/``."""
     p = profile()
     name = f"apiary_gui_{p}" if p else "apiary_gui"
-    return _main_apiary() / ".apiary" / "gui" / name
+    return main_apiary() / ".apiary" / "gui" / name
 
 
 def mutex_name() -> str:

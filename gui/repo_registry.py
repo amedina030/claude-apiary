@@ -14,22 +14,23 @@ GUI-only filter file.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Optional
 
-# Resolve main-apiary the same way gui/paths does — gui/ lives at
-# <main-apiary>/gui/, so the parent of this file's parent is main-apiary.
-_MAIN_APIARY = Path(__file__).resolve().parent.parent
+from gui.paths import main_apiary
 
 # Kept for backwards-compatible import paths in tests; a path that doesn't
 # exist on a fresh machine. Callers shouldn't rely on its filesystem
 # behavior — it's never read post-migration.
-CONFIG_PATH = _MAIN_APIARY / ".apiary" / "gui" / "repo_registry.json"
+CONFIG_PATH = main_apiary() / ".apiary" / "gui" / "repo_registry.json"
 
 
 def _registry_path() -> Path:
-    return _MAIN_APIARY / ".repos" / "registry.json"
+    # Resolved per call, not at import: main_apiary() answers differently
+    # for source and frozen builds, and a module-level constant here used
+    # to bake in this file's grandparent — which in a PyInstaller bundle is
+    # <bundle>/_internal, where no registry exists (#T-2026-248).
+    return main_apiary() / ".repos" / "registry.json"
 
 
 def load(config_path: Path = CONFIG_PATH) -> tuple[list[Path], Optional[str]]:
