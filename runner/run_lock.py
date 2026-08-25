@@ -83,10 +83,58 @@ def read(uuid: str) -> dict | None:
     return None
 
 
+def _pid_alive_windows(pid: int) -> bool:
+    """Windows liveness probe.
+
+    ``os.kill(pid, 0)`` must NOT be used here: on Windows ``CTRL_C_EVENT``
+    is 0, so CPython routes signal 0 to ``GenerateConsoleCtrlEvent`` rather
+    than to a liveness check. For any PID that is not a console process
+    group leader that call fails with ERROR_INVALID_PARAMETER (87), making
+    every live peer run look dead — and when it does succeed it delivers a
+    real Ctrl+C to that process group. Query the process object instead.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    SYNCHRONIZE = 0x00100000
+    WAIT_OBJECT_0 = 0x0
+    ERROR_ACCESS_DENIED = 5
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    # Handles are pointer-sized; without explicit restype ctypes truncates
+    # them to a C int on 64-bit and CloseHandle then fails.
+    k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    k32.WaitForSingleObject.restype = wintypes.DWORD
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    k32.CloseHandle.restype = wintypes.BOOL
+
+    handle = k32.OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid
+    )
+    if not handle:
+        # A process owned by another user/session exists but cannot be
+        # opened; access-denied is positive evidence that it is alive.
+        return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+    try:
+        # Signalled means the process object has exited. Anything else
+        # (WAIT_TIMEOUT) means it is still running.
+        return k32.WaitForSingleObject(handle, 0) != WAIT_OBJECT_0
+    finally:
+        k32.CloseHandle(handle)
+
+
 def _pid_alive(pid: int) -> bool:
     """Check whether a process with the given PID exists."""
     if not isinstance(pid, int) or pid <= 0:
         return False
+    if os.name == "nt":
+        try:
+            return _pid_alive_windows(pid)
+        except OSError:
+            return False
     try:
         os.kill(pid, 0)
         return True

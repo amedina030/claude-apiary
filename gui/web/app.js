@@ -350,11 +350,14 @@
 
   function humanizeModel(id) {
     if (!id) return "—";
-    // claude-opus-4-7 → opus 4.7 ; claude-sonnet-4-6-1m → sonnet 4.6 (1m)
-    const m = id.match(/claude-([a-z]+)-(\d+)-(\d+)(?:\[(\w+)\])?/i);
+    // claude-opus-4-7 → opus 4.7 ; claude-opus-4-8[1m] → opus 4.8 (1m)
+    // Single-segment versions (claude-fable-5, claude-sonnet-5) → fable 5
+    // The (?!\d) keeps a date suffix (claude-haiku-4-5-20251001) out of the minor.
+    const m = id.match(/claude-([a-z]+)-(\d+)(?:-(\d{1,2})(?!\d))?(?:\[(\w+)\])?/i);
     if (!m) return id;
     const variant = m[4] ? ` (${m[4]})` : "";
-    return `${m[1]} ${m[2]}.${m[3]}${variant}`;
+    const version = m[3] ? `${m[2]}.${m[3]}` : m[2];
+    return `${m[1]} ${version}${variant}`;
   }
 
   function setModel(model) {
@@ -2434,7 +2437,7 @@
     return h + "h" + m + "m";
   }
   function shortModel(model) {
-    const m = /claude-(opus|sonnet|haiku)/i.exec(model || "");
+    const m = /claude-(fable|opus|sonnet|haiku)/i.exec(model || "");
     return m ? m[1].toLowerCase() : (model || "").slice(0, 8);
   }
   function agentTokenTotal(a) {

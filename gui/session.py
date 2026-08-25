@@ -42,22 +42,37 @@ def _claude_code_project_key(cwd: Path) -> str:
 
     Claude Code stores each session's JSONL under
     ``~/.claude/projects/<key>/`` where ``<key>`` is the absolute cwd path
-    with path separators AND dots replaced by ``-``. Notably this differs
-    from ``core.utils.project.project_key_from_path`` which preserves dots
-    — keep this local so we don't risk changing apiary's on-disk scribe
-    layout for existing users.
+    with path separators, dots AND spaces replaced by ``-``. Notably this
+    differs from ``core.utils.project.project_key_from_path`` which
+    preserves dots — keep this local so we don't risk changing apiary's
+    on-disk scribe layout for existing users.
 
     Example: ``C:\\Users\\user\\.claude\\projects\\claude-apiary`` →
     ``C--Users-user--claude-projects-claude-apiary``.
+
+    Spaces matter: a repo at ``D:\\Professional\\Hexworld Rebuilt`` gets a
+    transcript dir of ``D--Professional-Hexworld-Rebuilt``. Leaving the
+    space intact pointed SessionDiscovery at a directory that can never
+    exist, so the tab found no JSONL and rendered no assistant messages,
+    no model name, and zero token counts — while the pty pane worked fine,
+    since that path never touches the transcript. Underscores are NOT
+    replaced (cf. ``D--Professional-job_search``).
     """
     p = Path(cwd).resolve()
     if p.drive:
         drive = p.drive.rstrip(":\\")
         rest = str(p).replace(p.drive + "\\", "")
-        rest = rest.replace("\\", "-").replace("/", "-").replace(".", "-")
+        rest = _replace_key_seps(rest)
         return f"{drive}--{rest}"
     rest = str(p).lstrip("/")
-    return "-" + rest.replace("/", "-").replace(".", "-")
+    return "-" + _replace_key_seps(rest)
+
+
+def _replace_key_seps(rest: str) -> str:
+    """Collapse every char Claude Code maps to ``-`` in a project key."""
+    for ch in ("\\", "/", ".", " "):
+        rest = rest.replace(ch, "-")
+    return rest
 
 
 def _projects_root_for(cwd: Path) -> Path:
