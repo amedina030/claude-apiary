@@ -53,15 +53,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from core import secret_patterns  # noqa: E402
+
 ALLOW_PRAGMA = "apiary:allow-secret"
 ALLOWLIST_FILENAME = ".secretsallow"
 
 # The push-time gate (core/hooks/pre_push_secret_scan.py) predates this one and
 # uses the detect-secrets convention. Honour both spellings so a line silenced
 # for one gate isn't re-flagged by the other.
-_PRAGMA_RE = re.compile(
-    r"apiary:\s*allow-secret|pragma:\s*allowlist\s+secret", re.IGNORECASE
-)
+_PRAGMA_RE = secret_patterns.PRAGMA_RE
 
 # Values that look like a secret assignment but are obviously not one. Kept
 # separate from the patterns so the generic rule can stay broad without
@@ -165,52 +168,13 @@ class _GenericAssignPattern(Pattern):
         return None
 
 
-PATTERNS: tuple[Pattern, ...] = (
-    Pattern(
-        name="private-key",
-        regex=re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-        hint="a PEM private key block",
-    ),
-    Pattern(
-        name="aws-access-key",
-        regex=re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
-        hint="an AWS access key id",
-    ),
-    Pattern(
-        name="anthropic-key",
-        regex=re.compile(r"\bsk-ant-[A-Za-z0-9\-_]{20,}"),
-        hint="an Anthropic API key",
-    ),
-    Pattern(
-        name="openai-key",
-        regex=re.compile(r"\bsk-(?!ant-)[A-Za-z0-9]{20,}\b"),
-        hint="an OpenAI-style API key",
-    ),
-    Pattern(
-        name="github-token",
-        regex=re.compile(r"\bgh[pousr]_[A-Za-z0-9]{16,}\b"),
-        hint="a GitHub token",
-    ),
-    Pattern(
-        name="slack-token",
-        regex=re.compile(r"\bxox[abprs]-[A-Za-z0-9\-]{10,}"),
-        hint="a Slack token",
-    ),
-    Pattern(
-        name="google-api-key",
-        regex=re.compile(r"\bAIza[0-9A-Za-z\-_]{35}\b"),
-        hint="a Google API key",
-    ),
-    Pattern(
-        name="bearer-token",
-        regex=re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{20,}"),
-        hint="a bearer token",
-    ),
-    Pattern(
-        name="basic-auth-url",
-        regex=re.compile(r"\b[a-z][a-z0-9+.\-]*://[^/\s:@]+:[^/\s:@]+@"),
-        hint="credentials embedded in a URL",
-    ),
+# Literal-credential rules come from the table shared with the push-time gate
+# (core/secret_patterns.py) so the two cannot drift apart. The generic
+# assignment rule is appended locally: its filtering is specific to this gate,
+# and the push gate uses an entropy bar instead — see that module's docstring.
+PATTERNS: tuple[Pattern, ...] = tuple(
+    Pattern(name=p.name, regex=p.regex, hint=p.hint) for p in secret_patterns.PATTERNS
+) + (
     _GenericAssignPattern(
         name="generic-assignment",
         regex=_GENERIC_ASSIGN,

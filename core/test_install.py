@@ -12,6 +12,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from core import git_hooks
 from core import install as install_mod
 from core.utils import state
 
@@ -171,6 +172,58 @@ class InstallTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+_FOREIGN_HOOK = "#!/bin/sh\necho mine\n"
+
+
+class SecretScanHookOnInstallTests(unittest.TestCase):
+    """#T-2026-261 — bootstrapping is when the hook must arrive.
+
+    It used to be installed only by the incubator and a standalone script, so
+    any repo added through the ordinary `apiary install` path silently had no
+    commit-time scan. That decay was observed live: a repo registered half an
+    hour after the retrofit sweep had no hook at all.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.apiary = _make_fake_apiary(self.root)
+        self.target = self.root / "target"
+        self.target.mkdir()
+        _git_init(self.target)
+
+    def _write_foreign_hook(self):
+        hook = self.target / ".git" / "hooks" / "pre-commit"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text(_FOREIGN_HOOK, encoding="utf-8")
+        return hook
+
+    def test_install_leaves_a_working_hook(self):
+        install_mod.install(self.target, apiary_repo=self.apiary)
+        hook = git_hooks.hook_path(self.target)
+        self.assertTrue(hook.is_file(), "bootstrap should install the pre-commit hook")
+        self.assertEqual(git_hooks.classify(hook), "ours")
+
+    def test_reinstall_is_idempotent(self):
+        install_mod.install(self.target, apiary_repo=self.apiary)
+        install_mod.install(self.target, apiary_repo=self.apiary)
+        self.assertEqual(git_hooks.classify(git_hooks.hook_path(self.target)), "ours")
+
+    def test_a_foreign_hook_is_never_clobbered(self):
+        hook = self._write_foreign_hook()
+        install_mod.install(self.target, apiary_repo=self.apiary)
+        self.assertIn("echo mine", hook.read_text(encoding="utf-8"))
+
+    def test_a_refused_hook_does_not_fail_the_install(self):
+        # A repo without the hook is still a usable repo; the install must not
+        # abort over it, only say so.
+        self._write_foreign_hook()
+        result = install_mod.install(self.target, apiary_repo=self.apiary)
+        self.assertIsNotNone(result)
+        self.assertTrue((self.target / ".claude").is_dir())
 
 
 class GitignoreDotClaudeTests(unittest.TestCase):

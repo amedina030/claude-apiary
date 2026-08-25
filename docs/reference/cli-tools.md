@@ -997,7 +997,7 @@ Exit codes: `0` no drift; `1` drift found; `2` `cli-tools.md` not found.
 
 Commit-time secret scanner. Stdlib only — no `gitleaks` or other external binary, which would break the portability contract. Reads the **staged** diff (added lines only), so it checks exactly what a commit would introduce, and reports file, line, and which pattern matched. Also blocks filenames that hold credentials by convention (`.env`, `id_rsa`, `*.pem`, ...) even when `git add -f` bypasses `.gitignore`.
 
-Wired up as a pre-commit hook by `scripts/install_repo_hooks.py` (main-apiary) and `scripts/install_git_hooks.py` (every other managed repo).
+Wired up as a pre-commit hook by `scripts/install_repo_hooks.py` (main-apiary) and by `core/git_hooks.py`, which `apiary install` calls for every other managed repo.
 
 ```bash
 python scripts/secret_scan.py --staged             # what a commit would add
@@ -1018,7 +1018,9 @@ False positives have three escape hatches, in order of preference: an inline `ap
 
 ## scripts/install_git_hooks.py
 
-Install the secret-scan pre-commit hook into the **current** repo. Sibling of `install_repo_hooks.py`, which targets main-apiary's own checkout and installs the combined doc-check + secret-scan hook; this one targets any other apiary-managed repo. The incubator runs it for every newly spawned repo, so use it by hand only to retrofit a repo that predates the feature.
+Install the secret-scan pre-commit hook into the **current** repo. Sibling of `install_repo_hooks.py`, which targets main-apiary's own checkout and installs the combined doc-check + secret-scan hook; this one targets any other apiary-managed repo.
+
+Thin CLI over `core/git_hooks.py`. `apiary install` calls that module on every bootstrap, so use this by hand only to retrofit a repo bootstrapped before that was wired in, or to inspect / remove an install.
 
 ```bash
 python .claude/apiary/launch.py scripts/install_git_hooks.py

@@ -21,13 +21,20 @@ commit time.
   filenames (`.env`, `id_rsa`, `*.pem`) even when `git add -f` bypasses
   `.gitignore`. `--path` runs an ad-hoc scan; `--entropy` adds high-entropy
   matching (off by default — noisy).
-- **`scripts/install_git_hooks.py`** — installs the hook into any managed repo.
-  The incubator wires it into every newly spawned repo; run it by hand to
-  retrofit an existing one. Never clobbers a pre-commit hook it doesn't own.
+- **`core/git_hooks.py`** — installs the hook into any managed repo, called by
+  `apiary install` on every bootstrap so the protection can't decay as new
+  repos appear. Never clobbers a pre-commit hook it doesn't own.
+  `scripts/install_git_hooks.py` is a thin CLI over it for retrofits and
+  inspection.
 - **main-apiary's own pre-commit** now chains doc-check *and* secret-scan.
   Re-running `scripts/install_repo_hooks.py` upgrades an older hook in place.
 - **Escape hatches:** an inline `apiary:allow-secret` comment, a repo-root
   `.secretsallow` regex file, or `git commit --no-verify`.
+- **`core/secret_patterns.py`** — the literal-credential table, shared by the
+  commit-time and push-time gates so they cannot drift apart. Each gate keeps
+  its own generic `key = value` heuristic: the push gate bars on entropy, the
+  commit gate filters placeholders and prose. Both honour both allowlist
+  spellings, and a parity suite asserts they agree on every rule.
 
 Deliberately **not** built on `gitleaks`: it needs a per-machine binary, so a
 fresh clone would silently skip the check. See `PORTABILITY.md`.

@@ -32,7 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core import install as core_install
 from core.utils import state
-from scripts import install_git_hooks
+from core import git_hooks
 
 EXIT_OK = 0
 EXIT_VALIDATION = 2
@@ -242,10 +242,8 @@ def verify_spawn(target: Path) -> list[tuple[str, bool, str]]:
     # Commit-time secret scan (#T-2026-253 AC6). The incubator installs this on
     # spawn; verifying it here is what makes that claim checkable.
     try:
-        from scripts import install_git_hooks as _igh
-
-        hook = _igh.hook_path(target)
-        installed = _igh._classify(hook) == "ours"
+        hook = git_hooks.hook_path(target)
+        installed = git_hooks.classify(hook) == "ours"
         hook_detail = str(hook)
     except Exception as exc:  # noqa: BLE001
         installed, hook_detail = False, f"check failed: {exc}"
@@ -314,7 +312,7 @@ def _install_secret_scan_hook(target: Path) -> tuple[bool, str]:
     worst outcome — the whole point is that it can't be forgotten.
     """
     try:
-        rc = install_git_hooks.install(target)
+        rc = git_hooks.install(target, quiet=True)
     except Exception as exc:  # noqa: BLE001 - never crash a spawn over a hook
         return False, f"unexpected {exc.__class__.__name__}: {exc}"
     return rc == 0, "installed" if rc == 0 else "installer refused (see output above)"
