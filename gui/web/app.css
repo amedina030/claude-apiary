@@ -885,6 +885,53 @@ body.sidebar-hidden #totals {
   border-color: var(--accent);
 }
 
+.sidebar-capture {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+#sidebar-capture {
+  width: 100%;
+  min-height: 28px;
+  max-height: 120px;
+  resize: none;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font-family: var(--font-family);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+#sidebar-capture:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+#sidebar-capture:disabled {
+  opacity: 0.6;
+}
+
+.sidebar-capture-status {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--muted, var(--fg));
+  min-height: 0;
+}
+
+.sidebar-capture-status:empty {
+  display: none;
+}
+
+.sidebar-capture-status.error {
+  color: var(--danger, #d9534f);
+}
+
 .sidebar-list {
   overflow-y: auto;
   flex: 1;

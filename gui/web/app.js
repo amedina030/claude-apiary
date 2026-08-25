@@ -1430,6 +1430,100 @@
     }
     loadNoteBody(note, bodyEl);
   }
+  // --- sidebar quick capture (#T-2026-251) ---------------------------------
+  // Jot a thought mid-turn without touching the composer or the pty. The write
+  // goes straight to the active tab's scribe store via the bridge, so it can
+  // never interrupt, cancel, or race whatever claude is doing.
+  const captureEl = document.getElementById("sidebar-capture");
+  const captureStatusEl = document.getElementById("sidebar-capture-status");
+  const CAPTURE_MAX_H = 120;
+  let captureStatusTimer = null;
+
+  function setCaptureStatus(text, isError) {
+    if (!captureStatusEl) return;
+    if (captureStatusTimer) { clearTimeout(captureStatusTimer); captureStatusTimer = null; }
+    captureStatusEl.textContent = text || "";
+    captureStatusEl.classList.toggle("error", !!isError);
+    // Success fades; an error stays until the next keystroke, so a failed save
+    // can't slip past unnoticed.
+    if (text && !isError) {
+      captureStatusTimer = setTimeout(() => {
+        captureStatusEl.textContent = "";
+        captureStatusTimer = null;
+      }, 4000);
+    }
+  }
+
+  function autoGrowCapture() {
+    if (!captureEl) return;
+    captureEl.style.height = "auto";
+    captureEl.style.height = Math.min(captureEl.scrollHeight, CAPTURE_MAX_H) + "px";
+  }
+
+  async function saveCapture() {
+    if (!captureEl || !bridgeReady()) return;
+    const text = captureEl.value.trim();
+    if (!text) return;
+    captureEl.disabled = true;
+    setCaptureStatus("saving…");
+    let res = null;
+    try {
+      res = await window.pywebview.api.add_quick_note(text, "wishlist");
+    } catch (e) {
+      res = { ok: false, error: String(e) };
+    }
+    captureEl.disabled = false;
+    if (res && res.ok) {
+      captureEl.value = "";
+      activeTab().captureDraft = "";
+      autoGrowCapture();
+      setCaptureStatus(`saved ${res.display_id}`, false);
+    } else {
+      // Deliberately do NOT clear: the typed thought is the whole value here,
+      // and an optimistic clear would throw it away on a backend hiccup.
+      setCaptureStatus((res && res.error) || "save failed — text kept", true);
+    }
+    captureEl.focus();
+  }
+
+  function focusCapture() {
+    if (!captureEl) return;
+    // The box is useless if the sidebar it lives in is hidden, so surface it.
+    if (sidebarHidden) {
+      sidebarHidden = false;
+      try { localStorage.setItem("apiary.sidebar.hidden", "0"); } catch (_) {}
+      reflectSidebarHidden();
+    }
+    captureEl.focus();
+    const end = captureEl.value.length;
+    captureEl.setSelectionRange(end, end);
+  }
+
+  if (captureEl) {
+    captureEl.addEventListener("input", () => {
+      autoGrowCapture();
+      activeTab().captureDraft = captureEl.value;
+      if (captureStatusEl && captureStatusEl.classList.contains("error")) setCaptureStatus("");
+    });
+    captureEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        saveCapture();
+      } else if (e.key === "Escape") {
+        // Blur without clearing — an unfinished thought survives a stray Esc.
+        e.preventDefault();
+        e.stopPropagation();
+        captureEl.blur();
+      }
+    });
+    document.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        focusCapture();
+      }
+    });
+  }
+
   sidebarSearchEl.addEventListener("input", (e) => {
     sidebarFilter = e.target.value;
     if (sidebarSearchTimer) clearTimeout(sidebarSearchTimer);
@@ -1606,6 +1700,11 @@
       // setActiveSession. Dropped with the rest of the TabState when the
       // session closes (the tabs.delete sweep in onSessions).
       draft: "",
+      // Same deal for the sidebar quick-capture box (#T-2026-251). This one
+      // matters more than the composer's: the note is filed to the ACTIVE
+      // tab's repo, so text left over from another tab would land silently in
+      // the wrong project.
+      captureDraft: "",
     };
   }
   const tabs = new Map();
@@ -2779,6 +2878,12 @@
       if (prevSid) {
         getTab(prevSid).draft = inputEl.value;
         inputEl.value = getTab(nextSid).draft || "";
+        if (captureEl) {
+          getTab(prevSid).captureDraft = captureEl.value;
+          captureEl.value = getTab(nextSid).captureDraft || "";
+          setCaptureStatus("");
+          autoGrowCapture();
+        }
       }
       if (isFirstActivation) return;
       try { clearMessages(); } catch (_) {}
