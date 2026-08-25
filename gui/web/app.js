@@ -844,6 +844,10 @@
   // --- sidebar --------------------------------------------------------------
   let allNotes = [];
   let sidebarFilter = "";
+  // Effective filter the live DOM was last rendered with. Scroll is only
+  // worth preserving across a re-render when it hasn't changed — typing a
+  // filter should land you at the top of the new results.
+  let lastRenderedFilter = null;
   let sidebarSearchTimer = null;
   // Group key → collapsed boolean. Hydrated from backend on startup.
   let collapsed = new Set();
@@ -995,8 +999,38 @@
       frag.appendChild(group);
     }
 
+    // The aggregator polls every ~5s and each poll rebuilds the whole list.
+    // Replacing all children drops scroll to the top — both this container's
+    // offset and the inner scroll of any expanded body, which caps at 360px
+    // and scrolls on its own. Reading a long note was impossible as a result
+    // (#T-2026-250), so carry both offsets across the swap.
+    const keepScroll = f === lastRenderedFilter;
+    lastRenderedFilter = f;
+    const prevScroll = keepScroll ? sidebarListEl.scrollTop : 0;
+    const prevBodyScroll = new Map();
+    if (keepScroll) {
+      for (const el of sidebarListEl.querySelectorAll(".sidebar-item.expanded")) {
+        const b = el.querySelector(".sidebar-item-body");
+        if (b && b.scrollTop) prevBodyScroll.set(el.dataset.displayId, b.scrollTop);
+      }
+    }
+
     sidebarListEl.innerHTML = "";
     sidebarListEl.appendChild(frag);
+
+    // Bodies first: their inner scroll doesn't affect the list's own height,
+    // and a body that's still loading has nothing to restore anyway.
+    if (prevBodyScroll.size) {
+      for (const el of sidebarListEl.querySelectorAll(".sidebar-item.expanded")) {
+        const top = prevBodyScroll.get(el.dataset.displayId);
+        if (!top) continue;
+        const b = el.querySelector(".sidebar-item-body");
+        if (b) b.scrollTop = top;
+      }
+    }
+    // Assigning past the end is clamped by the browser, so a shortened list
+    // (note archived, filter cleared) settles at the bottom instead of erroring.
+    if (prevScroll) sidebarListEl.scrollTop = prevScroll;
   }
 
   // --- usage meters (T-2026-25) --------------------------------------------
