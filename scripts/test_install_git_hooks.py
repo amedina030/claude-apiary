@@ -6,7 +6,6 @@ with the hook installed, so the acceptance criterion "staging a fake key and
 committing is blocked" is proven rather than assumed.
 """
 
-import os
 import shutil
 import subprocess
 import sys
@@ -88,6 +87,38 @@ class InstallTests(_TempRepo):
     def test_non_git_directory_is_an_error(self):
         with tempfile.TemporaryDirectory() as plain:
             self.assertEqual(install_git_hooks.main(["--repo", plain]), 1)
+
+
+class HooksPathTests(_TempRepo):
+    """core.hooksPath overrides .git/hooks entirely.
+
+    Regression for a live failure: this repo carried a stale core.hooksPath
+    from a directory rename, pointing somewhere that no longer existed, so
+    every git hook was inert while the installer still reported success.
+    """
+
+    def test_unset_hookspath_uses_git_hooks(self):
+        target, warning = install_git_hooks.hooks_dir(self.repo)
+        self.assertEqual(target, self.repo / ".git" / "hooks")
+        self.assertIsNone(warning)
+
+    def test_redirect_installs_where_git_actually_looks(self):
+        elsewhere = self.repo / "custom-hooks"
+        elsewhere.mkdir()
+        _git(["config", "core.hooksPath", str(elsewhere)], self.repo)
+        rc = install_git_hooks.main(["--repo", str(self.repo)])
+        self.assertEqual(rc, 0)
+        self.assertTrue((elsewhere / "pre-commit").is_file())
+        # Nothing written to the directory git is ignoring.
+        self.assertFalse((self.repo / ".git" / "hooks" / "pre-commit").exists())
+
+    def test_dangling_redirect_is_reported(self):
+        missing = self.repo / "nope" / "hooks"
+        _git(["config", "core.hooksPath", str(missing)], self.repo)
+        _, warning = install_git_hooks.hooks_dir(self.repo)
+        self.assertIsNotNone(warning)
+        self.assertIn("does not exist", warning)
+        self.assertIn("git config --unset core.hooksPath", warning)
 
 
 class UninstallTests(_TempRepo):

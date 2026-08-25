@@ -56,8 +56,52 @@ def current_repo(start: Path) -> Path | None:
     return Path(out) if proc.returncode == 0 and out else None
 
 
+def configured_hooks_path(repo: Path) -> str:
+    """Value of ``core.hooksPath`` for *repo*, or "" when unset."""
+    try:
+        proc = subprocess.run(
+            ["git", "config", "--get", "core.hooksPath"],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+    except (OSError, ValueError):
+        return ""
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def hooks_dir(repo: Path) -> tuple[Path, str | None]:
+    """Where git will look for hooks in *repo*, plus a warning when redirected.
+
+    ``core.hooksPath`` overrides ``.git/hooks`` entirely. Installing into
+    ``.git/hooks`` while that is set produces a hook file git never runs — the
+    installer reports success and the gate is silently dead. This repo shipped
+    exactly that failure: a stale ``core.hooksPath`` left over from a directory
+    rename pointed at a path that no longer existed, so every git hook here had
+    been inert for months without a word.
+    """
+    configured = configured_hooks_path(repo)
+    if not configured:
+        return repo / ".git" / "hooks", None
+    target = Path(configured)
+    if not target.is_absolute():
+        target = repo / target
+    if not target.is_dir():
+        return target, (
+            f"core.hooksPath points at {target}, which does not exist — git runs "
+            "NO hooks in this repo. Fix or clear it:\n"
+            "    git config --unset core.hooksPath"
+        )
+    return target, (
+        f"core.hooksPath redirects hooks to {target}; installing there rather "
+        "than in .git/hooks."
+    )
+
+
 def hook_path(repo: Path) -> Path:
-    return repo / ".git" / "hooks" / "pre-commit"
+    return hooks_dir(repo)[0] / "pre-commit"
 
 
 def _classify(target: Path) -> str:
@@ -72,12 +116,14 @@ def _classify(target: Path) -> str:
 
 
 def install(repo: Path, force: bool = False) -> int:
-    hooks_dir = repo / ".git" / "hooks"
-    if not hooks_dir.is_dir():
+    target_dir, warning = hooks_dir(repo)
+    if warning:
+        print(f"  WARNING: {warning}")
+    if not target_dir.is_dir():
         try:
-            hooks_dir.mkdir(parents=True, exist_ok=True)
+            target_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            print(f"  refused: cannot create {hooks_dir}: {exc}")
+            print(f"  refused: cannot create {target_dir}: {exc}")
             return 1
 
     if repo.resolve() == REPO_ROOT.resolve():
@@ -124,6 +170,9 @@ def uninstall(repo: Path) -> int:
 
 def report(repo: Path) -> int:
     target = hook_path(repo)
+    _, warning = hooks_dir(repo)
+    if warning:
+        print(f"  WARNING: {warning}")
     state = _classify(target)
     label = {
         "absent": "not installed",
