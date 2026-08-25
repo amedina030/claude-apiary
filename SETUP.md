@@ -133,18 +133,27 @@ If the secret scan flags a false positive, add an inline `apiary:allow-secret`
 comment on that line, or a regex to the repo-root `.secretsallow` file.
 `git commit --no-verify` bypasses every pre-commit hook as a last resort.
 
-### 4b. Install the secret-scan hook in other repos
+### 4b. The secret-scan hook in other repos
 
-Newly spawned repos get this automatically from the incubator. Retrofit an
-existing bootstrapped repo by running, from inside it:
+`apiary install --target <repo>` installs it as part of every bootstrap, so a
+repo added in step 3 already has it — side projects get the secret scan alone,
+since they have no framework docs to check.
+
+Reach for the standalone installer only to retrofit a repo bootstrapped before
+this was wired in, or to inspect / remove one:
 
 ```bash
 python .claude/apiary/launch.py scripts/install_git_hooks.py
+python .claude/apiary/launch.py scripts/install_git_hooks.py --list
+python .claude/apiary/launch.py scripts/install_git_hooks.py --uninstall
 ```
 
-Side projects get the secret scan alone — they have no framework docs to check.
 An existing pre-commit hook that isn't apiary's is never overwritten; the
 installer refuses and tells you, so inspect it and re-run with `--force`.
+
+To find repos that predate the change, `poetry run apiary doctor` reports
+registered repos, and `incubator/cli.py verify --path <repo>` includes the hook
+in its checks.
 
 ### 5. Start a new Claude Code session
 

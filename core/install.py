@@ -125,6 +125,13 @@ def install(
     # .gitignore
     _ensure_gitignore_entry(target_root)
 
+    # Commit-time secret scan. Installed here rather than only by the incubator
+    # or the standalone script, because bootstrapping is the one moment every
+    # managed repo passes through — a one-time sweep decays as soon as the next
+    # repo is registered (#T-2026-261). Best-effort: a repo without the hook is
+    # still a working repo, so a refusal warns rather than failing the install.
+    _install_secret_scan_hook(target_root)
+
     # bootstrap_state.json with hashes for doctor's drift detection
     _write_bootstrap_state(state_dir, profile, apiary_version, settings_hash,
                            commands_hashes, claude_md_hash, is_first, now)
@@ -361,6 +368,36 @@ _GITIGNORE_PRESENT = (".claude/", "/.claude/", ".claude", "/.claude",
 
 # The old spelling, which works but offers no way to track repo-owned commands.
 _GITIGNORE_BLANKET = (".claude/", "/.claude/", ".claude", "/.claude")
+
+
+def _install_secret_scan_hook(target_root: Path) -> None:
+    """Install the secret-scan pre-commit hook, reporting either way.
+
+    Silence would be the wrong failure mode: a hook the operator believes is
+    installed but isn't is worse than none at all, which is the whole reason
+    this moved out of a one-off script.
+    """
+    try:
+        from core import git_hooks
+    except Exception as exc:  # noqa: BLE001 - never fail an install over this
+        print(f"  secret-scan hook : SKIPPED (import failed: {exc})")
+        return
+    if git_hooks.is_main_apiary(target_root):
+        # main-apiary runs the combined doc-check + secret-scan hook instead.
+        print("  secret-scan hook : skipped (main-apiary uses install_repo_hooks.py)")
+        return
+    try:
+        rc = git_hooks.install(target_root, quiet=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  secret-scan hook : SKIPPED ({exc.__class__.__name__}: {exc})")
+        return
+    if rc == 0:
+        print(f"  secret-scan hook : {git_hooks.hook_path(target_root)}")
+    else:
+        print("  secret-scan hook : NOT installed — an existing pre-commit hook is in "
+              "the way. Inspect it, then run:")
+        print("                     python .claude/apiary/launch.py "
+              "scripts/install_git_hooks.py --force")
 
 
 def _ensure_gitignore_entry(target_root: Path) -> None:
