@@ -30,6 +30,15 @@ from gui.theme import (
     load_theme,
 )
 from gui.transcript import Message, parse_jsonl_lines
+from gui.paths import main_apiary
+from scribe import api as scribe_api
+
+# Note types the quick-capture box may write. Deliberately narrow: the box is
+# a low-friction inbox, not a general note editor. `wishlist` is the default
+# because a mid-run thought is not yet a commitment, and because only
+# todo/wishlist/blocker/context surface in the startup banner — a type outside
+# that set would file the thought somewhere it is never seen again.
+QUICK_NOTE_TYPES = ("wishlist", "todo")
 from gui.win_notify import flash_taskbar
 from gui.win_titlebar import apply_dark_titlebar, find_window_by_title
 
@@ -199,6 +208,42 @@ class GuiBridge:
         if not isinstance(body_path, str):
             return ""
         return read_body(body_path)
+
+    def add_quick_note(self, text: str, note_type: str = "wishlist") -> dict:
+        """Quick-capture a note into the ACTIVE tab's repo (#T-2026-251).
+
+        Writes straight to that repo's scribe store. It deliberately never
+        touches the pty, so jotting a thought mid-turn cannot interrupt,
+        cancel, or race whatever claude is doing — which is the entire point
+        of the feature, and keeps it clear of the never-kill-the-session rule.
+
+        Returns ``{"ok", "display_id", "error"}``. The frontend keeps the
+        typed text on failure rather than clearing optimistically: losing a
+        thought to a backend hiccup is the one outcome that would make the
+        feature untrustworthy.
+        """
+        body = text.strip() if isinstance(text, str) else ""
+        if not body:
+            return {"ok": False, "display_id": "", "error": "nothing to save"}
+        if note_type not in QUICK_NOTE_TYPES:
+            return {"ok": False, "display_id": "", "error": f"unsupported note type: {note_type}"}
+        session = self._app.active
+        if session is None:
+            return {"ok": False, "display_id": "", "error": "no active tab"}
+        try:
+            # Pass main-apiary explicitly: scribe's own fallback derives it
+            # from __file__, which lands inside the bundle in a frozen build
+            # (cf. T-2026-248). gui.paths.main_apiary() is source/frozen aware.
+            store = scribe_api.open_store(session.cwd, apiary_repo=main_apiary())
+            entry = store.add_note(note_type, body, session.session_id[:8])
+        except Exception as exc:  # noqa: BLE001 - surface, never crash the GUI
+            return {"ok": False, "display_id": "", "error": f"{exc.__class__.__name__}: {exc}"}
+        # Show it now instead of up to one aggregator tick (~5s) later.
+        try:
+            session.flush_notes()
+        except Exception as exc:  # noqa: BLE001 - the note is already written
+            print(f"[gui] quick-note resync failed: {exc}", file=sys.stderr)
+        return {"ok": True, "display_id": str(entry.get("display_id", "")), "error": ""}
 
     def get_sidebar_collapsed(self) -> list[str]:
         return sidebar_state.load()
