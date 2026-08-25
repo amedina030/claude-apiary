@@ -1600,6 +1600,12 @@
       // turn start, so a missing-bubble event can be classified by cause.
       shownThisTurn: false,
       lastHideReason: "",
+      // Unsent composer text (#T-2026-249). Unlike the fields above this one
+      // does need a hand-rolled save/restore on switch, because the composer
+      // is a single shared <textarea> rather than per-tab JS state — see
+      // setActiveSession. Dropped with the rest of the TabState when the
+      // session closes (the tabs.delete sweep in onSessions).
+      draft: "",
     };
   }
   const tabs = new Map();
@@ -2764,6 +2770,16 @@
       // skip the reset because the backend's discovery thread might have
       // already pushed the active session's history before setActiveSession
       // arrives — clearing would wipe that history.
+      // Park the outgoing tab's unsent composer text and hand the incoming
+      // tab its own (#T-2026-249) — one shared <textarea> otherwise bleeds a
+      // half-typed message into every other tab. Runs before the
+      // isFirstActivation bail: on first activation there is no prevSid to
+      // save from, and whatever sits in the composer already belongs to the
+      // session being activated, so leave it be.
+      if (prevSid) {
+        getTab(prevSid).draft = inputEl.value;
+        inputEl.value = getTab(nextSid).draft || "";
+      }
       if (isFirstActivation) return;
       try { clearMessages(); } catch (_) {}
       try { term.reset(); } catch (_) {}
@@ -2989,6 +3005,7 @@
       }
       const text = inputEl.value;
       inputEl.value = "";
+      activeTab().draft = "";   // sent, so it's no longer this tab's draft
       // Render optimistically — the tail will reconcile when the real record
       // lands. Uses `text` (not the manifest-augmented payload), so it can run
       // before we await Python for the manifest below. Skip empties and slash
