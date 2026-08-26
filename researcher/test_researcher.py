@@ -241,5 +241,168 @@ class TestYamlMini(unittest.TestCase):
             _yaml_mini.loads("no colon here\n")
 
 
+class TestYamlMiniRoundTrip(unittest.TestCase):
+    """`dumps` → `loads` must be lossless (deep review 2026-08, knowledge §3.2).
+
+    The old reader quoted on write but never unquoted on read, and treated any
+    ``#`` as a comment. `/research verify` is exactly ``loads → mutate → dumps``,
+    so every verify degraded a title with a colon or a source URL with a
+    fragment, compounding each time.
+    """
+
+    # Values that must survive dump → load unchanged. The first three are the
+    # exact inputs recorded in docs/review/subsystems/knowledge.md §3.2.
+    VALUES = (
+        "Foo: bar",
+        "C# generics",
+        "https://example.com/a#frag",
+        "https://x/y#frag",
+        "http://h:8080/p",
+        "issue#12",
+        "Claude Code GUI: interactive-wrapper vs Agent-SDK billing",
+        'say "hi"',
+        "it's fine",
+        '"already quoted"',
+        "'single quoted'",
+        "a\"b'c",
+        "trailing hash #",
+        "# leading hash",
+        "- leading dash",
+        "back\\slash",
+        "  padded  ",
+        "",
+        "[]",
+        "{}",
+        "plain value",
+    )
+
+    def _round_trip(self, value: str) -> str:
+        return _yaml_mini.loads(_yaml_mini.dumps({"title": value}))["title"]
+
+    def test_scalar_round_trip(self) -> None:
+        for value in self.VALUES:
+            with self.subTest(value=value):
+                self.assertEqual(self._round_trip(value), value)
+
+    def test_list_item_round_trip(self) -> None:
+        for value in self.VALUES:
+            with self.subTest(value=value):
+                data = {"sources": [value]}
+                parsed = _yaml_mini.loads(_yaml_mini.dumps(data))
+                self.assertEqual(parsed["sources"], [value])
+
+    def test_repeated_round_trips_are_stable(self) -> None:
+        """`verify` re-reads and re-writes; three passes must not compound."""
+        for value in self.VALUES:
+            with self.subTest(value=value):
+                current = value
+                for _ in range(3):
+                    current = self._round_trip(current)
+                self.assertEqual(current, value)
+
+    def test_full_document_round_trip(self) -> None:
+        data = {
+            "title": "Claude Code GUI: interactive-wrapper vs Agent-SDK billing",
+            "topic": "unreal",
+            "tags": ["multiplayer", "c#"],
+            "date_created": "2026-04-18",
+            "date_last_verified": "2026-08-26",
+            "sources": [
+                "https://example.com/a#frag",
+                "http://h:8080/p",
+                "https://docs.example.com/guide#section-2",
+            ],
+        }
+        self.assertEqual(_yaml_mini.loads(_yaml_mini.dumps(data)), data)
+
+    def test_empty_list_stays_a_list_but_quoted_brackets_stay_a_string(self) -> None:
+        parsed = _yaml_mini.loads('tags: []\nnote: "[]"\n')
+        self.assertEqual(parsed["tags"], [])
+        self.assertEqual(parsed["note"], "[]")
+
+    def test_bare_key_still_opens_a_block_list(self) -> None:
+        parsed = _yaml_mini.loads("tags:\n  - a\n  - b\n")
+        self.assertEqual(parsed["tags"], ["a", "b"])
+
+
+class TestYamlMiniComments(unittest.TestCase):
+    def test_hash_after_whitespace_starts_a_comment(self) -> None:
+        self.assertEqual(_yaml_mini.loads("title: value # note\n")["title"], "value")
+
+    def test_hash_at_line_start_is_a_whole_line_comment(self) -> None:
+        parsed = _yaml_mini.loads("# a comment\ntitle: value\n  # indented comment\n")
+        self.assertEqual(parsed, {"title": "value"})
+
+    def test_hash_inside_a_word_is_not_a_comment(self) -> None:
+        for raw, expected in (
+            ("title: C# generics\n", "C# generics"),
+            ("title: issue#12\n", "issue#12"),
+            ("title: https://example.com/a#frag\n", "https://example.com/a#frag"),
+        ):
+            with self.subTest(raw=raw):
+                self.assertEqual(_yaml_mini.loads(raw)["title"], expected)
+
+    def test_comment_after_a_quoted_value_is_stripped(self) -> None:
+        self.assertEqual(_yaml_mini.loads('title: "a # b"  # note\n')["title"], "a # b")
+
+    def test_comment_inside_a_list_item(self) -> None:
+        parsed = _yaml_mini.loads("sources:\n  - https://x/y#frag  # keep\n")
+        self.assertEqual(parsed["sources"], ["https://x/y#frag"])
+
+
+class TestYamlMiniQuotes(unittest.TestCase):
+    def test_symmetric_quotes_are_stripped(self) -> None:
+        self.assertEqual(_yaml_mini.loads('title: "Foo: bar"\n')["title"], "Foo: bar")
+        self.assertEqual(_yaml_mini.loads("title: 'Foo: bar'\n")["title"], "Foo: bar")
+
+    def test_quotes_inside_a_quoted_value_are_preserved(self) -> None:
+        self.assertEqual(
+            _yaml_mini.loads('title: "he said \\"hi\\""\n')["title"], 'he said "hi"'
+        )
+        self.assertEqual(_yaml_mini.loads("title: 'it''s'\n")["title"], "it's")
+
+    def test_value_that_merely_contains_a_quote_is_untouched(self) -> None:
+        for raw, expected in (
+            ('title: say "hi"\n', 'say "hi"'),
+            ("title: it's fine\n", "it's fine"),
+            ('title: a"b\n', 'a"b'),
+        ):
+            with self.subTest(raw=raw):
+                self.assertEqual(_yaml_mini.loads(raw)["title"], expected)
+
+    def test_unterminated_quote_is_kept_verbatim(self) -> None:
+        self.assertEqual(_yaml_mini.loads('title: "unclosed\n')["title"], '"unclosed')
+
+    def test_mismatched_quote_pair_is_kept_verbatim(self) -> None:
+        self.assertEqual(_yaml_mini.loads("title: \"mixed'\n")["title"], "\"mixed'")
+
+
+class TestVerifyPreservesFrontmatter(ResearcherTestCase):
+    """The live corruption path: `/research verify` on an entry whose title
+    holds a colon and whose sources hold URLs with fragments."""
+
+    TITLE = "Claude Code GUI: interactive-wrapper vs Agent-SDK billing"
+    SOURCES = ["https://example.com/a#frag", "http://h:8080/p"]
+
+    def test_repeated_verify_does_not_degrade_the_entry(self) -> None:
+        self._run_cli("register-tag", "gui")
+        code, _out, err = self._run_cli("add", "tools", self.TITLE, "--tags", "gui")
+        self.assertEqual(code, 0, err)
+
+        slug = store.slugify(self.TITLE)
+        path = store.entry_path(store.normalize_topic("tools"), slug)
+        fm, body = store.parse_entry(path)
+        fm["sources"] = list(self.SOURCES)
+        store.write_entry(path, fm, body)
+
+        for _ in range(3):
+            code, _out, err = self._run_cli("verify", "tools", slug)
+            self.assertEqual(code, 0, err)
+            fm, _body = store.parse_entry(path)
+            self.assertEqual(fm["title"], self.TITLE)
+            self.assertEqual(fm["sources"], self.SOURCES)
+            self.assertEqual(fm["tags"], ["gui"])
+
+
 if __name__ == "__main__":
     unittest.main()
