@@ -49,6 +49,24 @@ class TestRunClaudeCommand(unittest.TestCase):
         self.assertNotIn("--max-turns", cmd)
         self.assertNotIn("--disallowedTools", cmd)
 
+    def test_empty_stderr_on_failure_is_explained_from_the_json(self):
+        from runner import claude_subprocess as cs
+        envelope = b'{"type":"result","subtype":"error_max_turns","is_error":true,"result":""}'
+        def fake_run(cmd, **kw):
+            return subprocess.CompletedProcess(cmd, 1, stdout=envelope, stderr=b"")
+        with mock.patch.object(cs.subprocess, "run", fake_run):
+            rc, out, err = cs.run_claude("hello")
+        self.assertEqual(rc, 1)
+        self.assertIn("error_max_turns", err)
+        self.assertIn("--max-turns", err)
+        # Real stderr is never replaced.
+        def fake_run2(cmd, **kw):
+            return subprocess.CompletedProcess(cmd, 1, stdout=envelope, stderr=b"real reason")
+        with mock.patch.object(cs.subprocess, "run", fake_run2):
+            _rc, _out, err = cs.run_claude("hello")
+        self.assertEqual(err, "real reason")
+        self.assertEqual(cs.describe_failure("not json", 3), "claude exited 3 with no stderr")
+
     def test_non_positive_max_turns_rejected(self):
         from runner import claude_subprocess as cs
         with self.assertRaises(ValueError):

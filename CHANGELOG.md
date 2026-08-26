@@ -21,7 +21,9 @@ Review runner Bug 9 and the permissions note.
   "Bash(git push *)"` — nor loop until the timeout. Permission rules cannot
   see a push issued from a script file or another interpreter; that is a
   known limit, not a claim. Both are parameters for callers that need
-  something else.
+  something else. When `claude -p` stops for a reason it only reports in
+  its JSON (`error_max_turns`, …) it exits 1 with empty stderr; `run_claude`
+  now puts that reason into the returned stderr so stage logs say why.
 
 ### GUI: no lost messages on attach, no raw Ctrl+C, no orphaned claude (2026-08-26)
 
@@ -42,11 +44,12 @@ Review gui #2/#3/#4/#12.
   only terminated the direct child; on npm installs that is the `cmd /c`
   shim and the node grandchild running Claude Code lived on, holding the
   pty's pipe, burning quota and competing with the restarted session's
-  JSONL. `stop` now terminates, `close(force=True)`s the pty (which also
-  unblocks the reader thread), kills the process tree (`taskkill /T` or
-  `killpg`, capability-detected) and joins the reader. A Windows-only
-  integration test spawns `cmd /c python` through a real pty and checks the
-  grandchild is gone.
+  JSONL. `stop` now kills the process tree first (`taskkill /T` or
+  `killpg`, capability-detected — while the direct child is still alive so
+  its children can be enumerated), then terminates, `close(force=True)`s
+  the pty (which also unblocks the reader thread) and joins the reader. A
+  Windows-only integration test spawns `cmd /c python` through a real pty
+  and checks the grandchild is gone; it caught the wrong ordering.
 
 ### Budgeter hooks: no crashes, honest counts (2026-08-26)
 

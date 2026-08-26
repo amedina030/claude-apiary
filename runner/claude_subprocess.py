@@ -33,6 +33,7 @@ ALLOW_ALL_ENV_VAR : str
     the full parent environment is forwarded (legacy behavior).
 """
 import os
+import json
 import subprocess
 
 from .cost_emit import emit_usage_xml
@@ -125,6 +126,24 @@ DEFAULT_DISALLOWED_TOOLS = (
 DEFAULT_MAX_TURNS = 150
 
 
+def describe_failure(stdout: str, returncode: int) -> str:
+    """Human-readable reason for a non-zero exit when stderr was empty."""
+    try:
+        data = json.loads(stdout or "")
+    except (TypeError, ValueError):
+        data = None
+    if isinstance(data, dict):
+        subtype = data.get("subtype") or ""
+        text = data.get("result") or ""
+        if subtype or text:
+            detail = subtype if subtype else "error"
+            if subtype == "error_max_turns":
+                detail = "error_max_turns (hit --max-turns before finishing)"
+            snippet = f": {str(text)[:200]}" if text else ""
+            return f"claude exited {returncode}: {detail}{snippet}"
+    return f"claude exited {returncode} with no stderr"
+
+
 def run_claude(
     prompt: str,
     *,
@@ -197,6 +216,11 @@ def run_claude(
 
     stdout = result.stdout[:_MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
     stderr = result.stderr[:_MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+    if result.returncode != 0 and not stderr.strip():
+        # `claude -p` reports max-turns / budget / API stops only inside its
+        # JSON envelope and exits 1 with nothing on stderr; without this the
+        # stage log says "stderr: " and the reason is lost.
+        stderr = describe_failure(stdout, result.returncode)
 
     if result.returncode == 0:
         try:

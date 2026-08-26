@@ -334,8 +334,9 @@ class PtyWrapper:
         terminate() alone left two things behind (review gui #3): the
         pseudoconsole (only closed by PtyProcess.__del__, which the reader
         thread pinned) and, on npm installs, the node grandchild behind the
-        ``cmd /c`` shim. Now: terminate, close the pty (which also unblocks
-        the reader), then kill the whole tree.
+        ``cmd /c`` shim. Now: kill the whole tree first (while the direct
+        child is alive and its children can still be enumerated), then
+        terminate, then close the pty (which also unblocks the reader).
         """
         self._stop.set()
         proc = self._proc
