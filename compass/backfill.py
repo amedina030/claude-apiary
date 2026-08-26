@@ -115,6 +115,26 @@ def _select_transcripts(args: argparse.Namespace) -> list[Path]:
     return selected
 
 
+def _captured_at(transcript_path: Path) -> str:
+    """When the session happened — the transcript's mtime, never ``now()``.
+
+    ``synthesize.py`` sorts observations newest-first by ``captured_at``,
+    tells the model to prefer the more recent one on conflict, and counts
+    only the last few sessions toward volatile dimensions. Stamping the
+    backfill time made every historical session look like it happened at
+    the moment of the backfill, which inverted all three (review knowledge
+    Bug 5). The transcript's last write is the closest thing on disk to
+    the end of the session it records.
+    """
+    try:
+        mtime = transcript_path.stat().st_mtime
+    except OSError:
+        # Unreadable stat is not worth failing the session over; now() is
+        # the same (wrong but harmless) answer this used to give always.
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.fromtimestamp(mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _truncate_messages(conversation: list[dict]) -> list[dict]:
     out: list[dict] = []
     for msg in conversation:
@@ -221,7 +241,7 @@ def _process_one(transcript_path: Path, dimensions: dict, *, model: str | None,
         return "skipped"
 
     conversation = _truncate_messages(conversation)
-    captured_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    captured_at = _captured_at(transcript_path)
 
     prompt = _build_prompt(conversation, dimensions, sid_short, captured_at)
     if len(prompt) > MAX_PROMPT_CHARS:

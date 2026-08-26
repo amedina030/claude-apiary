@@ -14,7 +14,7 @@ Invokes a headless ``claude -p`` subprocess via runner.claude_subprocess.
 Used by the ``/compass-sync`` slash command and the weekly cron entrypoint.
 
 Usage:
-    synthesize.py [--dry-run] [--model MODEL]
+    synthesize.py [--dry-run] [--model MODEL] [--max-sessions N]
 
 Exit codes:
   0 — wrote personality.md
@@ -31,12 +31,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from compass import store
+from core.utils.atomic import write_text_atomic
 from runner.claude_subprocess import run_claude
 
 
 VOLATILE_RECENT_WINDOW = 5  # last N sessions count toward volatile dimensions
 CRON_MIN_AGE_DAYS = 7        # --cron mode no-ops if personality.md is younger than this
 DEFAULT_MODEL = "opus"       # synthesis benefits from Opus's integration of subtle signals
+
+# Upper bound on how many sessions' observations go into one prompt. The
+# active set is unbounded on disk (nothing schedules the archive sweep, and
+# it refuses to run below store.ARCHIVE_MIN_ACTIVE anyway), so without a cap
+# the prompt grows with history until a synthesis costs more than it is
+# worth. 50 matches the rolling window compass/CLAUDE.md documents and
+# store.ARCHIVE_MIN_ACTIVE, i.e. the point at which archiving starts.
+# Override per-invocation with --max-sessions; 0 means no cap.
+DEFAULT_MAX_SESSIONS = store.ARCHIVE_MIN_ACTIVE
 
 
 def _load_active(now_active: list[Path]) -> list[dict]:
@@ -49,6 +59,18 @@ def _load_active(now_active: list[Path]) -> list[dict]:
         loaded.append((data.get("captured_at", ""), data))
     loaded.sort(key=lambda item: item[0], reverse=True)
     return [data for _, data in loaded]
+
+
+def _cap_sessions(observations: list[dict], max_sessions: int | None) -> list[dict]:
+    """Keep at most *max_sessions* observations, dropping the oldest.
+
+    Input must already be newest-first (``_load_active`` sorts it), so the
+    slice keeps the recent sessions the synthesis prompt weights highest.
+    A non-positive *max_sessions* disables the cap.
+    """
+    if max_sessions is not None and max_sessions > 0:
+        return observations[:max_sessions]
+    return observations
 
 
 def _build_prompt(observations: list[dict], previous_personality: str,
@@ -142,11 +164,16 @@ def cmd_synthesize(args: argparse.Namespace) -> int:
         print("no active observations; nothing to synthesize", file=sys.stderr)
         return 1
 
-    observations = _load_active(active_paths)
-    if not observations:
+    loaded = _load_active(active_paths)
+    if not loaded:
         print("active observation files exist but all failed validation; aborting",
               file=sys.stderr)
         return 1
+
+    observations = _cap_sessions(loaded, args.max_sessions)
+    if len(observations) < len(loaded):
+        print(f"capping synthesis at the {len(observations)} most recent "
+              f"session(s) of {len(loaded)}", file=sys.stderr)
 
     previous = ""
     if store.personality_path().exists():
@@ -174,7 +201,13 @@ def cmd_synthesize(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
 
-    store.personality_path().write_text(text, encoding="utf-8")
+    # Atomic: personality.md is read at every session start by the startup
+    # prompt hook. A plain write_text truncates first, so a crash (or a
+    # session opening at the wrong moment) could hand the next session an
+    # empty or half-written profile with no way back — this is the only
+    # copy, synthesis is not idempotent, and the input observations may
+    # have been archived since.
+    write_text_atomic(store.personality_path(), text)
     print(f"wrote {store.personality_path()} ({len(text)} chars from "
           f"{len(observations)} session(s))")
     return 0
@@ -209,6 +242,9 @@ def main() -> int:
     parser.add_argument("--cron", action="store_true",
                         help=f"weekly-throttle mode: no-op if personality.md is "
                              f"younger than {CRON_MIN_AGE_DAYS} days")
+    parser.add_argument("--max-sessions", type=int, default=DEFAULT_MAX_SESSIONS,
+                        help=f"synthesize from at most N most recent sessions "
+                             f"(default: {DEFAULT_MAX_SESSIONS}; 0 = no cap)")
     args = parser.parse_args()
     return cmd_synthesize(args)
 

@@ -287,6 +287,7 @@ python -m compass.synthesize --cron        # cron-driven; no-ops if personality.
 | `--dry-run` | no | Print the synthesis prompt instead of calling claude |
 | `--model MODEL` | no | Override the claude CLI's default model |
 | `--cron` | no | Self-throttle to a 7-day cadence (no-op if `personality.md` was rewritten in the last week) |
+| `--max-sessions N` | no | Synthesize from at most the N most recent sessions by `captured_at` (default 50, matching the archive threshold; `0` disables the cap) |
 
 Exit codes: `0` wrote `personality.md`; `1` no active observations; `2` claude subprocess failed (previous file untouched).
 

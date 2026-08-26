@@ -15,9 +15,10 @@ Usage:
 import json
 import sys
 import argparse
-import tempfile
-import os
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core.utils.atomic import write_json_atomic
 
 BUDGETER_DIR = Path(__file__).parent
 CONFIG_PATH = BUDGETER_DIR / "config.json"
@@ -282,21 +283,9 @@ def main():
     # Merge proposed weights into config (preserve unchanged rules)
     new_weights = {**current_weights, **proposed_weights}
     config["rule_weights"] = new_weights
-    # Write atomically: write to a temp file in the same directory, then rename
-    # so a crash mid-write never truncates the live config.
-    config_dir = CONFIG_PATH.parent
+    # Write atomically so a crash mid-write never truncates the live config.
     try:
-        fd, tmp_path = tempfile.mkstemp(dir=config_dir, suffix=".tmp", prefix="config-")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as tf:
-                tf.write(json.dumps(config, indent=2) + "\n")
-            os.replace(tmp_path, CONFIG_PATH)
-        except Exception:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        write_json_atomic(CONFIG_PATH, config, indent=2, trailing_newline=True)
     except OSError as exc:
         print(f"Error writing config: {exc}", file=sys.stderr)
         sys.exit(1)

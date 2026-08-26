@@ -1,6 +1,5 @@
 import json
 from datetime import datetime, timezone
-import tempfile
 import os
 import sys
 import time
@@ -11,6 +10,7 @@ from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.session import SessionId
+from core.utils.atomic import write_json_atomic
 
 _globals_lock = threading.Lock()
 
@@ -515,7 +515,7 @@ def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_
     with _file_lock(path):
         # Write to a sibling temp file and os.replace it in, so a hook killed
         # mid-write can never leave a truncated baseline behind (review B1).
-        _atomic_write_json(path, {
+        write_json_atomic(path, {
                 "schema": BASELINE_SCHEMA,
                 "tokens": tokens,
                 "context_tokens": context_tokens,
@@ -533,20 +533,6 @@ def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_
                 "warning_fired": warning_fired,
                 "agent_description": agent_description,
         })
-
-
-def _atomic_write_json(path, data):
-    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-        os.replace(tmp_path, path)
-    except BaseException:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
 
 
 def cleanup_session(session_id):
