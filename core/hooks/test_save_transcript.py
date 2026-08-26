@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Tests for core/hooks/save_transcript.py.
 
-Runs the hook as a subprocess with a temporary HOME and asserts that:
-  - A normal session ends up in .session-history.json
+Runs the hook as a subprocess with a temporary HOME and a temporary
+state dir (APIARY_TARGET_STATE_DIR) and asserts that:
+  - A normal session ends up in <state-dir>/sessions/history.json
   - A runner subprocess session (APIARY_RUNNER_SUBPROCESS=1) does NOT
-    end up in .session-history.json or .last-session.json (#223)
+    end up in history.json or last-session.json (#223)
+  - Nothing is written under ~/.claude (review S1)
 """
 import json
 import os
@@ -22,6 +24,9 @@ def _run_hook(payload: dict, home: Path, *, runner_subprocess: bool = False) -> 
     env = os.environ.copy()
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
+    env["APIARY_TARGET_STATE_DIR"] = str(home / "state")
+    for var in ("CLAUDE_PROJECT_DIR", "APIARY_TARGET_REPO"):
+        env.pop(var, None)
     if runner_subprocess:
         env["APIARY_RUNNER_SUBPROCESS"] = "1"
     else:
@@ -41,8 +46,13 @@ class TestSaveTranscript(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.home = Path(self._tmp.name)
-        self.history = self.home / ".claude" / ".session-history.json"
-        self.last = self.home / ".claude" / ".last-session.json"
+        self.state = self.home / "state"
+        self.history = self.state / "sessions" / "history.json"
+        self.last = self.state / "sessions" / "last-session.json"
+
+    def _home_claude_files(self):
+        root = self.home / ".claude"
+        return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()) if root.exists() else []
 
     def _payload(self, sid: str = "abcd1234-1111-2222-3333-444444444444") -> dict:
         return {
@@ -61,6 +71,15 @@ class TestSaveTranscript(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["session_id"], "abcd1234-1111-2222-3333-444444444444")
         self.assertTrue(self.last.exists())
+        self.assertEqual(self._home_claude_files(), [], "apiary must write nothing under ~/.claude")
+
+    def test_unwritable_state_dir_does_not_crash_the_hook(self):
+        # A Stop hook that exits non-zero surfaces a hook error every turn.
+        blocker = self.home / "state"
+        blocker.write_text("not a directory", encoding="utf-8")
+        result = _run_hook(self._payload(), self.home)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("save_transcript", result.stderr)
 
     def test_runner_subprocess_skipped(self):
         result = _run_hook(self._payload(), self.home, runner_subprocess=True)

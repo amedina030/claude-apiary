@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Phase 1 — unbreak what was silently broken (2026-08-26)
+
+- **Apiary writes nothing under `~/.claude` — now true.** Session identity
+  and the session history / last-session records live under
+  `<main-apiary>/.repos/<slug>/sessions/` (the launcher's
+  `APIARY_TARGET_STATE_DIR`), once-per-session hook flags under
+  `<repo>/.claude/apiary/session-tmp/` (created by the installer,
+  git-ignored); with neither resolvable the fallback is the OS temp dir.
+  `core/session.py` used to anchor both at `~/.claude` and grew ~5 stray
+  files per session (review S1). `save_transcript.py` — a Stop hook that
+  runs every turn — no longer crashes on a lock timeout or an unwritable
+  dir (Bug 11). `core/test_session.py` pins the layout; the hook tests
+  point every hook at temp repo/state dirs.
+- The two scheduled tasks (`overnight-runner`, `compass-weekly-synthesis`)
+  had drifted to a bare `python` that does not resolve to the poetry env
+  under Task Scheduler; `cron_health repair --apply` recreated them with
+  the venv interpreter after confirming the registered commands (1.4).
+  Compass synthesis keeps running per §6 (keep, fix, measure).
+
 ### Runner never pushes, never sweeps, never runs unbounded (2026-08-26)
 
 Review runner Bug 9 and the permissions note.

@@ -72,7 +72,7 @@ Per-target state lives under the apiary checkout, not inside each target repo. T
 - `<state-dir>/bootstrap_state.json` — apiary_bootstrap provenance record
 - `<repo-root>/.apiary/pointer` — JSON breadcrumb pointing at the apiary repo + target id
 
-Session transcripts and identity files written by Claude Code itself stay under `~/.claude/` — those belong to Claude Code, not apiary.
+Session transcripts (`~/.claude/projects/<key>/*.jsonl`) are Claude Code's and stay under `~/.claude/`. Apiary's own per-session files live elsewhere: identity and session history under `<main-apiary>/.repos/<slug>/sessions/`, once-per-session hook flags under `<repo>/.claude/apiary/session-tmp/`.
 
 **This state is intentionally per-checkout and is not portable.** Notes, learnings, memory, and budgeter logs reflect what *this* checkout's Claude has been working on, with paths, session IDs, and timing rooted in that machine's history. Copying them to another machine usually creates more confusion than value (stale paths, dangling session references, conflicting handoffs). If you switch machines, start fresh on the new one — the repo is the source of truth, the local state is short-horizon scratchpad.
 

@@ -17,7 +17,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.session import CLAUDE_DIR, SessionId
+from core.session import SessionId, sessions_dir
 from core.utils.project import get_project_key
 from scribe.notes import (
     format_age, run_auto_archive, scribe_state_dir,
@@ -25,7 +25,11 @@ from scribe.notes import (
 )
 from scribe.store import ScribeStore, TYPE_FOLDERS
 
-HISTORY_PATH = CLAUDE_DIR / ".session-history.json"
+
+
+def history_path() -> Path:
+    """Session history ring buffer, written by core/hooks/save_transcript.py."""
+    return sessions_dir() / "history.json"
 REGISTRY_PATH = PROJECT_ROOT / "core" / "config" / "session-registry.json"
 
 
@@ -92,6 +96,7 @@ def run_init(session_id: str, first_message: str, repo_dir: str) -> dict:
         "wants_role": identity["wants_role"],
         "wants_mission": identity["wants_mission"],
     }
+    identity_file.parent.mkdir(parents=True, exist_ok=True)
     identity_file.write_text(json.dumps(identity_data), encoding="utf-8")
 
     return {"identity": {**identity_data, "registered": registered}}
@@ -187,9 +192,10 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
     latest_handoff = None
     if handoffs:
         session_times = {}
-        if HISTORY_PATH.exists():
+        hist = history_path()
+        if hist.exists():
             try:
-                history = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+                history = json.loads(hist.read_text(encoding="utf-8"))
                 for s in history:
                     sid_short = s.get("session_id", "")[:8].lower()
                     if sid_short and s.get("ended_at"):

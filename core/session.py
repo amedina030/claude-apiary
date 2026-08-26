@@ -1,14 +1,55 @@
 """
 Session identity helpers — shared by hooks, scribe, and startup.
 
-Identity files live at ~/.claude/.session-identity-<session_id>.json
-and contain: {role, mission, registered, wants_role, wants_mission}.
+Where session state lives (apiary writes nothing under ``~/.claude``):
+
+* identity files ``identity-<short>.json`` ({role, mission, registered,
+  wants_role, wants_mission}) and the session history / last-session
+  records: ``<state-dir>/sessions/`` — the per-target dir the launcher
+  exports as ``APIARY_TARGET_STATE_DIR`` (``<main-apiary>/.repos/<slug>/``);
+* once-per-session hook flag files ``<uuid>_<suffix>``:
+  ``<repo>/.claude/apiary/session-tmp/`` (created by the installer,
+  git-ignored).
+
+Until 2026-08 both went to ``~/.claude`` (review S1: ~4,000 stray files,
+growing ~5 per session). When neither a repo nor a state dir can be
+resolved the fallback is a directory under the OS temp dir, never the home
+directory.
 """
 import json
 import re
+import tempfile
 from pathlib import Path
 
-CLAUDE_DIR = Path.home() / ".claude"
+SESSION_TMP_DIRNAME = "session-tmp"
+SESSIONS_DIRNAME = "sessions"
+
+
+def _fallback_root() -> Path:
+    return Path(tempfile.gettempdir()) / "apiary-session-tmp"
+
+
+def session_tmp_dir() -> Path:
+    """``<repo>/.claude/apiary/session-tmp`` for the current repo."""
+    from core.flags import _per_repo_root
+    repo = _per_repo_root()
+    if repo is not None:
+        return Path(repo) / ".claude" / "apiary" / SESSION_TMP_DIRNAME
+    return _fallback_root()
+
+
+def sessions_dir() -> Path:
+    """``<state-dir>/sessions`` for the current target."""
+    from core.utils import state
+    sd = state.state_dir_from_env()
+    if sd is None:
+        from core.flags import _per_repo_root
+        repo = _per_repo_root()
+        if repo is not None:
+            sd = state.find_state_dir(Path(repo))
+    if sd is None:
+        return _fallback_root() / SESSIONS_DIRNAME
+    return Path(sd) / SESSIONS_DIRNAME
 
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
@@ -77,11 +118,15 @@ class SessionId:
 
     # --- path helpers ---
 
-    def identity_path(self, claude_dir: Path = CLAUDE_DIR) -> Path:
-        return claude_dir / f".session-identity-{self._short}.json"
+    def identity_path(self, base: Path | None = None) -> Path:
+        """``<state-dir>/sessions/identity-<short>.json`` (or under *base*)."""
+        root = Path(base) if base is not None else sessions_dir()
+        return root / f"identity-{self._short}.json"
 
-    def flag_path(self, suffix: str, claude_dir: Path = CLAUDE_DIR) -> Path:
-        return claude_dir / "tmp" / f"{self.full}_{suffix}"
+    def flag_path(self, suffix: str, base: Path | None = None) -> Path:
+        """``<repo>/.claude/apiary/session-tmp/<uuid>_<suffix>`` (or under *base*)."""
+        root = Path(base) if base is not None else session_tmp_dir()
+        return root / f"{self.full}_{suffix}"
 
     def tmp_path(self, suffix: str, tmp_dir: Path) -> Path:
         """Generic temp file: <tmp_dir>/<full_uuid>_<suffix>"""
@@ -113,18 +158,22 @@ def load_identity(session_id=None):
             return defaults
         files = [identity_file]
     else:
-        files = sorted(
-            CLAUDE_DIR.glob(".session-identity-*.json"),
-            key=lambda f: f.stat().st_mtime,
-            reverse=True,
-        )
+        root = sessions_dir()
+        try:
+            files = sorted(
+                root.glob("identity-*.json"),
+                key=lambda f: f.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError:
+            files = []
         if not files:
             return defaults
 
     try:
         data = json.loads(files[0].read_text(encoding="utf-8"))
-        # Extract session_id from filename: .session-identity-<sid>.json
-        sid = files[0].stem.replace(".session-identity-", "")
+        # Extract session_id from filename: identity-<sid>.json
+        sid = files[0].stem[len("identity-"):]
         return {
             "role": data.get("role", "user"),
             "mission": data.get("mission", "general"),

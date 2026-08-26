@@ -3,7 +3,7 @@
 
 For each guarded hook, runs it as a subprocess with HOME pointed at a
 temp directory and the env var set, and asserts no side effects:
-  - No flag files written under .claude/projects/<key>/sessions/.
+  - No flag files written under <repo>/.claude/apiary/session-tmp/.
   - No context block / additional output emitted.
 
 These tests complement test_save_transcript.py, which covers the
@@ -26,6 +26,14 @@ def _run_hook(hook_name: str, payload: dict, home: Path, *, runner_subprocess: b
     env = os.environ.copy()
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
+    # Per-repo session state (review S1): flags under <repo>/.claude/apiary/
+    # session-tmp, identity/history under <state-dir>/sessions. Point both at
+    # temp dirs so the hook never touches this checkout's own state.
+    repo = home / "repo"
+    (repo / ".claude" / "apiary" / "session-tmp").mkdir(parents=True, exist_ok=True)
+    env["APIARY_TARGET_REPO"] = str(repo)
+    env["APIARY_TARGET_STATE_DIR"] = str(home / "state")
+    env.pop("CLAUDE_PROJECT_DIR", None)
     if runner_subprocess:
         env["APIARY_RUNNER_SUBPROCESS"] = "1"
     else:
@@ -41,8 +49,8 @@ def _run_hook(hook_name: str, payload: dict, home: Path, *, runner_subprocess: b
 
 
 def _flag_files(home: Path) -> list[Path]:
-    """Return all session flag files written under home/.claude/tmp/."""
-    tmp = home / ".claude" / "tmp"
+    """Return all session flag files written under the temp repo's session-tmp/."""
+    tmp = home / "repo" / ".claude" / "apiary" / "session-tmp"
     if not tmp.exists():
         return []
     return [p for p in tmp.iterdir() if p.is_file()]

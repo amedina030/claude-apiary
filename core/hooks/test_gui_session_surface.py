@@ -31,6 +31,14 @@ def _run_hook(home: Path, *, gui_session: bool) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
+    # Per-repo session state (review S1): flags under <repo>/.claude/apiary/
+    # session-tmp, identity/history under <state-dir>/sessions. Point both at
+    # temp dirs so the hook never touches this checkout's own state.
+    repo = home / "repo"
+    (repo / ".claude" / "apiary" / "session-tmp").mkdir(parents=True, exist_ok=True)
+    env["APIARY_TARGET_REPO"] = str(repo)
+    env["APIARY_TARGET_STATE_DIR"] = str(home / "state")
+    env.pop("CLAUDE_PROJECT_DIR", None)
     # A fresh first message; cwd at home keeps it out of any git repo.
     if gui_session:
         env["APIARY_GUI_SESSION"] = "1"
