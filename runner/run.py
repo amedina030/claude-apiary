@@ -75,8 +75,14 @@ _PY_HINT = f'"{sys.executable}"' if " " in sys.executable else sys.executable
 # CLI subprocess for the entire plan (cheaper, post-hoc verification);
 # ``per_step`` spawns one per step (stronger mid-run invariants). Flip
 # via runner/config.json "executor.mode".
+#
+# Default is ``per_step``: the monolithic executor became the default on
+# 2026-04-14 (bef0dc8), one day after the last runner-produced commit
+# (2026-04-13), so it has never completed a run, and its guarantees are
+# all post-hoc. Move the default back once monolithic has a completed
+# end-to-end run to point at.
 _EXECUTOR_MODULE = (
-    "monolithic_executor" if cfg("executor", "mode", "monolithic") == "monolithic"
+    "monolithic_executor" if cfg("executor", "mode", "per_step") == "monolithic"
     else "executor"
 )
 

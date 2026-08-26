@@ -62,6 +62,11 @@ from .executor import (
     persist_execution_log,
 )
 from .git_lib import format_git_error as _format_git_error
+from .schema_versions import (
+    EXECUTION_SCHEMA_VERSION,
+    PLAN_SCHEMA_VERSION,
+    assert_schema_version,
+)
 
 MONOLITHIC_TIMEOUT = cfg("monolithic_executor", "timeout_seconds", 1800)
 
@@ -325,6 +330,15 @@ def main():
         print(f"Invalid plan JSON: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Same gate the per-step executor applies (executor.main). Without it a
+    # plan written by an older auto_plan would be executed silently against
+    # today's field expectations.
+    try:
+        assert_schema_version(plan, "plan", PLAN_SCHEMA_VERSION)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+
     if not plan.get("valid", False):
         print("Plan is not valid — cannot execute", file=sys.stderr)
         sys.exit(1)
@@ -372,7 +386,11 @@ def main():
     log_path = EXECUTIONS_DIR / f"{uuid}.json"
     transcript_path = EXECUTIONS_DIR / f"{uuid}.transcript.json"
 
+    # schema_version is mandatory: auto_harden and approval both call
+    # assert_schema_version on this artifact and exit 1 when it is absent
+    # (review runner Bug 1 — every default-mode run died at stage 5).
     execution_log = {
+        "schema_version": EXECUTION_SCHEMA_VERSION,
         "uuid": uuid,
         "branch": branch,
         "mode": "monolithic",
