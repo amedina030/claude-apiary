@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Hooks no longer vote on permissions (2026-08-26)
+
+`core/hook_context.hook_allow` — the "nothing to object to" response every
+apiary hook prints — emitted `permissionDecision: "allow"` on every call. In
+Claude Code that is an auto-approve: any tool call a PreToolUse hook sees is
+run without a prompt, so every bootstrapped repo had default-mode permission
+prompts silently disabled (review C-1). Verified before/after with
+`scripts/probe_permission_prompt.py` in a bootstrapped repo in `manual`
+mode: an unlisted `python -c` ran before the fix and is denied (prompted)
+after it.
+
+- `hook_allow` now prints only `additionalContext` when it has one and `{}`
+  otherwise — no permission field. A hook that really means to decide passes
+  `decision="ask"|"deny"|"allow"` explicitly; anything else raises so a typo
+  cannot become a vote. `hook_block` (deny + exit 2) is unchanged.
+- `core/test_hook_context.py` covers the helpers and guards every
+  `*/hooks/*.py` against a hand-rolled allow vote.
+- If the returning prompts are annoying, the sanctioned answer is
+  `permissions.allow` rules in the apiary profile (see
+  `/fewer-permission-prompts`), never a hook vote.
+
 ### Secret-scanning hardening (2026-08-26)
 
 A repo-wide review found both gates leakier than their docs claimed. Fixed:

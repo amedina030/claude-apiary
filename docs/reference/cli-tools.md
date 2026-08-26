@@ -1042,6 +1042,22 @@ Exit codes: `0` success or nothing to do; `1` refused (foreign hook in the way, 
 
 A pre-commit hook that isn't ours is never clobbered — inspect it first, then re-run with `--force`.
 
+## scripts/probe_permission_prompt.py
+
+Empirical check that apiary hooks still let default-mode permission prompts happen. Runs a headless `claude -p` in a bootstrapped repo in `manual` mode, asks for one unlisted Bash command (`python -c`, which is neither auto-approved nor built-in-protected) and reads `permission_denials` from the JSON result. Run it before and after any change to hook responses (`core/hook_context.py`, the dispatcher). Costs one short Haiku call.
+
+```bash
+poetry run python scripts/probe_permission_prompt.py /path/to/bootstrapped-repo
+poetry run python scripts/probe_permission_prompt.py /path/to/bootstrapped-repo --model claude-haiku-4-5-20251001 --timeout 180
+```
+
+| Flag | Description |
+|------|-------------|
+| `--model MODEL` | Model for the probe call (default: Haiku) |
+| `--timeout SECONDS` | Kill the probe after this many seconds (default: 180) |
+
+Exit codes: `0` the call was held for a prompt (hooks are not auto-approving); `1` the call ran without a prompt (something voted allow); `2` inconclusive.
+
 ## Test scripts
 
 All tests use `unittest` and are run directly:
