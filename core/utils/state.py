@@ -339,9 +339,9 @@ def find_state_dir(target_repo: Path) -> Optional[Path]:
     """Return the per-target state directory for ``target_repo``, or None.
 
     Read-only resolver — does not allocate ids, write registry entries,
-    or run git. Reads ``<target_repo>/.apiary/pointer`` to get the
-    apiary repo path and target id, then returns
-    ``<apiary>/.repos/<target_id>/`` if it exists on disk.
+    or run git. Reads the repo's ``.claude/apiary/*-pointer.json`` pins
+    (falling back to the legacy ``.apiary/pointer`` breadcrumb) and returns
+    ``<apiary>/.repos/<name>-<uid>/`` if it exists on disk.
 
     Use this from passive consumers (GUI, dashboards, audits) that need
     to find an already-registered target's state without side effects.
@@ -349,7 +349,23 @@ def find_state_dir(target_repo: Path) -> Optional[Path]:
     failed, return None — callers may fall back to a legacy in-repo
     path if they want to support unmigrated targets.
     """
-    pointer = _read_pointer(Path(target_repo))
+    repo = Path(target_repo)
+    # Live pin model first: <repo>/.claude/apiary/{main-apiary-pointer,
+    # self-pointer}.json -> <main-apiary>/.repos/<name>-<uid>/. Bootstrapped
+    # repos carry no .apiary/pointer any more (that model was retired), so
+    # without this branch launcher-less callers could never find their
+    # state dir and fell through to whatever fallback they had.
+    main_ptr = read_main_apiary_pointer(repo)
+    self_ptr = read_self_pointer(repo)
+    if main_ptr and self_ptr:
+        main_path = main_ptr.get("main_apiary_path", "")
+        name, uid = self_ptr.get("name", ""), self_ptr.get("uid", "")
+        if main_path and name and uid != "":
+            state_dir = Path(main_path) / REPOS_DIRNAME / f"{name}-{uid}"
+            if state_dir.is_dir():
+                return state_dir
+    # Legacy breadcrumb model (<repo>/.apiary/pointer).
+    pointer = _read_pointer(repo)
     if pointer is None:
         return None
     apiary_str = pointer.get("apiary_repo", "")

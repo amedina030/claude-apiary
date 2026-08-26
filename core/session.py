@@ -18,6 +18,7 @@ directory.
 """
 import json
 import re
+import sys
 import tempfile
 from pathlib import Path
 
@@ -48,8 +49,24 @@ def dump_history(entries: list) -> str:
     return json.dumps({"schema_version": HISTORY_SCHEMA_VERSION, "sessions": list(entries)}, indent=2)
 
 
+_warned_fallback = False
+
+
 def _fallback_root() -> Path:
-    return Path(tempfile.gettempdir()) / "apiary-session-tmp"
+    """Where session files go when neither a repo nor a state dir can be
+    resolved. Never the home directory — and never silent: a session whose
+    identity lands in the temp dir is a misconfiguration worth one stderr line."""
+    global _warned_fallback
+    root = Path(tempfile.gettempdir()) / "apiary-session-tmp"
+    if not _warned_fallback:
+        _warned_fallback = True
+        print(
+            "[apiary] no bootstrapped repo / state dir in scope; session files "
+            f"go to {root} (set APIARY_TARGET_REPO / APIARY_TARGET_STATE_DIR "
+            "or run inside a bootstrapped repo)",
+            file=sys.stderr,
+        )
+    return root
 
 
 def session_tmp_dir() -> Path:

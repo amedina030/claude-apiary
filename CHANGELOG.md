@@ -9,7 +9,11 @@
   `<main-apiary>/.repos/<slug>/sessions/` (the launcher's
   `APIARY_TARGET_STATE_DIR`), once-per-session hook flags under
   `<repo>/.claude/apiary/session-tmp/` (created by the installer,
-  git-ignored); with neither resolvable the fallback is the OS temp dir.
+  git-ignored); with neither resolvable the fallback is the OS temp dir,
+  announced once on stderr. The GUI's `bubble_anomalies.jsonl` moves under
+  the GUI state dir too, and `find_state_dir` now reads the live
+  `.claude/apiary/*-pointer.json` pins (the retired `.apiary/pointer` it
+  looked for meant launcher-less callers could never find their state).
   `core/session.py` used to anchor both at `~/.claude` and grew ~5 stray
   files per session (review S1). `save_transcript.py` — a Stop hook that
   runs every turn — no longer crashes on a lock timeout or an unwritable

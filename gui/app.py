@@ -30,7 +30,7 @@ from gui.theme import (
     load_theme,
 )
 from gui.transcript import Message, parse_jsonl_lines
-from gui.paths import main_apiary
+from gui.paths import main_apiary, state_dir
 from scribe import api as scribe_api
 
 # Note types the quick-capture box may write. Deliberately narrow: the box is
@@ -60,7 +60,9 @@ INDEX_HTML = WEB_DIR / "index.html"
 # posts a classified snapshot here for later analysis — the bug is intermittent
 # and unreproducible on demand, so we capture occurrences as they happen rather
 # than guess at the cause. Same home-dir location convention as permission_mcp.
-BUBBLE_ANOMALY_LOG = Path.home() / ".claude" / "apiary_gui" / "bubble_anomalies.jsonl"
+# Under the per-profile GUI state dir like every other GUI file — this was
+# the last apiary writer under ~/.claude (review gui #5 / S1).
+BUBBLE_ANOMALY_LOG = state_dir() / "bubble_anomalies.jsonl"
 
 
 class GuiBridge:

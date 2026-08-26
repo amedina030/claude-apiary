@@ -116,5 +116,54 @@ class HistoryShapeTest(unittest.TestCase):
             self.assertEqual(json.loads(sess.dump_history([{"x": 1}])), {"schema_version": 1, "sessions": [{"x": 1}]})
 
 
+class FindStateDirTest(unittest.TestCase):
+    def _pinned(self, root):
+        from core.utils import state
+        main = root / "apiary"
+        (main / ".repos" / "proj-7").mkdir(parents=True)
+        repo = root / "proj"
+        (repo / ".claude" / "apiary").mkdir(parents=True, exist_ok=True)
+        state.write_main_apiary_pointer(repo, {"main_apiary_path": str(main), "main_apiary_uid": 1, "schema_version": 1})
+        state.write_self_pointer(repo, {"name": "proj", "uid": 7, "real_path": str(repo), "schema_version": 1})
+        return main, repo
+
+    def test_live_pins_resolve_and_legacy_pointer_still_works(self):
+        from core.utils import state
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "proj"
+            (repo / ".claude" / "apiary").mkdir(parents=True)
+            self.assertIsNone(state.find_state_dir(repo))          # no pins yet
+            main, repo = self._pinned(root)
+            self.assertEqual(state.find_state_dir(repo), main / ".repos" / "proj-7")
+            # Pins pointing at a dir that does not exist -> None, not a guess.
+            state.write_self_pointer(repo, {"name": "proj", "uid": 8, "real_path": str(repo), "schema_version": 1})
+            self.assertIsNone(state.find_state_dir(repo))
+            # Legacy breadcrumb model.
+            legacy = root / "old"
+            (legacy / ".apiary").mkdir(parents=True)
+            (main / ".repos" / "old-3").mkdir()
+            (legacy / ".apiary" / "pointer").write_text(
+                json.dumps({"apiary_repo": str(main), "target_id": "old-3"}), encoding="utf-8")
+            self.assertEqual(state.find_state_dir(legacy), main / ".repos" / "old-3")
+
+    def test_session_dirs_follow_the_pins_without_launcher_env(self):
+        with tempfile.TemporaryDirectory() as td:
+            main, repo = self._pinned(Path(td))
+            saved = {v: os.environ.get(v) for v in ("APIARY_TARGET_STATE_DIR", "CLAUDE_PROJECT_DIR", "APIARY_TARGET_REPO")}
+            try:
+                os.environ.pop("APIARY_TARGET_STATE_DIR", None)
+                os.environ.pop("CLAUDE_PROJECT_DIR", None)
+                os.environ["APIARY_TARGET_REPO"] = str(repo)
+                self.assertEqual(sess.sessions_dir(), main / ".repos" / "proj-7" / "sessions")
+            finally:
+                for v, val in saved.items():
+                    if val is None:
+                        os.environ.pop(v, None)
+                    else:
+                        os.environ[v] = val
+
+
+
 if __name__ == "__main__":
     unittest.main()
