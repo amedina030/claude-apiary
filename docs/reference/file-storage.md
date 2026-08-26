@@ -4,7 +4,7 @@ title: File Storage
 scope: project
 description: Runtime data locations — where JSONL logs, flags, transcripts, and session state live
 framework_version: "1.0"
-last_verified: 2026-05-04
+last_verified: 2026-08-26
 ---
 
 # File Storage
@@ -38,10 +38,14 @@ Toggle state stored as sentinel files. Presence = enabled, absence = disabled.
 
 | Flag | Path | Set by |
 |------|------|--------|
-| Budgeter logging | `~/.claude/budgeter-log-enabled` | `/budgeter-log` |
-| Budgeter warnings | `~/.claude/budgeter-warn-enabled` | `/budgeter-warn` |
+| Budgeter logging | `<repo>/.claude/apiary/flags/budgeter-log-enabled` | `/budgeter log` |
+| Budgeter warnings | `<repo>/.claude/apiary/flags/budgeter-warn-enabled` | `/budgeter warn` |
+| Budgeter session nudge | `<repo>/.claude/apiary/flags/budgeter-session-warn-enabled` | `/budgeter session-warn` |
 
-Managed via `core/flags.py`: `flags.is_enabled("budgeter-log")`, `flags.enable(name)`, `flags.disable(name)`.
+Managed via `core/flags.py`, in-process (`flags.is_enabled("budgeter-log")`,
+`flags.enable(name)`, `flags.disable(name)`) or from a shell
+(`python core/flags.py toggle budgeter-log`). The repo is resolved from
+`$CLAUDE_PROJECT_DIR`, then `$APIARY_TARGET_REPO`, then cwd's git root.
 
 ## Budgeter data
 

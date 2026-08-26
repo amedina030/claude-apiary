@@ -4,7 +4,7 @@ title: Slash Commands
 scope: project
 description: All slash commands, what they do, and when to use them
 framework_version: "1.0"
-last_verified: 2026-04-21
+last_verified: 2026-08-26
 ---
 
 # Slash Commands
@@ -16,9 +16,7 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 | Command | Source | Description |
 |---------|--------|-------------|
 | `/apiary-context` | `core/commands/apiary-context.md` | Load apiary toolkit context (scribe, budgeter, runner, portability rules) |
-| `/budgeter-log` | `budgeter/commands/budgeter-log.md` | Toggle token logging on/off |
-| `/budgeter-warn` | `budgeter/commands/budgeter-warn.md` | Toggle cost estimation warnings on/off |
-| `/budgeter-session-warn` | `budgeter/commands/budgeter-session-warn.md` | Toggle session-length wrap-up nudge on/off |
+| `/budgeter` | `budgeter/commands/budgeter.md` | Toggle one budgeter feature on/off: `log`, `warn`, or `session-warn` |
 | `/budgeter-setup` | `budgeter/commands/budgeter-setup.md` | Set up budgeter for a specific project |
 | `/note` | `scribe/commands/note.md` | Add a typed note (type auto-detected from prefix) |
 | `/notes` | `scribe/commands/notes.md` | List and query notes |
@@ -34,15 +32,18 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 
 ## Toggles
 
-These commands create or remove flag files at `~/.claude/<name>-enabled`:
+`/budgeter <log|warn|session-warn>` creates or removes a sentinel file at
+`<repo>/.claude/apiary/flags/<flag-name>-enabled`. Presence = enabled.
 
-| Command | Flag file | Default |
-|---------|-----------|---------|
-| `/budgeter-log` | `~/.claude/budgeter-log-enabled` | off |
-| `/budgeter-warn` | `~/.claude/budgeter-warn-enabled` | off |
-| `/budgeter-session-warn` | `~/.claude/budgeter-session-warn-enabled` | off |
+| Invocation | Flag file | Default |
+|------------|-----------|---------|
+| `/budgeter log` | `<repo>/.claude/apiary/flags/budgeter-log-enabled` | off |
+| `/budgeter warn` | `<repo>/.claude/apiary/flags/budgeter-warn-enabled` | off |
+| `/budgeter session-warn` | `<repo>/.claude/apiary/flags/budgeter-session-warn-enabled` | off |
 
-Toggles persist across sessions.
+Toggles are per-repo and persist across sessions. The skill shells out to
+`core/flags.py` (see [CLI Tools](cli-tools.md#coreflagspy)), which is the same
+code path the hooks read — so what the toggle writes is what they check.
 
 ## Always-active features
 

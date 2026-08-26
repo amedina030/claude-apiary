@@ -167,8 +167,8 @@ Hooks and slash commands are loaded at session start. Restart Claude Code after 
 Inside a bootstrapped repo:
 
 ```
-/budgeter-log     # start recording token usage
-/budgeter-warn    # enable expensive-call warnings
+/budgeter log     # start recording token usage
+/budgeter warn    # enable expensive-call warnings
 ```
 
 Toggles persist per-repo at `<repo>/.claude/apiary/flags/<flag-name>-enabled`.
@@ -341,11 +341,11 @@ Main-apiary's self-pointer drifted. Run `apiary doctor pointers --fix` to update
 **`apiary doctor` reports `unreachable`**
 A registered repo's `real_path` no longer exists on disk. Either restore the repo, or `apiary uninstall --target <real_path>` (the registry entry is removed even if the path is gone, freeing the slug).
 
-**`/budgeter-log` toggle has no effect**
-Check `<repo>/.claude/apiary/flags/budgeter-log-enabled` exists when ON, is absent when OFF. The slash command creates/removes this file.
+**`/budgeter log` toggle has no effect**
+Check `<repo>/.claude/apiary/flags/budgeter-log-enabled` exists when ON, is absent when OFF. The slash command creates/removes this file via `core/flags.py`; run `python core/flags.py status budgeter-log` from inside the repo to see what the hooks see.
 
 **Warnings never firing**
-Warnings require at least `min_tasks` unique tasks in the log (default: 50). Run `/budgeter-log` and use the repo until you've accumulated enough history.
+Warnings require at least `min_tasks` unique tasks in the log (default: 50). Run `/budgeter log` and use the repo until you've accumulated enough history.
 
 **`setup.py --global` still in your muscle memory**
 That mode is gone. The redirect stub at `setup.py` will print the new commands.

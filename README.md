@@ -46,14 +46,16 @@ Claude Code has no built-in visibility into how many tokens a session consumes o
 When warnings are enabled and enough task history exists, the pre-hook evaluates the current assistant message against a set of scope detection rules (keyword categories, file counts, step counts). Each rule has a configurable weight; if the weighted score exceeds a threshold, the hook finds similar past tasks and injects a warning with their median cost — Claude then asks you before proceeding.
 
 **Session-length nudge:**
-Separate from cost warnings, the budgeter can inject a one-shot advisory when the current prompt size crosses configured thresholds (`session_warn_soft_tokens` / `session_warn_hard_tokens`) — suggesting Claude wrap up at a natural checkpoint and prompt you to start a fresh session. Skipped in detached runner runs. Gated independently via `/budgeter-session-warn` so you can enable it without re-enabling the cost-warning rules.
+Separate from cost warnings, the budgeter can inject a one-shot advisory when the current prompt size crosses configured thresholds (`session_warn_soft_tokens` / `session_warn_hard_tokens`) — suggesting Claude wrap up at a natural checkpoint and prompt you to start a fresh session. Skipped in detached runner runs. Gated independently via `/budgeter session-warn` so you can enable it without re-enabling the cost-warning rules.
 
 **Toggle features:**
 ```
-/budgeter-log            # turn token logging on/off
-/budgeter-warn           # turn cost estimation warnings on/off
-/budgeter-session-warn   # turn session-length wrap-up nudge on/off
+/budgeter log            # turn token logging on/off
+/budgeter warn           # turn cost estimation warnings on/off
+/budgeter session-warn   # turn session-length wrap-up nudge on/off
 ```
+Each writes a sentinel file at `<repo>/.claude/apiary/flags/<flag-name>-enabled`;
+toggles are per-repo and persist across sessions.
 
 ---
 
@@ -224,7 +226,7 @@ Full details: [`gui/README.md`](gui/README.md).
 ```
 claude-apiary/
 ├── core/                        # Shared infrastructure used by all tools
-│   ├── flags.py                 # Flag file management (~/.claude/{name}-enabled)
+│   ├── flags.py                 # Flag files + CLI (<repo>/.claude/apiary/flags/{name}-enabled)
 │   ├── config.py                # JSON config loader with defaults fallback
 │   ├── hooks_lib.py             # Hook registration and settings.json management
 │   └── hooks/
@@ -241,9 +243,7 @@ claude-apiary/
 │   │   ├── logger.py            # All file I/O: log, baseline, snapshot, session JSONL
 │   │   └── estimator.py         # Rule-based scope detection + percentile threshold logic
 │   ├── commands/
-│   │   ├── budgeter-log.md           # /budgeter-log slash command definition
-│   │   ├── budgeter-warn.md          # /budgeter-warn slash command definition
-│   │   ├── budgeter-session-warn.md  # /budgeter-session-warn slash command definition
+│   │   ├── budgeter.md               # /budgeter <log|warn|session-warn> toggle definition
 │   │   └── budgeter-setup.md         # /budgeter-setup slash command definition
 │   ├── data/                    # Runtime — usage_log.jsonl (git-ignored)
 │   ├── tmp/                     # Runtime — per-session baseline files (git-ignored)
