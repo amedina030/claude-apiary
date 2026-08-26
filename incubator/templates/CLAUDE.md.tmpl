@@ -19,7 +19,8 @@ This repo's apiary state (scribe notes, budgeter data, etc.) is managed centrall
 ```bash
 python .claude/apiary/launch.py scribe/notes.py list             # operational notes for this project
 python .claude/apiary/launch.py scribe/notes.py list --type context  # specs and project context
-python .claude/apiary/launch.py budgeter/report.py --since 7d    # session cost rollup
+python .claude/apiary/launch.py budgeter/report.py                    # session cost rollup
+python .claude/apiary/launch.py budgeter/report.py --since 2026-01-01 # ...from a date onwards (dates are YYYY-MM-DD)
 ```
 
 The full project spec produced during incubation lives as a `context`-type scribe note in this repo — run `scribe/notes.py list --type context` to find it.

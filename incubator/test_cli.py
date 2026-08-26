@@ -288,6 +288,191 @@ class SkeletonLayoutTests(unittest.TestCase):
             self.assertTrue(target.exists(), "repo left intact for manual recovery")
 
 
+class MigrateSpecTests(unittest.TestCase):
+    """B9/B10: the spec must not travel on argv, and a half-done migration must
+    not tell the operator to re-run the step that already succeeded."""
+
+    SPEC = "# Spec\n" + ("filler line to make this realistically long\n" * 1200)
+
+    def test_spec_travels_by_file_not_argv(self):
+        """A /refine spec routinely runs several KB; Windows CreateProcess caps
+        a command line at 32,767 chars."""
+        self.assertGreater(len(self.SPEC), 32767, "fixture must exceed the argv cap")
+        seen: dict = {}
+
+        def fake_run_scribe(args, cwd, launcher=None):
+            if args and args[0] == "add":
+                seen["args"] = list(args)
+                idx = args.index("--content-file")
+                seen["path"] = Path(args[idx + 1])
+                seen["body"] = seen["path"].read_text(encoding="utf-8")
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="Added C-2026-1 (context)\n", stderr=""
+            )
+
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(cli, "_run_scribe", side_effect=fake_run_scribe):
+                ok, _msg, added = cli._migrate_spec(
+                    Path(td) / "t", self.SPEC, "C-2026-999", "sess"
+                )
+
+        self.assertTrue(ok)
+        self.assertTrue(added)
+        self.assertIn("--content-file", seen["args"])
+        self.assertNotIn("--content", seen["args"],
+                         "the spec body must never be an argv element")
+        self.assertEqual(seen["body"], self.SPEC)
+        self.assertFalse(seen["path"].exists(), "the staged spec file is temporary")
+
+    def test_oserror_from_the_scribe_spawn_is_reported_not_raised(self):
+        """subprocess.run can raise (missing interpreter, argv too long). The
+        CLI must return its documented failure, not a traceback."""
+        with mock.patch.object(cli.subprocess, "run",
+                               side_effect=OSError("[WinError 206] filename too long")):
+            result = cli._run_scribe(["add"], cwd=Path.cwd())
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("filename too long", result.stderr)
+
+    def test_migrate_survives_an_oserror(self):
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(cli.subprocess, "run", side_effect=OSError("boom")):
+                ok, msg, added = cli._migrate_spec(
+                    Path(td) / "t", "spec", "C-2026-999", None
+                )
+        self.assertFalse(ok)
+        self.assertFalse(added)
+        self.assertIn("boom", msg)
+
+    def test_add_failure_reports_the_spec_was_not_migrated(self):
+        fail_add = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="scribe blew up"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(cli, "_run_scribe", return_value=fail_add):
+                ok, msg, added = cli._migrate_spec(
+                    Path(td) / "t", "spec", "C-2026-999", None
+                )
+        self.assertFalse(ok)
+        self.assertFalse(added, "add failed, so nothing landed in the new repo")
+        self.assertIn("scribe blew up", msg)
+
+    def test_done_failure_still_reports_the_spec_as_added(self):
+        ok_add = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="Added C-2026-1 (context)\n", stderr=""
+        )
+        fail_done = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="no such note"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(cli, "_run_scribe", side_effect=[ok_add, fail_done]):
+                ok, msg, added = cli._migrate_spec(
+                    Path(td) / "t", "spec", "C-2026-999", None
+                )
+        self.assertFalse(ok)
+        self.assertTrue(added, "the spec did land — only the close failed")
+        self.assertIn("no such note", msg)
+
+
+class RecoveryHintTests(unittest.TestCase):
+    """B10: the hint printed on a partial migration must match what is left to do."""
+
+    SPEC = SkeletonLayoutTests.SAMPLE_SPEC
+
+    def _spawn_with(self, scribe_results) -> str:
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "hint-target"
+            args = argparse.Namespace(
+                path=str(target), spec_note_id="C-2026-999",
+                author="x", session_id=None,
+            )
+            apiary = _minimal_apiary(Path(td))
+            err = io.StringIO()
+            with mock.patch.object(cli, "_fetch_spec", return_value=(self.SPEC, None)), \
+                 mock.patch.object(cli, "APIARY_REPO", apiary), \
+                 mock.patch.object(cli.core_install, "install",
+                                   side_effect=_fake_install(apiary)), \
+                 mock.patch.object(cli, "_run_scribe", side_effect=scribe_results), \
+                 mock.patch.object(sys, "stderr", err):
+                rc = cli.cmd_spawn(args)
+            self.assertEqual(rc, cli.EXIT_MIGRATION_FAILED)
+            return err.getvalue()
+
+    def test_hint_after_add_succeeded_says_close_the_original_only(self):
+        ok_add = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="Added C-2026-1 (context)\n", stderr=""
+        )
+        fail_done = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="no such note"
+        )
+        err = self._spawn_with([ok_add, fail_done])
+        self.assertIn("done C-2026-999", err)
+        self.assertIn("ALREADY", err)
+        # Re-running `add` would file a second copy of the spec.
+        self.assertNotIn("--type context", err)
+        self.assertNotIn("--content-file <path>", err)
+
+    def test_hint_after_add_failed_covers_both_steps(self):
+        fail_add = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="scribe blew up"
+        )
+        err = self._spawn_with([fail_add])
+        self.assertIn("--content-file", err)
+        self.assertNotIn("--content <spec-body>", err,
+                         "the recovery command must not put the spec on argv")
+        self.assertIn("done C-2026-999", err)
+
+
+class TemplateTests(unittest.TestCase):
+    """Every spawned repo ships these verbatim, so a wrong example is a bug in
+    13 repos at once."""
+
+    def test_budgeter_example_uses_a_date_budgeter_can_parse(self):
+        from budgeter import report
+
+        text = (cli.TEMPLATES_DIR / "CLAUDE.md.tmpl").read_text(encoding="utf-8")
+        values = re.findall(r"report\.py\s+--(?:since|date)\s+(\S+)", text)
+        self.assertTrue(values, "template should still show a dated report example")
+        for value in values:
+            with self.subTest(value=value):
+                report.parse_date(value)  # ValueError on '7d'
+
+    def test_budgeter_example_flags_exist(self):
+        text = (cli.TEMPLATES_DIR / "CLAUDE.md.tmpl").read_text(encoding="utf-8")
+        flags = set(re.findall(r"budgeter/report\.py\s+(--[a-z-]+)", text))
+        help_text = subprocess.run(
+            [sys.executable, str(cli.APIARY_REPO / "budgeter" / "report.py"), "--help"],
+            capture_output=True, text=True, encoding="utf-8",
+        ).stdout
+        for flag in flags:
+            with self.subTest(flag=flag):
+                self.assertIn(flag, help_text)
+
+    def test_gitignore_has_no_dead_apiary_entries(self):
+        """Spawned repos carry no local .apiary/ dir (55ae7ba), so rules for one
+        are noise that implies state lives somewhere it does not."""
+        text = (cli.TEMPLATES_DIR / "gitignore.tmpl").read_text(encoding="utf-8")
+        entries = [
+            line.strip() for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(
+            [e for e in entries if ".apiary" in e], [],
+            "gitignore.tmpl still carries dead .apiary/ rules",
+        )
+
+    def test_gitignore_leaves_the_claude_seam_to_the_installer(self):
+        """core.install appends the stepwise `.claude/` block only when the file
+        has no `.claude` rule yet — the template must not pre-empt it."""
+        text = (cli.TEMPLATES_DIR / "gitignore.tmpl").read_text(encoding="utf-8")
+        entries = [
+            line.strip() for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(
+            [e for e in entries if e in install_mod._GITIGNORE_PRESENT], []
+        )
+
+
 class SpecFetchErrorTests(unittest.TestCase):
     def test_missing_spec_returns_exit_3(self):
         with tempfile.TemporaryDirectory() as td:
@@ -392,6 +577,47 @@ class SpawnEndToEndTests(unittest.TestCase):
         # Original is marked done in apiary.
         got = self._scribe(["get", note_id], cwd=self.apiary)
         self.assertIn("done", got.stdout.lower())
+
+    def test_multi_kilobyte_spec_migrates_intact(self):
+        """B9 regression: a spec too long for a Windows command line still
+        migrates, because it goes to scribe through --content-file."""
+        marker_head = "SPEC-HEAD-MARKER"
+        marker_tail = "SPEC-TAIL-MARKER"
+        big = (
+            f"{marker_head}\n"
+            + self.SPEC
+            + ("a line of spec body that is here only to add length\n" * 900)
+            + f"{marker_tail}\n"
+        )
+        self.assertGreater(len(big), 32767, "fixture must exceed the argv cap")
+
+        seed_file = self.root / "seed-spec.md"
+        seed_file.write_text(big, encoding="utf-8")
+        seeded = self._scribe(
+            ["add", "--type", "context", "--content-file", str(seed_file),
+             "--session-id", "seed"],
+            cwd=self.apiary,
+        )
+        self.assertEqual(seeded.returncode, 0, seeded.stderr or seeded.stdout)
+        note_id = re.search(r"C-\d{4}-\d+", seeded.stdout).group(0)
+
+        target = self.root / "big-spec-proj"
+        args = argparse.Namespace(
+            path=str(target), spec_note_id=note_id,
+            author="x <x@example.com>", session_id="sess",
+        )
+        with mock.patch.object(sys, "stdout", new_callable=io.StringIO):
+            rc = cli.cmd_spawn(args)
+        self.assertEqual(rc, cli.EXIT_OK)
+
+        new_launcher = target / ".claude" / "apiary" / "launch.py"
+        listed = self._scribe(["list", "--type", "context"], cwd=target,
+                              launcher=new_launcher)
+        new_id = re.search(r"C-\d{4}-\d+", listed.stdout).group(0)
+        got = self._scribe(["get", new_id], cwd=target, launcher=new_launcher)
+        self.assertEqual(got.returncode, 0, got.stderr or got.stdout)
+        self.assertIn(marker_head, got.stdout, "spec head lost in migration")
+        self.assertIn(marker_tail, got.stdout, "spec tail lost in migration")
 
 
 if __name__ == "__main__":

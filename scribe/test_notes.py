@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for scribe/notes.py — ScribeStore-backed CLI commands."""
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -223,6 +224,30 @@ class TestScribeNotes(unittest.TestCase):
         with self.assertRaises(SystemExit):
             notes.cmd_add(args)
 
+    def test_cmd_learn_content_file_reads_file_verbatim(self):
+        raw = 'learned: `echo XXX` beats /clear on filename.md'
+        src = self.tmp_dir / 'learning.md'
+        src.write_text(raw, encoding='utf-8')
+        args = self._make_args(
+            content=None, content_file=str(src), session_id='sess1',
+            brief_summary='', role='', mission='', tags='scribe', area=[],
+            supersedes='',
+        )
+        notes.cmd_learn(args)
+        learnings = self.store.list_learnings()
+        self.assertEqual(len(learnings), 1)
+        full = self.store.get_learning(learnings[0]['year'], learnings[0]['seq'])
+        self.assertEqual(full['content'], raw)
+
+    def test_cmd_learn_content_file_missing_fails(self):
+        args = self._make_args(
+            content=None, content_file=str(self.tmp_dir / 'nope.md'),
+            session_id='sess1', brief_summary='', role='', mission='',
+            tags='scribe', area=[], supersedes='',
+        )
+        with self.assertRaises(SystemExit):
+            notes.cmd_learn(args)
+
     def test_unarchive_restores_note(self):
         entry = self.store.add_note('todo', 'round-trip', 'sess1')
         self.store.update_note('todo', entry['year'], entry['seq'], status='done')
@@ -407,6 +432,41 @@ class TestScribeNotes(unittest.TestCase):
         self._write_template('context', 'two')
         args = self._make_args(template_action='list')
         notes.cmd_template(args)
+
+
+class TestContentFileParserWiring(unittest.TestCase):
+    """`--content-file` is the list-form-subprocess rule made real: callers with
+    a multi-kilobyte body (an incubator spec, a /wrapup handoff) cannot put it on
+    argv. Both `add` and `learn` must offer it, exclusively with `--content`."""
+
+    NOTES_PY = Path(__file__).resolve().parent / 'notes.py'
+
+    def _help(self, subcommand):
+        return subprocess.run(
+            [sys.executable, str(self.NOTES_PY), subcommand, '--help'],
+            capture_output=True, text=True, encoding='utf-8',
+        )
+
+    def _both(self, subcommand):
+        return subprocess.run(
+            [sys.executable, str(self.NOTES_PY), subcommand,
+             '--content', 'a', '--content-file', 'b'],
+            capture_output=True, text=True, encoding='utf-8',
+        )
+
+    def test_content_file_is_offered_by_add_and_learn(self):
+        for subcommand in ('add', 'learn'):
+            with self.subTest(subcommand=subcommand):
+                result = self._help(subcommand)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('--content-file', result.stdout)
+
+    def test_content_and_content_file_are_mutually_exclusive(self):
+        for subcommand in ('add', 'learn'):
+            with self.subTest(subcommand=subcommand):
+                result = self._both(subcommand)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertIn('not allowed with argument', result.stderr)
 
 
 if __name__ == '__main__':

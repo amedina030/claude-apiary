@@ -10,7 +10,7 @@ Requires PYTHONUTF8=1 environment variable on Windows (set by setup.py).
 Usage:
     notes.py add --type todo (--content "..." | --content-file PATH) --session-id X [--auto] [--role X] [--mission X]
     notes.py list [--type X] [--session X] [--search X] [--last N | --limit N] [--all] [--archive] [--role X] [--mission X]
-    notes.py learn --content "..." [--session-id X] [--role X] [--mission X]
+    notes.py learn (--content "..." | --content-file PATH) [--session-id X] [--role X] [--mission X]
     notes.py learnings [--search X] [--role X] [--mission X]
     notes.py get <id>
     notes.py done <id>
@@ -386,6 +386,24 @@ def run_auto_archive(project_key: str, *, start: Path | None = None) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _content_from_args(args):
+    """Return note content from ``--content-file`` if given, else ``--content``.
+
+    ``--content-file`` is the list-form-subprocess rule made real: a caller with
+    a multi-kilobyte body (an incubator spec, a /wrapup handoff) cannot put it on
+    argv — Windows ``CreateProcess`` caps the command line at 32,767 chars — and
+    quoting it through a shell mangles backticks and ``/``-prefixed tokens.
+    """
+    content_file = getattr(args, 'content_file', None)
+    if content_file:
+        try:
+            return Path(content_file).read_text(encoding='utf-8')
+        except OSError as e:
+            print(f'Error: cannot read --content-file {content_file!r}: {e}', file=sys.stderr)
+            sys.exit(1)
+    return args.content
+
+
 def cmd_add(args):
     store = args.store
 
@@ -406,15 +424,7 @@ def cmd_add(args):
                 print(f"Handoff for session {target_sid.short} already exists ({h.get('display_id', _format_id(h))}). Skipping.")
                 return
 
-    if getattr(args, 'content_file', None):
-        content_path = Path(args.content_file)
-        try:
-            content = content_path.read_text(encoding='utf-8')
-        except OSError as e:
-            print(f'Error: cannot read --content-file {args.content_file!r}: {e}', file=sys.stderr)
-            sys.exit(1)
-    else:
-        content = args.content
+    content = _content_from_args(args)
     if len(content.encode('utf-8')) > MAX_CONTENT_LENGTH:
         print(f'Error: content exceeds {MAX_CONTENT_LENGTH} bytes', file=sys.stderr)
         sys.exit(1)
@@ -907,7 +917,7 @@ def cmd_migrate(args):
 
 def cmd_learn(args):
     store = args.store
-    content = args.content
+    content = _content_from_args(args)
     if len(content.encode('utf-8')) > MAX_CONTENT_LENGTH:
         print(f'Error: content exceeds {MAX_CONTENT_LENGTH} bytes', file=sys.stderr)
         sys.exit(1)
@@ -1530,7 +1540,12 @@ def main():
 
     # learn
     p_learn = sub.add_parser("learn")
-    p_learn.add_argument("--content", required=True)
+    p_learn_content = p_learn.add_mutually_exclusive_group(required=True)
+    p_learn_content.add_argument("--content")
+    p_learn_content.add_argument("--content-file", dest="content_file",
+                        help="Read content from a UTF-8 file instead of --content. Use this when "
+                             "content contains backticks, /-prefixed tokens, or filenames that would "
+                             "otherwise trigger shell command substitution in the caller.")
     p_learn.add_argument("--session-id", default="")
     p_learn.add_argument("--brief-summary", default="", dest="brief_summary",
                           help=f"One-sentence headline (<={BRIEF_SUMMARY_MAX} chars) for GUI sidebar. Auto-derived if omitted.")

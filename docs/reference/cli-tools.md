@@ -27,7 +27,7 @@ Core note and learning management.
 | `resume` | `notes.py resume <ID>` | Undo a defer — return the note to active |
 | `update` | `notes.py update <ID> --content "<text>"` | Update note content (e.g. `T-2026-1`) |
 | `archive` | `notes.py archive [--before YYYY-MM-DD]` | Archive old notes |
-| `learn` | `notes.py learn --content "<text>"` | Add a learning |
+| `learn` | `notes.py learn (--content "<text>" \| --content-file PATH)` | Add a learning |
 | `learnings` | `notes.py learnings` | List all learnings |
 | `unlearn` | `notes.py unlearn <ID>` | Remove a learning (e.g. `L-2026-3`) |
 | `handoff-sessions` | `notes.py handoff-sessions` | List sessions with handoffs |
@@ -62,7 +62,7 @@ Core note and learning management.
 | `--role ROLE` | add, list, learn | Session role filter |
 | `--mission MISSION` | add, list, learn | Session mission filter |
 | `--before DATE` | archive | Archive notes before this date |
-| `--content-file PATH` | add | Read content from a UTF-8 file instead of `--content` (avoids shell-substitution issues with backticks/slashes) |
+| `--content-file PATH` | add, learn | Read content from a UTF-8 file instead of `--content`. Mutually exclusive with `--content`; one of the two is required. Use it for any body that is long or awkward on argv — backticks and `/`-prefixed tokens trigger shell substitution, and Windows caps a command line at 32,767 chars, so multi-kilobyte content (an incubator spec, a `/wrapup` handoff) must go through a file |
 | `--summary TEXT` | add | One-line abstract shown in lists and startup. Required for `--type handoff` |
 | `--brief-summary TEXT` | add, update, learn | One-sentence GUI-sidebar headline; auto-derived if omitted |
 | `--ack-template HASH` | add | Acknowledge the current template hash; required when a non-empty `templates/<type>.md` exists |
