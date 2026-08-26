@@ -45,8 +45,6 @@ def main():
     no-objection response (review B1)."""
     try:
         _run()
-    except SystemExit:
-        raise
     except Exception as exc:  # noqa: BLE001 — hooks must not crash
         print(f"[budgeter] pre_tool_use failed: {exc!r}", file=sys.stderr)
         hook_allow()
@@ -147,7 +145,10 @@ def _run():
             predicted_cost = int(median_cost)
             warning_fired = True
 
-    compacted = (baseline is not None
+    # A baseline written by an older counting scheme is kept for task/turn
+    # continuity but never compared against (its numbers mean something else).
+    comparable = logger.baseline_comparable(baseline)
+    compacted = (comparable
                  and tokens_now < baseline["tokens"]
                  and baseline.get("prev_tool_name") != "Agent")
 
@@ -175,7 +176,7 @@ def _run():
         # assistant turn): there is no cost to attribute, so log nothing.
         # Logging last_output here created phantom entries — 25% of the log
         # (review B3).
-        if (baseline is not None and baseline.get("prev_tool_name") != "Agent"
+        if (comparable and baseline.get("prev_tool_name") != "Agent"
                 and not compacted and tokens_now != baseline["tokens"]):
             entry = logger.build_cost_entry(
                 baseline, session_id, transcript_path, tokens_now,

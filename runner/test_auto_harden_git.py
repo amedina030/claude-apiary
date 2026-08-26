@@ -49,6 +49,29 @@ class CommitAllTest(unittest.TestCase):
     def test_nothing_to_commit_is_fine(self):
         auto_harden.commit_all("noop")
 
+    def test_files_created_since_snapshot_are_committed_even_if_undeclared(self):
+        (self.repo / "_tmp_scratch.txt").write_text("operator notes\n", encoding="utf-8")
+        before = auto_harden.untracked_files()
+        self.assertIn("_tmp_scratch.txt", before)
+        # The defender creates a helper the plan never declared and imports it.
+        (self.repo / "foo_utils.py").write_text("def f(): pass\n", encoding="utf-8")
+        (self.repo / "tracked.py").write_text("from foo_utils import f\n", encoding="utf-8")
+        auto_harden.commit_all("harden round 1 fixes", ["tracked.py"], new_since=before)
+        self.assertEqual(sorted(self._committed()), ["foo_utils.py", "tracked.py"])
+        self.assertIn("_tmp_scratch.txt", _git(["status", "--porcelain"], self.repo).stdout)
+
+    def test_bad_path_does_not_cancel_the_others_and_dirs_are_not_expanded(self):
+        (self.repo / "tests").mkdir()
+        (self.repo / "tests" / "_tmp_scratch.py").write_text("x\n", encoding="utf-8")
+        (self.repo / "new_mod.py").write_text("y = 1\n", encoding="utf-8")
+        outside = Path(self._tmp.name).parent / "outside_apiary_probe.txt"
+        outside.write_text("z\n", encoding="utf-8")
+        try:
+            auto_harden.commit_all("round", ["new_mod.py", str(outside), "tests/", "tests"])
+        finally:
+            outside.unlink(missing_ok=True)
+        self.assertEqual(self._committed(), ["new_mod.py"])
+
 
 if __name__ == "__main__":
     unittest.main()

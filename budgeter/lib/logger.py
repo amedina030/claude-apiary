@@ -470,6 +470,19 @@ def delete_snapshot(session_id):
         path.unlink()
 
 
+# Bump when the meaning of a baseline's numbers changes. Schema 2 (2026-08):
+# token totals are deduped per API call and include cache creation, so a
+# schema-1 baseline is 1.7-2.6x too large to compare against — comparing
+# produced a spurious "[compaction]" marker on the first PRE after upgrade.
+BASELINE_SCHEMA = 2
+
+
+def baseline_comparable(baseline) -> bool:
+    """True when *baseline* was written by code that counts the same way we
+    do now, so a delta against it means something."""
+    return isinstance(baseline, dict) and baseline.get("schema") == BASELINE_SCHEMA
+
+
 def load_baseline(session_id):
     """Return the session's baseline dict, or None when there is none.
 
@@ -492,7 +505,7 @@ def load_baseline(session_id):
             print(f"[budgeter] unreadable baseline {path.name}: {exc}; starting over",
                   file=sys.stderr)
             return None
-    return data if isinstance(data, dict) else None
+    return data if isinstance(data, dict) and "tokens" in data else None
 
 
 def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message="", scope_flags=None, predicted_cost=0, warning_fired=False, baseline_input=0, baseline_cache=0, baseline_output=0, agent_description="", baseline_cache_creation=0):
@@ -503,6 +516,7 @@ def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_
         # Write to a sibling temp file and os.replace it in, so a hook killed
         # mid-write can never leave a truncated baseline behind (review B1).
         _atomic_write_json(path, {
+                "schema": BASELINE_SCHEMA,
                 "tokens": tokens,
                 "context_tokens": context_tokens,
                 "baseline_input": baseline_input,
@@ -544,3 +558,10 @@ def cleanup_session(session_id):
                 p.unlink()
             except PermissionError:
                 pass  # file locked by another process (common on Windows); leave it
+        # Orphaned atomic-write temp files (a hook killed between mkstemp and
+        # os.replace, or a Windows replace refused while the file was open).
+        for orphan in p.parent.glob(p.name + ".*.tmp") if p.parent.exists() else ():
+            try:
+                orphan.unlink()
+            except OSError:
+                pass

@@ -14,14 +14,23 @@ Review runner Bug 9 and the permissions note.
   instead of `git add -A`, which swept the operator's untracked scratch
   files into "harden round fixes" commits.
 - `claude_subprocess.run_claude` passes `--disallowedTools` for the
-  `git push` and `gh pr merge/create` command families (including
-  `git -c … push`) and `--max-turns 150` on every stage call, so a
-  subprocess cannot push through the Bash tool — a deny beats an allow at
-  every settings level, verified against `claude -p --allowedTools
-  "Bash(git push *)"` — nor loop until the timeout. Permission rules cannot
-  see a push issued from a script file or another interpreter; that is a
-  known limit, not a claim. Both are parameters for callers that need
-  something else. When `claude -p` stops for a reason it only reports in
+  `git push` and `gh pr merge/create` command families and `--max-turns
+  150` on every stage call, so a subprocess cannot push through the Bash
+  tool — a deny beats an allow at every settings level, verified against
+  `claude -p --allowedTools "Bash(git push *)"` — nor loop until the
+  timeout. Known limits, stated rather than papered over: `git -c k=v push`
+  / `git --no-pager push` are not matched (a `git * push *` rule was tried
+  and rejected — it also denied `git log --grep push`, breaking the
+  executor's own commit step), and permission rules cannot see a push
+  issued from a script file or another interpreter.
+- **The runner now brings its own tool grant.** Until this PR every
+  headless stage worked only because the apiary hooks auto-approved every
+  tool call (C-1); with that gone, `claude -p` denied every Edit/Write/Bash
+  and step 1 failed with "no changes". `run_claude` passes
+  `--permission-mode acceptEdits` and `--allowedTools` Read/Edit/Write/
+  Glob/Grep + `Bash(git|python|poetry|pytest *)` — narrower than the vote
+  ever was — configurable under `subprocess` in `runner/config.json`. The
+  runner revive programme's e2e test is where that list gets validated. When `claude -p` stops for a reason it only reports in
   its JSON (`error_max_turns`, …) it exits 1 with empty stderr; `run_claude`
   now puts that reason into the returned stderr so stage logs say why.
 
@@ -49,7 +58,14 @@ Review gui #2/#3/#4/#12.
   its children can be enumerated), then terminates, `close(force=True)`s
   the pty (which also unblocks the reader thread) and joins the reader. A
   Windows-only integration test spawns `cmd /c python` through a real pty
-  and checks the grandchild is gone; it caught the wrong ordering.
+  and checks the grandchild is gone; it caught the wrong ordering. The
+  reader thread is unblocked by `shutdown()`ing pywinpty's read socket
+  (its `close()` alone never wakes a blocked `recv`), a deliberate stop no
+  longer fires the "exited (code -1)" toast, and `taskkill` runs without a
+  console window in the packaged build. The attach replay stops at the
+  last complete line so a record torn mid-write is picked up whole by the
+  tail instead of being half-dropped. Ctrl+C typed in the xterm pane is
+  routed to the ESC+Ctrl+U interrupt instead of being silently dropped.
 
 ### Budgeter hooks: no crashes, honest counts (2026-08-26)
 
@@ -77,6 +93,11 @@ and could break a session for good:
 - **Agent payloads over 64 KB were dropped silently** — exactly the most
   expensive calls. `post_tool_use.py` reads the whole payload and says so
   on stderr when it can't parse it.
+- Baselines carry a `schema` (now 2). A baseline written by the old
+  per-line counting is 1.7–2.6× too large to compare against, so the first
+  PRE after upgrade used to log a spurious `[compaction]` marker and drop an
+  entry; old-schema baselines are kept for turn continuity but never
+  compared. The Stop hook no longer logs against a shrunk total either.
 
 ### GUI permission gate fails closed (2026-08-26)
 
@@ -96,7 +117,8 @@ outside the GUI get blanket approval (review C-2).
 - `permission_mcp.log` and `permission_mcp_config.json` move from
   `~/.claude/apiary_gui/` to the per-profile GUI state dir
   (`<main-apiary>/.apiary/gui/apiary_gui[_<profile>]/`). The log rotates at
-  1 MiB and no longer records `Write` bodies or `Edit` strings.
+  1 MiB and no longer records `Write` bodies or `Edit` strings — on the
+  DECISION line as well as the REQUEST line.
 
 ### Hooks no longer vote on permissions (2026-08-26)
 
@@ -168,7 +190,16 @@ A repo-wide review found both gates leakier than their docs claimed. Fixed:
   against nothing. Also from the adversarial pass: `cd sub && git push`
   is scanned in `sub` (composed with `-C`), every push in a compound
   command is scanned against its own remote (only the first used to be),
-  and `--delete` / `:ref` deletions no longer count as outgoing.
+  and `--delete` / `:ref` deletions no longer count as outgoing. From the
+  final review: commands are also split on newlines; `git.exe`, `/usr/bin/git`
+  and `--exec-path` are recognised; a push the gate sees but cannot parse
+  falls back to scanning HEAD instead of being waved through; a `cd` the
+  gate cannot resolve (`cd $(...)`, `cd -`, `popd`) blocks with an
+  explanation instead of scanning a guessed directory; a URL / path
+  destination is scanned against the tips `git ls-remote` reports there
+  (everything reachable if it cannot be reached) instead of against the
+  configured remotes; and findings from one push in a compound command are
+  never discarded because a later one hit a git error.
 - `.secretsallow` is now honoured by the push gate too (it previously read
   only the inline pragma, so the scanner's own fixture files could not be
   pushed). Entries are path rules unless prefixed `line:`; more

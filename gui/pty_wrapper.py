@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -52,6 +53,9 @@ def _kill_process_tree(pid: int) -> None:
             subprocess.run(
                 [taskkill, "/PID", str(pid), "/T", "/F"],
                 capture_output=True, timeout=10, check=False,
+                # The windowed (console=False) build would otherwise flash a
+                # console for every tab close.
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except (OSError, subprocess.SubprocessError):
             pass
@@ -253,6 +257,10 @@ class PtyWrapper:
                 self.on_stdout(chunk)
             except Exception:
                 pass
+        if self._stop.is_set():
+            # Deliberate stop(): the UI asked for this; an "exited (code -1)"
+            # toast here would be a lie.
+            return
         # Process exited.
         code = -1
         try:
@@ -353,6 +361,15 @@ class PtyWrapper:
                 proc.terminate(force=True)
         except Exception:
             pass
+        # pywinpty's read() is a blocking recv() on a loopback socket and its
+        # close() only close()s it — a recv blocked in another thread does not
+        # wake for that. shutdown() does, so the reader sees EOF and exits.
+        fileobj = getattr(proc, "fileobj", None)
+        if fileobj is not None:
+            try:
+                fileobj.shutdown(socket.SHUT_RDWR)
+            except (OSError, AttributeError):
+                pass
         try:
             proc.close(force=True)
         except Exception:
@@ -360,3 +377,4 @@ class PtyWrapper:
         reader = self._reader_thread
         if reader is not None and reader is not threading.current_thread():
             reader.join(timeout=2.0)
+        self._proc = None

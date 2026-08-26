@@ -9,6 +9,7 @@ surfaces as an entry in the JSON result's ``permission_denials``:
 
     denied  -> prompts are alive (hooks did not vote allow)   -> exit 0
     ran     -> something auto-approved the call               -> exit 1
+    inconclusive / probe could not run                        -> exit 2 / 3
 
 Use it before and after any change to hook responses (hook_context,
 the dispatcher). Costs one short Haiku call. The CLAUDECODE* env vars are
@@ -28,6 +29,10 @@ PROBE_COMMAND = 'python -c "print(12345*2)"'
 PROBE_ANSWER = "24690"
 
 
+class ProbeError(RuntimeError):
+    """The probe itself could not run — distinct from a FAIL verdict."""
+
+
 def scrubbed_env() -> dict:
     return {k: v for k, v in os.environ.items()
             if not (k == "CLAUDECODE" or k.startswith("CLAUDE_CODE_"))}
@@ -36,18 +41,21 @@ def scrubbed_env() -> dict:
 def run_probe(repo: str, model: str, timeout: int) -> dict:
     claude = shutil.which("claude")
     if not claude:
-        raise SystemExit("claude CLI not found on PATH")
+        raise ProbeError("claude CLI not found on PATH")
     cmd = [claude, "-p",
            "Use the Bash tool to run exactly this command, then reply with only its output: "
            + PROBE_COMMAND,
            "--permission-mode", "manual", "--output-format", "json",
            "--max-turns", "2", "--model", model]
-    r = subprocess.run(cmd, cwd=repo, env=scrubbed_env(), capture_output=True,
-                       text=True, encoding="utf-8", timeout=timeout)
+    try:
+        r = subprocess.run(cmd, cwd=repo, env=scrubbed_env(), capture_output=True,
+                           text=True, encoding="utf-8", timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ProbeError(f"could not run claude: {exc}")
     try:
         return json.loads(r.stdout)
     except json.JSONDecodeError:
-        raise SystemExit(f"claude did not return JSON (exit {r.returncode}):\n"
+        raise ProbeError(f"claude did not return JSON (exit {r.returncode}):\n"
                          f"{r.stdout[:800]}\n{r.stderr[:800]}")
 
 
@@ -58,7 +66,11 @@ def main(argv=None) -> int:
     ap.add_argument("--timeout", type=int, default=180)
     args = ap.parse_args(argv)
 
-    d = run_probe(args.repo, args.model, args.timeout)
+    try:
+        d = run_probe(args.repo, args.model, args.timeout)
+    except ProbeError as exc:
+        print(f"ERROR — {exc}", file=sys.stderr)
+        return 3
     denials = [x for x in d.get("permission_denials", []) if x.get("tool_name") == "Bash"]
     result = (d.get("result") or "").strip()
     print(f"repo: {args.repo}")

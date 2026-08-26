@@ -1057,7 +1057,7 @@ poetry run python scripts/probe_permission_prompt.py /path/to/bootstrapped-repo 
 | `--model MODEL` | Model for the probe call (default: Haiku) |
 | `--timeout SECONDS` | Kill the probe after this many seconds (default: 180) |
 
-Exit codes: `0` the call was held for a prompt (hooks are not auto-approving); `1` the call ran without a prompt (something voted allow); `2` inconclusive.
+Exit codes: `0` the call was held for a prompt (hooks are not auto-approving); `1` the call ran without a prompt (something voted allow); `2` inconclusive; `3` the probe itself could not run (no `claude`, timeout, non-JSON output).
 
 ## Test scripts
 

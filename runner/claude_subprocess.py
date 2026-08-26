@@ -36,6 +36,7 @@ import os
 import json
 import subprocess
 
+from .config_loader import get as cfg
 from .cost_emit import emit_usage_xml
 
 RUNNER_SUBPROCESS_ENV_VAR = "APIARY_RUNNER_SUBPROCESS"
@@ -110,20 +111,35 @@ _MAX_OUTPUT_BYTES = 50 * 1024 * 1024  # 50 MB
 # `Bash(git push *)` from .claude/settings.local.json). A deny at any level
 # beats an allow at every other level, verified empirically against
 # `claude -p --allowedTools "Bash(git push *)"`. Both rule spellings are
-# passed because Claude Code accepted `Bash(cmd:*)` before `Bash(cmd *)`;
-# `git * push *` catches `git -c k=v push` / `git --no-pager push`.
-# Out of reach of permission rules, by design of the rules: a push issued
-# from a script file or another interpreter (`python -c "subprocess..."`).
+# passed because Claude Code accepted `Bash(cmd:*)` before `Bash(cmd *)`.
+# Known limits (stated, not papered over): `git -c k=v push` and
+# `git --no-pager push` are not matched (a `git * push *` rule was tried and
+# rejected — with two wildcards it also denies `git log --grep push`, which
+# broke the executor's own commit step); a push issued from a script file or
+# another interpreter is invisible to permission rules altogether.
 DEFAULT_DISALLOWED_TOOLS = (
     "Bash(git push *)",
     "Bash(git push:*)",
-    "Bash(git * push *)",
     "Bash(gh pr merge *)",
     "Bash(gh pr create *)",
 )
+# What a headless stage may do without a prompt. Until 2026-08 the runner
+# had no grant of its own: every tool call was auto-approved by the apiary
+# hooks' `permissionDecision: allow` (review C-1). With that gone, `claude -p`
+# denies every Edit/Write/Bash it is not explicitly allowed, so the runner
+# gets a narrow, explicit grant: file tools plus the Bash prefixes its
+# stages use. Widen per-repo in runner/config.json:
+#   {"subprocess": {"allowed_tools": [...], "permission_mode": "...",
+#                   "max_turns": N}}
+DEFAULT_ALLOWED_TOOLS = (
+    "Read", "Edit", "Write", "Glob", "Grep",
+    "Bash(git *)", "Bash(python *)", "Bash(poetry *)", "Bash(pytest *)",
+)
+DEFAULT_PERMISSION_MODE = "acceptEdits"
 # Hard ceiling on agentic turns per stage call so a looping subprocess
 # cannot run until the timeout alone stops it.
 DEFAULT_MAX_TURNS = 150
+_FROM_CONFIG = object()
 
 
 def describe_failure(stdout: str, returncode: int) -> str:
@@ -149,8 +165,10 @@ def run_claude(
     *,
     timeout: int | None = 300,
     model: str | None = None,
-    max_turns: int | None = DEFAULT_MAX_TURNS,
+    max_turns=_FROM_CONFIG,
     disallowed_tools=DEFAULT_DISALLOWED_TOOLS,
+    allowed_tools=_FROM_CONFIG,
+    permission_mode=_FROM_CONFIG,
 ) -> tuple[int, str, str]:
     """Run a `claude -p` subprocess and return (returncode, stdout, stderr).
 
@@ -166,12 +184,21 @@ def run_claude(
         If given, passed as ``--model <model>``.  Must be a non-empty,
         non-whitespace string.
     max_turns:
-        Passed as ``--max-turns``; ``None`` removes the ceiling.
+        Passed as ``--max-turns``; ``None`` removes the ceiling. Defaults to
+        ``subprocess.max_turns`` in runner/config.json, else 150.
     disallowed_tools:
         Permission rules passed as ``--disallowedTools``; the default denies
         the ``git push`` and ``gh pr merge/create`` command families (not
         pushes issued from scripts or other interpreters). Pass an empty
         sequence to send none.
+    allowed_tools:
+        Permission rules passed as ``--allowedTools``. Defaults to
+        ``subprocess.allowed_tools`` in runner/config.json, else
+        ``DEFAULT_ALLOWED_TOOLS``. Pass an empty sequence to send none.
+    permission_mode:
+        Passed as ``--permission-mode``. Defaults to
+        ``subprocess.permission_mode`` in runner/config.json, else
+        ``acceptEdits``. ``None`` sends no flag.
 
     Returns
     -------
@@ -187,13 +214,25 @@ def run_claude(
     if model is not None and not model.strip():
         raise ValueError(f"model must be a non-empty string, got {model!r}")
 
+    if max_turns is _FROM_CONFIG:
+        max_turns = cfg("subprocess", "max_turns", DEFAULT_MAX_TURNS)
+    if allowed_tools is _FROM_CONFIG:
+        allowed_tools = cfg("subprocess", "allowed_tools", DEFAULT_ALLOWED_TOOLS)
+    if permission_mode is _FROM_CONFIG:
+        permission_mode = cfg("subprocess", "permission_mode", DEFAULT_PERMISSION_MODE)
+
     cmd = ["claude", "-p", "-", "--output-format", "json"]
     if model:
         cmd.extend(["--model", model])
+    if permission_mode:
+        cmd.extend(["--permission-mode", str(permission_mode)])
     if max_turns is not None:
         if int(max_turns) <= 0:
             raise ValueError(f"max_turns must be positive, got {max_turns!r}")
         cmd.extend(["--max-turns", str(int(max_turns))])
+    grants = [r for r in (allowed_tools or ()) if r]
+    if grants:
+        cmd.extend(["--allowedTools", *grants])
     rules = [r for r in (disallowed_tools or ()) if r]
     if rules:
         cmd.extend(["--disallowedTools", *rules])

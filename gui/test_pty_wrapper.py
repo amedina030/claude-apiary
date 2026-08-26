@@ -90,6 +90,15 @@ class _StubProcWithLifecycle(_StubProc):
     def close(self, force=False):
         self.calls.append(f"close(force={force})")
 
+    @property
+    def fileobj(self):
+        stub = self
+
+        class _Sock:
+            def shutdown(self, how):
+                stub.calls.append("shutdown")
+        return _Sock()
+
 
 class StopReleasesPtyTests(unittest.TestCase):
     def test_stop_terminates_closes_and_kills_tree(self) -> None:
@@ -101,9 +110,29 @@ class StopReleasesPtyTests(unittest.TestCase):
             killed.append((pid, stub.isalive()))
         with mock.patch.object(pty_wrapper, "_kill_process_tree", _kill):
             wrapper.stop()
-        self.assertEqual(stub.calls, ["terminate(force=True)", "close(force=True)"])
+        self.assertEqual(stub.calls, ["terminate(force=True)", "shutdown", "close(force=True)"])
         # The tree is killed while the direct child is still alive.
         self.assertEqual(killed, [(4242, True)])
+        self.assertIsNone(wrapper._proc)
+        self.assertFalse(wrapper.is_alive())
+
+    def test_deliberate_stop_does_not_report_an_exit(self):
+        exits: list[int] = []
+        wrapper = PtyWrapper(on_exit=exits.append)
+
+        class _EofProc:
+            exitstatus = 7
+            def read(self, n):
+                raise EOFError
+            def isalive(self):
+                return False
+        wrapper._proc = _EofProc()  # type: ignore[assignment]
+        wrapper._stop.set()
+        wrapper._read_loop()
+        self.assertEqual(exits, [])
+        wrapper._stop.clear()
+        wrapper._read_loop()
+        self.assertEqual(exits, [7])
 
     def test_stop_without_proc_is_a_noop(self) -> None:
         PtyWrapper().stop()
@@ -126,7 +155,7 @@ class StopKillsGrandchildTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             pidfile = Path(td) / "pid"
             code = (
-                "import os,time;open(r'%s','w').write(str(os.getpid()));time.sleep(60)"
+                "import os,time;open(r'%s','w',encoding='utf-8').write(str(os.getpid()));time.sleep(60)"
                 % str(pidfile)
             )
             wrapper = PtyWrapper(argv=["cmd", "/c", sys.executable, "-c", code])
@@ -136,7 +165,7 @@ class StopKillsGrandchildTest(unittest.TestCase):
                 while time.time() < deadline and not pidfile.exists():
                     time.sleep(0.1)
                 self.assertTrue(pidfile.exists(), "grandchild never started")
-                pid = int(pidfile.read_text())
+                pid = int(pidfile.read_text(encoding="utf-8"))
             finally:
                 wrapper.stop()
 

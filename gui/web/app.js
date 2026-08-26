@@ -1590,6 +1590,12 @@
       window.pywebview.api.send_escape();
       return;
     }
+    if (data === "\x03") {
+      // Raw Ctrl+C would kill the claude session (and the backend refuses
+      // it); route it to the sanctioned interrupt instead.
+      interruptClaudeSession();
+      return;
+    }
     window.pywebview.api.send_text(data);
   });
 

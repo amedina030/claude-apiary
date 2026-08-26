@@ -42,8 +42,6 @@ def main():
     """Never crash the tool call (review B1)."""
     try:
         _run()
-    except SystemExit:
-        raise
     except Exception as exc:  # noqa: BLE001 — hooks must not crash
         print(f"[budgeter] post_tool_use failed: {exc!r}", file=sys.stderr)
 

@@ -35,8 +35,25 @@ class TestRunClaudeCommand(unittest.TestCase):
         self.assertEqual(tuple(cmd[i + 1:i + 1 + len(cs.DEFAULT_DISALLOWED_TOOLS)]),
                          cs.DEFAULT_DISALLOWED_TOOLS)
         self.assertIn("Bash(git push *)", cmd)
+        self.assertNotIn("Bash(git * push *)", cmd)  # denied `git log --grep push`
         j = cmd.index("--max-turns")
         self.assertEqual(cmd[j + 1], str(cs.DEFAULT_MAX_TURNS))
+
+    def test_default_grants_the_stage_tools_explicitly(self):
+        # Without the apiary hooks' allow vote (review C-1) a headless claude
+        # denies every tool it is not explicitly granted; the runner must
+        # bring its own narrow grant.
+        from runner import claude_subprocess as cs
+        cmd = self._argv()
+        self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "acceptEdits")
+        k = cmd.index("--allowedTools")
+        grants = cmd[k + 1:k + 1 + len(cs.DEFAULT_ALLOWED_TOOLS)]
+        self.assertEqual(tuple(grants), cs.DEFAULT_ALLOWED_TOOLS)
+        for must in ("Edit", "Write", "Bash(git *)"):
+            self.assertIn(must, grants)
+        self.assertNotIn("Bash(git push *)", grants)
+        # A deny at any level beats an allow at every other level.
+        self.assertLess(cmd.index("--allowedTools"), cmd.index("--disallowedTools"))
 
     def test_model_and_overrides(self):
         cmd = self._argv(model="sonnet", max_turns=7, disallowed_tools=("Bash(rm *)",))
@@ -45,9 +62,21 @@ class TestRunClaudeCommand(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--disallowedTools") + 1:], ["Bash(rm *)"])
 
     def test_none_and_empty_remove_the_flags(self):
-        cmd = self._argv(max_turns=None, disallowed_tools=())
+        cmd = self._argv(max_turns=None, disallowed_tools=(), allowed_tools=(), permission_mode=None)
         self.assertNotIn("--max-turns", cmd)
         self.assertNotIn("--disallowedTools", cmd)
+        self.assertNotIn("--allowedTools", cmd)
+        self.assertNotIn("--permission-mode", cmd)
+
+    def test_config_overrides_the_defaults(self):
+        from runner import claude_subprocess as cs
+        table = {("subprocess", "max_turns"): 9, ("subprocess", "allowed_tools"): ["Read"],
+                 ("subprocess", "permission_mode"): "plan"}
+        with mock.patch.object(cs, "cfg", lambda s, k, d=None: table.get((s, k), d)):
+            cmd = self._argv()
+        self.assertEqual(cmd[cmd.index("--max-turns") + 1], "9")
+        self.assertEqual(cmd[cmd.index("--allowedTools") + 1], "Read")
+        self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "plan")
 
     def test_empty_stderr_on_failure_is_explained_from_the_json(self):
         from runner import claude_subprocess as cs

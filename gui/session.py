@@ -113,6 +113,15 @@ _CLAUDE_SUBPROC_ENV = (
 GUI_SESSION_ENV = "APIARY_GUI_SESSION"
 
 
+def replay_cut(raw: bytes) -> int:
+    """Byte offset just past the last complete line in *raw* (0 if none).
+
+    The attach path replays ``raw[:cut]`` and starts the tail at ``cut`` so
+    a record torn by a mid-write read is neither half-rendered nor lost.
+    """
+    return raw.rfind(b"\n") + 1
+
+
 class Session:
     """A single claude subprocess + transcript pipeline keyed to one cwd."""
 
@@ -346,7 +355,11 @@ class Session:
         except OSError as e:
             self._on_status(f"Cannot read {path.name}: {e}")
             return
-        text = raw.decode("utf-8", errors="replace")
+        # Replay only whole lines: a read that tears a record mid-write
+        # would otherwise drop its head here and hand the tail only its
+        # unparseable remainder. The partial line is left for the tail.
+        cut = replay_cut(raw)
+        text = raw[:cut].decode("utf-8", errors="replace")
         history = parse_jsonl_lines(text)
         self._on_status("")
         self._on_messages(history)
@@ -379,7 +392,7 @@ class Session:
             on_message=self._on_message,
             poll_interval=0.1,
             on_record=_on_record,
-            start_at=len(raw),
+            start_at=cut,
         )
         tail.start()
         self.tail = tail
@@ -460,8 +473,8 @@ class Session:
 
     # Every input path refuses a raw Ctrl+C: it kills the claude session
     # rather than interrupting the turn. Interrupt = ESC then Ctrl+U. The
-    # pty layer refuses it too; this is the bridge-facing check so the
-    # frontend gets a False instead of a dead tab.
+    # pty layer refuses it as well; the duplication is deliberate so that a
+    # future pty backend cannot lose the rule.
 
     def send_text(self, text: str) -> bool:
         if self.pty is None or not isinstance(text, str) or contains_ctrl_c(text):

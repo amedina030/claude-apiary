@@ -945,6 +945,10 @@ def main():
         test_weighted_delta_counts_cache_creation(tmp_path)
         print("OK")
 
+        print("Integration: old-schema baseline not compared ... ", end="")
+        test_old_schema_baseline_is_not_compared(tmp_path)
+        print("OK")
+
     print("\nAll tests passed.")
 
 
@@ -1196,8 +1200,6 @@ def test_session_length_nudge_independent_of_magnitude_warn(tmp_path):
         _cleanup_session_flag_files(session_id)
 
 
-if __name__ == "__main__":
-    main()
 
 
 # ---------------------------------------------------------------------------
@@ -1270,6 +1272,7 @@ def test_corrupt_baseline_does_not_wedge_the_session(tmp_path):
     assert "permissionDecision" not in r.stdout
     assert json.loads(baseline_path.read_text(encoding="utf-8"))["prev_tool_name"] == "Bash", \
         "PRE must rewrite the baseline"
+    _cleanup_session_flag_files(session_id)
 
     baseline_path.write_text('{"tokens": 12', encoding="utf-8")
     restore = _with_flag_enabled("budgeter-log")
@@ -1329,6 +1332,47 @@ def test_pre_skips_phantom_entry_when_no_api_call(tmp_path):
         lg.cleanup_session(session_id)
 
 
+def test_old_schema_baseline_is_not_compared(tmp_path):
+    """A baseline from the per-line counting era is 1.7-2.6x too large; the
+    first PRE after upgrade must neither log a phantom '[compaction]' marker
+    nor a cost entry against it, and must rewrite it with the new schema."""
+    import budgeter.lib.logger as lg
+    project_dir = make_test_project(tmp_path / "project_oldschema")
+    cwd = str(project_dir)
+    log_path = project_dir / ".claude" / "budgeter-log.jsonl"
+    tmp_dir = project_dir / ".claude" / "budgeter-tmp"
+    session_id = make_session_id()
+    transcript = tmp_path / "old.jsonl"
+    usage = {"input_tokens": 1000, "cache_read_input_tokens": 0, "output_tokens": 50}
+    transcript.write_text("\n".join(_assistant_lines("m1", usage, ("text", "tool_use"))) + "\n",
+                          encoding="utf-8")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    old = {"tokens": 2100, "context_tokens": 1050, "baseline_input": 1000, "baseline_cache": 0,
+           "baseline_output": 50, "prev_tool_name": "Bash", "prev_assistant_message": "",
+           "turn_number": 1, "task_turn": 1, "user_message": "", "scope_flags": [],
+           "predicted_cost": 0, "warning_fired": False, "agent_description": ""}
+    (tmp_dir / f"{session_id}_baseline.json").write_text(json.dumps(old), encoding="utf-8")
+    payload = {"tool_name": "Bash", "session_id": session_id,
+               "transcript_path": str(transcript), "cwd": cwd}
+    restore = _with_flag_enabled("budgeter-log")
+    try:
+        r = run_hook("pre_tool_use.py", payload)
+        assert r.returncode == 0, r.stderr
+        assert log_entry_count(log_path) == 0, "no marker, no entry against an old-schema baseline"
+        new = json.loads((tmp_dir / f"{session_id}_baseline.json").read_text(encoding="utf-8"))
+        assert new["schema"] == lg.BASELINE_SCHEMA and new["tokens"] == 1050
+        assert new["task_turn"] == 1, "turn continuity is kept"
+        # STOP against a shrunk total logs nothing (compaction is the PRE's job).
+        (tmp_dir / f"{session_id}_baseline.json").write_text(
+            json.dumps({**new, "tokens": 5000}), encoding="utf-8")
+        r = run_hook("stop_session.py", {"session_id": session_id, "transcript_path": str(transcript), "cwd": cwd})
+        assert r.returncode == 0, r.stderr
+        assert log_entry_count(log_path) == 0
+    finally:
+        restore()
+        _cleanup_session_flag_files(session_id)
+
+
 def test_post_agent_payload_over_64kb_is_logged(tmp_path):
     import budgeter.lib.logger as lg
     project_dir = make_test_project(tmp_path / "project_bigpost")
@@ -1360,3 +1404,7 @@ def test_weighted_delta_counts_cache_creation(tmp_path):
          "cache_creation_tokens_delta": 200, "output_tokens_delta": 10}
     assert report.weighted_delta(e) == int(100 * w_input + 1000 * w_cache + 200 * w_create + 10 * w_output)
     assert w_create > w_input, "cache writes bill above plain input"
+
+
+if __name__ == "__main__":
+    main()

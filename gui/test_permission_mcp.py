@@ -150,6 +150,20 @@ class PermissionMcpTests(unittest.TestCase):
         self.assertNotIn('"old"', log)
         self.assertIn("<redacted", log)
 
+    def test_decision_log_is_redacted_too(self):
+        # An Allow carries updatedInput with the full Write body; the log must
+        # not keep it (the REQUEST line was redacted, the DECISION line was not).
+        args = {"tool_use_id": "t", "tool_name": "Write",
+                "input": {"file_path": "/x/secrets.env", "content": "TOKEN=zyxw9876vuts5432"}}  # apiary:allow-secret
+        with _env({self.mod.BRIDGE_URL_ENV: None, self.mod.ALLOW_ALL_ENV: "1"}):
+            self._roundtrip([
+                {"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                 "params": {"name": self.mod.TOOL_NAME, "arguments": args}},
+            ])
+        log = self.mod.LOG_PATH.read_text(encoding="utf-8")
+        self.assertIn("DECISION", log)
+        self.assertNotIn("zyxw9876", log)
+
     def test_redact_for_log_truncates_long_strings_and_keeps_shape(self):
         long = "x" * 500
         out = self.mod.redact_for_log({

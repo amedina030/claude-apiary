@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from gui.session import Session, _claude_code_project_key, _replace_key_seps
+from gui.session import Session, _claude_code_project_key, _replace_key_seps, replay_cut
 
 
 class _FakePty:
@@ -115,6 +115,14 @@ class NeverSendCtrlCTest(unittest.TestCase):
         sess = _session_with(pty)
         self.assertFalse(sess.send_input("run this\x03"))
         self.assertEqual(pty.sent, [])
+
+
+class ReplayCutTest(unittest.TestCase):
+    def test_cuts_after_last_complete_line(self):
+        self.assertEqual(replay_cut(b'{"a":1}\n{"b":2}\n'), 16)
+        self.assertEqual(replay_cut(b'{"a":1}\n{"b":'), 8)   # torn tail left for the tail thread
+        self.assertEqual(replay_cut(b'{"a":'), 0)
+        self.assertEqual(replay_cut(b""), 0)
 
 
 class SepReplacementTest(unittest.TestCase):

@@ -158,8 +158,8 @@ def _log(msg: str) -> None:
         try:
             if path.stat().st_size > LOG_MAX_BYTES:
                 os.replace(path, path.with_name(path.name + ".1"))
-        except FileNotFoundError:
-            pass
+        except OSError:
+            pass  # a rotation that fails (file busy) must not drop the line
         with path.open("a", encoding="utf-8") as f:
             f.write(f"{dt.datetime.now().isoformat(timespec='seconds')} {msg}\n")
     except OSError:
@@ -296,7 +296,7 @@ def handle_tools_call(params: dict[str, Any]) -> dict[str, Any]:
     else:
         _log(f"REQUEST {json.dumps(redact_for_log(args), separators=(',', ':'))}")
         decision = decide(args)
-        _log(f"DECISION {json.dumps(decision, separators=(',', ':'))}")
+        _log(f"DECISION {json.dumps(redact_for_log(decision), separators=(',', ':'))}")
     return {"content": [{"type": "text", "text": json.dumps(decision)}]}
 
 
