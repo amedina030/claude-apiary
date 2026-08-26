@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### GUI permission gate fails closed (2026-08-26)
+
+The opt-in MCP permission server (`gui/permission_mcp.py`) auto-allowed
+every tool call whenever `APIARY_PERMISSION_MCP_URL` was unset. Two real
+paths hit that: the GUI set `APIARY_PERMISSION_MCP=1` *before* starting the
+loopback bridge, so a failed bind left claude spawned with
+`--permission-prompt-tool` pointing at a server that approved everything;
+and the mcp-config file left on disk let any `claude --mcp-config <it>`
+outside the GUI get blanket approval (review C-2).
+
+- `decide()` now denies when no bridge URL is set. Headless tests of the
+  plumbing opt into auto-allow with `APIARY_PERMISSION_MCP_ALLOW_ALL=1`; the
+  GUI never sets it.
+- The GUI sets `APIARY_PERMISSION_MCP=1` only after `bridge.start()`
+  succeeds, and pins it to `0` (TUI-banner prompts) when the bind fails.
+- `permission_mcp.log` and `permission_mcp_config.json` move from
+  `~/.claude/apiary_gui/` to the per-profile GUI state dir
+  (`<main-apiary>/.apiary/gui/apiary_gui[_<profile>]/`). The log rotates at
+  1 MiB and no longer records `Write` bodies or `Edit` strings.
+
 ### Hooks no longer vote on permissions (2026-08-26)
 
 `core/hook_context.hook_allow` — the "nothing to object to" response every

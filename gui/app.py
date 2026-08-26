@@ -511,20 +511,31 @@ class App:
             return
         if self._permission_bridge is not None:
             return
-        # Pin the env var to "1" so session.py (and anything else that reads
-        # it downstream) sees a consistent source of truth regardless of
-        # whether the flag came from env or launch.json.
-        os.environ["APIARY_PERMISSION_MCP"] = "1"
         bridge = PermissionBridge(on_request=self._push_permission_prompt)
         try:
             url = bridge.start()
         except OSError as e:
-            print(f"[gui] permission bridge failed to boot: {e}", file=sys.stderr)
+            # Fail closed. With no bridge the MCP server denies every call,
+            # so pin the flag OFF: session.py then spawns claude without
+            # --permission-prompt-tool and prompts come through the TUI
+            # banner path instead of a dead gate (review C-2).
+            os.environ["APIARY_PERMISSION_MCP"] = "0"
+            os.environ.pop(_PERMISSION_MCP_BRIDGE_URL_ENV, None)
+            print(
+                f"[gui] permission bridge failed to boot: {e}; "
+                "MCP permission path disabled for this run",
+                file=sys.stderr,
+            )
             return
         self._permission_bridge = bridge
         # Exported via process env so the claude subprocess (and, downstream,
         # the MCP stdio server spawned by claude) can POST decisions here.
         os.environ[_PERMISSION_MCP_BRIDGE_URL_ENV] = url
+        # Only now pin the flag to "1" so session.py (and anything else that
+        # reads it downstream) sees a consistent source of truth regardless
+        # of whether it came from env or launch.json — and never sees "1"
+        # without a live bridge behind it.
+        os.environ["APIARY_PERMISSION_MCP"] = "1"
         print(f"[gui] permission bridge listening at {url}", file=sys.stderr)
 
     def resolve_permission(

@@ -894,10 +894,11 @@ poetry run python -m gui.app
 
 | Var | Description |
 |-----|-------------|
-| `APIARY_GUI_PROFILE` | Re-roots state, mutex name, and window title — see `gui/paths.py`. Set to e.g. `dev` to run a second instance alongside the default one. State goes to `~/.claude/apiary_gui_<profile>/`; window title becomes `apiary [<profile>]`. |
-| `APIARY_GUI_CAPTURE_LABEL` | Enables raw pty-output capture for the session (writes to `~/.claude/apiary_gui/captures/<ts>-<label>.bin`). Used by `gui/capture_session.py`. |
+| `APIARY_GUI_PROFILE` | Re-roots state, mutex name, and window title — see `gui/paths.py`. Set to e.g. `dev` to run a second instance alongside the default one. State goes to `<main-apiary>/.apiary/gui/apiary_gui_<profile>/`; window title becomes `apiary [<profile>]`. |
+| `APIARY_GUI_CAPTURE_LABEL` | Enables raw pty-output capture for the session (writes to `<main-apiary>/.apiary/gui/apiary_gui/captures/<ts>-<label>.bin`). Used by `gui/capture_session.py`. |
 | `APIARY_PERMISSION_MCP` | One-shot override for the `permission_mcp` flag in `launch.json`. `"1"` forces the structured MCP permission-prompt path on; any other value (including `"0"`) forces it off. When unset, the GUI falls back to the `launch.json` value (defaults to off). Enabling routes prompts through `gui/permission_mcp.py` + loopback HTTP bridge instead of the TUI-banner scraper; the GUI boots the bridge and appends `--mcp-config`/`--permission-prompt-tool` to the claude argv. See scribe `C-2026-36`. |
-| `APIARY_PERMISSION_MCP_URL` | Exported automatically by the GUI to the bridge's loopback URL so the spawned MCP subprocess can POST decisions back. Do not set by hand. |
+| `APIARY_PERMISSION_MCP_URL` | Exported automatically by the GUI to the bridge's loopback URL so the spawned MCP subprocess can POST decisions back. Do not set by hand. When it is unset the MCP server **denies** every request (fail closed) — a bridge that failed to boot, or a stale `permission_mcp_config.json` used outside the GUI, never becomes a rubber stamp. The GUI only sets `APIARY_PERMISSION_MCP=1` after the bridge is listening and pins it to `0` if the bind fails. |
+| `APIARY_PERMISSION_MCP_ALLOW_ALL` | `"1"` makes the MCP server auto-allow when no bridge URL is set. For headless tests of the MCP plumbing only; the GUI never sets it and it has no effect while a bridge URL is present. |
 | `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` | Pass-through to WebView2; the app appends `--disable-cache` flags so frontend edits aren't masked by the static-asset cache. |
 
 ## gui/capture_session.py
