@@ -106,9 +106,20 @@ _MAX_OUTPUT_BYTES = 50 * 1024 * 1024  # 50 MB
 
 # Every runner-spawned claude gets these regardless of what the operator's
 # own Claude Code settings allow (review runner: the subprocess inherited
-# `Bash(git push *)` from .claude/settings.local.json). Both rule spellings
-# are passed because Claude Code accepted `Bash(cmd:*)` before `Bash(cmd *)`.
-DEFAULT_DISALLOWED_TOOLS = ("Bash(git push *)", "Bash(git push:*)")
+# `Bash(git push *)` from .claude/settings.local.json). A deny at any level
+# beats an allow at every other level, verified empirically against
+# `claude -p --allowedTools "Bash(git push *)"`. Both rule spellings are
+# passed because Claude Code accepted `Bash(cmd:*)` before `Bash(cmd *)`;
+# `git * push *` catches `git -c k=v push` / `git --no-pager push`.
+# Out of reach of permission rules, by design of the rules: a push issued
+# from a script file or another interpreter (`python -c "subprocess..."`).
+DEFAULT_DISALLOWED_TOOLS = (
+    "Bash(git push *)",
+    "Bash(git push:*)",
+    "Bash(git * push *)",
+    "Bash(gh pr merge *)",
+    "Bash(gh pr create *)",
+)
 # Hard ceiling on agentic turns per stage call so a looping subprocess
 # cannot run until the timeout alone stops it.
 DEFAULT_MAX_TURNS = 150
@@ -139,7 +150,9 @@ def run_claude(
         Passed as ``--max-turns``; ``None`` removes the ceiling.
     disallowed_tools:
         Permission rules passed as ``--disallowedTools``; the default denies
-        ``git push``. Pass an empty sequence to send none.
+        the ``git push`` and ``gh pr merge/create`` command families (not
+        pushes issued from scripts or other interpreters). Pass an empty
+        sequence to send none.
 
     Returns
     -------

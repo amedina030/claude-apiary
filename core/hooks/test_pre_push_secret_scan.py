@@ -9,12 +9,14 @@ drives the same git invocation ``_run`` uses against a throwaway repo.
 
 Fixtures are fake credentials; ``.secretsallow`` exempts this file.
 """
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 from core.hooks.pre_push_secret_scan import (
+    push_targets,
     PushTarget,
     iter_added_lines,
     outgoing_log_args,
@@ -223,7 +225,11 @@ class PushTargetTest(unittest.TestCase):
         self.assertEqual(push_target("git push -u origin HEAD").refs, ("HEAD",))
         self.assertEqual(push_target("git push --force-with-lease origin +local:remote").refs, ("local",))
         self.assertEqual(push_target("git push origin tag v1.2").refs, ("v1.2",))
-        self.assertEqual(push_target("git push origin :gone").refs, ("HEAD",))   # deletion → nothing outgoing
+        self.assertEqual(push_target("git push origin :gone").refs, ())   # deletion → nothing outgoing
+        self.assertEqual(push_target("git push origin --delete gone").refs, ())
+        self.assertEqual(push_target("git push -d origin gone").refs, ())
+        self.assertEqual(push_target("git push origin :gone main").refs, ("main",))
+        self.assertEqual(push_target("git push origin").refs, ("HEAD",))
         self.assertEqual(push_target("git push -o ci.skip origin main").refs, ("main",))
 
     def test_all_and_mirror_scan_every_branch(self):
@@ -257,6 +263,22 @@ class PushTargetTest(unittest.TestCase):
         t = push_target("git push origin main 2> err.log < /dev/null")
         self.assertEqual((t.remote, t.refs), ("origin", ("main",)))
         self.assertEqual(push_target("git push &> all.log").remote, None)
+
+    def test_cd_before_push_sets_cwd(self):
+        # ``cd sub && git push`` runs in sub — the scan must too, or a secret in
+        # a nested checkout slips past a scan of the parent repo.
+        self.assertEqual(push_target("cd sub && git push origin main").cwd, "sub")
+        t = push_target("cd a && cd b && git -C c push")
+        self.assertEqual(t.cwd, os.path.join(os.path.join("a", "b"), "c"))
+        self.assertEqual(push_target("pushd repo; git push").cwd, "repo")
+        self.assertIsNone(push_target("cd - && git push").cwd)
+
+    def test_every_push_segment_is_parsed(self):
+        ts = push_targets("git push origin main; git push upstream main")
+        self.assertEqual([(t.remote, t.refs) for t in ts], [("origin", ("main",)), ("upstream", ("main",))])
+        ts = push_targets("cd x && git push origin a && cd y && git push")
+        self.assertEqual([(t.cwd, t.remote) for t in ts], [("x", "origin"), (os.path.join("x", "y"), None)])
+        self.assertEqual(push_targets("echo no push here"), [])
 
     def test_log_args_unknown_remote_falls_back_to_all_remotes(self):
         target = PushTarget("2>&1", ("HEAD",), False, None)

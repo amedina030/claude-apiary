@@ -13,10 +13,14 @@ Review runner Bug 9 and the permissions note.
 - `auto_harden.commit_all` uses `git add -u` plus the round's declared files
   instead of `git add -A`, which swept the operator's untracked scratch
   files into "harden round fixes" commits.
-- `claude_subprocess.run_claude` passes `--disallowedTools "Bash(git push *)"
-  "Bash(git push:*)"` and `--max-turns 150` on every stage call, so a
-  subprocess can neither push (whatever the operator's own settings allow)
-  nor loop until the timeout. Both are parameters for callers that need
+- `claude_subprocess.run_claude` passes `--disallowedTools` for the
+  `git push` and `gh pr merge/create` command families (including
+  `git -c … push`) and `--max-turns 150` on every stage call, so a
+  subprocess cannot push through the Bash tool — a deny beats an allow at
+  every settings level, verified against `claude -p --allowedTools
+  "Bash(git push *)"` — nor loop until the timeout. Permission rules cannot
+  see a push issued from a script file or another interpreter; that is a
+  known limit, not a claim. Both are parameters for callers that need
   something else.
 
 ### GUI: no lost messages on attach, no raw Ctrl+C, no orphaned claude (2026-08-26)
@@ -158,7 +162,10 @@ A repo-wide review found both gates leakier than their docs claimed. Fixed:
   outgoing (an already-pushed, already-allowlisted fixture blocked the
   push). Redirection tokens are skipped, and a parsed remote that isn't a
   configured one falls back to scanning against every remote instead of
-  against nothing.
+  against nothing. Also from the adversarial pass: `cd sub && git push`
+  is scanned in `sub` (composed with `-C`), every push in a compound
+  command is scanned against its own remote (only the first used to be),
+  and `--delete` / `:ref` deletions no longer count as outgoing.
 - `.secretsallow` is now honoured by the push gate too (it previously read
   only the inline pragma, so the scanner's own fixture files could not be
   pushed). Entries are path rules unless prefixed `line:`; more
