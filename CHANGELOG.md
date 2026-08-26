@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### GUI: no lost messages on attach, no raw Ctrl+C, no orphaned claude (2026-08-26)
+
+Review gui #2/#3/#4/#12.
+
+- **Transcript attach race.** `Session._start_tail` read the file, replayed
+  it, and *then* fast-forwarded the tail to the file's current size — every
+  record claude appended in between (routinely, while streaming its first
+  turn) was never rendered until `Ctrl+R`. It now reads the bytes once and
+  starts the tail at exactly that byte count (`TranscriptTail(start_at=)`).
+  The tail is byte-mode (a text-mode seek to a byte offset was undefined)
+  and reparses from the top when the file shrinks.
+- **Raw Ctrl+C is refused by the backend.** The "never send `\x03`" rule
+  lived in a JS comment; `send_text`/`send_control`/`send_bytes`/`send_input`
+  now return False for it at both the `Session` and `PtyWrapper` layers.
+  Interrupt is still ESC then Ctrl+U.
+- **Closing a tab closes the pty and kills the tree.** `PtyWrapper.stop`
+  only terminated the direct child; on npm installs that is the `cmd /c`
+  shim and the node grandchild running Claude Code lived on, holding the
+  pty's pipe, burning quota and competing with the restarted session's
+  JSONL. `stop` now terminates, `close(force=True)`s the pty (which also
+  unblocks the reader thread), kills the process tree (`taskkill /T` or
+  `killpg`, capability-detected) and joins the reader. A Windows-only
+  integration test spawns `cmd /c python` through a real pty and checks the
+  grandchild is gone.
+
 ### Budgeter hooks: no crashes, honest counts (2026-08-26)
 
 Review B1/B2/B3/B5/B6. The three budgeter hooks measured the wrong thing

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import threading
 import time
 from collections import deque
@@ -20,6 +21,49 @@ from typing import Callable, Optional, Sequence
 # and the historical Windows ConPTY cooked-mode line-input limit. See
 # send_text() docstring.
 _SEND_CHUNK_SIZE = 1024
+
+# Raw Ctrl+C (ETX). The GUI must never send it: Claude Code treats it as
+# "kill the session", not "interrupt the turn". The sanctioned interrupt is
+# ESC (stop the turn) followed by Ctrl+U (clear the composer). Every send
+# path below rejects it so the rule is structural, not a comment in app.js
+# (review gui #4, memory feedback_gui_never_kill_session).
+CTRL_C = "\x03"
+
+
+def contains_ctrl_c(data) -> bool:
+    """True if *data* (str or bytes) carries a raw Ctrl+C anywhere."""
+    if isinstance(data, bytes):
+        return b"\x03" in data
+    return isinstance(data, str) and CTRL_C in data
+
+
+def _kill_process_tree(pid: int) -> None:
+    """Best-effort kill of *pid* and every descendant.
+
+    pywinpty's terminate() is TerminateProcess on the direct child only. When
+    claude was spawned through an npm ``cmd /c claude.cmd`` shim that child is
+    cmd.exe and the node grandchild running Claude Code survives, still
+    holding the pty's output pipe (review gui #3). Capability-detected, not
+    OS-branched: ``taskkill /T`` where it exists, ``os.killpg`` where it does.
+    """
+    taskkill = shutil.which("taskkill")
+    if taskkill:
+        try:
+            subprocess.run(
+                [taskkill, "/PID", str(pid), "/T", "/F"],
+                capture_output=True, timeout=10, check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return
+    killpg = getattr(os, "killpg", None)
+    getpgid = getattr(os, "getpgid", None)
+    if killpg and getpgid:
+        try:
+            import signal
+            killpg(getpgid(pid), signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
 
 
 def _resolve_claude_command(name: str = "claude") -> Optional[list[str]]:
@@ -233,6 +277,8 @@ class PtyWrapper:
         proc = self._proc
         if proc is None or not proc.isalive():
             return False
+        if contains_ctrl_c(text):
+            return False
         if not text:
             return True
         try:
@@ -243,9 +289,14 @@ class PtyWrapper:
             return False
 
     def send_control(self, ch: str) -> bool:
-        """Send a control character (e.g. 'c' → Ctrl+C → 0x03)."""
+        """Send a control character (e.g. 'm' → Enter, 'u' → Ctrl+U).
+
+        'c' (Ctrl+C) is refused — see ``CTRL_C``.
+        """
         proc = self._proc
         if proc is None or not proc.isalive():
+            return False
+        if not ch or ch[0].lower() == "c" or contains_ctrl_c(ch):
             return False
         try:
             proc.sendcontrol(ch)
@@ -259,6 +310,8 @@ class PtyWrapper:
         """
         proc = self._proc
         if proc is None or not proc.isalive():
+            return False
+        if contains_ctrl_c(raw):
             return False
         try:
             proc.write(raw.decode("latin-1"))
@@ -276,12 +329,33 @@ class PtyWrapper:
             pass
 
     def stop(self) -> None:
+        """Stop the child and release the pty.
+
+        terminate() alone left two things behind (review gui #3): the
+        pseudoconsole (only closed by PtyProcess.__del__, which the reader
+        thread pinned) and, on npm installs, the node grandchild behind the
+        ``cmd /c`` shim. Now: terminate, close the pty (which also unblocks
+        the reader), then kill the whole tree.
+        """
         self._stop.set()
         proc = self._proc
         if proc is None:
             return
+        pid = getattr(proc, "pid", None)
+        # Tree first, while the direct child is still alive: once it is
+        # gone its children are re-parented and ``taskkill /T`` can no
+        # longer find them (verified by StopKillsGrandchildTest).
+        if isinstance(pid, int) and pid > 0:
+            _kill_process_tree(pid)
         try:
             if proc.isalive():
                 proc.terminate(force=True)
         except Exception:
             pass
+        try:
+            proc.close(force=True)
+        except Exception:
+            pass
+        reader = self._reader_thread
+        if reader is not None and reader is not threading.current_thread():
+            reader.join(timeout=2.0)
