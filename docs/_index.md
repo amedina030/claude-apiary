@@ -26,6 +26,17 @@ Framework version: **1.0** | Last updated: 2026-04-02
 - [Report Style](standards/report-style.md) — How to write acceptance, validation, and post-mortem reports
 - [Schema Migration](standards/schema-migration.md) — How to bump a runner stage-artifact schema version
 
+## Reviews
+
+- [Deep Review 2026-08 (LLM edition)](review/review-for-llm.md) — Repo-wide assessment with file:line evidence, verdicts, and a phased remediation plan for an LLM executor
+- [Deep Review 2026-08 (plain-language edition)](review/review-for-human.md) — The same assessment for a person: what's good, what's broken, what to keep/drop, what to decide
+- [Core subsystem review](review/subsystems/core.md) — Appendix: install/registry/drift/mailbox/doctor, hooks, shared utilities
+- [Runner subsystem review](review/subsystems/runner.md) — Appendix: six-stage orchestrator, detached mode, schedulers
+- [GUI subsystem review](review/subsystems/gui.md) — Appendix: PyWebView wrapper, pty, transcript tail, permission MCP
+- [Knowledge tools review](review/subsystems/knowledge.md) — Appendix: scribe, compass, researcher, captures, refiner
+- [Budgeter, harden, incubator review](review/subsystems/budgeter-harden-incubator.md) — Appendix: budgeter hooks/estimator, harden validators and prompts, incubator
+- [Infra, docs, and skills review](review/subsystems/infra-docs-skills.md) — Appendix: scripts, docs framework, hygiene, secret scanning, all skills
+
 ## Guides
 
 - [Adding a Hook](guides/adding-a-hook.md) — End-to-end: write, register, test
