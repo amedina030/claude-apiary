@@ -223,7 +223,7 @@ _KEY_EXCLUDE = re.compile(
     r"|opts?|flags?|input|output|store|manager|provider|service|client|handler"
     r"|callback|fn|func|method|getter|setter|cache|age|time|timeout|date|created"
     r"|updated|rotated|endpoint|host|server|domain|address|addr|port|route"
-    r"|cap|caps|budget|quota|cost|usage|price|rate|last_\w+)$",
+    r"|cap|caps|budget|quota|cost|usage|price|rate|threshold|last_\w+)$",
     re.IGNORECASE,
 )
 
@@ -267,7 +267,8 @@ INDIRECTION = re.compile(
 # ``request.form["password"]``, ``cfg.db.password``. Digits keep a bare token
 # in play (``password = wh4tever1``) — variable names rarely carry them, real
 # bare credentials nearly always do.
-_BARE_READ = re.compile(r"^[A-Za-z_]+$|^\w+(?:\.\w+)+|^\w+\[")
+_IDENTIFIER = re.compile(r"[A-Za-z_]+")
+_BARE_READ = re.compile(r"^\w+(?:\.\w+)+|^\w+\[")
 
 _TRAILING_COMMENT = re.compile(r"\s+(?:#|//).*$")
 
@@ -322,12 +323,17 @@ def find_generic(line: str) -> Hit | None:
             region = value
         else:
             region = _TRAILING_COMMENT.sub("", line[m.start("bare"):])
-            if _BARE_READ.match(region):
-                continue
+            if _IDENTIFIER.fullmatch(value) or _BARE_READ.match(region):
+                continue                    # `x = other_var`, `x = cfg.pw`
         if INDIRECTION.search(region):
             continue
         if not quoted and not looks_like_a_credential(value):
             continue                        # bare word in prose, not a secret
+        # A bare `token` key is the most ambiguous word in the list — lexer
+        # tokens, search tokens, UI tokens. Without a qualifying prefix
+        # (`auth_`, `api_`, `access_`), a quoted plain word is not a credential.
+        if quoted and key.lower() in ("token", "tokens") and not looks_like_a_credential(value):
+            continue
         start = m.start("dq") if m.group("dq") is not None else (
             m.start("sq") if m.group("sq") is not None else m.start("bare"))
         return Hit(GENERIC_RULE, value, line[m.start():start])

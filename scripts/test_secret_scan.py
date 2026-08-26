@@ -193,7 +193,15 @@ class FalsePositiveTests(unittest.TestCase):
         "ns.token_cap = token_cap",          # bare identifier: a read, not a literal
         "password = new_password",
         "self.token = token",
+        "f(token_threshold=token_threshold, x=1)",   # identifier followed by more args
+        '"token": "montecarlodata",',        # JSON search/lexer token: a plain word
+        "tokens = ['datadog', 'snowflake']",
     ]
+
+    def test_bare_token_key_still_fires_on_a_credential_shaped_value(self):
+        # The `token`-alone relaxation only exempts plain words.
+        self.assertEqual(len(secret_scan.scan_lines(_lines('"token": "d4t4d0g-X9"'))), 1)
+        self.assertEqual(len(secret_scan.scan_lines(_lines('auth_token = "montecarlodata"'))), 1)
 
     def test_clean_lines_do_not_trigger(self):
         for line in self.CLEAN:
