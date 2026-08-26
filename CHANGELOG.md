@@ -83,6 +83,13 @@ A repo-wide review found both gates leakier than their docs claimed. Fixed:
   `allow|deny|ask` vocabulary; it now emits `deny` with
   `permissionDecisionReason`, the legacy top-level `decision`/`reason` pair,
   and exits 2 with the reason on stderr.
+- **The push gate no longer mistakes shell redirections for the remote.**
+  `git push -q 2>&1 | tail` parsed `2>&1` as the remote name, so
+  `--remotes=2>&1` matched nothing and the *entire history* was reported as
+  outgoing (an already-pushed, already-allowlisted fixture blocked the
+  push). Redirection tokens are skipped, and a parsed remote that isn't a
+  configured one falls back to scanning against every remote instead of
+  against nothing.
 - `.secretsallow` is now honoured by the push gate too (it previously read
   only the inline pragma, so the scanner's own fixture files could not be
   pushed). Entries are path rules unless prefixed `line:`; more

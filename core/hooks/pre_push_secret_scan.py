@@ -63,6 +63,11 @@ _shannon_entropy = secret_patterns.shannon_entropy
 
 _SHA_LINE = re.compile(r"^[0-9a-f]{40}$")
 _SEGMENT_SPLIT = re.compile(r"\|\||&&|;|\|")
+# Shell redirections that shlex leaves as ordinary words: ``2>&1``, ``>log``,
+# ``2>/dev/null``, ``<in``, ``&>out``. They are not git arguments; treating one
+# as the remote name made ``--remotes=2>&1`` match nothing and the "outgoing"
+# range became the whole history.
+_REDIRECTION = re.compile(r"^(\d*[<>]|&>)")
 _OPTS_WITH_VALUE = {"-o", "--push-option", "--repo", "--receive-pack", "--exec", "-C", "-c"}
 _GIT_GLOBAL_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
 
@@ -233,6 +238,10 @@ def push_target(command: str) -> PushTarget:
             elif tok.startswith("-"):
                 if tok in _OPTS_WITH_VALUE and i + 1 < len(toks):
                     i += 1
+            elif _REDIRECTION.match(tok):
+                # ``> file`` / ``2> file`` (space-separated) consume the next word.
+                if tok.endswith(">") or tok.endswith("<"):
+                    i += 1
             else:
                 positional.append(tok)
             i += 1
@@ -256,10 +265,23 @@ def push_target(command: str) -> PushTarget:
     return PushTarget(None, ("HEAD",), False, None)
 
 
-def outgoing_log_args(target: PushTarget, verified_refs: list[str]) -> list[str]:
-    """Build the ``git log`` argument list for the outgoing patch series."""
+def outgoing_log_args(
+    target: PushTarget,
+    verified_refs: list[str],
+    known_remotes: list[str] | None = None,
+) -> list[str]:
+    """Build the ``git log`` argument list for the outgoing patch series.
+
+    *known_remotes* is the repo's configured remote names. A parsed remote
+    that isn't one of them (a mis-parsed token, a typo) must not narrow the
+    ``--not`` side to a pattern that matches nothing — that would report the
+    whole history as outgoing — so it falls back to every remote.
+    """
     refs = ["--branches"] if target.everything else (verified_refs or ["HEAD"])
-    remotes = f"--remotes={target.remote}" if target.remote else "--remotes"
+    remote = target.remote
+    if known_remotes is not None and remote not in known_remotes:
+        remote = None
+    remotes = f"--remotes={remote}" if remote else "--remotes"
     return [
         "-c", "core.quotepath=false",
         "log", "-p", "--no-color", "--no-ext-diff", "--no-textconv", "--format=%H",
@@ -319,7 +341,8 @@ def _run():  # pragma: no cover — the pure pieces are tested; this is the shel
         return
 
     try:
-        log = _git(*outgoing_log_args(target, verified), timeout=SCAN_TIMEOUT_SECONDS)
+        known = _git("remote").stdout.split()
+        log = _git(*outgoing_log_args(target, verified, known), timeout=SCAN_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         hook_block(
             f"Push blocked: the secret scan did not finish within "

@@ -245,6 +245,29 @@ class PushTargetTest(unittest.TestCase):
         t = push_target("git add . && git commit -m 'x' && git push origin dev; echo done")
         self.assertEqual((t.remote, t.refs), ("origin", ("dev",)))
 
+    def test_shell_redirections_are_not_remotes_or_refs(self):
+        # Regression: ``git push -q 2>&1 | tail`` parsed ``2>&1`` as the remote,
+        # ``--remotes=2>&1`` matched nothing, and the whole history was
+        # reported as outgoing.
+        self.assertEqual(push_target("git push -q 2>&1 | tail -2"), PushTarget(None, ("HEAD",), False, None))
+        self.assertEqual(push_target("git push origin main 2>/dev/null").remote, "origin")
+        self.assertEqual(push_target("git push origin main >push.log").refs, ("main",))
+        t = push_target("git push origin main > push.log")
+        self.assertEqual((t.remote, t.refs), ("origin", ("main",)))
+        t = push_target("git push origin main 2> err.log < /dev/null")
+        self.assertEqual((t.remote, t.refs), ("origin", ("main",)))
+        self.assertEqual(push_target("git push &> all.log").remote, None)
+
+    def test_log_args_unknown_remote_falls_back_to_all_remotes(self):
+        target = PushTarget("2>&1", ("HEAD",), False, None)
+        args = outgoing_log_args(target, ["HEAD"], known_remotes=["origin"])
+        self.assertEqual(args[-3:], ["HEAD", "--not", "--remotes"])
+        args = outgoing_log_args(PushTarget("origin", ("HEAD",), False, None), ["HEAD"], known_remotes=["origin"])
+        self.assertEqual(args[-1], "--remotes=origin")
+        # Without the list the caller gets the old behaviour (pure, no git).
+        args = outgoing_log_args(target, ["HEAD"])
+        self.assertEqual(args[-1], "--remotes=2>&1")
+
     def test_log_args(self):
         args = outgoing_log_args(PushTarget("origin", ("main",), False, None), ["main"])
         self.assertEqual(args[-3:], ["main", "--not", "--remotes=origin"])
@@ -316,6 +339,20 @@ class OutgoingScanIntegrationTest(unittest.TestCase):
         _git(["push", "-q", "origin", "main"], self.work)      # already leaked; not *this* push
         self._commit("other.py", "x = 1\n", "clean")
         self.assertEqual(self._outgoing(), [])
+
+    def test_unknown_remote_does_not_widen_the_scan_to_history(self):
+        self._commit("cfg.py", f"key = '{AWS_ID}'\n", "oops")
+        _git(["push", "-q", "origin", "main"], self.work)
+        self._commit("other.py", "x = 1\n", "clean")
+        known = _git(["remote"], self.work).stdout.split()
+        bad_target = PushTarget("2>&1", ("HEAD",), False, None)
+        # The unguarded range reports the already-pushed leak as outgoing…
+        proc = _git(outgoing_log_args(bad_target, ["HEAD"]), self.work)
+        self.assertEqual(len(scan_patch_series(proc.stdout)), 1)
+        # …the guarded one does not.
+        proc = _git(outgoing_log_args(bad_target, ["HEAD"], known), self.work)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(scan_patch_series(proc.stdout), [])
 
 
 class EntropyTest(unittest.TestCase):
