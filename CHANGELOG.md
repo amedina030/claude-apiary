@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Budgeter hooks: no crashes, honest counts (2026-08-26)
+
+Review B1/B2/B3/B5/B6. The three budgeter hooks measured the wrong thing
+and could break a session for good:
+
+- **A truncated baseline wedged the session.** `save_baseline` wrote in
+  place, `load_baseline` raised on bad JSON before anything could rewrite
+  it, and no hook wrapped `main()` — so one hook killed mid-write meant a
+  hook error on every later monitored call. Baselines are now written via
+  temp file + `os.replace`, an unreadable one is treated as absent (one
+  stderr line, then rewritten), all three hooks catch everything, and the
+  Stop hook always reaches `cleanup_session`.
+- **Multi-block turns were counted 2-3x.** Claude Code writes one JSONL
+  line per content block with the same `message.id` and `usage`; the
+  cumulative and last-call figures now dedupe on `message.id`.
+- **`cache_creation_input_tokens` was never counted.** It is now part of
+  the cumulative total, the last-call split (`baseline_cache_creation`,
+  `cache_creation_tokens_delta`), the session-length nudge, and
+  `report.py --weighted` (new `price_weight_cache_creation`, default 1.25).
+  `net_tokens_delta` sums the prompt components before clamping so tokens
+  that move from "written" to "read" between calls net to zero.
+- **Parallel tool calls produced phantom entries** (25% of the log). A PRE
+  that sees no API call since the previous one now logs nothing.
+- **Agent payloads over 64 KB were dropped silently** — exactly the most
+  expensive calls. `post_tool_use.py` reads the whole payload and says so
+  on stderr when it can't parse it.
+
 ### GUI permission gate fails closed (2026-08-26)
 
 The opt-in MCP permission server (`gui/permission_mcp.py`) auto-allowed
