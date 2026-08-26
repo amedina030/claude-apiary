@@ -330,6 +330,79 @@ class TranscriptTailTests(unittest.TestCase):
             finally:
                 tail.stop()
 
+    def test_start_at_skips_replayed_bytes_and_catches_the_gap(self):
+        """The attach race: the caller replays what it read and hands the
+        tail that byte count. A record written between the read and the
+        tail start must be rendered exactly once; the replayed one never."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "session.jsonl"
+            first = json.dumps({"type": "user", "promptId": "p1",
+                                "message": {"role": "user", "content": "already replayed"}})
+            p.write_text(first + "\n", encoding="utf-8")
+            raw = p.read_bytes()
+            # Claude appends before the tail thread starts.
+            gap = json.dumps({"type": "user", "promptId": "p2",
+                              "message": {"role": "user", "content": "in the gap"}})
+            with p.open("a", encoding="utf-8") as f:
+                f.write(gap + "\n")
+            received: list[Message] = []
+            tail = TranscriptTail(p, on_message=received.append, poll_interval=0.05,
+                                  start_at=len(raw))
+            tail.start()
+            try:
+                deadline = time.time() + 2.0
+                while time.time() < deadline and not received:
+                    time.sleep(0.05)
+                time.sleep(0.15)
+                self.assertEqual([m.text for m in received], ["in the gap"])
+            finally:
+                tail.stop()
+
+    def test_multibyte_utf8_survives_byte_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "session.jsonl"
+            p.write_text("", encoding="utf-8")
+            received: list[Message] = []
+            tail = TranscriptTail(p, on_message=received.append, poll_interval=0.05)
+            tail.start()
+            try:
+                rec = json.dumps({"type": "user", "promptId": "p1",
+                                  "message": {"role": "user", "content": "héllo — ✓ 日本"}},
+                                 ensure_ascii=False)
+                with p.open("a", encoding="utf-8") as f:
+                    f.write(rec + "\n")
+                deadline = time.time() + 2.0
+                while time.time() < deadline and not received:
+                    time.sleep(0.05)
+                self.assertEqual([m.text for m in received], ["héllo — ✓ 日本"])
+            finally:
+                tail.stop()
+
+    def test_truncated_file_is_reparsed_from_the_top(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "session.jsonl"
+            long_rec = json.dumps({"type": "user", "promptId": "p1",
+                                   "message": {"role": "user", "content": "x" * 500}})
+            p.write_text(long_rec + "\n", encoding="utf-8")
+            received: list[Message] = []
+            tail = TranscriptTail(p, on_message=received.append, poll_interval=0.05)
+            tail.start()
+            try:
+                deadline = time.time() + 2.0
+                while time.time() < deadline and not received:
+                    time.sleep(0.05)
+                self.assertEqual(len(received), 1)
+                # Rewritten shorter (/clear, compaction): the old offset is past EOF.
+                short_rec = json.dumps({"type": "user", "promptId": "p2",
+                                        "message": {"role": "user", "content": "fresh"}})
+                p.write_text(short_rec + "\n", encoding="utf-8")
+                deadline = time.time() + 2.0
+                while time.time() < deadline and len(received) < 2:
+                    time.sleep(0.05)
+                self.assertEqual([m.text for m in received][-1], "fresh")
+            finally:
+                tail.stop()
+
     def test_partial_line_buffered_until_newline(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "session.jsonl"

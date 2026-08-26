@@ -18,16 +18,30 @@ from budgeter.lib import logger, estimator
 from core import flags
 
 
-_MAX_STDIN_BYTES = 64 * 1024  # 64 KB — matches log_agent_cost.py cap
-
-
 def main():
+    """Never crash, and always reach cleanup: a Stop hook that dies before
+    ``cleanup_session`` leaves the baseline (possibly the corrupt one that
+    killed it) for the next session to trip over (review B1)."""
     try:
-        payload = json.loads(sys.stdin.buffer.read(_MAX_STDIN_BYTES))
-    except json.JSONDecodeError:
+        payload = json.loads(sys.stdin.buffer.read())
+    except json.JSONDecodeError as exc:
+        print(f"[budgeter] stop_session: unreadable payload: {exc}", file=sys.stderr)
         sys.exit(0)
 
     session_id = payload.get("session_id", "")
+    try:
+        _log_final_call(payload, session_id)
+    except Exception as exc:  # noqa: BLE001 — hooks must not crash
+        print(f"[budgeter] stop_session failed: {exc!r}", file=sys.stderr)
+    finally:
+        if session_id:
+            try:
+                logger.cleanup_session(session_id)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[budgeter] stop_session cleanup failed: {exc!r}", file=sys.stderr)
+
+
+def _log_final_call(payload, session_id):
     transcript_path = payload.get("transcript_path", "")
     cwd = payload.get("cwd", "")
 
@@ -36,42 +50,19 @@ def main():
 
     if session_id and flags.is_enabled("budgeter-log"):
         baseline = logger.load_baseline(session_id)
-        if baseline is not None and baseline.get("prev_tool_name") and baseline.get("prev_tool_name") != "Agent":
+        if (logger.baseline_comparable(baseline) and baseline.get("prev_tool_name")
+                and baseline.get("prev_tool_name") != "Agent"):
             session_entries = logger.read_session_jsonl(transcript_path)
             tokens_now = logger.get_cumulative_tokens(session_entries)
-            last_input, last_cache, last_output = logger.get_last_call_tokens(session_entries)
-            tokens_delta = max(0, tokens_now - baseline["tokens"])
-
-            prev_input = baseline.get("baseline_input", 0)
-            prev_cache = baseline.get("baseline_cache", 0)
-            if prev_input > 0 or prev_cache > 0:
-                input_growth = max(0, last_input - prev_input)
-                cache_growth = max(0, last_cache - prev_cache)
-                net_tokens_delta = input_growth + cache_growth + last_output
-            else:
-                input_growth = 0
-                cache_growth = 0
-                context_tokens = baseline.get("context_tokens", 0)
-                net_tokens_delta = max(0, tokens_delta - context_tokens)
-
-            entry = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "session_id": session_id,
-                "tool_name": baseline.get("prev_tool_name", ""),
-                "assistant_message": baseline.get("prev_assistant_message", ""),
-                "user_message": baseline.get("user_message", ""),
-                "tokens_delta": tokens_delta,
-                "context_tokens": baseline.get("baseline_input", 0) + baseline.get("baseline_cache", 0) + baseline.get("baseline_output", 0),
-                "net_tokens_delta": net_tokens_delta,
-                "input_tokens_delta": input_growth,
-                "cache_tokens_delta": cache_growth,
-                "output_tokens_delta": last_output,
-                "turn_number": baseline.get("turn_number", 0),
-                "task_turn": baseline.get("task_turn", baseline.get("turn_number", 0)),
-                "scope_flags": baseline.get("scope_flags", []),
-                "project": str(Path(transcript_path).parent) if transcript_path else "",
-            }
-            logger.append_entry(entry)
+            last_input, last_cache, last_create, last_output = logger.get_last_call_tokens(session_entries)
+            # Shrunk total = compaction; the PRE hook writes the marker, the
+            # Stop hook must not log a phantom entry against it.
+            if tokens_now > baseline["tokens"]:
+                entry = logger.build_cost_entry(
+                    baseline, session_id, transcript_path, tokens_now,
+                    last_input, last_cache, last_create, last_output,
+                )
+                logger.append_entry(entry)
 
         # Write feedback for the last task in the session, but only if
         # pre_tool_use hasn't already written a record for the same task
@@ -91,9 +82,6 @@ def main():
                 "warning_fired": baseline.get("warning_fired", False),
             }
             logger.append_feedback_if_not_present(feedback_entry, session_id, task_turn_val)
-
-    if session_id:
-        logger.cleanup_session(session_id)
 
 
 if __name__ == "__main__":

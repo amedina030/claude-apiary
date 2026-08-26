@@ -9,7 +9,7 @@ A PyWebView + PyInstaller desktop app that wraps Claude Code as a hidden pty sub
 - a global scribe sidebar across all registered apiary repos (read-only in V1)
 - a hot-reloadable theme via `<main-apiary>/.apiary/gui/apiary_gui/theme.json`
 - a small pty output strip for interactive Claude Code UI (plan-mode banners, legacy permission prompts when the MCP path is off)
-- a structured permission-prompt banner wired through a local MCP server (opt-in via `permission_mcp: true` in `launch.json`, or the `APIARY_PERMISSION_MCP=1` env var for a one-off) — see scribe `C-2026-36`
+- a structured permission-prompt banner wired through a local MCP server (opt-in via `permission_mcp: true` in `launch.json`, or the `APIARY_PERMISSION_MCP=1` env var for a one-off) — see scribe `C-2026-36`. The server fails closed: without the GUI's bridge it denies every request, so a stale `permission_mcp_config.json` can't grant blanket approval
 
 Windows V1 only (pywinpty). Code stays portability-clean (`pathlib`, `os.devnull`, list-form subprocess) so a V2 cross-platform port is a small delta.
 

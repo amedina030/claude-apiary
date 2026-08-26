@@ -1,12 +1,105 @@
 #!/usr/bin/env python3
 """Unit tests for runner/claude_subprocess.py env allowlist."""
 import unittest
+import subprocess
+from unittest import mock
 
 from runner.claude_subprocess import (
     ALLOW_ALL_ENV_VAR,
     RUNNER_SUBPROCESS_ENV_VAR,
     _build_subprocess_env,
 )
+
+
+class TestRunClaudeCommand(unittest.TestCase):
+    """The argv every runner stage spawns: git push denied, turns capped."""
+
+    def _argv(self, **kwargs):
+        from runner import claude_subprocess as cs
+        captured = {}
+
+        def fake_run(cmd, **run_kwargs):
+            captured["cmd"] = list(cmd)
+            return subprocess.CompletedProcess(cmd, 1, stdout=b"", stderr=b"stub")
+
+        with mock.patch.object(cs.subprocess, "run", fake_run):
+            rc, _out, _err = cs.run_claude("hello", **kwargs)
+        self.assertEqual(rc, 1)
+        return captured["cmd"]
+
+    def test_default_denies_git_push_and_caps_turns(self):
+        from runner import claude_subprocess as cs
+        cmd = self._argv()
+        self.assertEqual(cmd[:5], ["claude", "-p", "-", "--output-format", "json"])
+        i = cmd.index("--disallowedTools")
+        self.assertEqual(tuple(cmd[i + 1:i + 1 + len(cs.DEFAULT_DISALLOWED_TOOLS)]),
+                         cs.DEFAULT_DISALLOWED_TOOLS)
+        self.assertIn("Bash(git push *)", cmd)
+        self.assertNotIn("Bash(git * push *)", cmd)  # denied `git log --grep push`
+        j = cmd.index("--max-turns")
+        self.assertEqual(cmd[j + 1], str(cs.DEFAULT_MAX_TURNS))
+
+    def test_default_grants_the_stage_tools_explicitly(self):
+        # Without the apiary hooks' allow vote (review C-1) a headless claude
+        # denies every tool it is not explicitly granted; the runner must
+        # bring its own narrow grant.
+        from runner import claude_subprocess as cs
+        cmd = self._argv()
+        self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "acceptEdits")
+        k = cmd.index("--allowedTools")
+        grants = cmd[k + 1:k + 1 + len(cs.DEFAULT_ALLOWED_TOOLS)]
+        self.assertEqual(tuple(grants), cs.DEFAULT_ALLOWED_TOOLS)
+        for must in ("Edit", "Write", "Bash(git *)"):
+            self.assertIn(must, grants)
+        self.assertNotIn("Bash(git push *)", grants)
+        # A deny at any level beats an allow at every other level.
+        self.assertLess(cmd.index("--allowedTools"), cmd.index("--disallowedTools"))
+
+    def test_model_and_overrides(self):
+        cmd = self._argv(model="sonnet", max_turns=7, disallowed_tools=("Bash(rm *)",))
+        self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
+        self.assertEqual(cmd[cmd.index("--max-turns") + 1], "7")
+        self.assertEqual(cmd[cmd.index("--disallowedTools") + 1:], ["Bash(rm *)"])
+
+    def test_none_and_empty_remove_the_flags(self):
+        cmd = self._argv(max_turns=None, disallowed_tools=(), allowed_tools=(), permission_mode=None)
+        self.assertNotIn("--max-turns", cmd)
+        self.assertNotIn("--disallowedTools", cmd)
+        self.assertNotIn("--allowedTools", cmd)
+        self.assertNotIn("--permission-mode", cmd)
+
+    def test_config_overrides_the_defaults(self):
+        from runner import claude_subprocess as cs
+        table = {("subprocess", "max_turns"): 9, ("subprocess", "allowed_tools"): ["Read"],
+                 ("subprocess", "permission_mode"): "plan"}
+        with mock.patch.object(cs, "cfg", lambda s, k, d=None: table.get((s, k), d)):
+            cmd = self._argv()
+        self.assertEqual(cmd[cmd.index("--max-turns") + 1], "9")
+        self.assertEqual(cmd[cmd.index("--allowedTools") + 1], "Read")
+        self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "plan")
+
+    def test_empty_stderr_on_failure_is_explained_from_the_json(self):
+        from runner import claude_subprocess as cs
+        envelope = b'{"type":"result","subtype":"error_max_turns","is_error":true,"result":""}'
+        def fake_run(cmd, **kw):
+            return subprocess.CompletedProcess(cmd, 1, stdout=envelope, stderr=b"")
+        with mock.patch.object(cs.subprocess, "run", fake_run):
+            rc, out, err = cs.run_claude("hello")
+        self.assertEqual(rc, 1)
+        self.assertIn("error_max_turns", err)
+        self.assertIn("--max-turns", err)
+        # Real stderr is never replaced.
+        def fake_run2(cmd, **kw):
+            return subprocess.CompletedProcess(cmd, 1, stdout=envelope, stderr=b"real reason")
+        with mock.patch.object(cs.subprocess, "run", fake_run2):
+            _rc, _out, err = cs.run_claude("hello")
+        self.assertEqual(err, "real reason")
+        self.assertEqual(cs.describe_failure("not json", 3), "claude exited 3 with no stderr")
+
+    def test_non_positive_max_turns_rejected(self):
+        from runner import claude_subprocess as cs
+        with self.assertRaises(ValueError):
+            cs.run_claude("x", max_turns=0)
 
 
 class TestBuildSubprocessEnv(unittest.TestCase):

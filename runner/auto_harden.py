@@ -59,8 +59,36 @@ def checkout(branch: str):
         raise RuntimeError(f"Git checkout failed: {result.stderr.strip()}")
 
 
-def commit_all(message: str):
-    git("add", "-A")
+def untracked_files() -> set[str]:
+    """Untracked, non-ignored files in the checkout (``git ls-files -o``)."""
+    result = git("ls-files", "--others", "--exclude-standard", "-z")
+    if result.returncode != 0:
+        return set()
+    return {p for p in result.stdout.split("\0") if p}
+
+
+def commit_all(message: str, paths=(), new_since=None):
+    """Commit the defender's fixes.
+
+    Staged: every modified tracked file (``git add -u``), the declared
+    *paths* that exist as files, and — when *new_since* is the set returned
+    by :func:`untracked_files` before the defender ran — every file the
+    defender created since, declared or not. Not ``git add -A``: in
+    interactive mode the runner works in the operator's checkout, and ``-A``
+    swept every pre-existing scratch file into a "harden round fixes" commit
+    (review runner Bug 9). Each path is added on its own so one bad entry
+    cannot cancel the rest, and directories are never expanded.
+    """
+    result = git("add", "-u")
+    if result.returncode != 0:
+        raise RuntimeError(f"Git add -u failed: {result.stderr.strip()}")
+    to_add = [p for p in paths if Path(p).is_file()]
+    if new_since is not None:
+        to_add.extend(sorted(untracked_files() - set(new_since)))
+    for p in to_add:
+        res = git("add", "--", p)
+        if res.returncode != 0:
+            print(f"  Git warning: could not add {p}: {res.stderr.strip()}", file=sys.stderr)
     result = git("commit", "-m", message)
     if result.returncode != 0:
         # No changes to commit is OK
@@ -443,7 +471,10 @@ def main():
 
             print(f"  Round {round_num}: attacker found {len(findings)} issue(s)", file=sys.stderr)
 
-            # Defend
+            # Defend — snapshot untracked files first so the commit below can
+            # include what the defender creates without sweeping what the
+            # operator already had lying around.
+            untracked_before = untracked_files()
             responses = run_defender(findings, changed_files)
             if responses is None or len(responses) == 0:
                 # Defender produced no responses despite findings — mark all unresolved.
@@ -461,7 +492,8 @@ def main():
 
             # Commit defender fixes
             try:
-                commit_all(f"runner/{uuid} harden round {round_num} fixes")
+                commit_all(f"runner/{uuid} harden round {round_num} fixes", changed_files,
+                           new_since=untracked_before)
             except RuntimeError as e:
                 print(f"  Git warning: {e}", file=sys.stderr)
 

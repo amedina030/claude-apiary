@@ -1,4 +1,6 @@
 import json
+from datetime import datetime, timezone
+import tempfile
 import os
 import sys
 import time
@@ -338,32 +340,107 @@ def get_last_assistant_message(session_entries):
     return last_text
 
 
-def get_cumulative_tokens(session_entries):
-    """Sum all token usage across all assistant messages in the session."""
-    total = 0
+def iter_api_calls(session_entries):
+    """Yield one ``usage`` dict per API call, in transcript order.
+
+    Claude Code writes one JSONL line per content block (thinking, text,
+    tool_use ...) and every line of the same API turn repeats the same
+    ``message.id`` and the same ``usage``. Summing per line therefore counts
+    a multi-block turn 2-3x (review B2). Records are deduped on
+    ``message.id``; a record without an id is counted on its own.
+    """
+    seen = set()
     for entry in session_entries:
         msg = entry.get("message", {})
-        if msg.get("role") == "assistant":
-            usage = msg.get("usage", {})
-            total += usage.get("input_tokens", 0)
-            total += usage.get("output_tokens", 0)
-            total += usage.get("cache_read_input_tokens", 0)
-    return total
+        if msg.get("role") != "assistant":
+            continue
+        msg_id = msg.get("id")
+        if msg_id:
+            if msg_id in seen:
+                continue
+            seen.add(msg_id)
+        usage = msg.get("usage") or {}
+        if isinstance(usage, dict):
+            yield usage
+
+
+def _usage_total(usage):
+    """Everything the API billed for one call: uncached input, cache reads,
+    cache writes (``cache_creation_input_tokens`` — never counted before
+    review B5), and output."""
+    return (
+        usage.get("input_tokens", 0)
+        + usage.get("cache_read_input_tokens", 0)
+        + usage.get("cache_creation_input_tokens", 0)
+        + usage.get("output_tokens", 0)
+    )
+
+
+def get_cumulative_tokens(session_entries):
+    """Sum token usage across all API calls in the session (deduped per call)."""
+    return sum(_usage_total(u) for u in iter_api_calls(session_entries))
 
 
 def get_last_call_tokens(session_entries):
-    """Return (input_tokens, cache_read_tokens, output_tokens) of the most recent assistant message."""
-    last_input = 0
-    last_cache = 0
-    last_output = 0
-    for entry in session_entries:
-        msg = entry.get("message", {})
-        if msg.get("role") == "assistant":
-            usage = msg.get("usage", {})
-            last_input = usage.get("input_tokens", 0)
-            last_cache = usage.get("cache_read_input_tokens", 0)
-            last_output = usage.get("output_tokens", 0)
-    return last_input, last_cache, last_output
+    """Return ``(input, cache_read, cache_creation, output)`` of the most
+    recent API call, or all zeros when the transcript has none."""
+    last = None
+    for usage in iter_api_calls(session_entries):
+        last = usage
+    if last is None:
+        return 0, 0, 0, 0
+    return (
+        last.get("input_tokens", 0),
+        last.get("cache_read_input_tokens", 0),
+        last.get("cache_creation_input_tokens", 0),
+        last.get("output_tokens", 0),
+    )
+
+
+def build_cost_entry(baseline, session_id, transcript_path, tokens_now,
+                     last_input, last_cache, last_create, last_output):
+    """Build the log entry attributing the API call(s) since *baseline* to
+    the tool recorded in it. Shared by the PRE and Stop hooks.
+
+    ``net_tokens_delta`` is the marginal cost: growth of the prompt (uncached
+    input + cache reads + cache writes, summed *before* clamping so tokens
+    that merely moved from "written" to "read" between calls net to zero)
+    plus the new output. The split fields are informational.
+    """
+    tokens_delta = max(0, tokens_now - baseline["tokens"])
+    prev_input = baseline.get("baseline_input", 0)
+    prev_cache = baseline.get("baseline_cache", 0)
+    prev_create = baseline.get("baseline_cache_creation", 0)
+    if prev_input > 0 or prev_cache > 0 or prev_create > 0:
+        input_growth = max(0, last_input - prev_input)
+        cache_growth = max(0, last_cache - prev_cache)
+        create_growth = max(0, last_create - prev_create)
+        prompt_growth = max(
+            0, (last_input + last_cache + last_create) - (prev_input + prev_cache + prev_create)
+        )
+        net_tokens_delta = prompt_growth + last_output
+    else:
+        input_growth = cache_growth = create_growth = 0
+        context_tokens = baseline.get("context_tokens", 0)
+        net_tokens_delta = max(0, tokens_delta - context_tokens)
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "session_id": session_id,
+        "tool_name": baseline.get("prev_tool_name", ""),
+        "assistant_message": baseline.get("prev_assistant_message", ""),
+        "user_message": baseline.get("user_message", ""),
+        "tokens_delta": tokens_delta,
+        "context_tokens": prev_input + prev_cache + prev_create + baseline.get("baseline_output", 0),
+        "net_tokens_delta": net_tokens_delta,
+        "input_tokens_delta": input_growth,
+        "cache_tokens_delta": cache_growth,
+        "cache_creation_tokens_delta": create_growth,
+        "output_tokens_delta": last_output,
+        "turn_number": baseline.get("turn_number", 0),
+        "task_turn": baseline.get("task_turn", baseline.get("turn_number", 0)),
+        "scope_flags": baseline.get("scope_flags", []),
+        "project": str(Path(transcript_path).parent) if transcript_path else "",
+    }
 
 
 def save_snapshot(session_id, snapshot):
@@ -393,28 +470,58 @@ def delete_snapshot(session_id):
         path.unlink()
 
 
+# Bump when the meaning of a baseline's numbers changes. Schema 2 (2026-08):
+# token totals are deduped per API call and include cache creation, so a
+# schema-1 baseline is 1.7-2.6x too large to compare against — comparing
+# produced a spurious "[compaction]" marker on the first PRE after upgrade.
+BASELINE_SCHEMA = 2
+
+
+def baseline_comparable(baseline) -> bool:
+    """True when *baseline* was written by code that counts the same way we
+    do now, so a delta against it means something."""
+    return isinstance(baseline, dict) and baseline.get("schema") == BASELINE_SCHEMA
+
+
 def load_baseline(session_id):
+    """Return the session's baseline dict, or None when there is none.
+
+    A baseline that cannot be parsed (a hook killed mid-write, a disk
+    hiccup) is treated as absent rather than raised: the next PRE rewrites
+    it and the session carries on with one gap in the log. Before review
+    B1 the JSONDecodeError escaped every hook, and since nothing rewrote
+    the file the session's hooks stayed broken for good.
+    """
     path = _sid(session_id).tmp_path("baseline.json", TMP_DIR)
     if not path.exists():
         return None
     with _file_lock(path):
         if not path.exists():
             return None
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError) as exc:
+            print(f"[budgeter] unreadable baseline {path.name}: {exc}; starting over",
+                  file=sys.stderr)
+            return None
+    return data if isinstance(data, dict) and "tokens" in data else None
 
 
-def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message="", scope_flags=None, predicted_cost=0, warning_fired=False, baseline_input=0, baseline_cache=0, baseline_output=0, agent_description=""):
+def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message="", scope_flags=None, predicted_cost=0, warning_fired=False, baseline_input=0, baseline_cache=0, baseline_output=0, agent_description="", baseline_cache_creation=0):
     _assert_isolated_in_test_mode(TMP_DIR, "tmp")
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     path = _sid(session_id).tmp_path("baseline.json", TMP_DIR)
     with _file_lock(path):
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({
+        # Write to a sibling temp file and os.replace it in, so a hook killed
+        # mid-write can never leave a truncated baseline behind (review B1).
+        _atomic_write_json(path, {
+                "schema": BASELINE_SCHEMA,
                 "tokens": tokens,
                 "context_tokens": context_tokens,
                 "baseline_input": baseline_input,
                 "baseline_cache": baseline_cache,
+                "baseline_cache_creation": baseline_cache_creation,
                 "baseline_output": baseline_output,
                 "prev_tool_name": prev_tool_name,
                 "prev_assistant_message": prev_assistant_message,
@@ -425,7 +532,21 @@ def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_
                 "predicted_cost": predicted_cost,
                 "warning_fired": warning_fired,
                 "agent_description": agent_description,
-            }, f)
+        })
+
+
+def _atomic_write_json(path, data):
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def cleanup_session(session_id):
@@ -437,3 +558,10 @@ def cleanup_session(session_id):
                 p.unlink()
             except PermissionError:
                 pass  # file locked by another process (common on Windows); leave it
+        # Orphaned atomic-write temp files (a hook killed between mkstemp and
+        # os.replace, or a Windows replace refused while the file was open).
+        for orphan in p.parent.glob(p.name + ".*.tmp") if p.parent.exists() else ():
+            try:
+                orphan.unlink()
+            except OSError:
+                pass

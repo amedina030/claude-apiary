@@ -38,11 +38,36 @@ def join_contexts(*blocks: str) -> str:
 # Hook response helpers
 # ---------------------------------------------------------------------------
 
-def hook_allow(context: str = None, event: str = "PreToolUse"):
-    """Print a hook allow response and exit 0."""
-    out = {"hookSpecificOutput": {"hookEventName": event, "permissionDecision": "allow"}}
+# The only values Claude Code accepts for PreToolUse ``permissionDecision``.
+# ``block`` / ``approve`` are legacy top-level ``decision`` values, not these.
+PERMISSION_DECISIONS = ("allow", "deny", "ask")
+
+
+def hook_allow(context: str = None, event: str = "PreToolUse", decision: str = None):
+    """Print a "no objection" hook response and return (exit code stays 0).
+
+    This does **not** vote ``allow``. A hook whose permission decision is
+    ``allow`` auto-approves the tool call and silently
+    disables default-mode permission prompts for every call it sees — which
+    is exactly what this helper did until 2026-08 (review C-1). Now it only
+    attaches *context* (``additionalContext``) when given one and otherwise
+    prints ``{}``, so Claude Code's normal permission flow decides.
+
+    A hook that genuinely intends to decide passes ``decision`` explicitly
+    (``"ask"``, ``"deny"``, or — for one specific, justified call shape, never
+    a blanket — ``"allow"``). Anything else raises ``ValueError`` so a typo
+    cannot turn into a vote. Hard blocks use :func:`hook_block`.
+    """
+    if decision is not None and decision not in PERMISSION_DECISIONS:
+        raise ValueError(
+            f"permissionDecision must be one of {PERMISSION_DECISIONS}, got {decision!r}"
+        )
+    spec = {}
     if context:
-        out["hookSpecificOutput"]["additionalContext"] = context
+        spec["additionalContext"] = context
+    if decision:
+        spec["permissionDecision"] = decision
+    out = {"hookSpecificOutput": {"hookEventName": event, **spec}} if spec else {}
     print(json.dumps(out))
 
 
@@ -72,7 +97,11 @@ def hook_block(message: str, event: str = "PreToolUse"):
 
 
 def read_payload():
-    """Read and parse JSON payload from stdin. Returns dict or exits with allow."""
+    """Read and parse JSON payload from stdin.
+
+    Returns the dict, or on malformed input prints the no-objection response
+    and exits 0 (fail open, no permission vote).
+    """
     try:
         return json.loads(sys.stdin.read())
     except json.JSONDecodeError:

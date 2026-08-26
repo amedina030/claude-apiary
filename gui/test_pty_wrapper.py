@@ -29,6 +29,158 @@ class _StubProc:
     def isalive(self) -> bool:
         return self._alive
 
+    def sendcontrol(self, ch: str) -> None:
+        self.writes.append(chr(ord(ch.lower()) - 96))
+
+
+class NeverSendCtrlCTests(unittest.TestCase):
+    """The GUI must never deliver a raw Ctrl+C to claude (it kills the
+    session). Structural at the pty layer, whatever the caller."""
+
+    def _wrapper(self):
+        wrapper = PtyWrapper()
+        stub = _StubProc()
+        wrapper._proc = stub  # type: ignore[assignment]
+        return wrapper, stub
+
+    def test_send_control_c_is_refused(self) -> None:
+        wrapper, stub = self._wrapper()
+        self.assertFalse(wrapper.send_control("c"))
+        self.assertFalse(wrapper.send_control("C"))
+        self.assertFalse(wrapper.send_control("\x03"))
+        self.assertEqual(stub.writes, [])
+
+    def test_other_controls_still_work(self) -> None:
+        wrapper, stub = self._wrapper()
+        self.assertTrue(wrapper.send_control("m"))
+        self.assertTrue(wrapper.send_control("u"))
+        self.assertEqual(stub.writes, ["\r", "\x15"])
+
+    def test_send_text_with_embedded_ctrl_c_is_refused_whole(self) -> None:
+        wrapper, stub = self._wrapper()
+        self.assertFalse(wrapper.send_text("abc\x03def"))
+        self.assertEqual(stub.writes, [])
+
+    def test_send_bytes_with_ctrl_c_is_refused(self) -> None:
+        wrapper, stub = self._wrapper()
+        self.assertFalse(wrapper.send_bytes(b"\x03"))
+        self.assertFalse(wrapper.send_bytes(b"\x1b[A\x03"))
+        self.assertEqual(stub.writes, [])
+        self.assertTrue(wrapper.send_bytes(b"\x1b"))
+
+    def test_contains_ctrl_c(self) -> None:
+        self.assertTrue(pty_wrapper.contains_ctrl_c("\x03"))
+        self.assertTrue(pty_wrapper.contains_ctrl_c(b"x\x03"))
+        self.assertFalse(pty_wrapper.contains_ctrl_c("c"))
+        self.assertFalse(pty_wrapper.contains_ctrl_c(b"\x1b"))
+        self.assertFalse(pty_wrapper.contains_ctrl_c(None))
+
+
+class _StubProcWithLifecycle(_StubProc):
+    def __init__(self):
+        super().__init__()
+        self.pid = 4242
+        self.calls: list[str] = []
+
+    def terminate(self, force=False):
+        self.calls.append(f"terminate(force={force})")
+        self._alive = False
+        return True
+
+    def close(self, force=False):
+        self.calls.append(f"close(force={force})")
+
+    @property
+    def fileobj(self):
+        stub = self
+
+        class _Sock:
+            def shutdown(self, how):
+                stub.calls.append("shutdown")
+        return _Sock()
+
+
+class StopReleasesPtyTests(unittest.TestCase):
+    def test_stop_terminates_closes_and_kills_tree(self) -> None:
+        wrapper = PtyWrapper()
+        stub = _StubProcWithLifecycle()
+        wrapper._proc = stub  # type: ignore[assignment]
+        killed: list[int] = []
+        def _kill(pid):
+            killed.append((pid, stub.isalive()))
+        with mock.patch.object(pty_wrapper, "_kill_process_tree", _kill):
+            wrapper.stop()
+        self.assertEqual(stub.calls, ["terminate(force=True)", "shutdown", "close(force=True)"])
+        # The tree is killed while the direct child is still alive.
+        self.assertEqual(killed, [(4242, True)])
+        self.assertIsNone(wrapper._proc)
+        self.assertFalse(wrapper.is_alive())
+
+    def test_deliberate_stop_does_not_report_an_exit(self):
+        exits: list[int] = []
+        wrapper = PtyWrapper(on_exit=exits.append)
+
+        class _EofProc:
+            exitstatus = 7
+            def read(self, n):
+                raise EOFError
+            def isalive(self):
+                return False
+        wrapper._proc = _EofProc()  # type: ignore[assignment]
+        wrapper._stop.set()
+        wrapper._read_loop()
+        self.assertEqual(exits, [])
+        wrapper._stop.clear()
+        wrapper._read_loop()
+        self.assertEqual(exits, [7])
+
+    def test_stop_without_proc_is_a_noop(self) -> None:
+        PtyWrapper().stop()
+
+
+@unittest.skipUnless(pty_wrapper.shutil.which("taskkill"), "needs a Windows host (taskkill)")
+class StopKillsGrandchildTest(unittest.TestCase):
+    """Spawn ``cmd /c python`` through a real pty — the npm-shim shape — and
+    prove the python grandchild is gone after stop()."""
+
+    def test_grandchild_dies(self) -> None:
+        import subprocess
+        import sys
+        import tempfile
+        from pathlib import Path
+        try:
+            import winpty  # noqa: F401
+        except ImportError:
+            self.skipTest("pywinpty not installed")
+        with tempfile.TemporaryDirectory() as td:
+            pidfile = Path(td) / "pid"
+            code = (
+                "import os,time;open(r'%s','w',encoding='utf-8').write(str(os.getpid()));time.sleep(60)"
+                % str(pidfile)
+            )
+            wrapper = PtyWrapper(argv=["cmd", "/c", sys.executable, "-c", code])
+            wrapper.start()
+            try:
+                deadline = time.time() + 15
+                while time.time() < deadline and not pidfile.exists():
+                    time.sleep(0.1)
+                self.assertTrue(pidfile.exists(), "grandchild never started")
+                pid = int(pidfile.read_text(encoding="utf-8"))
+            finally:
+                wrapper.stop()
+
+            def alive() -> bool:
+                out = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                    capture_output=True, text=True, check=False,
+                ).stdout
+                return str(pid) in out
+
+            deadline = time.time() + 5
+            while time.time() < deadline and alive():
+                time.sleep(0.2)
+            self.assertFalse(alive(), f"grandchild {pid} survived stop()")
+
 
 class SendTextChunkingTests(unittest.TestCase):
     def _wrapper_with_stub(self, **stub_kwargs) -> tuple[PtyWrapper, _StubProc]:

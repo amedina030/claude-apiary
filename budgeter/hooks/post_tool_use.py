@@ -19,8 +19,6 @@ from budgeter.lib import logger
 from core import flags
 
 
-_MAX_STDIN_BYTES = 64 * 1024  # 64 KB — matches log_agent_cost.py cap
-
 # /harden encodes the run's request_id in the Agent description as "[rid:<id>]"
 # because the Agent tool has no `env` parameter — there is no LLM-controlled
 # mechanism to set APIARY_REQUEST_ID on a spawn. The hook parses it here as
@@ -41,9 +39,22 @@ def _sanitize_request_id(value: str) -> str:
 
 
 def main():
+    """Never crash the tool call (review B1)."""
     try:
-        payload = json.loads(sys.stdin.buffer.read(_MAX_STDIN_BYTES))
-    except json.JSONDecodeError:
+        _run()
+    except Exception as exc:  # noqa: BLE001 — hooks must not crash
+        print(f"[budgeter] post_tool_use failed: {exc!r}", file=sys.stderr)
+
+
+def _run():
+    # Read the whole payload. A 64 KB cap used to drop exactly the most
+    # expensive Agent calls — tool_response carries the subagent's full
+    # return text — with no trace (review B6). Claude Code bounds the
+    # payload; we don't need to.
+    try:
+        payload = json.loads(sys.stdin.buffer.read())
+    except json.JSONDecodeError as exc:
+        print(f"[budgeter] post_tool_use: unreadable payload: {exc}", file=sys.stderr)
         sys.exit(0)
 
     tool_name = payload.get("tool_name", "")

@@ -11,15 +11,27 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from gui.session import Session, _claude_code_project_key, _replace_key_seps
+from gui.session import Session, _claude_code_project_key, _replace_key_seps, replay_cut
 
 
 class _FakePty:
     def __init__(self):
         self.sent = []
+        self.last_output_at = 0.0
 
     def send_bytes(self, raw: bytes) -> bool:
         self.sent.append(raw)
+        return True
+
+    def send_text(self, text: str) -> bool:
+        self.sent.append(text)
+        return True
+
+    def send_control(self, ch: str) -> bool:
+        self.sent.append(("ctrl", ch))
+        return True
+
+    def wait_for_quiet(self, after=0.0):
         return True
 
 
@@ -68,6 +80,49 @@ class SendBytesTest(unittest.TestCase):
     def test_no_pty_returns_false(self):
         sess = _session_with(None)
         self.assertFalse(sess.send_bytes([27, 91, 65]))
+
+
+class NeverSendCtrlCTest(unittest.TestCase):
+    """Bridge-facing guard: no input path may deliver a raw Ctrl+C."""
+
+    def test_send_control_c_refused(self):
+        pty = _FakePty()
+        sess = _session_with(pty)
+        self.assertFalse(sess.send_control("c"))
+        self.assertFalse(sess.send_control("C"))
+        self.assertFalse(sess.send_control("\x03"))
+        self.assertEqual(pty.sent, [])
+        self.assertTrue(sess.send_control("u"))
+        self.assertEqual(pty.sent, [("ctrl", "u")])
+
+    def test_send_text_with_ctrl_c_refused(self):
+        pty = _FakePty()
+        sess = _session_with(pty)
+        self.assertFalse(sess.send_text("\x03"))
+        self.assertFalse(sess.send_text("hello\x03"))
+        self.assertEqual(pty.sent, [])
+        self.assertTrue(sess.send_text("hello"))
+
+    def test_send_bytes_with_ctrl_c_refused(self):
+        pty = _FakePty()
+        sess = _session_with(pty)
+        self.assertFalse(sess.send_bytes([3]))
+        self.assertFalse(sess.send_bytes([27, 3]))
+        self.assertEqual(pty.sent, [])
+
+    def test_send_input_with_ctrl_c_refused(self):
+        pty = _FakePty()
+        sess = _session_with(pty)
+        self.assertFalse(sess.send_input("run this\x03"))
+        self.assertEqual(pty.sent, [])
+
+
+class ReplayCutTest(unittest.TestCase):
+    def test_cuts_after_last_complete_line(self):
+        self.assertEqual(replay_cut(b'{"a":1}\n{"b":2}\n'), 16)
+        self.assertEqual(replay_cut(b'{"a":1}\n{"b":'), 8)   # torn tail left for the tail thread
+        self.assertEqual(replay_cut(b'{"a":'), 0)
+        self.assertEqual(replay_cut(b""), 0)
 
 
 class SepReplacementTest(unittest.TestCase):

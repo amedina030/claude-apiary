@@ -9,12 +9,15 @@ drives the same git invocation ``_run`` uses against a throwaway repo.
 
 Fixtures are fake credentials; ``.secretsallow`` exempts this file.
 """
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 from core.hooks.pre_push_secret_scan import (
+    UNRESOLVED_CWD,
+    push_targets,
     PushTarget,
     iter_added_lines,
     outgoing_log_args,
@@ -223,7 +226,11 @@ class PushTargetTest(unittest.TestCase):
         self.assertEqual(push_target("git push -u origin HEAD").refs, ("HEAD",))
         self.assertEqual(push_target("git push --force-with-lease origin +local:remote").refs, ("local",))
         self.assertEqual(push_target("git push origin tag v1.2").refs, ("v1.2",))
-        self.assertEqual(push_target("git push origin :gone").refs, ("HEAD",))   # deletion → nothing outgoing
+        self.assertEqual(push_target("git push origin :gone").refs, ())   # deletion → nothing outgoing
+        self.assertEqual(push_target("git push origin --delete gone").refs, ())
+        self.assertEqual(push_target("git push -d origin gone").refs, ())
+        self.assertEqual(push_target("git push origin :gone main").refs, ("main",))
+        self.assertEqual(push_target("git push origin").refs, ("HEAD",))
         self.assertEqual(push_target("git push -o ci.skip origin main").refs, ("main",))
 
     def test_all_and_mirror_scan_every_branch(self):
@@ -232,9 +239,43 @@ class PushTargetTest(unittest.TestCase):
 
     def test_url_remote_is_not_treated_as_a_name(self):
         t = push_target("git push https://example.com/r.git main")
-        self.assertEqual((t.remote, t.refs), (None, ("main",)))
+        self.assertEqual((t.remote, t.refs, t.url), (None, ("main",), "https://example.com/r.git"))
         t = push_target("git push git@github.com:o/r.git main")
         self.assertIsNone(t.remote)
+        # scp-style and bare-path destinations are URLs too (no remote-tracking refs).
+        # Backslash paths are eaten by posix shlex (L-2026-70); only the
+        # forward-slash Windows form is testable here.
+        for dest in ("deploy@prod:/srv/app", "/srv/mirrors/publicdir", "../bare", "~/repos/x",
+                     "C:/repos/bare", "//nas/share/repo"):
+            with self.subTest(dest=dest):
+                t = push_target(f"git push {dest} main")
+                self.assertEqual((t.remote, t.url), (None, dest))
+        self.assertEqual(push_target("git push origin main").url, None)
+
+    def test_git_token_forms_and_newlines(self):
+        self.assertEqual(push_target("git.exe push origin main").remote, "origin")
+        self.assertEqual(push_target("/usr/bin/git push origin main").remote, "origin")
+        self.assertEqual(push_target("C:/Git/bin/git.exe push origin main").remote, "origin")
+        self.assertEqual(push_target("git --exec-path /x push origin main").remote, "origin")
+        ts = push_targets('git commit -m "wip"\ngit push origin main')
+        self.assertEqual([(t.remote, t.refs) for t in ts], [("origin", ("main",))])
+        self.assertEqual(push_targets("gitk; echo done"), [])
+
+    def test_unresolvable_cd_is_flagged_not_guessed(self):
+        for cmd in ('cd "$(git rev-parse --show-toplevel)" && git push origin main',
+                    "cd $REPO && git push", "cd `pwd`/x && git push",
+                    "cd ../clean; cd -; git push origin main", "popd; git push"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(push_target(cmd).cwd, UNRESOLVED_CWD)
+        # An absolute cd after a relative one replaces it; ~ expands.
+        self.assertEqual(push_target("cd a && cd /tmp/x && git push").cwd, "/tmp/x" if os.name != "nt" else "/tmp/x")
+        self.assertEqual(push_target("cd ~/proj && git push").cwd, os.path.expanduser("~/proj"))
+        self.assertEqual(push_target("cd && git push").cwd, os.path.expanduser("~"))
+
+    @unittest.skipUnless(os.name == "nt", "Git Bash drive paths only exist on Windows")
+    def test_git_bash_drive_path_is_translated(self):
+        self.assertEqual(push_target("cd /d/Professional/x && git push").cwd, "D:/Professional/x")
+        self.assertEqual(push_target("cd /c && git push").cwd, "C:/")
 
     def test_dash_c_sets_cwd(self):
         t = push_target("git -C ../other push origin main")
@@ -244,6 +285,55 @@ class PushTargetTest(unittest.TestCase):
     def test_compound_command_finds_the_push_segment(self):
         t = push_target("git add . && git commit -m 'x' && git push origin dev; echo done")
         self.assertEqual((t.remote, t.refs), ("origin", ("dev",)))
+
+    def test_shell_redirections_are_not_remotes_or_refs(self):
+        # Regression: ``git push -q 2>&1 | tail`` parsed ``2>&1`` as the remote,
+        # ``--remotes=2>&1`` matched nothing, and the whole history was
+        # reported as outgoing.
+        self.assertEqual(push_target("git push -q 2>&1 | tail -2"), PushTarget(None, ("HEAD",), False, None))
+        self.assertEqual(push_target("git push origin main 2>/dev/null").remote, "origin")
+        self.assertEqual(push_target("git push origin main >push.log").refs, ("main",))
+        t = push_target("git push origin main > push.log")
+        self.assertEqual((t.remote, t.refs), ("origin", ("main",)))
+        t = push_target("git push origin main 2> err.log < /dev/null")
+        self.assertEqual((t.remote, t.refs), ("origin", ("main",)))
+        self.assertEqual(push_target("git push &> all.log").remote, None)
+
+    def test_cd_before_push_sets_cwd(self):
+        # ``cd sub && git push`` runs in sub — the scan must too, or a secret in
+        # a nested checkout slips past a scan of the parent repo.
+        self.assertEqual(push_target("cd sub && git push origin main").cwd, "sub")
+        t = push_target("cd a && cd b && git -C c push")
+        self.assertEqual(t.cwd, os.path.join(os.path.join("a", "b"), "c"))
+        self.assertEqual(push_target("pushd repo; git push").cwd, "repo")
+        self.assertEqual(push_target("cd - && git push").cwd, UNRESOLVED_CWD)
+
+    def test_every_push_segment_is_parsed(self):
+        ts = push_targets("git push origin main; git push upstream main")
+        self.assertEqual([(t.remote, t.refs) for t in ts], [("origin", ("main",)), ("upstream", ("main",))])
+        ts = push_targets("cd x && git push origin a && cd y && git push")
+        self.assertEqual([(t.cwd, t.remote) for t in ts], [("x", "origin"), (os.path.join("x", "y"), None)])
+        self.assertEqual(push_targets("echo no push here"), [])
+
+    def test_log_args_url_destination_uses_its_tips(self):
+        t = PushTarget(None, ("main",), False, None, "/srv/bare")
+        args = outgoing_log_args(t, ["main"], ["origin"], ["a" * 40, "b" * 40])
+        self.assertEqual(args[-4:], ["main", "--not", "a" * 40, "b" * 40])
+        self.assertNotIn("--remotes", " ".join(args))
+        # Unknown destination state → scan everything reachable.
+        args = outgoing_log_args(t, ["main"], ["origin"], [])
+        self.assertEqual(args[-1], "main")
+        self.assertNotIn("--not", args)
+
+    def test_log_args_unknown_remote_falls_back_to_all_remotes(self):
+        target = PushTarget("2>&1", ("HEAD",), False, None)
+        args = outgoing_log_args(target, ["HEAD"], known_remotes=["origin"])
+        self.assertEqual(args[-3:], ["HEAD", "--not", "--remotes"])
+        args = outgoing_log_args(PushTarget("origin", ("HEAD",), False, None), ["HEAD"], known_remotes=["origin"])
+        self.assertEqual(args[-1], "--remotes=origin")
+        # Without the list the caller gets the old behaviour (pure, no git).
+        args = outgoing_log_args(target, ["HEAD"])
+        self.assertEqual(args[-1], "--remotes=2>&1")
 
     def test_log_args(self):
         args = outgoing_log_args(PushTarget("origin", ("main",), False, None), ["main"])
@@ -316,6 +406,20 @@ class OutgoingScanIntegrationTest(unittest.TestCase):
         _git(["push", "-q", "origin", "main"], self.work)      # already leaked; not *this* push
         self._commit("other.py", "x = 1\n", "clean")
         self.assertEqual(self._outgoing(), [])
+
+    def test_unknown_remote_does_not_widen_the_scan_to_history(self):
+        self._commit("cfg.py", f"key = '{AWS_ID}'\n", "oops")
+        _git(["push", "-q", "origin", "main"], self.work)
+        self._commit("other.py", "x = 1\n", "clean")
+        known = _git(["remote"], self.work).stdout.split()
+        bad_target = PushTarget("2>&1", ("HEAD",), False, None)
+        # The unguarded range reports the already-pushed leak as outgoing…
+        proc = _git(outgoing_log_args(bad_target, ["HEAD"]), self.work)
+        self.assertEqual(len(scan_patch_series(proc.stdout)), 1)
+        # …the guarded one does not.
+        proc = _git(outgoing_log_args(bad_target, ["HEAD"], known), self.work)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(scan_patch_series(proc.stdout), [])
 
 
 class EntropyTest(unittest.TestCase):

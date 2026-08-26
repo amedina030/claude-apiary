@@ -41,6 +41,16 @@ def _strip_cont(message):
 
 
 def main():
+    """Never crash the tool call: any failure is one stderr line and a
+    no-objection response (review B1)."""
+    try:
+        _run()
+    except Exception as exc:  # noqa: BLE001 — hooks must not crash
+        print(f"[budgeter] pre_tool_use failed: {exc!r}", file=sys.stderr)
+        hook_allow()
+
+
+def _run():
     payload = read_payload()
 
     tool_name = payload.get("tool_name", "")
@@ -57,7 +67,7 @@ def main():
 
     session_entries = logger.read_session_jsonl(transcript_path)
     tokens_now = logger.get_cumulative_tokens(session_entries)
-    last_input, last_cache, last_output = logger.get_last_call_tokens(session_entries)
+    last_input, last_cache, last_create, last_output = logger.get_last_call_tokens(session_entries)
     assistant_message = logger.get_last_assistant_message(session_entries)
     turn_number = logger.get_user_turn_number(session_entries)
 
@@ -135,7 +145,10 @@ def main():
             predicted_cost = int(median_cost)
             warning_fired = True
 
-    compacted = (baseline is not None
+    # A baseline written by an older counting scheme is kept for task/turn
+    # continuity but never compared against (its numbers mean something else).
+    comparable = logger.baseline_comparable(baseline)
+    compacted = (comparable
                  and tokens_now < baseline["tokens"]
                  and baseline.get("prev_tool_name") != "Agent")
 
@@ -159,39 +172,16 @@ def main():
                 "_marker": True,  # force-write despite zero deltas
             })
 
-        if baseline is not None and baseline.get("prev_tool_name") != "Agent" and not compacted:
-            tokens_delta = max(0, tokens_now - baseline["tokens"])
-            # Marginal cost: input growth (new context added) + cache growth + new output.
-            # Falls back to old context_tokens heuristic for baselines without split fields.
-            prev_input = baseline.get("baseline_input", 0)
-            prev_cache = baseline.get("baseline_cache", 0)
-            if prev_input > 0 or prev_cache > 0:
-                input_growth = max(0, last_input - prev_input)
-                cache_growth = max(0, last_cache - prev_cache)
-                net_tokens_delta = input_growth + cache_growth + last_output
-            else:
-                input_growth = 0
-                cache_growth = 0
-                context_tokens = baseline.get("context_tokens", 0)
-                net_tokens_delta = max(0, tokens_delta - context_tokens)
-
-            entry = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "session_id": session_id,
-                "tool_name": baseline.get("prev_tool_name", ""),
-                "assistant_message": baseline.get("prev_assistant_message", ""),
-                "user_message": baseline.get("user_message", ""),
-                "tokens_delta": tokens_delta,
-                "context_tokens": baseline.get("baseline_input", 0) + baseline.get("baseline_cache", 0) + baseline.get("baseline_output", 0),
-                "net_tokens_delta": net_tokens_delta,
-                "input_tokens_delta": input_growth,
-                "cache_tokens_delta": cache_growth,
-                "output_tokens_delta": last_output,
-                "turn_number": baseline.get("turn_number", 0),
-                "task_turn": baseline.get("task_turn", baseline.get("turn_number", 0)),
-                "scope_flags": baseline.get("scope_flags", []),
-                "project": str(Path(transcript_path).parent) if transcript_path else "",
-            }
+        # No API call happened since the last PRE (parallel tool calls in one
+        # assistant turn): there is no cost to attribute, so log nothing.
+        # Logging last_output here created phantom entries — 25% of the log
+        # (review B3).
+        if (comparable and baseline.get("prev_tool_name") != "Agent"
+                and not compacted and tokens_now != baseline["tokens"]):
+            entry = logger.build_cost_entry(
+                baseline, session_id, transcript_path, tokens_now,
+                last_input, last_cache, last_create, last_output,
+            )
             logger.append_entry(entry)
 
         # Write feedback for the previous task at task-completion boundary.
@@ -231,6 +221,7 @@ def main():
         warning_fired=warning_fired,
         baseline_input=last_input,
         baseline_cache=last_cache,
+        baseline_cache_creation=last_create,
         baseline_output=last_output,
         agent_description=agent_description,
     )
@@ -273,7 +264,10 @@ def main():
     # nudge without also re-enabling the noisier magnitude warning.
     session_warn_enabled = flags.is_enabled("budgeter-session-warn")
     if session_warn_enabled and os.environ.get("APIARY_RUNNER_SUBPROCESS") != "1":
-        tier, nudge_msg = estimator.session_length_nudge(last_input + last_cache, config)
+        # Prompt size = everything the last call read: uncached input, cache
+        # reads and cache writes. Leaving cache writes out read a full
+        # context as nearly empty on a cache-miss turn (review B5).
+        tier, nudge_msg = estimator.session_length_nudge(last_input + last_cache + last_create, config)
         if tier:
             try:
                 sid_for_flag = SessionId(session_id)

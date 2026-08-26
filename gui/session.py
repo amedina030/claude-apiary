@@ -23,6 +23,7 @@ from gui.file_refs import FileRefs
 from gui.permission_mcp import SESSION_ID_ENV, permission_tool_arg, write_mcp_config
 from gui.pty_capture import CaptureWriter
 from gui.pty_wrapper import PtySpawnError, PtyWrapper
+from gui.pty_wrapper import contains_ctrl_c
 from gui.scribe_aggregator import ScribeAggregatorService, aggregate
 from gui.subagent_tracker import SubagentTracker
 from gui.transcript import (
@@ -110,6 +111,15 @@ _CLAUDE_SUBPROC_ENV = (
 # session it's running inside the GUI. Read by core/hooks/startup_prompt_hook.py
 # (as a literal — core/ must not import from gui/).
 GUI_SESSION_ENV = "APIARY_GUI_SESSION"
+
+
+def replay_cut(raw: bytes) -> int:
+    """Byte offset just past the last complete line in *raw* (0 if none).
+
+    The attach path replays ``raw[:cut]`` and starts the tail at ``cut`` so
+    a record torn by a mid-write read is neither half-rendered nor lost.
+    """
+    return raw.rfind(b"\n") + 1
 
 
 class Session:
@@ -336,11 +346,20 @@ class Session:
     # --- transcript wiring ----------------------------------------------------
 
     def _start_tail(self, path: Path) -> None:
+        # Read the bytes exactly once and start the tail at that byte count.
+        # Reading, replaying, and only then fast-forwarding to stat().st_size
+        # lost every record claude appended in between — routinely tens of
+        # ms of writes while it streams its first turn (review gui #2).
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
+            raw = path.read_bytes()
         except OSError as e:
             self._on_status(f"Cannot read {path.name}: {e}")
             return
+        # Replay only whole lines: a read that tears a record mid-write
+        # would otherwise drop its head here and hand the tail only its
+        # unparseable remainder. The partial line is left for the tail.
+        cut = replay_cut(raw)
+        text = raw[:cut].decode("utf-8", errors="replace")
         history = parse_jsonl_lines(text)
         self._on_status("")
         self._on_messages(history)
@@ -373,11 +392,8 @@ class Session:
             on_message=self._on_message,
             poll_interval=0.1,
             on_record=_on_record,
+            start_at=cut,
         )
-        try:
-            tail._pos = path.stat().st_size  # private but intentional fast-forward
-        except OSError:
-            pass
         tail.start()
         self.tail = tail
 
@@ -428,7 +444,7 @@ class Session:
         *after* paste mode ends (ESC[201~) and submits, rather than being folded
         into the pasted text. Mirrors the CLI's own pty-injection pattern.
         """
-        if self.pty is None or not isinstance(text, str):
+        if self.pty is None or not isinstance(text, str) or contains_ctrl_c(text):
             return False
         normalized = text.replace("\r\n", "\n").replace("\r", "\n")
         if normalized:
@@ -455,13 +471,20 @@ class Session:
             ).start()
         return ok
 
+    # Every input path refuses a raw Ctrl+C: it kills the claude session
+    # rather than interrupting the turn. Interrupt = ESC then Ctrl+U. The
+    # pty layer refuses it as well; the duplication is deliberate so that a
+    # future pty backend cannot lose the rule.
+
     def send_text(self, text: str) -> bool:
-        if self.pty is None or not isinstance(text, str):
+        if self.pty is None or not isinstance(text, str) or contains_ctrl_c(text):
             return False
         return self.pty.send_text(text)
 
     def send_control(self, ch: str) -> bool:
         if self.pty is None or not isinstance(ch, str) or not ch:
+            return False
+        if ch[0].lower() == "c" or contains_ctrl_c(ch):
             return False
         return self.pty.send_control(ch[:1])
 
@@ -485,6 +508,8 @@ class Session:
         try:
             raw = bytes(int(v) for v in values)
         except (TypeError, ValueError):
+            return False
+        if contains_ctrl_c(raw):
             return False
         return self.pty.send_bytes(raw)
 

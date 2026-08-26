@@ -921,6 +921,34 @@ def main():
         test_session_length_nudge_independent_of_magnitude_warn(tmp_path)
         print("OK")
 
+        print("Unit: cumulative tokens dedupe + cache creation . ", end="")
+        test_cumulative_tokens_dedupes_by_message_id_and_counts_cache_creation(tmp_path)
+        print("OK")
+
+        print("Unit: baseline atomic save / corrupt load ....... ", end="")
+        test_save_baseline_is_atomic_and_load_survives_corruption(tmp_path)
+        print("OK")
+
+        print("Integration: corrupt baseline does not wedge .... ", end="")
+        test_corrupt_baseline_does_not_wedge_the_session(tmp_path)
+        print("OK")
+
+        print("Integration: PRE skips phantom entries .......... ", end="")
+        test_pre_skips_phantom_entry_when_no_api_call(tmp_path)
+        print("OK")
+
+        print("Integration: POST logs >64KB Agent payload ...... ", end="")
+        test_post_agent_payload_over_64kb_is_logged(tmp_path)
+        print("OK")
+
+        print("Unit: weighted_delta counts cache creation ...... ", end="")
+        test_weighted_delta_counts_cache_creation(tmp_path)
+        print("OK")
+
+        print("Integration: old-schema baseline not compared ... ", end="")
+        test_old_schema_baseline_is_not_compared(tmp_path)
+        print("OK")
+
     print("\nAll tests passed.")
 
 
@@ -1170,6 +1198,212 @@ def test_session_length_nudge_independent_of_magnitude_warn(tmp_path):
         if warn_was_on:
             flags.enable("budgeter-warn")
         _cleanup_session_flag_files(session_id)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Review 2026-08 Phase 0.4: B1 (crash/atomic), B2 (dedupe), B3 (phantoms),
+# B5 (cache creation), B6 (stdin cap)
+# ---------------------------------------------------------------------------
+
+def _assistant_lines(msg_id, usage, blocks=("text",)):
+    """One JSONL line per content block, all sharing message.id and usage —
+    exactly how Claude Code writes a multi-block API turn."""
+    lines = []
+    for block in blocks:
+        content = {"type": block, "text": "ok"} if block == "text" else {"type": block}
+        lines.append(json.dumps({"type": "assistant", "message": {
+            "id": msg_id, "role": "assistant", "content": [content], "usage": usage,
+        }}))
+    return lines
+
+
+def test_cumulative_tokens_dedupes_by_message_id_and_counts_cache_creation(tmp_path):
+    import budgeter.lib.logger as lg
+    usage = {"input_tokens": 10, "cache_read_input_tokens": 900,
+             "cache_creation_input_tokens": 300, "output_tokens": 40}
+    entries = [json.loads(l) for l in _assistant_lines("m1", usage, ("thinking", "text", "tool_use"))]
+    # Three lines, one API call: 10 + 900 + 300 + 40, not 3x that.
+    assert lg.get_cumulative_tokens(entries) == 1250
+    # A record with no id is counted on its own.
+    entries.append({"message": {"role": "assistant", "usage": {"input_tokens": 5, "output_tokens": 1}}})
+    assert lg.get_cumulative_tokens(entries) == 1256
+    assert lg.get_last_call_tokens(entries) == (5, 0, 0, 1)
+    assert lg.get_last_call_tokens([]) == (0, 0, 0, 0)
+
+
+def test_save_baseline_is_atomic_and_load_survives_corruption(tmp_path):
+    import budgeter.lib.logger as lg
+    orig_tmp = lg.TMP_DIR
+    lg.TMP_DIR = tmp_path / "tmp"
+    sid = make_session_id()
+    try:
+        lg.save_baseline(sid, tokens=42, prev_tool_name="Bash", baseline_cache_creation=7)
+        files = sorted(p.name for p in lg.TMP_DIR.iterdir())
+        assert files == [f"{sid}_baseline.json"], f"temp file left behind: {files}"
+        b = lg.load_baseline(sid)
+        assert b["tokens"] == 42 and b["baseline_cache_creation"] == 7
+        # A hook killed mid-write leaves truncated JSON: treated as absent.
+        (lg.TMP_DIR / f"{sid}_baseline.json").write_text('{"tokens": 12', encoding="utf-8")
+        assert lg.load_baseline(sid) is None
+        lg.save_baseline(sid, tokens=43)
+        assert lg.load_baseline(sid)["tokens"] == 43
+    finally:
+        lg.cleanup_session(sid)
+        lg.TMP_DIR = orig_tmp
+
+
+def test_corrupt_baseline_does_not_wedge_the_session(tmp_path):
+    """PRE and STOP both used to die on a truncated baseline and, since neither
+    rewrote it, every later monitored call errored too."""
+    project_dir = make_test_project(tmp_path / "project_corrupt")
+    cwd = str(project_dir)
+    tmp_dir = project_dir / ".claude" / "budgeter-tmp"
+    session_id = make_session_id()
+    payload = {"tool_name": "Bash", "session_id": session_id, "transcript_path": "", "cwd": cwd}
+    baseline_path = tmp_dir / f"{session_id}_baseline.json"
+
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    baseline_path.write_text('{"tokens": 12', encoding="utf-8")
+    r = run_hook("pre_tool_use.py", payload)
+    assert r.returncode == 0, f"PRE crashed on corrupt baseline: {r.stderr}"
+    assert json.loads(r.stdout.strip()) is not None, "PRE must still print its JSON response"
+    assert "permissionDecision" not in r.stdout
+    assert json.loads(baseline_path.read_text(encoding="utf-8"))["prev_tool_name"] == "Bash", \
+        "PRE must rewrite the baseline"
+    _cleanup_session_flag_files(session_id)
+
+    baseline_path.write_text('{"tokens": 12', encoding="utf-8")
+    restore = _with_flag_enabled("budgeter-log")
+    try:
+        r = run_hook("stop_session.py", {"session_id": session_id, "transcript_path": "", "cwd": cwd})
+    finally:
+        restore()
+    assert r.returncode == 0, f"STOP crashed on corrupt baseline: {r.stderr}"
+    assert not baseline_path.exists(), "STOP must still clean up"
+
+
+def test_pre_skips_phantom_entry_when_no_api_call(tmp_path):
+    """A second PRE with an unchanged transcript (parallel tool calls) logs
+    nothing; the next real API turn is logged once, deduped across its
+    content-block lines, with cache creation counted."""
+    import budgeter.lib.logger as lg
+    project_dir = make_test_project(tmp_path / "project_phantom")
+    cwd = str(project_dir)
+    log_path = project_dir / ".claude" / "budgeter-log.jsonl"
+    session_id = make_session_id()
+    transcript = tmp_path / "phantom.jsonl"
+    first = {"input_tokens": 1000, "cache_read_input_tokens": 0, "output_tokens": 50}
+    transcript.write_text("\n".join(_assistant_lines("m1", first)) + "\n", encoding="utf-8")
+    payload = {"tool_name": "Bash", "session_id": session_id,
+               "transcript_path": str(transcript), "cwd": cwd}
+
+    restore = _with_flag_enabled("budgeter-log")
+    try:
+        r = run_hook("pre_tool_use.py", payload)
+        assert r.returncode == 0, r.stderr
+        assert log_entry_count(log_path) == 0
+
+        # Parallel tool call: same transcript, no API call in between.
+        r = run_hook("pre_tool_use.py", payload)
+        assert r.returncode == 0, r.stderr
+        assert log_entry_count(log_path) == 0, "no API call -> no entry"
+
+        second = {"input_tokens": 10, "cache_read_input_tokens": 900,
+                  "cache_creation_input_tokens": 300, "output_tokens": 40}
+        with open(transcript, "a", encoding="utf-8") as f:
+            f.write("\n".join(_assistant_lines("m2", second, ("thinking", "text", "tool_use"))) + "\n")
+        r = run_hook("pre_tool_use.py", payload)
+        assert r.returncode == 0, r.stderr
+        assert log_entry_count(log_path) == 1
+
+        lg.configure_for_project(cwd)
+        entry = [e for e in lg.read_log() if e.get("session_id") == session_id][0]
+        assert entry["tool_name"] == "Bash"
+        assert entry["tokens_delta"] == 1250, "three lines of one call must count once"
+        assert entry["cache_creation_tokens_delta"] == 300
+        # prompt grew from 1000 to 1210 (+210), plus 40 output.
+        assert entry["net_tokens_delta"] == 250
+    finally:
+        restore()
+        _cleanup_session_flag_files(session_id)
+        lg.configure_for_project(cwd)
+        lg.cleanup_session(session_id)
+
+
+def test_old_schema_baseline_is_not_compared(tmp_path):
+    """A baseline from the per-line counting era is 1.7-2.6x too large; the
+    first PRE after upgrade must neither log a phantom '[compaction]' marker
+    nor a cost entry against it, and must rewrite it with the new schema."""
+    import budgeter.lib.logger as lg
+    project_dir = make_test_project(tmp_path / "project_oldschema")
+    cwd = str(project_dir)
+    log_path = project_dir / ".claude" / "budgeter-log.jsonl"
+    tmp_dir = project_dir / ".claude" / "budgeter-tmp"
+    session_id = make_session_id()
+    transcript = tmp_path / "old.jsonl"
+    usage = {"input_tokens": 1000, "cache_read_input_tokens": 0, "output_tokens": 50}
+    transcript.write_text("\n".join(_assistant_lines("m1", usage, ("text", "tool_use"))) + "\n",
+                          encoding="utf-8")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    old = {"tokens": 2100, "context_tokens": 1050, "baseline_input": 1000, "baseline_cache": 0,
+           "baseline_output": 50, "prev_tool_name": "Bash", "prev_assistant_message": "",
+           "turn_number": 1, "task_turn": 1, "user_message": "", "scope_flags": [],
+           "predicted_cost": 0, "warning_fired": False, "agent_description": ""}
+    (tmp_dir / f"{session_id}_baseline.json").write_text(json.dumps(old), encoding="utf-8")
+    payload = {"tool_name": "Bash", "session_id": session_id,
+               "transcript_path": str(transcript), "cwd": cwd}
+    restore = _with_flag_enabled("budgeter-log")
+    try:
+        r = run_hook("pre_tool_use.py", payload)
+        assert r.returncode == 0, r.stderr
+        assert log_entry_count(log_path) == 0, "no marker, no entry against an old-schema baseline"
+        new = json.loads((tmp_dir / f"{session_id}_baseline.json").read_text(encoding="utf-8"))
+        assert new["schema"] == lg.BASELINE_SCHEMA and new["tokens"] == 1050
+        assert new["task_turn"] == 1, "turn continuity is kept"
+        # STOP against a shrunk total logs nothing (compaction is the PRE's job).
+        (tmp_dir / f"{session_id}_baseline.json").write_text(
+            json.dumps({**new, "tokens": 5000}), encoding="utf-8")
+        r = run_hook("stop_session.py", {"session_id": session_id, "transcript_path": str(transcript), "cwd": cwd})
+        assert r.returncode == 0, r.stderr
+        assert log_entry_count(log_path) == 0
+    finally:
+        restore()
+        _cleanup_session_flag_files(session_id)
+
+
+def test_post_agent_payload_over_64kb_is_logged(tmp_path):
+    import budgeter.lib.logger as lg
+    project_dir = make_test_project(tmp_path / "project_bigpost")
+    cwd = str(project_dir)
+    log_path = project_dir / ".claude" / "budgeter-log.jsonl"
+    session_id = make_session_id()
+    payload = {
+        "tool_name": "Agent", "session_id": session_id, "cwd": cwd,
+        "tool_input": {"description": "lens attacker", "prompt": "p" * 4000},
+        "tool_response": {"totalTokens": 777, "content": "x" * 200_000},
+    }
+    assert len(json.dumps(payload)) > 64 * 1024
+    restore = _with_flag_enabled("budgeter-log")
+    try:
+        r = run_hook("post_tool_use.py", payload)
+        assert r.returncode == 0, r.stderr
+        assert log_entry_count(log_path) == 1, f"large Agent payload must be logged: {r.stderr}"
+        lg.configure_for_project(cwd)
+        entry = [e for e in lg.read_log() if e.get("session_id") == session_id][0]
+        assert entry["tokens_delta"] == 777 and entry["agent_type"] == "lens attacker"
+    finally:
+        restore()
+
+
+def test_weighted_delta_counts_cache_creation(tmp_path):
+    from budgeter import report
+    w_input, w_cache, w_create, w_output = report._get_price_weights()
+    e = {"input_tokens_delta": 100, "cache_tokens_delta": 1000,
+         "cache_creation_tokens_delta": 200, "output_tokens_delta": 10}
+    assert report.weighted_delta(e) == int(100 * w_input + 1000 * w_cache + 200 * w_create + 10 * w_output)
+    assert w_create > w_input, "cache writes bill above plain input"
 
 
 if __name__ == "__main__":

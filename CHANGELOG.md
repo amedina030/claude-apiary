@@ -2,6 +2,145 @@
 
 ## Unreleased
 
+### Runner never pushes, never sweeps, never runs unbounded (2026-08-26)
+
+Review runner Bug 9 and the permissions note.
+
+- `runner/approval.py` no longer pushes. A fully-resolved run is
+  squash-merged to master locally, reported as `merged-locally`, and a todo
+  asks the operator to review and push. The unattended push from the
+  interactive checkout was the worst path in the package.
+- `auto_harden.commit_all` uses `git add -u` plus the round's declared files
+  instead of `git add -A`, which swept the operator's untracked scratch
+  files into "harden round fixes" commits.
+- `claude_subprocess.run_claude` passes `--disallowedTools` for the
+  `git push` and `gh pr merge/create` command families and `--max-turns
+  150` on every stage call, so a subprocess cannot push through the Bash
+  tool — a deny beats an allow at every settings level, verified against
+  `claude -p --allowedTools "Bash(git push *)"` — nor loop until the
+  timeout. Known limits, stated rather than papered over: `git -c k=v push`
+  / `git --no-pager push` are not matched (a `git * push *` rule was tried
+  and rejected — it also denied `git log --grep push`, breaking the
+  executor's own commit step), and permission rules cannot see a push
+  issued from a script file or another interpreter.
+- **The runner now brings its own tool grant.** Until this PR every
+  headless stage worked only because the apiary hooks auto-approved every
+  tool call (C-1); with that gone, `claude -p` denied every Edit/Write/Bash
+  and step 1 failed with "no changes". `run_claude` passes
+  `--permission-mode acceptEdits` and `--allowedTools` Read/Edit/Write/
+  Glob/Grep + `Bash(git|python|poetry|pytest *)` — narrower than the vote
+  ever was — configurable under `subprocess` in `runner/config.json`. The
+  runner revive programme's e2e test is where that list gets validated. When `claude -p` stops for a reason it only reports in
+  its JSON (`error_max_turns`, …) it exits 1 with empty stderr; `run_claude`
+  now puts that reason into the returned stderr so stage logs say why.
+
+### GUI: no lost messages on attach, no raw Ctrl+C, no orphaned claude (2026-08-26)
+
+Review gui #2/#3/#4/#12.
+
+- **Transcript attach race.** `Session._start_tail` read the file, replayed
+  it, and *then* fast-forwarded the tail to the file's current size — every
+  record claude appended in between (routinely, while streaming its first
+  turn) was never rendered until `Ctrl+R`. It now reads the bytes once and
+  starts the tail at exactly that byte count (`TranscriptTail(start_at=)`).
+  The tail is byte-mode (a text-mode seek to a byte offset was undefined)
+  and reparses from the top when the file shrinks.
+- **Raw Ctrl+C is refused by the backend.** The "never send `\x03`" rule
+  lived in a JS comment; `send_text`/`send_control`/`send_bytes`/`send_input`
+  now return False for it at both the `Session` and `PtyWrapper` layers.
+  Interrupt is still ESC then Ctrl+U.
+- **Closing a tab closes the pty and kills the tree.** `PtyWrapper.stop`
+  only terminated the direct child; on npm installs that is the `cmd /c`
+  shim and the node grandchild running Claude Code lived on, holding the
+  pty's pipe, burning quota and competing with the restarted session's
+  JSONL. `stop` now kills the process tree first (`taskkill /T` or
+  `killpg`, capability-detected — while the direct child is still alive so
+  its children can be enumerated), then terminates, `close(force=True)`s
+  the pty (which also unblocks the reader thread) and joins the reader. A
+  Windows-only integration test spawns `cmd /c python` through a real pty
+  and checks the grandchild is gone; it caught the wrong ordering. The
+  reader thread is unblocked by `shutdown()`ing pywinpty's read socket
+  (its `close()` alone never wakes a blocked `recv`), a deliberate stop no
+  longer fires the "exited (code -1)" toast, and `taskkill` runs without a
+  console window in the packaged build. The attach replay stops at the
+  last complete line so a record torn mid-write is picked up whole by the
+  tail instead of being half-dropped. Ctrl+C typed in the xterm pane is
+  routed to the ESC+Ctrl+U interrupt instead of being silently dropped.
+
+### Budgeter hooks: no crashes, honest counts (2026-08-26)
+
+Review B1/B2/B3/B5/B6. The three budgeter hooks measured the wrong thing
+and could break a session for good:
+
+- **A truncated baseline wedged the session.** `save_baseline` wrote in
+  place, `load_baseline` raised on bad JSON before anything could rewrite
+  it, and no hook wrapped `main()` — so one hook killed mid-write meant a
+  hook error on every later monitored call. Baselines are now written via
+  temp file + `os.replace`, an unreadable one is treated as absent (one
+  stderr line, then rewritten), all three hooks catch everything, and the
+  Stop hook always reaches `cleanup_session`.
+- **Multi-block turns were counted 2-3x.** Claude Code writes one JSONL
+  line per content block with the same `message.id` and `usage`; the
+  cumulative and last-call figures now dedupe on `message.id`.
+- **`cache_creation_input_tokens` was never counted.** It is now part of
+  the cumulative total, the last-call split (`baseline_cache_creation`,
+  `cache_creation_tokens_delta`), the session-length nudge, and
+  `report.py --weighted` (new `price_weight_cache_creation`, default 1.25).
+  `net_tokens_delta` sums the prompt components before clamping so tokens
+  that move from "written" to "read" between calls net to zero.
+- **Parallel tool calls produced phantom entries** (25% of the log). A PRE
+  that sees no API call since the previous one now logs nothing.
+- **Agent payloads over 64 KB were dropped silently** — exactly the most
+  expensive calls. `post_tool_use.py` reads the whole payload and says so
+  on stderr when it can't parse it.
+- Baselines carry a `schema` (now 2). A baseline written by the old
+  per-line counting is 1.7–2.6× too large to compare against, so the first
+  PRE after upgrade used to log a spurious `[compaction]` marker and drop an
+  entry; old-schema baselines are kept for turn continuity but never
+  compared. The Stop hook no longer logs against a shrunk total either.
+
+### GUI permission gate fails closed (2026-08-26)
+
+The opt-in MCP permission server (`gui/permission_mcp.py`) auto-allowed
+every tool call whenever `APIARY_PERMISSION_MCP_URL` was unset. Two real
+paths hit that: the GUI set `APIARY_PERMISSION_MCP=1` *before* starting the
+loopback bridge, so a failed bind left claude spawned with
+`--permission-prompt-tool` pointing at a server that approved everything;
+and the mcp-config file left on disk let any `claude --mcp-config <it>`
+outside the GUI get blanket approval (review C-2).
+
+- `decide()` now denies when no bridge URL is set. Headless tests of the
+  plumbing opt into auto-allow with `APIARY_PERMISSION_MCP_ALLOW_ALL=1`; the
+  GUI never sets it.
+- The GUI sets `APIARY_PERMISSION_MCP=1` only after `bridge.start()`
+  succeeds, and pins it to `0` (TUI-banner prompts) when the bind fails.
+- `permission_mcp.log` and `permission_mcp_config.json` move from
+  `~/.claude/apiary_gui/` to the per-profile GUI state dir
+  (`<main-apiary>/.apiary/gui/apiary_gui[_<profile>]/`). The log rotates at
+  1 MiB and no longer records `Write` bodies or `Edit` strings — on the
+  DECISION line as well as the REQUEST line.
+
+### Hooks no longer vote on permissions (2026-08-26)
+
+`core/hook_context.hook_allow` — the "nothing to object to" response every
+apiary hook prints — emitted `permissionDecision: "allow"` on every call. In
+Claude Code that is an auto-approve: any tool call a PreToolUse hook sees is
+run without a prompt, so every bootstrapped repo had default-mode permission
+prompts silently disabled (review C-1). Verified before/after with
+`scripts/probe_permission_prompt.py` in a bootstrapped repo in `manual`
+mode: an unlisted `python -c` ran before the fix and is denied (prompted)
+after it.
+
+- `hook_allow` now prints only `additionalContext` when it has one and `{}`
+  otherwise — no permission field. A hook that really means to decide passes
+  `decision="ask"|"deny"|"allow"` explicitly; anything else raises so a typo
+  cannot become a vote. `hook_block` (deny + exit 2) is unchanged.
+- `core/test_hook_context.py` covers the helpers and guards every
+  `*/hooks/*.py` against a hand-rolled allow vote.
+- If the returning prompts are annoying, the sanctioned answer is
+  `permissions.allow` rules in the apiary profile (see
+  `/fewer-permission-prompts`), never a hook vote.
+
 ### Secret-scanning hardening (2026-08-26)
 
 A repo-wide review found both gates leakier than their docs claimed. Fixed:
@@ -42,6 +181,25 @@ A repo-wide review found both gates leakier than their docs claimed. Fixed:
   `allow|deny|ask` vocabulary; it now emits `deny` with
   `permissionDecisionReason`, the legacy top-level `decision`/`reason` pair,
   and exits 2 with the reason on stderr.
+- **The push gate no longer mistakes shell redirections for the remote.**
+  `git push -q 2>&1 | tail` parsed `2>&1` as the remote name, so
+  `--remotes=2>&1` matched nothing and the *entire history* was reported as
+  outgoing (an already-pushed, already-allowlisted fixture blocked the
+  push). Redirection tokens are skipped, and a parsed remote that isn't a
+  configured one falls back to scanning against every remote instead of
+  against nothing. Also from the adversarial pass: `cd sub && git push`
+  is scanned in `sub` (composed with `-C`), every push in a compound
+  command is scanned against its own remote (only the first used to be),
+  and `--delete` / `:ref` deletions no longer count as outgoing. From the
+  final review: commands are also split on newlines; `git.exe`, `/usr/bin/git`
+  and `--exec-path` are recognised; a push the gate sees but cannot parse
+  falls back to scanning HEAD instead of being waved through; a `cd` the
+  gate cannot resolve (`cd $(...)`, `cd -`, `popd`) blocks with an
+  explanation instead of scanning a guessed directory; a URL / path
+  destination is scanned against the tips `git ls-remote` reports there
+  (everything reachable if it cannot be reached) instead of against the
+  configured remotes; and findings from one push in a compound command are
+  never discarded because a later one hit a git error.
 - `.secretsallow` is now honoured by the push gate too (it previously read
   only the inline pragma, so the scanner's own fixture files could not be
   pushed). Entries are path rules unless prefixed `line:`; more

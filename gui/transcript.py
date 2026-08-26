@@ -208,14 +208,18 @@ class TranscriptTail:
         on_skip: Optional[Callable[[int], None]] = None,
         poll_interval: float = 0.5,
         on_record: Optional[Callable[[dict], None]] = None,
+        start_at: int = 0,
     ) -> None:
+        """*start_at* is the byte offset to begin tailing from — pass the
+        length of the bytes the caller already replayed so nothing written
+        in between is lost and nothing is rendered twice (review gui #2)."""
         self.path = path
         self.on_message = on_message
         self.on_skip = on_skip or (lambda _n: None)
         self.on_record = on_record
         self.poll_interval = poll_interval
-        self._pos = 0
-        self._buf = ""
+        self._pos = max(0, int(start_at))
+        self._buf = b""
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._skipped = 0
@@ -248,7 +252,14 @@ class TranscriptTail:
             self._stop.wait(self.poll_interval)
 
     def _read_new_bytes(self) -> None:
-        with self.path.open("r", encoding="utf-8", errors="replace") as f:
+        # Byte mode: _pos is a byte offset (the caller hands us len(raw)),
+        # and a text-mode seek to a byte count is undefined in Python. A file
+        # that shrank was rewritten (/clear, compaction): reparse from the top
+        # instead of reading from a stale offset (review gui #12).
+        if self.path.stat().st_size < self._pos:
+            self._pos = 0
+            self._buf = b""
+        with self.path.open("rb") as f:
             f.seek(self._pos)
             chunk = f.read()
             self._pos = f.tell()
@@ -256,10 +267,10 @@ class TranscriptTail:
             return
         self._buf += chunk
         # Split on newline, keep last partial line in buffer.
-        lines = self._buf.split("\n")
+        lines = self._buf.split(b"\n")
         self._buf = lines[-1]
-        for line in lines[:-1]:
-            line = line.strip()
+        for raw_line in lines[:-1]:
+            line = raw_line.decode("utf-8", errors="replace").strip()
             if not line:
                 continue
             try:

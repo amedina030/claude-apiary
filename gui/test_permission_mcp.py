@@ -79,24 +79,125 @@ class PermissionMcpTests(unittest.TestCase):
             set(schema["required"]), {"tool_name", "input", "tool_use_id"},
         )
 
-    def test_tools_call_returns_allow_payload(self):
-        # With no bridge URL in env, decide() falls back to auto-allow.
+    def test_tools_call_without_bridge_denies(self):
+        # No bridge URL in env → fail closed. A server reachable through a
+        # stale mcp-config, or one whose bridge failed to boot, must not
+        # rubber-stamp every call (review C-2).
         args = {
             "tool_use_id": "toolu_test",
             "tool_name": "Edit",
             "input": {"file_path": "/x", "old_string": "a", "new_string": "b"},
         }
-        os.environ.pop(self.mod.BRIDGE_URL_ENV, None)
-        responses = self._roundtrip([
-            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-             "params": {"name": self.mod.TOOL_NAME, "arguments": args}},
-        ])
+        with _env({self.mod.BRIDGE_URL_ENV: None, self.mod.ALLOW_ALL_ENV: None}):
+            responses = self._roundtrip([
+                {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                 "params": {"name": self.mod.TOOL_NAME, "arguments": args}},
+            ])
         self.assertEqual(len(responses), 1)
         content = responses[0]["result"]["content"]
         self.assertEqual(content[0]["type"], "text")
         decision = json.loads(content[0]["text"])
+        self.assertEqual(decision["behavior"], "deny")
+        self.assertIn("bridge", decision["message"].lower())
+        self.assertNotIn("updatedInput", decision)
+
+    def test_allow_all_flag_is_the_only_way_to_auto_allow(self):
+        args = {"tool_use_id": "t", "tool_name": "Bash", "input": {"command": "ls"}}
+        with _env({self.mod.BRIDGE_URL_ENV: None, self.mod.ALLOW_ALL_ENV: "1"}):
+            decision = self.mod.decide(args)
         self.assertEqual(decision["behavior"], "allow")
         self.assertEqual(decision["updatedInput"], args["input"])
+        # Any other value is not an opt-in.
+        for value in ("0", "true", "yes", ""):
+            with self.subTest(value=value):
+                with _env({self.mod.BRIDGE_URL_ENV: None, self.mod.ALLOW_ALL_ENV: value}):
+                    self.assertEqual(self.mod.decide(args)["behavior"], "deny")
+
+    def test_allow_all_flag_does_not_bypass_a_live_bridge(self):
+        from gui.permission_bridge import PermissionBridge
+        def on_request(pid, payload):
+            bridge.resolve(pid, {"behavior": "deny", "message": "policy"})
+        bridge = PermissionBridge(on_request, timeout_seconds=5.0)
+        url = bridge.start()
+        try:
+            with _env({self.mod.BRIDGE_URL_ENV: url, self.mod.ALLOW_ALL_ENV: "1"}):
+                decision = self.mod.decide(
+                    {"tool_use_id": "t1", "tool_name": "Bash", "input": {"command": "ls"}}
+                )
+        finally:
+            bridge.stop()
+        self.assertEqual(decision["behavior"], "deny")
+
+    def test_request_log_redacts_file_bodies_and_edit_strings(self):
+        args = {
+            "tool_use_id": "toolu_w",
+            "tool_name": "Write",
+            "input": {
+                "file_path": "/x/secrets.env",
+                "content": "AWS_SECRET_ACCESS_KEY=abcd1234efgh5678ijkl9012mnop3456qrst7890",  # apiary:allow-secret
+                "old_string": "old", "new_string": "new",
+            },
+        }
+        with _env({self.mod.BRIDGE_URL_ENV: None, self.mod.ALLOW_ALL_ENV: None}):
+            self._roundtrip([
+                {"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                 "params": {"name": self.mod.TOOL_NAME, "arguments": args}},
+            ])
+        log = self.mod.LOG_PATH.read_text(encoding="utf-8")
+        self.assertIn("REQUEST", log)
+        self.assertIn("/x/secrets.env", log)  # structure survives
+        self.assertNotIn("abcd1234efgh5678", log)
+        self.assertNotIn('"old"', log)
+        self.assertIn("<redacted", log)
+
+    def test_decision_log_is_redacted_too(self):
+        # An Allow carries updatedInput with the full Write body; the log must
+        # not keep it (the REQUEST line was redacted, the DECISION line was not).
+        args = {"tool_use_id": "t", "tool_name": "Write",
+                "input": {"file_path": "/x/secrets.env", "content": "TOKEN=zyxw9876vuts5432"}}  # apiary:allow-secret
+        with _env({self.mod.BRIDGE_URL_ENV: None, self.mod.ALLOW_ALL_ENV: "1"}):
+            self._roundtrip([
+                {"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                 "params": {"name": self.mod.TOOL_NAME, "arguments": args}},
+            ])
+        log = self.mod.LOG_PATH.read_text(encoding="utf-8")
+        self.assertIn("DECISION", log)
+        self.assertNotIn("zyxw9876", log)
+
+    def test_redact_for_log_truncates_long_strings_and_keeps_shape(self):
+        long = "x" * 500
+        out = self.mod.redact_for_log({
+            "tool_name": "Bash",
+            "input": {"command": long, "nested": [{"content": "body"}]},
+        })
+        self.assertEqual(out["tool_name"], "Bash")
+        self.assertLess(len(out["input"]["command"]), 300)
+        self.assertIn("more chars", out["input"]["command"])
+        self.assertEqual(out["input"]["nested"][0]["content"], "<redacted 4 chars>")
+
+    def test_log_rotates_past_cap(self):
+        self.mod.LOG_MAX_BYTES = 100
+        self.mod.LOG_PATH.write_text("y" * 150, encoding="utf-8")
+        self.mod._log("after rotation")
+        rotated = self.mod.LOG_PATH.with_name(self.mod.LOG_PATH.name + ".1")
+        self.assertTrue(rotated.exists())
+        self.assertEqual(rotated.read_text(encoding="utf-8"), "y" * 150)
+        self.assertIn("after rotation", self.mod.LOG_PATH.read_text(encoding="utf-8"))
+
+    def test_paths_default_under_gui_state_dir_not_home(self):
+        from gui.paths import state_dir
+        self.mod.LOG_PATH = None
+        self.mod.CONFIG_PATH = None
+        self.assertEqual(self.mod.log_path(), state_dir() / self.mod.LOG_FILE_NAME)
+        self.assertEqual(self.mod.config_path(), state_dir() / self.mod.CONFIG_FILE_NAME)
+        self.assertNotIn(".claude", self.mod.log_path().parts)
+        self.mod.LOG_PATH = Path(self._tmp.name) / "permission_mcp.log"
+
+    def test_write_mcp_config_default_dest_is_config_path(self):
+        self.mod.CONFIG_PATH = Path(self._tmp.name) / "cfg" / "mcp.json"
+        dest = self.mod.write_mcp_config(python="/fake/python", script=Path("/fake/s.py"))
+        self.assertEqual(dest, self.mod.CONFIG_PATH)
+        self.assertTrue(dest.exists())
 
     def test_decide_with_bridge_forwards_and_parses(self):
         # Stand up a throwaway loopback bridge; verify decide() POSTs there

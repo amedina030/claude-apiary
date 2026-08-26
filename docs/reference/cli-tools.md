@@ -765,7 +765,7 @@ Verdicts written to the artifact:
 
 ## runner/approval.py
 
-Approval — Stage 6. Reads the harden verdict and either auto-merges (all resolved), flags for review (unresolved findings), or halts on `defender_failed` without merging or writing a note. Includes a deferral review sub-step that uses Claude to evaluate deferred findings on the `has_unresolved` path.
+Approval — Stage 6. Reads the harden verdict and either squash-merges to master **locally** (all resolved — it never pushes; a todo asks the operator to review and push), flags for review (unresolved findings), or halts on `defender_failed` without merging or writing a note. Includes a deferral review sub-step that uses Claude to evaluate deferred findings on the `has_unresolved` path.
 
 ```bash
 python -m runner.approval runner/hardens/<uuid>.json
@@ -775,7 +775,7 @@ python -m runner.approval runner/hardens/<uuid>.json
 |----------|----------|-------------|
 | `harden_result` | yes | Path to harden result JSON |
 
-Output: `runner/reports/<uuid>.json`. Path taken: `auto-merged`, `pending-review`, `defender-failed`, or a merge/push error. Exits non-zero on `defender_failed` so `overnight.jsonl` records the failure.
+Output: `runner/reports/<uuid>.json`. Path taken: `merged-locally`, `pending-review`, `defender-failed`, or a merge error. Exits non-zero on `defender_failed` so `overnight.jsonl` records the failure.
 
 ## runner/draft_ticket.py
 
@@ -894,10 +894,11 @@ poetry run python -m gui.app
 
 | Var | Description |
 |-----|-------------|
-| `APIARY_GUI_PROFILE` | Re-roots state, mutex name, and window title — see `gui/paths.py`. Set to e.g. `dev` to run a second instance alongside the default one. State goes to `~/.claude/apiary_gui_<profile>/`; window title becomes `apiary [<profile>]`. |
-| `APIARY_GUI_CAPTURE_LABEL` | Enables raw pty-output capture for the session (writes to `~/.claude/apiary_gui/captures/<ts>-<label>.bin`). Used by `gui/capture_session.py`. |
+| `APIARY_GUI_PROFILE` | Re-roots state, mutex name, and window title — see `gui/paths.py`. Set to e.g. `dev` to run a second instance alongside the default one. State goes to `<main-apiary>/.apiary/gui/apiary_gui_<profile>/`; window title becomes `apiary [<profile>]`. |
+| `APIARY_GUI_CAPTURE_LABEL` | Enables raw pty-output capture for the session (writes to `<main-apiary>/.apiary/gui/apiary_gui/captures/<ts>-<label>.bin`). Used by `gui/capture_session.py`. |
 | `APIARY_PERMISSION_MCP` | One-shot override for the `permission_mcp` flag in `launch.json`. `"1"` forces the structured MCP permission-prompt path on; any other value (including `"0"`) forces it off. When unset, the GUI falls back to the `launch.json` value (defaults to off). Enabling routes prompts through `gui/permission_mcp.py` + loopback HTTP bridge instead of the TUI-banner scraper; the GUI boots the bridge and appends `--mcp-config`/`--permission-prompt-tool` to the claude argv. See scribe `C-2026-36`. |
-| `APIARY_PERMISSION_MCP_URL` | Exported automatically by the GUI to the bridge's loopback URL so the spawned MCP subprocess can POST decisions back. Do not set by hand. |
+| `APIARY_PERMISSION_MCP_URL` | Exported automatically by the GUI to the bridge's loopback URL so the spawned MCP subprocess can POST decisions back. Do not set by hand. When it is unset the MCP server **denies** every request (fail closed) — a bridge that failed to boot, or a stale `permission_mcp_config.json` used outside the GUI, never becomes a rubber stamp. The GUI only sets `APIARY_PERMISSION_MCP=1` after the bridge is listening and pins it to `0` if the bind fails. |
+| `APIARY_PERMISSION_MCP_ALLOW_ALL` | `"1"` makes the MCP server auto-allow when no bridge URL is set. For headless tests of the MCP plumbing only; the GUI never sets it and it has no effect while a bridge URL is present. |
 | `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` | Pass-through to WebView2; the app appends `--disable-cache` flags so frontend edits aren't masked by the static-asset cache. |
 
 ## gui/capture_session.py
@@ -1041,6 +1042,22 @@ python .claude/apiary/launch.py scripts/install_git_hooks.py --uninstall
 Exit codes: `0` success or nothing to do; `1` refused (foreign hook in the way, main-apiary targeted, or not a git repo); `2` bad arguments.
 
 A pre-commit hook that isn't ours is never clobbered — inspect it first, then re-run with `--force`.
+
+## scripts/probe_permission_prompt.py
+
+Empirical check that apiary hooks still let default-mode permission prompts happen. Runs a headless `claude -p` in a bootstrapped repo in `manual` mode, asks for one unlisted Bash command (`python -c`, which is neither auto-approved nor built-in-protected) and reads `permission_denials` from the JSON result. Run it before and after any change to hook responses (`core/hook_context.py`, the dispatcher). Costs one short Haiku call.
+
+```bash
+poetry run python scripts/probe_permission_prompt.py /path/to/bootstrapped-repo
+poetry run python scripts/probe_permission_prompt.py /path/to/bootstrapped-repo --model claude-haiku-4-5-20251001 --timeout 180
+```
+
+| Flag | Description |
+|------|-------------|
+| `--model MODEL` | Model for the probe call (default: Haiku) |
+| `--timeout SECONDS` | Kill the probe after this many seconds (default: 180) |
+
+Exit codes: `0` the call was held for a prompt (hooks are not auto-approving); `1` the call ran without a prompt (something voted allow); `2` inconclusive; `3` the probe itself could not run (no `claude`, timeout, non-JSON output).
 
 ## Test scripts
 
