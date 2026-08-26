@@ -30,6 +30,11 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 VALID_TYPES = {"create", "modify", "delete", "test", "verify"}
 VALID_ACTIONS = {"create", "modify", "delete", "test", "verify"}
+# Models a plan step may request. Deliberately excludes fable, decided
+# 2026-08-26 (#T-2026-259): the GUI model picker offers it for interactive
+# sessions, but runner steps stay on the three tiers whose cost and
+# behaviour are known here. The mismatch with the picker is intentional --
+# do not "fix" it by adding fable without revisiting that call.
 VALID_MODELS = {"opus", "sonnet", "haiku"}
 REQUIRED_STEP_FIELDS = ["step_number", "type", "description", "action", "files", "depends_on", "code_spec"]
 
