@@ -3,8 +3,9 @@ Flag file management for claude-apiary tools.
 
 Each toggle is a sentinel file at
 ``<repo>/.claude/apiary/flags/<flag_name>-enabled``. Apiary tools call
-``is_enabled(name)``; ``/budgeter-log`` and the other slash-command
-toggles call ``enable``/``disable``/``toggle``. Repo discovery order:
+``is_enabled(name)``; the ``/budgeter`` slash command drives the
+``toggle``/``enable``/``disable``/``status`` CLI at the bottom of this
+module. Repo discovery order:
 
 1. ``$CLAUDE_PROJECT_DIR`` (set by Claude Code at hook-fire time).
 2. ``$APIARY_TARGET_REPO`` — explicit override for tests / CLI.
@@ -13,14 +14,29 @@ toggles call ``enable``/``disable``/``toggle``. Repo discovery order:
 When none of those resolve to a directory, the helpers raise
 ``RuntimeError`` — there's no global fallback post-migration
 (MIGRATION-PLAN.md §10 phase 5).
+
+CLI::
+
+    python core/flags.py toggle budgeter-log     # -> "ON" / "OFF"
+    python core/flags.py status budgeter-warn
+
+Exit 0 on success, 1 when no bootstrapped repo is in scope or the flag
+name is malformed.
 """
 from __future__ import annotations
 
+import argparse
 import os
+import re
 import subprocess
+import sys
 from pathlib import Path
 
 PIN_FLAGS_SUBPATH = ".claude/apiary/flags"
+
+# Flag names become filenames — keep them to a conservative slug so a
+# caller can never walk out of the flags directory.
+_FLAG_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class FlagsRepoUnresolved(RuntimeError):
@@ -99,3 +115,73 @@ def toggle(flag_name: str) -> bool:
         return False
     enable(flag_name)
     return True
+
+
+# --------------------------------------------------------------------------- #
+# CLI
+# --------------------------------------------------------------------------- #
+
+_VERBS = {
+    "toggle": "Flip the flag and print its new state",
+    "enable": "Create the flag file and print ON",
+    "disable": "Remove the flag file and print OFF",
+    "status": "Print the current state without changing it",
+}
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the ``flags.py`` argument parser (also read by docs/check_cli_claims.py)."""
+    parser = argparse.ArgumentParser(
+        prog="flags.py",
+        description=(
+            "Toggle apiary feature flags. Each flag is a sentinel file at "
+            "<repo>/.claude/apiary/flags/<name>-enabled; presence means enabled."
+        ),
+    )
+    subparsers = parser.add_subparsers(dest="verb", required=True)
+    for verb, help_text in _VERBS.items():
+        sub = subparsers.add_parser(verb, help=help_text, description=help_text)
+        sub.add_argument(
+            "name",
+            help="Flag name, e.g. budgeter-log, budgeter-warn, budgeter-session-warn",
+        )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point. Prints ``ON``/``OFF``; returns 0 on success, 1 on error."""
+    args = build_parser().parse_args(argv)
+    name = args.name
+
+    if not _FLAG_NAME_RE.match(name):
+        print(
+            f"error: invalid flag name {name!r}; expected letters, digits, "
+            "'.', '_' or '-'",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        # Resolve first so every verb fails the same way on a bad
+        # environment — `disable` and `status` would otherwise no-op.
+        _flag_path(name)
+        if args.verb == "toggle":
+            state = toggle(name)
+        elif args.verb == "enable":
+            enable(name)
+            state = True
+        elif args.verb == "disable":
+            disable(name)
+            state = False
+        else:  # status
+            state = is_enabled(name)
+    except FlagsRepoUnresolved as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    print("ON" if state else "OFF")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

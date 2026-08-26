@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-06-08"
+last_verified: "2026-08-26"
 ---
 
 # CLI Tools
@@ -149,6 +149,45 @@ python core/doctor.py [subcommand] [--apiary-repo PATH]
 
 - `0` — all checks pass (notes are informational and do not fail the run).
 - `1` — any check reported an issue.
+
+## core/flags.py
+
+Feature-flag toggles for apiary tools. Each flag is a sentinel file at
+`<repo>/.claude/apiary/flags/<name>-enabled` — presence means enabled, absence
+means disabled. The `/budgeter` slash command drives this CLI; hooks read the
+same files in-process via `flags.is_enabled(name)`.
+
+```bash
+python core/flags.py toggle budgeter-log
+python core/flags.py status budgeter-session-warn
+```
+
+The repo is resolved from `$CLAUDE_PROJECT_DIR`, then `$APIARY_TARGET_REPO`,
+then the git root containing the cwd.
+
+### Subcommands
+
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `toggle` | `flags.py toggle NAME` | Flip the flag, print its new state |
+| `enable` | `flags.py enable NAME` | Create the flag file, print `ON` (idempotent) |
+| `disable` | `flags.py disable NAME` | Remove the flag file, print `OFF` (idempotent) |
+| `status` | `flags.py status NAME` | Print the current state without changing it |
+
+### Arguments and flags
+
+| Argument / Flag | Applies to | Required | Description |
+|-----------------|-----------|----------|-------------|
+| `NAME` | all | yes | Flag name — `budgeter-log`, `budgeter-warn`, `budgeter-session-warn`, `auto-startup`. Letters, digits, `.`, `_`, `-` only |
+
+### Output and exit codes
+
+Prints exactly `ON` or `OFF` on stdout — for `toggle`, that is the state *after*
+the flip.
+
+- `0` — the verb ran; stdout holds the resulting state.
+- `1` — no bootstrapped repo is in scope, or the flag name is malformed (reason on stderr).
+- `2` — argparse usage error (unknown verb, missing name).
 
 ## budgeter/report.py
 

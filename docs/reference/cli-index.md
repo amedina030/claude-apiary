@@ -4,7 +4,7 @@ title: CLI Tools Index
 scope: project
 description: Quick-reference table of all CLI entry points with key flags — use cli_lookup.py for full details
 framework_version: "1.0"
-last_verified: "2026-04-23"
+last_verified: "2026-08-26"
 ---
 
 # CLI Tools Index
@@ -16,6 +16,7 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `scribe/notes.py` | Note and learning management | add, list, get, done, update, archive, learn, learnings, unlearn |
 | `scribe/backup_indexes.py` | Snapshot scribe indexes with retention pruning | --retain, --project |
 | `core/startup.py` | Session initialization and summary | init, summary |
+| `core/flags.py` | Per-repo feature flag toggles | toggle, enable, disable, status |
 | `budgeter/report.py` | Usage reporting | --date, --since, --flat, --grouped, --by-turn, --by-agent, --weighted, --feedback |
 | `budgeter/tune.py` | Suggest rule weight adjustments | --min, --percentile, --yes |
 | `budgeter/log_agent_cost.py` | Log background agent token costs | --session-id, --agent, --cwd |
