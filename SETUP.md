@@ -119,9 +119,14 @@ python scripts/install_repo_hooks.py
 
 This installs `.git/hooks/pre-commit` and `.git/hooks/post-merge` into main-apiary's own `.git/hooks/`. Repo-local — unrelated to Claude Code hooks.
 
-The pre-commit hook chains two checks, and either one failing blocks the commit:
+The pre-commit hook chains three checks, and any one failing blocks the commit:
 
 - `docs/check.py` — framework doc conformance.
+- `docs/check_cli_claims.py` — every subcommand and flag documented in
+  `docs/reference/cli-tools.md` still exists in the tool's argparse, and every
+  real one is documented. It shells out to ~44 tools' `--help`, so it adds
+  ~15-20 s to a commit. The push gate (`core/hooks/pre_push_doc_conformer.py`)
+  runs the same check, so catching drift here is the cheap end of that loop.
 - `scripts/secret_scan.py --staged` — credentials in the staged diff (API keys,
   private keys, credential-shaped assignments), plus filenames that hold secrets
   by convention (`.env`, `id_rsa`, `*.pem`) even when `git add -f` bypasses

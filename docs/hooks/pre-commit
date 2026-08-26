@@ -2,11 +2,18 @@
 # Pre-commit hook for main-apiary's own checkout. Runs every check and blocks
 # the commit if any of them fail.
 #
-#   1. docs/check.py       — framework-doc conformance
-#   2. scripts/secret_scan.py --staged — credentials in the staged diff
+#   1. docs/check.py            — framework-doc conformance
+#   2. docs/check_cli_claims.py — cli-tools.md vs each tool's real argparse
+#   3. scripts/secret_scan.py --staged — credentials in the staged diff
 #
-# Both run even when the first fails, so one commit attempt reports every
-# problem instead of making you re-run to discover the next one.
+# All three run even when an earlier one fails, so one commit attempt reports
+# every problem instead of making you re-run to discover the next one.
+#
+# check_cli_claims.py shells out to ~44 tools' `--help` and takes ~15-20 s —
+# by far the slowest of the three. It runs here rather than only at push
+# because `core/hooks/pre_push_doc_conformer.py` blocks the push on the same
+# check, and a doc edit is a much cheaper fix at commit time than a blocked
+# push with several commits already stacked behind it.
 #
 # Installed by: python scripts/install_repo_hooks.py
 # Source: docs/hooks/pre-commit
@@ -31,7 +38,8 @@ fi
 
 STATUS=0
 
-"${PY[@]}" "$REPO_ROOT/docs/check.py"           || STATUS=1
+"${PY[@]}" "$REPO_ROOT/docs/check.py"            || STATUS=1
+"${PY[@]}" "$REPO_ROOT/docs/check_cli_claims.py" || STATUS=1
 "${PY[@]}" "$REPO_ROOT/scripts/secret_scan.py" --staged --quiet || STATUS=1
 
 exit $STATUS

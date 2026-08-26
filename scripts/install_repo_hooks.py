@@ -45,10 +45,11 @@ def _git_hooks_dir() -> Path:
 def install_pre_commit_hook() -> None:
     """Install ``docs/hooks/pre-commit`` into ``.git/hooks/pre-commit``.
 
-    The hook chains two checks before a commit: ``docs/check.py`` (framework
-    doc conformance) and ``scripts/secret_scan.py --staged`` (credentials in
-    the staged diff). Either failing blocks. Skipped silently if
-    ``.git/hooks/`` doesn't exist (e.g. on a sparse checkout).
+    The hook chains three checks before a commit: ``docs/check.py`` (framework
+    doc conformance), ``docs/check_cli_claims.py`` (cli-tools.md vs each tool's
+    real argparse) and ``scripts/secret_scan.py --staged`` (credentials in the
+    staged diff). Any one failing blocks. Skipped silently if ``.git/hooks/``
+    doesn't exist (e.g. on a sparse checkout).
 
     Conflict policy: a pre-commit hook that doesn't reference ``docs/check.py``
     is treated as somebody else's and left alone. An older apiary hook (doc

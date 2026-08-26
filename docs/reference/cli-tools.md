@@ -118,11 +118,14 @@ Session initialization and summary loading.
 
 ## core/doctor.py
 
-Read-only consistency checks for the per-repo install model. Phase-0 scaffold;
-`--fix` actions land in later phases. See `MIGRATION-PLAN.md` §7.6.
+Consistency checks for the per-repo install model. Every check is read-only;
+`--fix` opts into the named check's writer, where one exists. Reached in normal
+use as `apiary doctor` (see the `apiary` section) — the module form below is for
+running it out of a checkout that has no console script installed.
 
 ```bash
-python core/doctor.py [subcommand] [--apiary-repo PATH]
+poetry run apiary doctor [subcommand] [--fix] [--apiary-repo PATH]
+python core/doctor.py [subcommand] [--fix] [--apiary-repo PATH]
 ```
 
 ### Subcommands
@@ -143,12 +146,14 @@ python core/doctor.py [subcommand] [--apiary-repo PATH]
 
 | Flag | Description |
 |------|-------------|
+| `--fix` | Apply the named check's safe fix. Supported for `pointers` (cascade every bootstrapped repo's pointer to the current main-apiary path) and `mailbox` (drain the queue). Requires a subcommand. |
 | `--apiary-repo PATH` | Path to main-apiary checkout (default: resolved via launcher / pointer) |
 
 ### Exit code
 
 - `0` — all checks pass (notes are informational and do not fail the run).
-- `1` — any check reported an issue.
+- `1` — any check reported an issue, or a `--fix` run hit an error.
+- `2` — `--fix` without a subcommand, or on a check that has no fix.
 
 ## core/flags.py
 
@@ -974,28 +979,38 @@ poetry run python gui/packaging/make_icon.py
 ## apiary
 
 The unified CLI registered as a console_script by `pyproject.toml` (run as
-`poetry run apiary <subcommand>`). Source at `core/cli.py`. Subcommands:
+`poetry run apiary <subcommand>`). Source at `core/cli.py`; each verb dispatches
+to a single-purpose module under `core/`.
 
-| Subcommand | Description |
-|------------|-------------|
-| `install --target <repo>` | Bootstrap apiary into a target repo. `--profile <name>` selects a profile under `<main-apiary>/profiles/`. Idempotent. |
-| `uninstall --target <repo>` | Reverse of install. `--remove-data` also deletes the centralized per-target state. |
-| `self-bootstrap` | First-machine setup of main-apiary; equivalent to running `install --target` on main-apiary itself. |
-| `doctor [check]` | Read-only consistency checks; `--fix` applies safe fixes for `mailbox` and `pointers`. Subcommands: `pointers`, `registry`, `mailbox`, `versions`, `orphans`, `duplicates`, `unreachable`. |
-| `mailbox` | Process pending forwarding messages; `--list` to inspect without draining. |
-| `cascade-fix` | Rewrite every bootstrapped repo's `main-apiary-pointer.json` to the current main-apiary path. |
-| `version` | Print main-apiary's pinned version (the contents of `<main-apiary>/VERSION`). |
+### Subcommands
 
-`install` walks the profile's `extends` chain, deep-merges parents left-to-right then the child on top (`{"$replace": value}` escape hatch replaces instead of merges), and writes the resolved apiary-owned top-level keys into `<repo>/.claude/settings.json`. It also generates `<repo>/.claude/apiary/{launch.py, main-apiary-pointer.json, self-pointer.json, version.json}`, copies slash commands into `<repo>/.claude/commands/`, writes the apiary-managed zone into `<repo>/CLAUDE.md`, and updates `<repo>/.gitignore`. Centralized state lands at `<main-apiary>/.repos/<name>-<uid>/bootstrap_state.json` (schema v2 — adds hash fields used by `apiary doctor registry` for drift detection).
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `install` | `apiary install --target <repo> [--profile <name>]` | Bootstrap apiary into a target repo (`core/install.py`). Idempotent. |
+| `uninstall` | `apiary uninstall --target <repo> [--remove-data]` | Reverse of install (`core/uninstall.py`). |
+| `self-bootstrap` | `apiary self-bootstrap` | First-machine setup of main-apiary; equivalent to running `install --target` on main-apiary itself (`core/self_bootstrap.py`). |
+| `doctor` | `apiary doctor [check] [--fix]` | Consistency checks (`core/doctor.py`). Checks: `pointers`, `registry`, `mailbox`, `versions`, `stale`, `orphans`, `duplicates`, `unreachable` — name one, or omit to run all. See the `core/doctor.py` section for what each reports. |
+| `mailbox` | `apiary mailbox [--list]` | Process pending forwarding messages (`core/mailbox.py`). |
+| `cascade-fix` | `apiary cascade-fix` | Rewrite every bootstrapped repo's `main-apiary-pointer.json` to the current main-apiary path (`core/cascade.py`). |
+| `version` | `apiary version` | Print main-apiary's pinned version (the contents of `<main-apiary>/VERSION`). |
 
-First-run safety: if the target has an existing `settings.json` with content inside apiary-owned keys that the profile doesn't set, a warning prints listing the about-to-be-wiped entries and recommends moving them to `.claude/settings.local.json` (Claude Code merges that file natively). The tool prompts before applying; `--force` skips the prompt but still prints the warning.
+### Flags
 
-Re-runs detect drift against the stored state: if the new merge would change the current `settings.json`, a per-key diff prints and the tool prompts before applying. `--force` skips the prompt. Non-TTY stdin without `--force` is a hard error in both the first-run-wipe and re-run-drift paths.
+| Flag | Applies to | Required | Description |
+|------|-----------|----------|-------------|
+| `--target PATH` | install, uninstall | yes | Target repo. |
+| `--profile NAME` | install | no | Profile under `<main-apiary>/profiles/` (default: `base`). |
+| `--remove-data` | uninstall | no | Also delete `<main-apiary>/.repos/<name>-<uid>/` (the centralized per-target state). |
+| `--fix` | doctor | no | Apply the named check's safe fix. Only `pointers` (cascade the pointer rewrite) and `mailbox` (drain the queue) have one; `--fix` without a check name, or on any other check, exits `2`. |
+| `--list` | mailbox | no | List pending messages without processing them. |
+| `--apiary-repo PATH` | all | no | Path to main-apiary. Default: resolved via `APIARY_MAIN_REPO`, the running source tree, or `<cwd>/.claude/apiary/main-apiary-pointer.json`. |
+
+`install` walks the profile's `extends` chain, deep-merges parents left-to-right then the child on top (`{"$replace": value}` escape hatch replaces instead of merges), and writes the resolved apiary-owned top-level keys into `<repo>/.claude/settings.json`. It also generates `<repo>/.claude/apiary/{launch.py, main-apiary-pointer.json, self-pointer.json, version.json}`, copies slash commands into `<repo>/.claude/commands/`, writes the apiary-managed zone into `<repo>/CLAUDE.md`, updates `<repo>/.gitignore`, and installs the commit-time secret-scan pre-commit hook (best-effort — a refusal warns instead of failing the install). Centralized state lands at `<main-apiary>/.repos/<name>-<uid>/bootstrap_state.json` (schema v2 — adds the file hashes `apiary doctor stale` compares against to detect slash-command drift).
 
 Exit codes:
-- `0` — success, or re-run no-op
-- `1` — aborted by user, or non-TTY re-run without `--force`
-- `2` — profile not found, extends cycle, unsupported `$schema_version`, or JSONC parse error
+- `0` — success; for `doctor`, every check passed.
+- `1` — `doctor` reported an issue, or `mailbox` hit a malformed message. `install` / `uninstall` failures (target is not a git repo, unknown profile, `extends` cycle, unsupported `$schema_version`, JSONC parse error) currently surface as an unhandled exception traceback, which also exits `1`.
+- `2` — argparse usage error, or `--fix` on a check that has no fix.
 
 See [Bootstrapping a repo](../guides/bootstrapping-a-repo.md) for profile authoring and the full workflow.
 
@@ -1022,6 +1037,8 @@ Spec: scribe note `C-2026-46`.
 ## docs/check_cli_claims.py
 
 Reconcile the CLI claims in `cli-tools.md` against each tool's real argparse — reports drift when a documented subcommand/flag no longer exists, or a real one is undocumented. Sibling to `docs/check.py`; report-only, never rewrites the doc. Shells out to each tool's `--help`. Mark intentional omissions with an inline `<!-- cli-claims: ignore: --some-flag, somesubcmd -->` anywhere in a tool's section.
+
+A section is reconciled when its `##` header is a repo-relative `.py` path, or a console-script name listed in `CONSOLE_SCRIPTS` (the header is the command, so it is mapped to the module behind the entry point — `apiary` → `core/cli.py`). Sections in `SKIP_HEADERS` are libraries, redirect stubs, GUI-dependency scripts and prose categories, and are dropped silently; anything else that is not reconcilable is reported as `SKIP` rather than passing quietly. Run by `docs/hooks/pre-commit` on every commit and by `core/hooks/pre_push_doc_conformer.py` on every push — the two gates run the same check, so drift is normally fixed at commit time.
 
 ```bash
 python docs/check_cli_claims.py

@@ -16,8 +16,9 @@ Report-only.
 
 Mechanism: shell out to `python <tool> --help` (and `<tool> <sub> --help` per
 subcommand) and parse the names out of the help text. Tools that can't be
-introspected (libraries, GUI deps, console scripts) are reported as skipped —
-never silently dropped.
+introspected (libraries, GUI deps) are reported as skipped — never silently
+dropped. Console scripts have no file at their section header's name, so they
+are mapped to the module behind the entry point (see CONSOLE_SCRIPTS).
 
 Exit codes:
   0 — no drift (skips may be present)
@@ -40,7 +41,6 @@ HELP_TIMEOUT = 30  # seconds per --help subprocess
 # Section headers in cli-tools.md that are not single introspectable argparse CLIs.
 # Libraries, console scripts, GUI (heavy deps), redirect stubs, and prose categories.
 SKIP_HEADERS = {
-    "apiary",                       # console_script (core/cli.py) — different invocation
     "setup.py",                     # redirect stub, no live argparse
     "runner/cost_emit.py",          # library module
     "runner/config_loader.py",      # library module
@@ -49,6 +49,15 @@ SKIP_HEADERS = {
     "gui/packaging/build.py",       # build script, not an argparse CLI
     "gui/packaging/make_icon.py",   # build script, not an argparse CLI
     "Test scripts",                 # prose category, not a tool
+}
+
+# Console scripts declared in pyproject's [tool.poetry.scripts]. Their section
+# header is the command name, so there is no `<repo>/<header>` file to run
+# `--help` against — map the header to the module whose `main()` the entry
+# point calls and introspect that instead. Reconciling these matters more than
+# most: they are the CLIs a user types by name.
+CONSOLE_SCRIPTS = {
+    "apiary": "core/cli.py",        # pyproject.toml: apiary = "core.cli:main"
 }
 
 # Flags every argparse parser carries — never real drift.
@@ -275,7 +284,7 @@ def introspect(rel_path: str) -> tuple[set[str], set[str]]:
 def reconcile(header: str, section: str) -> list[str]:
     """Return a list of drift findings for one tool section."""
     ignore = doc_ignores(section)
-    c_subs, c_flags = introspect(header)
+    c_subs, c_flags = introspect(CONSOLE_SCRIPTS.get(header, header))
 
     findings: list[str] = []
 
@@ -299,9 +308,12 @@ def reconcile(header: str, section: str) -> list[str]:
 
 
 def is_tool_section(header: str) -> bool:
-    """A section is an introspectable tool if it's a repo-relative .py path."""
+    """A section is introspectable if it's a repo-relative .py path or a
+    console script we know how to resolve to one."""
     if header in SKIP_HEADERS:
         return False
+    if header in CONSOLE_SCRIPTS:
+        return True
     return header.endswith(".py") and "/" in header
 
 
