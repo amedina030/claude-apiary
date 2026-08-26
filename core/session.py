@@ -25,6 +25,29 @@ SESSION_TMP_DIRNAME = "session-tmp"
 SESSIONS_DIRNAME = "sessions"
 
 
+HISTORY_SCHEMA_VERSION = 1
+
+
+def load_history(path: Path) -> list:
+    """Read the session history file in its v1 shape
+    (``{"schema_version": 1, "sessions": [...]}``); a bare list (the old
+    ``~/.claude/.session-history.json`` ring buffer) is accepted too.
+    Anything unreadable or malformed reads as empty."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if isinstance(data, dict):
+        data = data.get("sessions", [])
+    if not isinstance(data, list):
+        return []
+    return [e for e in data if isinstance(e, dict)]
+
+
+def dump_history(entries: list) -> str:
+    return json.dumps({"schema_version": HISTORY_SCHEMA_VERSION, "sessions": list(entries)}, indent=2)
+
+
 def _fallback_root() -> Path:
     return Path(tempfile.gettempdir()) / "apiary-session-tmp"
 

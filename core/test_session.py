@@ -100,5 +100,21 @@ class LoadIdentityTest(_Env):
         self.assertFalse((self.home / ".claude").exists())
 
 
+
+
+class HistoryShapeTest(unittest.TestCase):
+    def test_load_accepts_v1_dict_and_bare_list_and_junk(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "history.json"
+            p.write_text(json.dumps({"schema_version": 1, "sessions": [{"session_id": "a"}, 3]}), encoding="utf-8")
+            self.assertEqual(sess.load_history(p), [{"session_id": "a"}])
+            p.write_text(json.dumps([{"session_id": "b"}]), encoding="utf-8")
+            self.assertEqual(sess.load_history(p), [{"session_id": "b"}])
+            p.write_text("not json", encoding="utf-8")
+            self.assertEqual(sess.load_history(p), [])
+            self.assertEqual(sess.load_history(Path(td) / "missing.json"), [])
+            self.assertEqual(json.loads(sess.dump_history([{"x": 1}])), {"schema_version": 1, "sessions": [{"x": 1}]})
+
+
 if __name__ == "__main__":
     unittest.main()

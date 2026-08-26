@@ -67,11 +67,27 @@ class TestSaveTranscript(unittest.TestCase):
         result = _run_hook(self._payload(), self.home)
         self.assertEqual(result.returncode, 0)
         self.assertTrue(self.history.exists(), msg=result.stderr)
-        history = json.loads(self.history.read_text(encoding="utf-8"))
+        raw = json.loads(self.history.read_text(encoding="utf-8"))
+        self.assertEqual(raw["schema_version"], 1)         # the documented v1 shape
+        history = raw["sessions"]
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["session_id"], "abcd1234-1111-2222-3333-444444444444")
         self.assertTrue(self.last.exists())
         self.assertEqual(self._home_claude_files(), [], "apiary must write nothing under ~/.claude")
+
+    def test_legacy_v1_history_is_read_and_kept(self):
+        # The 2026-05 migration left {"schema_version": 1, "sessions": [...]}
+        # files in .repos/<slug>/sessions/; the hook must append to them, and
+        # a malformed entry must not break the ring buffer.
+        self.history.parent.mkdir(parents=True)
+        self.history.write_text(json.dumps({"schema_version": 1, "sessions": [
+            {"session_id": "11111111-1111-2222-3333-444444444444", "ended_at": "2026-05-05T00:00:00Z"},
+            "garbage",
+        ]}), encoding="utf-8")
+        result = _run_hook(self._payload(), self.home)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        sessions = json.loads(self.history.read_text(encoding="utf-8"))["sessions"]
+        self.assertEqual([s["session_id"][:8] for s in sessions], ["11111111", "abcd1234"])
 
     def test_unwritable_state_dir_does_not_crash_the_hook(self):
         # A Stop hook that exits non-zero surfaces a hook error every turn.
@@ -97,7 +113,7 @@ class TestSaveTranscript(unittest.TestCase):
             runner_subprocess=True,
         )
         self.assertEqual(result.returncode, 0)
-        history = json.loads(self.history.read_text(encoding="utf-8"))
+        history = json.loads(self.history.read_text(encoding="utf-8"))["sessions"]
         ids = [h["session_id"] for h in history]
         self.assertIn("aaaaaaaa-1111-2222-3333-444444444444", ids)
         self.assertNotIn("bbbbbbbb-1111-2222-3333-444444444444", ids)

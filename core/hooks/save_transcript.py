@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.utils.filelock import FileLock
-from core.session import sessions_dir
+from core.session import dump_history, load_history, sessions_dir
 
 MAX_HISTORY = 10
 
@@ -46,13 +46,7 @@ def _append_to_history(session_id, transcript_path):
     hist = history_path()
     hist.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(hist):
-        if hist.exists():
-            try:
-                history = json.loads(hist.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                history = []
-        else:
-            history = []
+        history = load_history(hist)
 
         # Dedup: remove existing entry for this session_id
         history = [h for h in history if h.get("session_id") != session_id]
@@ -69,7 +63,7 @@ def _append_to_history(session_id, transcript_path):
         # Cap at MAX_HISTORY
         history = history[-MAX_HISTORY:]
 
-        hist.write_text(json.dumps(history, indent=2), encoding="utf-8")
+        hist.write_text(dump_history(history), encoding="utf-8")
 
 
 def main():

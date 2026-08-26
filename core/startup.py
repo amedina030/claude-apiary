@@ -17,7 +17,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.session import SessionId, sessions_dir
+from core.session import SessionId, load_history, sessions_dir
 from core.utils.project import get_project_key
 from scribe.notes import (
     format_age, run_auto_archive, scribe_state_dir,
@@ -192,16 +192,10 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
     latest_handoff = None
     if handoffs:
         session_times = {}
-        hist = history_path()
-        if hist.exists():
-            try:
-                history = json.loads(hist.read_text(encoding="utf-8"))
-                for s in history:
-                    sid_short = s.get("session_id", "")[:8].lower()
-                    if sid_short and s.get("ended_at"):
-                        session_times[sid_short] = s["ended_at"]
-            except (OSError, json.JSONDecodeError):
-                pass
+        for s in load_history(history_path()):
+            sid_short = str(s.get("session_id", ""))[:8].lower()
+            if sid_short and s.get("ended_at"):
+                session_times[sid_short] = s["ended_at"]
 
         def handoff_sort_key(n):
             sid = n.get("session", n.get("session_id", ""))[:8].lower()
