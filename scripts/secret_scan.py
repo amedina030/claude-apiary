@@ -66,13 +66,18 @@ sys.path.insert(0, str(REPO_ROOT))
 from core import secret_patterns  # noqa: E402
 
 ALLOW_PRAGMA = "apiary:allow-secret"
-ALLOWLIST_FILENAME = ".secretsallow"
-ALLOWLIST_LINE_PREFIX = "line:"
+ALLOWLIST_FILENAME = secret_patterns.ALLOWLIST_FILENAME
+ALLOWLIST_LINE_PREFIX = secret_patterns.ALLOWLIST_LINE_PREFIX
 
 # Both spellings are honoured — see core/secret_patterns.PRAGMA_RE.
 _PRAGMA_RE = secret_patterns.PRAGMA_RE
 
 shannon_entropy = secret_patterns.shannon_entropy
+
+# The allowlist is shared with the push gate so a file or line exempted for
+# one is exempted for the other.
+Allowlist = secret_patterns.Allowlist
+load_allowlist = secret_patterns.load_allowlist
 
 
 class GitError(RuntimeError):
@@ -168,22 +173,6 @@ class Finding:
         return f"  {where}\n      {self.pattern}: {self.hint}\n      {self.excerpt}"
 
 
-@dataclass(frozen=True)
-class Allowlist:
-    """Compiled ``.secretsallow``: path rules exempt files, line rules exempt lines."""
-
-    paths: tuple[re.Pattern[str], ...] = ()
-    lines: tuple[re.Pattern[str], ...] = ()
-
-    def allows_path(self, path: str) -> bool:
-        return any(rx.search(path) for rx in self.paths)
-
-    def allows_line(self, line: str) -> bool:
-        if _PRAGMA_RE.search(line):
-            return True
-        return any(rx.search(line) for rx in self.lines)
-
-
 def _coerce_allowlist(obj) -> Allowlist:
     """Accept an ``Allowlist`` or a bare iterable of path regexes."""
     if isinstance(obj, Allowlist):
@@ -269,32 +258,6 @@ def parse_staged_diff(diff: str) -> list[tuple[str, int, str]]:
             line_no += 1
         # '-' lines and everything else don't advance the post-image counter.
     return added
-
-
-def load_allowlist(root: Path) -> Allowlist:
-    """Compile ``.secretsallow``. Unreadable/invalid lines are skipped."""
-    path = root / ALLOWLIST_FILENAME
-    if not path.is_file():
-        return Allowlist()
-    paths: list[re.Pattern[str]] = []
-    lines: list[re.Pattern[str]] = []
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return Allowlist()
-    for raw in text.splitlines():
-        entry = raw.strip()
-        if not entry or entry.startswith("#"):
-            continue
-        bucket = paths
-        if entry.startswith(ALLOWLIST_LINE_PREFIX):
-            entry = entry[len(ALLOWLIST_LINE_PREFIX):].strip()
-            bucket = lines
-        try:
-            bucket.append(re.compile(entry))
-        except re.error:
-            print(f"{ALLOWLIST_FILENAME}: skipping invalid regex: {entry}", file=sys.stderr)
-    return Allowlist(paths=tuple(paths), lines=tuple(lines))
 
 
 def _skipped(path: str) -> bool:

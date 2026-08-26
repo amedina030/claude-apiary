@@ -30,7 +30,10 @@ from __future__ import annotations
 
 import math
 import re
+import sys
 from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
 from typing import NamedTuple
 
 
@@ -182,6 +185,63 @@ PRAGMA_RE = re.compile(
 
 GENERIC_RULE = "generic-assignment"
 GENERIC_HINT = "a credential-looking assignment"
+
+# ---------------------------------------------------------------------------
+# Repo allowlist (.secretsallow) — honoured identically by both gates
+# ---------------------------------------------------------------------------
+
+ALLOWLIST_FILENAME = ".secretsallow"
+ALLOWLIST_LINE_PREFIX = "line:"
+
+
+@dataclass(frozen=True)
+class Allowlist:
+    """Compiled ``.secretsallow``: path rules exempt files, line rules exempt lines.
+
+    The inline pragma is always honoured, allowlist file or not.
+    """
+
+    paths: tuple[re.Pattern[str], ...] = ()
+    lines: tuple[re.Pattern[str], ...] = ()
+
+    def allows_path(self, path: str) -> bool:
+        return any(rx.search(path) for rx in self.paths)
+
+    def allows_line(self, line: str) -> bool:
+        if PRAGMA_RE.search(line):
+            return True
+        return any(rx.search(line) for rx in self.lines)
+
+
+def load_allowlist(root: Path) -> Allowlist:
+    """Compile ``<root>/.secretsallow``. Unreadable/invalid lines are skipped.
+
+    A plain entry is a path regex (exempts the whole file); an entry prefixed
+    ``line:`` is matched against the offending line instead. ``#`` starts a
+    comment.
+    """
+    path = root / ALLOWLIST_FILENAME
+    if not path.is_file():
+        return Allowlist()
+    paths: list[re.Pattern[str]] = []
+    lines: list[re.Pattern[str]] = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return Allowlist()
+    for raw in text.splitlines():
+        entry = raw.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        bucket = paths
+        if entry.startswith(ALLOWLIST_LINE_PREFIX):
+            entry = entry[len(ALLOWLIST_LINE_PREFIX):].strip()
+            bucket = lines
+        try:
+            bucket.append(re.compile(entry))
+        except re.error:
+            print(f"{ALLOWLIST_FILENAME}: skipping invalid regex: {entry}", file=sys.stderr)
+    return Allowlist(paths=tuple(paths), lines=tuple(lines))
 
 # ---------------------------------------------------------------------------
 # Generic ``key = value`` rule

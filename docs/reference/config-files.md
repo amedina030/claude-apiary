@@ -164,8 +164,9 @@ Current session identity. Written by `/startup`, read by hooks. Located at repo 
 
 ## .secretsallow
 
-Per-repo allowlist for `scripts/secret_scan.py`. Lives at the repo root and is
-committed, so the exemption travels with the repo. One regex per line; blank
+Per-repo allowlist for both secret-scanning gates — `scripts/secret_scan.py`
+at commit time and `core/hooks/pre_push_secret_scan.py` at push time. Lives at
+the repo root and is committed, so the exemption travels with the repo. One regex per line; blank
 lines and lines starting with `#` are ignored. A plain entry is tested against
 the repo-relative **path** and exempts that whole file; an entry prefixed
 `line:` is tested against the offending **line** instead and exempts matching

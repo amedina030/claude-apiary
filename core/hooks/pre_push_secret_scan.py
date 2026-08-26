@@ -139,18 +139,26 @@ def iter_added_lines(diff_text: str):
             new_lineno += 1
 
 
-def scan_diff(diff_text: str):
+def scan_diff(diff_text: str, allowlist: secret_patterns.Allowlist | None = None):
     """Scan a unified diff's added lines. Return a list of
     ``(path, lineno, rule, redacted_preview)`` findings — empty if clean.
+
+    *allowlist* is the repo's ``.secretsallow`` (shared with the commit gate):
+    path rules exempt whole files, line rules exempt matching lines.
     """
+    allow = allowlist or secret_patterns.Allowlist()
     findings = []
     for path, lineno, content in iter_added_lines(diff_text):
+        if path and allow.allows_path(path):
+            continue
+        if allow.allows_line(content):
+            continue
         for rule, preview in scan_line(content):
             findings.append((path or "<unknown>", lineno, rule, preview))
     return findings
 
 
-def scan_patch_series(log_text: str):
+def scan_patch_series(log_text: str, allowlist: secret_patterns.Allowlist | None = None):
     """Scan ``git log -p --format=%H`` output: one patch per commit.
 
     Returns ``(sha, path, lineno, rule, redacted_preview)`` tuples, de-duplicated
@@ -163,7 +171,7 @@ def scan_patch_series(log_text: str):
     chunk: list[str] = []
 
     def flush():
-        for path, lineno, rule, preview in scan_diff("\n".join(chunk)):
+        for path, lineno, rule, preview in scan_diff("\n".join(chunk), allowlist):
             key = (path, rule, preview)
             if key in seen:
                 continue
@@ -333,7 +341,17 @@ def _run():  # pragma: no cover — the pure pieces are tested; this is the shel
         )
         return
 
-    findings = scan_patch_series(log.stdout)
+    # The repo's .secretsallow applies here exactly as it does at commit time,
+    # so a fixture file exempted for one gate is exempted for the other.
+    allowlist = secret_patterns.Allowlist()
+    try:
+        top = _git("rev-parse", "--show-toplevel")
+        if top.returncode == 0 and top.stdout.strip():
+            allowlist = secret_patterns.load_allowlist(Path(top.stdout.strip()))
+    except (OSError, subprocess.SubprocessError):
+        pass                                # no allowlist → strictest scan
+
+    findings = scan_patch_series(log.stdout, allowlist)
     if not findings:
         hook_allow()
         return
@@ -347,7 +365,8 @@ def _run():  # pragma: no cover — the pure pieces are tested; this is the shel
         "the history being pushed; rewrite the commits, don't just remove the line.\n\n"
         + "\n".join(lines)
         + "\n\nIf a hit is an intentional fixture/example, append "
-        "'apiary:allow-secret' (or 'pragma: allowlist secret') to that line."
+        "'apiary:allow-secret' (or 'pragma: allowlist secret') to that line, "
+        "or add a path regex for the file to the repo-root .secretsallow."
     )
 
 

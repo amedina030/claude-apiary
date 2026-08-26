@@ -161,6 +161,26 @@ class GateParityTests(unittest.TestCase):
                 self.assertNotIn(secret, push_preview)
 
 
+class AllowlistParityTests(unittest.TestCase):
+    """Both gates read the same ``.secretsallow`` with the same semantics."""
+
+    def test_same_loader(self):
+        self.assertIs(commit_gate.load_allowlist, secret_patterns.load_allowlist)
+        self.assertIs(commit_gate.Allowlist, secret_patterns.Allowlist)
+
+    def test_path_rule_exempts_file_in_both_gates(self):
+        import re
+        allow = secret_patterns.Allowlist(paths=(re.compile(r"^fixtures/"),))
+        text = FIXTURES["aws-access-key"]
+        self.assertEqual(commit_gate.scan_lines([("fixtures/k.py", 1, text)], allow), [])
+        diff = f"--- a/x\n+++ b/fixtures/k.py\n@@ -0,0 +1 @@\n+{text}\n"
+        self.assertEqual(push_gate.scan_diff(diff, allow), [])
+        # Unlisted paths are still scanned by both.
+        self.assertEqual(len(commit_gate.scan_lines([("src/k.py", 1, text)], allow)), 1)
+        diff = f"--- a/x\n+++ b/src/k.py\n@@ -0,0 +1 @@\n+{text}\n"
+        self.assertEqual(len(push_gate.scan_diff(diff, allow)), 1)
+
+
 class PragmaParityTests(unittest.TestCase):
     """A line silenced for one gate must be silenced for the other.
 

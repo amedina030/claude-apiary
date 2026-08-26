@@ -198,6 +198,18 @@ class ScanPatchSeriesTest(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0][0], "")
 
+    def test_repo_allowlist_is_honoured(self):
+        import re
+        from core.secret_patterns import Allowlist
+        log = f"{self.SHA_A}\n\n" + _diff(f"key = {AWS_ID}", path="tests/fixtures.py")
+        by_path = Allowlist(paths=(re.compile(r"^tests/"),))
+        by_line = Allowlist(lines=(re.compile("EXAMPLE"),))
+        self.assertEqual(scan_patch_series(log, by_path), [])
+        self.assertEqual(scan_patch_series(log, by_line), [])
+        # A path rule does not leak into line matching and vice versa.
+        self.assertEqual(len(scan_patch_series(log, Allowlist(paths=(re.compile("EXAMPLE"),)))), 1)
+        self.assertEqual(len(scan_patch_series(log, Allowlist(lines=(re.compile(r"^tests/"),)))), 1)
+
 
 class PushTargetTest(unittest.TestCase):
     def test_bare_push_scans_head(self):

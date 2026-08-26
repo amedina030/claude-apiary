@@ -42,7 +42,9 @@ A repo-wide review found both gates leakier than their docs claimed. Fixed:
   `allow|deny|ask` vocabulary; it now emits `deny` with
   `permissionDecisionReason`, the legacy top-level `decision`/`reason` pair,
   and exits 2 with the reason on stderr.
-- `.secretsallow` entries are path rules unless prefixed `line:`; more
+- `.secretsallow` is now honoured by the push gate too (it previously read
+  only the inline pragma, so the scanner's own fixture files could not be
+  pushed). Entries are path rules unless prefixed `line:`; more
   credential-by-convention filenames are blocked (`*.key`, `.netrc`,
   `.git-credentials`, `kubeconfig`, `service-account*.json`, …); git output is
   read with `core.quotepath=false`/`--no-ext-diff`/`--no-textconv` and quoted
