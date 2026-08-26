@@ -47,9 +47,28 @@ def hook_allow(context: str = None, event: str = "PreToolUse"):
 
 
 def hook_block(message: str, event: str = "PreToolUse"):
-    """Print a hook block response and exit 0."""
-    out = {"hookSpecificOutput": {"hookEventName": event, "permissionDecision": "block", "reason": message}}
+    """Block the tool call and exit 2, reporting *message* as the reason.
+
+    Claude Code's documented PreToolUse vocabulary is ``allow`` / ``deny`` /
+    ``ask`` (``block`` was never a valid value) and the reason field is
+    ``permissionDecisionReason``. Exit code 2 is the hard block — it stops the
+    call whether or not the JSON is parsed, and feeds stderr back to Claude as
+    the reason — so gates emit all three: the JSON ``deny``, the legacy
+    top-level ``decision``/``reason`` pair for older clients, and exit 2 with
+    the message on stderr. Never returns.
+    """
+    out = {
+        "decision": "block",
+        "reason": message,
+        "hookSpecificOutput": {
+            "hookEventName": event,
+            "permissionDecision": "deny",
+            "permissionDecisionReason": message,
+        },
+    }
     print(json.dumps(out))
+    print(message, file=sys.stderr)
+    sys.exit(2)
 
 
 def read_payload():

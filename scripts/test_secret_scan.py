@@ -6,31 +6,49 @@ of the suite. ``.secretsallow`` in the repo root exempts this file, otherwise
 the hook would block every commit that touches it.
 """
 
+import contextlib
+import io
+import re
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import secret_scan  # noqa: E402
 
+GENERIC = secret_scan.PATTERNS[-1].name
+
 # --- fake credentials, assembled so the literals aren't themselves scannable
 # by a naive grep of this file. Each is syntactically valid for its pattern
 # but corresponds to nothing real.
+AWS_SECRET_40 = "wJalrXUtnFEMI/K7MDENG/bPxRfiCY" + "EXAMPLEKEY"   # 40 chars, AWS docs example
 FAKE = {
     "private-key": "-----BEGIN RSA PRIVATE KEY-----",
     "aws-access-key": "AKIA" + "IOSFODNN7EXAMPLE",
+    "aws-secret-key": "aws_secret_access_key = " + AWS_SECRET_40,
     "anthropic-key": "sk-ant-" + "a" * 32,
     "openai-key": "sk-" + "B" * 32,
     "github-token": "ghp_" + "c" * 36,
+    "github-pat": "github_pat_" + "A" * 30,
+    "gitlab-token": "glpat-" + "a" * 20,
+    "stripe-key": "sk_live_" + "a" * 24,
+    "npm-token": "npm_" + "a" * 36,
+    "pypi-token": "pypi-AgEIcHlwaS5vcmc" + "A" * 50,
+    "sendgrid-key": "SG." + "a" * 22 + "." + "b" * 43,
     "slack-token": "xoxb-" + "1234567890-abcdefghij",
+    "slack-webhook": "https://hooks.slack.com/services/T" + "ABCDEF12" + "/B" + "ABCDEF12" + "/" + "a" * 24,
+    "twilio-key": "SK" + "0123456789abcdef" * 2,
     "google-api-key": "AIza" + "D" * 35,
+    "jwt": "eyJ" + "a" * 20 + ".eyJ" + "b" * 20 + "." + "c" * 20,
+    "azure-storage-key": "AccountKey=" + "A" * 86 + "==",
     "bearer-token": "Authorization: Bearer " + "e" * 24,
     "basic-auth-url": "https://user:hunter2pass@example.com/x",
-    "generic-assignment": 'password = "n0tAr3alP4ssw0rd"',
+    GENERIC: 'password = "n0tAr3alP4ssw0rd"',
 }
 
 
@@ -67,10 +85,71 @@ class PatternTests(unittest.TestCase):
         self.assertIn("src/app.py:42", rendered)
         self.assertIn("aws-access-key", rendered)
 
-    def test_long_match_is_truncated_in_output(self):
-        found = secret_scan.scan_lines(_lines("k = " + FAKE["anthropic-key"] * 6))
-        self.assertTrue(found[0].excerpt.endswith("…"))
-        self.assertLess(len(found[0].excerpt), 120)
+
+class RedactionTests(unittest.TestCase):
+    """The report is printed to a terminal and, via the push gate, into a
+    Claude transcript. It must never reprint the credential it found."""
+
+    def test_no_fixture_secret_appears_in_its_own_finding(self):
+        for name, text in FAKE.items():
+            if name in ("private-key",):      # a header, not a value
+                continue
+            with self.subTest(pattern=name):
+                found = secret_scan.scan_lines(_lines(text))
+                secret = text.split("=", 1)[-1].split()[-1] if name in (GENERIC, "aws-secret-key") else text
+                if name == "bearer-token":
+                    secret = text.split()[-1]
+                if name == "basic-auth-url":
+                    secret = "hunter2pass"
+                if name == "azure-storage-key":
+                    secret = text.split("=", 1)[1]
+                self.assertNotIn(secret, found[0].excerpt)
+                self.assertNotIn(secret, found[0].render())
+                self.assertIn("…", found[0].excerpt)
+
+    def test_generic_finding_keeps_the_key_name_readable(self):
+        found = secret_scan.scan_lines(_lines('db_password = "n0tAr3alP4ssw0rd"'))
+        self.assertTrue(found[0].excerpt.startswith("db_password = "))
+        self.assertNotIn("n0tAr3alP4ssw0rd", found[0].excerpt)
+
+    def test_short_secret_is_still_redacted(self):
+        self.assertEqual(secret_scan._redact("abcdefgh"), "ab***")
+        self.assertNotIn("cdefgh", secret_scan._redact("abcdefgh"))
+
+
+class FormerlyMissedTests(unittest.TestCase):
+    """Shapes the first version of the scanner let through. Each was a real
+    gap found in review (2026-08); none may regress."""
+
+    MUST_FLAG = [
+        ("aws_secret_access_key = " + AWS_SECRET_40, "aws-secret-key"),
+        ('AWS_SECRET_ACCESS_KEY="' + AWS_SECRET_40 + '"', "aws-secret-key"),
+        ("aws-secret-key: " + AWS_SECRET_40, "aws-secret-key"),
+        ('password = "Tr0ub4dor&3xyz"', GENERIC),           # punctuation in value
+        ('password = "p@ssw0rd!2024"', GENERIC),
+        ('token = "abcdefgh12345678"  # see get_config()', GENERIC),  # call in the comment
+        ('my_password_value = "CorrectHorse9"', GENERIC),    # key with prefix + suffix
+        ('secret_key = "django-insecure-abc123def456"', GENERIC),
+        ('"password": "p@ssw0rd!2024",', GENERIC),           # JSON
+        ("DB_PASSWORD=Sup3rS3cret!", GENERIC),               # bare, env-file style
+        ("--password=abc12345xyz", GENERIC),                 # CLI flag in a script
+        ('self._token = "abcdefgh12345678"', GENERIC),       # private attribute
+        ("password: 'correct horse battery staple'", GENERIC),  # quoted, with spaces
+        ("github_pat_" + "A" * 30, "github-pat"),
+        ("sk_live_" + "a" * 24, "stripe-key"),
+        ("rk_test_" + "a" * 24, "stripe-key"),
+        ("glpat-" + "a" * 20, "gitlab-token"),
+        ("npm_" + "a" * 36, "npm-token"),
+        ("-----BEGIN PGP PRIVATE KEY BLOCK-----", "private-key"),
+        ("-----BEGIN ENCRYPTED PRIVATE KEY-----", "private-key"),
+    ]
+
+    def test_each_formerly_missed_shape_is_flagged(self):
+        for text, expected in self.MUST_FLAG:
+            with self.subTest(line=text):
+                found = secret_scan.scan_lines(_lines(text))
+                self.assertEqual(len(found), 1, f"missed: {text}")
+                self.assertEqual(found[0].pattern, expected)
 
 
 class FalsePositiveTests(unittest.TestCase):
@@ -79,6 +158,7 @@ class FalsePositiveTests(unittest.TestCase):
     CLEAN = [
         'password = os.environ["APP_PASSWORD"]',
         "token = get_token()",
+        "token = get_token()  # returns the token",
         "api_key = os.getenv('API_KEY')",
         'secret = "your-secret-here"',
         'password = "changeme"',
@@ -86,10 +166,42 @@ class FalsePositiveTests(unittest.TestCase):
         "timeout = 900",
         'token = f"{prefix}-{suffix}"',
         'password = "${DB_PASSWORD}"',
+        'password = "%(DB_PASSWORD)s"',
+        "token: ${GITHUB_TOKEN}",
+        "export TOKEN=$(cat ~/.token)",
         "client_secret = config.get('client_secret')",
+        'password_confirm = request.form["password_confirm"]',
+        "password = settings.db.password",
         "# password = whatever you set in the dashboard",
-        'access_key = process.env.ACCESS_KEY',
+        "the password is stored in the vault",
+        "access_key = process.env.ACCESS_KEY",
+        'password_file = "/etc/secrets/pw"',
+        'token_url = "https://example.com/oauth/token"',
+        "token_endpoint = https://example.com/oauth/token",
+        'secret_name = "my-vault-secret-name"',
+        'api_key_header = "X-API-Key-Value"',
+        'token_description = "used for the nightly job"',
+        "PASSWORD_MIN_LENGTH = 12",
+        "token_count = 12345678",
+        'password = "********"',
+        'api_key = "<your-api-key>"',
+        'password = "[REDACTED]"',
+        'secret = "xxxxxxxxxxxxxxxx"',
+        'password = "abababababababab"',
+        'api_key = "my_api_key_here"',
+        "password: {{ vault_pw }}",
+        "ns.token_cap = token_cap",          # bare identifier: a read, not a literal
+        "password = new_password",
+        "self.token = token",
+        "f(token_threshold=token_threshold, x=1)",   # identifier followed by more args
+        '"token": "montecarlodata",',        # JSON search/lexer token: a plain word
+        "tokens = ['datadog', 'snowflake']",
     ]
+
+    def test_bare_token_key_still_fires_on_a_credential_shaped_value(self):
+        # The `token`-alone relaxation only exempts plain words.
+        self.assertEqual(len(secret_scan.scan_lines(_lines('"token": "d4t4d0g-X9"'))), 1)
+        self.assertEqual(len(secret_scan.scan_lines(_lines('auth_token = "montecarlodata"'))), 1)
 
     def test_clean_lines_do_not_trigger(self):
         for line in self.CLEAN:
@@ -138,7 +250,7 @@ class AllowlistTests(unittest.TestCase):
         self.assertEqual(secret_scan.scan_lines(_lines(line)), [])
 
     def test_allowlist_regex_by_path(self):
-        rules = [__import__("re").compile(r"^fixtures/")]
+        rules = [re.compile(r"^fixtures/")]
         found = secret_scan.scan_lines(
             [("fixtures/keys.txt", 1, FAKE["aws-access-key"])], rules
         )
@@ -149,20 +261,38 @@ class AllowlistTests(unittest.TestCase):
         )
         self.assertEqual(len(found), 1)
 
+    def test_path_rule_does_not_leak_into_line_matching(self):
+        # A loose path regex used to be tested against the LINE too, so an
+        # entry like `fixtures` silenced any line containing that word.
+        rules = secret_scan.Allowlist(paths=(re.compile("fixtures"),))
+        line = f'k = "{FAKE["aws-access-key"]}"  # from fixtures'
+        self.assertEqual(len(secret_scan.scan_lines([("src/a.py", 1, line)], rules)), 1)
+
+    def test_line_rule_matches_lines_only(self):
+        rules = secret_scan.Allowlist(lines=(re.compile("EXAMPLE"),))
+        self.assertEqual(
+            secret_scan.scan_lines([("src/a.py", 1, FAKE["aws-access-key"])], rules), []
+        )
+        # ...and does not exempt a path that happens to match.
+        found = secret_scan.blocked_files(["EXAMPLE/.env"], rules)
+        self.assertEqual(len(found), 1)
+
     def test_allowlist_file_is_parsed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / secret_scan.ALLOWLIST_FILENAME).write_text(
-                "# a comment\n\n^docs/\n[unclosed\n", encoding="utf-8"
+                "# a comment\n\n^docs/\nline: EXAMPLE\n[unclosed\n", encoding="utf-8"
             )
             rules = secret_scan.load_allowlist(root)
-            # The invalid regex is skipped, the valid one survives.
-            self.assertEqual(len(rules), 1)
-            self.assertTrue(rules[0].search("docs/x.md"))
+            self.assertEqual(len(rules.paths), 1)
+            self.assertEqual(len(rules.lines), 1)
+            self.assertTrue(rules.allows_path("docs/x.md"))
+            self.assertTrue(rules.allows_line("has EXAMPLE in it"))
+            self.assertFalse(rules.allows_line("docs/x.md"))
 
     def test_missing_allowlist_is_not_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(secret_scan.load_allowlist(Path(tmp)), [])
+            self.assertEqual(secret_scan.load_allowlist(Path(tmp)), secret_scan.Allowlist())
 
 
 class BlockedFileTests(unittest.TestCase):
@@ -171,9 +301,17 @@ class BlockedFileTests(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0].pattern, "blocked-file")
 
-    def test_dotenv_variants_blocked_but_examples_allowed(self):
-        blocked = [".env", ".env.local", "cfg/.env.production", "id_rsa", "a/b/key.pem"]
-        allowed = [".env.example", ".env.sample", ".env.template", "notes.md"]
+    def test_credential_filenames_blocked_but_lookalikes_allowed(self):
+        blocked = [
+            ".env", ".env.local", "cfg/.env.production", "id_rsa", "a/b/key.pem",
+            "server.key", "deploy.ppk", "AuthKey_ABC.p8", ".netrc", ".git-credentials",
+            ".htpasswd", "ops/kubeconfig", ".docker/config.json",
+            "gcp/service-account-prod.json", "credentials.json", ".aws/credentials",
+        ]
+        allowed = [
+            ".env.example", ".env.sample", ".env.template", "notes.md", "keys.md",
+            "public.pub", "docs/credentials.md", "src/keystore.py", "monkey.js",
+        ]
         for p in blocked:
             with self.subTest(path=p):
                 self.assertEqual(len(secret_scan.blocked_files([p])), 1)
@@ -220,6 +358,11 @@ class DiffParsingTests(unittest.TestCase):
     def test_deleted_file_contributes_nothing(self):
         diff = "--- a/gone.py\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n"  # noqa: null-device
         self.assertEqual(secret_scan.parse_staged_diff(diff), [])
+
+    def test_quoted_path_header_is_unquoted(self):
+        # git C-quotes paths with unusual characters: +++ "b/we\"ird.py"
+        diff = '--- a/x\n+++ "b/we\\"ird.py"\n@@ -0,0 +1 @@\n+line\n'
+        self.assertEqual(secret_scan.parse_staged_diff(diff), [('we"ird.py', 1, "line")])
 
 
 class EntropyTests(unittest.TestCase):
@@ -299,6 +442,34 @@ class StagedIntegrationTests(unittest.TestCase):
         self.assertEqual(secret_scan.scan_staged(self.root), [])
 
 
+class FailClosedTests(unittest.TestCase):
+    """If git cannot be run, the scan must not report "clean"."""
+
+    def test_git_failure_raises_instead_of_returning_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # Not a git repo: `git diff --cached` exits non-zero.
+            with self.assertRaises(secret_scan.GitError):
+                secret_scan.scan_staged(Path(tmp))
+
+    def test_staged_mode_exits_2_and_says_the_scan_did_not_run(self):
+        err = io.StringIO()
+        with mock.patch.object(secret_scan, "repo_root", return_value=Path(".")), \
+             mock.patch.object(secret_scan, "_git", side_effect=secret_scan.GitError("index.lock exists")), \
+             contextlib.redirect_stderr(err):
+            code = secret_scan.main(["--staged"])
+        self.assertEqual(code, 2)
+        self.assertIn("did NOT run", err.getvalue())
+        self.assertIn("index.lock", err.getvalue())
+
+    def test_git_missing_entirely_is_also_fatal(self):
+        with mock.patch.object(secret_scan.subprocess, "run", side_effect=OSError("no git")):
+            with self.assertRaises(secret_scan.GitError):
+                secret_scan._git(["diff"], Path("."))
+            # ...but repo_root, used to decide whether we are in a repo at all,
+            # degrades to None so --path mode still works outside git.
+            self.assertIsNone(secret_scan.repo_root(Path(".")))
+
+
 class PathScanTests(unittest.TestCase):
     def test_scan_path_walks_a_tree(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -326,6 +497,20 @@ class PathScanTests(unittest.TestCase):
                 FAKE["aws-access-key"], encoding="utf-8"
             )
             self.assertEqual(secret_scan.scan_path(root), [])
+
+    def test_gitignored_files_are_skipped_inside_a_repo(self):
+        # Runtime logs a commit can never include are noise for a tree scan.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _run_git(["init", "-q"], root)
+            (root / ".gitignore").write_text("logs/\n", encoding="utf-8")
+            (root / "logs").mkdir()
+            (root / "logs" / "run.log").write_text(FAKE["aws-access-key"], encoding="utf-8")
+            (root / "src.py").write_text(f"k = '{FAKE['github-token']}'\n", encoding="utf-8")
+            found = secret_scan.scan_path(root, root)
+            self.assertEqual([f.path for f in found], ["src.py"])
+            # Without a repo root the walk is plain and sees everything.
+            self.assertEqual(len(secret_scan.scan_path(root)), 2)
 
 
 class CliTests(unittest.TestCase):

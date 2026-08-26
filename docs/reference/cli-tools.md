@@ -275,6 +275,7 @@ Spawn a new side-project repo wired up with the apiary toolkit. Used by the `/in
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `spawn` | `cli.py spawn --path <abs-path> --spec-note-id <id> [--author "<name>"] [--session-id ID]` | Create the new repo and migrate the spec |
+| `verify` | `cli.py verify --path <abs-path>` | Check that a path is a complete, working spawn (see below) |
 
 ### Flags
 
@@ -289,7 +290,7 @@ Exit codes: `0` success; `2` validation error (bad path); `3` spec note not foun
 
 Templates that get written into the new repo live under `incubator/templates/` (`gitignore.tmpl`, `pyproject.toml.tmpl`, `CLAUDE.md.tmpl`).
 
-## incubator/cli.py verify
+### verify
 
 Check that a target path is a complete, working spawn. Prints a pass/miss table and exits non-zero if anything is missing.
 
@@ -995,7 +996,9 @@ Exit codes: `0` no drift; `1` drift found; `2` `cli-tools.md` not found.
 
 ## scripts/secret_scan.py
 
-Commit-time secret scanner. Stdlib only — no `gitleaks` or other external binary, which would break the portability contract. Reads the **staged** diff (added lines only), so it checks exactly what a commit would introduce, and reports file, line, and which pattern matched. Also blocks filenames that hold credentials by convention (`.env`, `id_rsa`, `*.pem`, ...) even when `git add -f` bypasses `.gitignore`.
+Commit-time secret scanner. Stdlib only — git hooks resolve `py -3`/`python3`/`python`, not the Poetry virtualenv, so nothing outside the standard library is importable here, and an external binary like `gitleaks` would break the portability contract. Reads the **staged** diff (added lines only), so it checks exactly what a commit would introduce, and reports file, line, and which pattern matched — with the credential itself redacted, never reprinted. Also blocks filenames that hold credentials by convention (`.env`, `id_rsa`, `*.pem`, `*.key`, `.netrc`, `.git-credentials`, `kubeconfig`, `service-account*.json`, ...) even when `git add -f` bypasses `.gitignore`. Rules live in `core/secret_patterns.py`, shared with the push-time gate.
+
+Fails closed: if git itself cannot be run (missing binary, locked index) the scan exits 2 and says it did **not** run, which blocks the commit — a check that quietly stops working is worse than one that is loudly broken.
 
 Wired up as a pre-commit hook by `scripts/install_repo_hooks.py` (main-apiary) and by `core/git_hooks.py`, which `apiary install` calls for every other managed repo.
 
@@ -1012,9 +1015,9 @@ python scripts/secret_scan.py --staged --entropy   # + high-entropy strings
 | `--entropy` | Also flag high-entropy strings; noisier, off by default |
 | `--quiet` | Print nothing on a clean scan |
 
-Exit codes: `0` clean; `1` findings; `2` bad arguments or not a git repo.
+Exit codes: `0` clean; `1` findings; `2` bad arguments, not a git repo, or the scan could not run.
 
-False positives have three escape hatches, in order of preference: an inline `apiary:allow-secret` comment on the offending line; a regex in the repo-root `.secretsallow` file (matched against both path and line); or `git commit --no-verify`, which skips every pre-commit hook. See [config files](config-files.md#secretsallow).
+False positives have three escape hatches, in order of preference: an inline `apiary:allow-secret` comment on the offending line; an entry in the repo-root `.secretsallow` file (a plain regex exempts every file whose path matches; `line:<regex>` exempts matching lines instead); or `git commit --no-verify`, which skips every pre-commit hook. See [config files](config-files.md#secretsallow).
 
 ## scripts/install_git_hooks.py
 

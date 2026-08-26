@@ -130,8 +130,11 @@ The pre-commit hook chains two checks, and either one failing blocks the commit:
 The post-merge hook closes scribe TODOs linked to merged runner branches.
 
 If the secret scan flags a false positive, add an inline `apiary:allow-secret`
-comment on that line, or a regex to the repo-root `.secretsallow` file.
-`git commit --no-verify` bypasses every pre-commit hook as a last resort.
+comment on that line, or an entry to the repo-root `.secretsallow` file (a path
+regex exempts the file; `line:<regex>` exempts matching lines).
+`git commit --no-verify` bypasses every pre-commit hook as a last resort. The
+scan fails closed: if git itself cannot run, the commit is blocked with a
+message saying the scan did not happen, rather than passing unscanned.
 
 ### 4b. The secret-scan hook in other repos
 

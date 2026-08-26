@@ -481,7 +481,7 @@ class TestDeriveBriefSummary(unittest.TestCase):
     def test_mid_word_cut_trims_to_last_space_with_ellipsis(self):
         # One token ("supercalifragilisticexpialidocious") kept whole-or-omitted
         # so we can prove the truncator never splits a word mid-letters.
-        token = 'supercalifragilisticexpialidocious'
+        token = 'supercalifragilisticexpialidocious'  # apiary:allow-secret
         content = ' '.join([token] * 10) + ' end-of-sentence-without-period'
         result = derive_brief_summary(content)
         self.assertLessEqual(len(result), BRIEF_SUMMARY_MAX + 1)

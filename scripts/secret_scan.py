@@ -5,20 +5,22 @@ Reads the *staged* diff — not the working tree — so it checks exactly what
 is about to be committed, and reports file, line, and which pattern matched.
 Non-zero exit blocks the commit when wired up as a ``pre-commit`` hook.
 
-Zero-dependency by design. ``gitleaks`` and friends need a per-machine
-binary install, which breaks the portability contract in PORTABILITY.md, so
-the default scanner is plain Python and an external tool is never required.
+Zero-dependency by design: git hooks resolve ``py -3`` / ``python3`` /
+``python``, not the Poetry virtualenv, so the scanner can only import the
+standard library. ``gitleaks`` and friends also need a per-machine binary,
+which breaks the portability contract in PORTABILITY.md.
 
 Sibling gate: ``core/hooks/pre_push_secret_scan.py`` scans the *outgoing*
-diff when Claude runs ``git push``. The two are complementary, not redundant.
-That one is a Claude Code PreToolUse hook, so it never fires for a commit made
-by hand in a terminal, and never fires at all in a repo with no remote — which
-is exactly the case that motivated this one (a personal-data repo that is
-never pushed has no push to intercept). This gate blocks earlier, at commit,
-regardless of who is driving.
+commits when Claude runs ``git push``. The two are complementary, not
+redundant. That one is a Claude Code PreToolUse hook, so it never fires for a
+commit made by hand in a terminal, and never fires at all in a repo with no
+remote — which is exactly the case that motivated this one (a personal-data
+repo that is never pushed has no push to intercept). This gate blocks earlier,
+at commit, regardless of who is driving.
 
-Both honour the same allowlist pragmas, so a line exempted for one is exempted
-for the other; disagreeing gates would be worse than either alone.
+Both gates apply the same rules (``core/secret_patterns``) and honour the same
+allowlist pragmas, so a line exempted for one is exempted for the other;
+disagreeing gates would be worse than either alone.
 
 Usage::
 
@@ -30,25 +32,30 @@ Escape hatches, in order of preference:
 
 1. ``# apiary:allow-secret`` on the offending line (any comment syntax — the
    pragma is matched as a substring, so ``// apiary:allow-secret`` works too).
-2. A repo-root ``.secretsallow`` file: one regex per line, tested against both
-   the repo-relative path and the offending line. ``#`` starts a comment.
+2. A repo-root ``.secretsallow`` file: one regex per line. A plain entry is
+   matched against the repo-relative *path* and exempts that whole file; an
+   entry prefixed ``line:`` is matched against the offending *line* instead.
+   ``#`` starts a comment.
 3. ``git commit --no-verify`` skips every pre-commit hook. The hook prints
    this as a reminder on failure so nobody is stuck.
+
+Fails closed: if git itself cannot be run (missing binary, locked index, a
+corrupt repo) the scan reports that it did NOT run and exits 2, which blocks
+the commit. A security control that quietly stops working is worse than one
+that is loudly broken.
 
 Exit codes::
     0  clean
     1  findings (or a blocked filename)
-    2  bad arguments / not a git repo
+    2  bad arguments / not a git repo / the scan could not run
 """
 
 from __future__ import annotations
 
 import argparse
-import math
 import re
 import subprocess
 import sys
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -59,61 +66,22 @@ sys.path.insert(0, str(REPO_ROOT))
 from core import secret_patterns  # noqa: E402
 
 ALLOW_PRAGMA = "apiary:allow-secret"
-ALLOWLIST_FILENAME = ".secretsallow"
+ALLOWLIST_FILENAME = secret_patterns.ALLOWLIST_FILENAME
+ALLOWLIST_LINE_PREFIX = secret_patterns.ALLOWLIST_LINE_PREFIX
 
-# The push-time gate (core/hooks/pre_push_secret_scan.py) predates this one and
-# uses the detect-secrets convention. Honour both spellings so a line silenced
-# for one gate isn't re-flagged by the other.
+# Both spellings are honoured — see core/secret_patterns.PRAGMA_RE.
 _PRAGMA_RE = secret_patterns.PRAGMA_RE
 
-# Values that look like a secret assignment but are obviously not one. Kept
-# separate from the patterns so the generic rule can stay broad without
-# drowning real findings in noise.
-_PLACEHOLDER = re.compile(
-    r"""^(?:
-          x{3,}                     # xxx, xxxxxx
-        | y{3,}                     # yyy
-        | \.{3,}                    # ...
-        | changeme | placeholder | example | redacted | dummy | sample
-        | your[-_a-z0-9]*           # your-api-key-here
-        | some[-_a-z0-9]*
-        | fake[-_a-z0-9]*
-        | test[-_a-z0-9]*
-        | none | null | true | false | undefined
-    )$""",
-    re.VERBOSE | re.IGNORECASE,
-)
+shannon_entropy = secret_patterns.shannon_entropy
 
-# A value that is *read* rather than *written*: env lookups, interpolation,
-# function calls. These are the correct way to handle a secret, so flagging
-# them would punish the right behaviour.
-_INDIRECTION = re.compile(
-    r"""(
-          \$\{?[A-Za-z_]          # ${VAR} / $VAR
-        | %\(?[A-Za-z_]           # %(VAR)s / %VAR%
-        | \{\{                    # {{ template }}
-        | \{[A-Za-z_]             # {var} f-string / format
-        | \bos\.environ | \bgetenv | \bos\.getenv
-        | \bprocess\.env
-        | \bsecrets?_?manager
-        | \binput\s*\(
-        | \w+\s*\(                # any function call
-        | \bimport\b
-    )""",
-    re.VERBOSE | re.IGNORECASE,
-)
+# The allowlist is shared with the push gate so a file or line exempted for
+# one is exempted for the other.
+Allowlist = secret_patterns.Allowlist
+load_allowlist = secret_patterns.load_allowlist
 
-# The generic assignment rule's value: a literal that is long enough to be a
-# real credential. Quoted or bare, but not a call and not interpolation.
-_GENERIC_ASSIGN = re.compile(
-    r"""(?P<key>\b(?:api[-_]?key|secret|token|password|passwd|pwd|access[-_]?key
-        |auth[-_]?token|client[-_]?secret|private[-_]?token)\b)
-        \s*[:=]\s*
-        (?P<quote>["']?)
-        (?P<value>[A-Za-z0-9_\-./+=]{8,})
-        (?P=quote)""",
-    re.VERBOSE | re.IGNORECASE,
-)
+
+class GitError(RuntimeError):
+    """git could not be run or exited non-zero. The scan must not pass."""
 
 
 @dataclass(frozen=True)
@@ -121,64 +89,41 @@ class Pattern:
     """One reviewed detection rule. ``name`` shows up in the failure output."""
 
     name: str
-    regex: re.Pattern[str]
+    regex: re.Pattern[str] | None
     hint: str
 
-    def search(self, line: str) -> str | None:
-        """Return the matched text, or None. Overridden by generic rules."""
+    def search(self, line: str) -> tuple[str, str] | None:
+        """Return ``(secret, prefix)`` for a hit, or None.
+
+        ``secret`` is the credential text (never printed unredacted);
+        ``prefix`` is the non-secret context inside the match, if any.
+        """
         m = self.regex.search(line)
-        return m.group(0) if m else None
-
-
-def _looks_like_a_credential(value: str) -> bool:
-    """Does an UNQUOTED value carry any signal beyond being a long word?
-
-    Prose keeps tripping the generic rule — "# password = whatever you set in
-    the dashboard" parses as an assignment of the word "whatever". A real bare
-    credential almost always has a digit, mixed case, or punctuation; an
-    English word has none of the three. Quoted values skip this check, because
-    ``password = "supersecret"`` is an explicit literal no matter how wordy it
-    looks.
-    """
-    return (
-        any(c.isdigit() for c in value)
-        or (any(c.isupper() for c in value) and any(c.islower() for c in value))
-        or any(c in "-_./+=" for c in value)
-    )
+        if not m:
+            return None
+        if "v" in m.groupdict() and m.group("v") is not None:
+            return m.group("v"), line[m.start():m.start("v")]
+        return m.group(0), ""
 
 
 class _GenericAssignPattern(Pattern):
-    """``key = <literal>`` with placeholder, indirection, and prose filtering."""
+    """``key = <literal>`` — shared rule with placeholder/indirection filtering."""
 
-    def search(self, line: str) -> str | None:
-        for m in _GENERIC_ASSIGN.finditer(line):
-            value = m.group("value")
-            if _PLACEHOLDER.match(value):
-                continue
-            # Only consider indirection to the RIGHT of the key: a call on the
-            # left (`self.get_config()["password"] = ...`) doesn't make the
-            # right-hand side safe.
-            if _INDIRECTION.search(line[m.start("value"):]):
-                continue
-            if value.isdigit():          # port numbers, timeouts, ids
-                continue
-            if not m.group("quote") and not _looks_like_a_credential(value):
-                continue                 # bare word in prose, not a secret
-            return m.group(0)
-        return None
+    def search(self, line: str) -> tuple[str, str] | None:
+        hit = secret_patterns.find_generic(line)
+        return (hit.secret, hit.prefix) if hit else None
 
 
-# Literal-credential rules come from the table shared with the push-time gate
-# (core/secret_patterns.py) so the two cannot drift apart. The generic
-# assignment rule is appended locally: its filtering is specific to this gate,
-# and the push gate uses an entropy bar instead — see that module's docstring.
+# Every rule comes from the table shared with the push-time gate so the two
+# cannot drift apart. Literal patterns first (narrower labels), then the
+# generic assignment rule.
 PATTERNS: tuple[Pattern, ...] = tuple(
     Pattern(name=p.name, regex=p.regex, hint=p.hint) for p in secret_patterns.PATTERNS
 ) + (
     _GenericAssignPattern(
-        name="generic-assignment",
-        regex=_GENERIC_ASSIGN,
-        hint="a credential-looking assignment",
+        name=secret_patterns.GENERIC_RULE,
+        regex=None,
+        hint=secret_patterns.GENERIC_HINT,
     ),
 )
 
@@ -188,10 +133,17 @@ BLOCKED_FILENAMES: tuple[re.Pattern[str], ...] = (
     re.compile(r"(^|/)\.env$"),
     re.compile(r"(^|/)\.env\.(?!example$|sample$|template$|dist$)[^/]+$"),
     re.compile(r"(^|/)id_(?:rsa|dsa|ecdsa|ed25519)$"),
-    re.compile(r"\.(?:pem|pfx|p12|keystore|jks)$"),
+    re.compile(r"\.(?:pem|pfx|p12|keystore|jks|ppk|p8)$"),
+    re.compile(r"(^|/)[^/]+\.key$"),
     re.compile(r"(^|/)\.aws/credentials$"),
     re.compile(r"(^|/)\.npmrc$"),
     re.compile(r"(^|/)\.pypirc$"),
+    re.compile(r"(^|/)\.netrc$"),
+    re.compile(r"(^|/)\.git-credentials$"),
+    re.compile(r"(^|/)\.htpasswd$"),
+    re.compile(r"(^|/)\.docker/config\.json$"),
+    re.compile(r"(^|/)kubeconfig$"),
+    re.compile(r"(^|/)(?:service[-_]?account[^/]*|credentials)\.json$"),
 )
 
 # Files whose contents are never scanned for line-level secrets. Lockfiles and
@@ -221,27 +173,27 @@ class Finding:
         return f"  {where}\n      {self.pattern}: {self.hint}\n      {self.excerpt}"
 
 
-def _redact(text: str, limit: int = 100) -> str:
-    """Shorten a match so the failure message doesn't reprint the whole secret.
+def _coerce_allowlist(obj) -> Allowlist:
+    """Accept an ``Allowlist`` or a bare iterable of path regexes."""
+    if isinstance(obj, Allowlist):
+        return obj
+    return Allowlist(paths=tuple(obj))
 
-    Enough of the head to recognise which line is meant, never the tail.
+
+def _redact(secret: str) -> str:
+    """Show only enough of *secret* to locate it, never the whole value.
+
+    The failure message is printed to a terminal and, via the push gate, into a
+    Claude transcript — both places a credential must not be re-leaked.
     """
-    text = text.strip()
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "…"
-
-
-def shannon_entropy(s: str) -> float:
-    if not s:
-        return 0.0
-    counts = Counter(s)
-    n = len(s)
-    return -sum((c / n) * math.log2(c / n) for c in counts.values())
+    secret = secret.strip()
+    if len(secret) <= 8:
+        return secret[:2] + "***"
+    return f"{secret[:4]}…{secret[-2:]} ({len(secret)} chars)"
 
 
 def _git(args: Sequence[str], cwd: Path) -> str:
-    """Run a git command and return stdout, or "" when git fails."""
+    """Run a git command and return stdout. Raises ``GitError`` on any failure."""
     try:
         proc = subprocess.run(
             ["git", *args],
@@ -252,16 +204,27 @@ def _git(args: Sequence[str], cwd: Path) -> str:
             errors="replace",
             check=False,
         )
-    except (OSError, ValueError):
-        return ""
+    except (OSError, ValueError) as exc:
+        raise GitError(f"could not run git: {exc}") from exc
     if proc.returncode != 0:
-        return ""
+        detail = (proc.stderr or "").strip() or f"exit {proc.returncode}"
+        raise GitError(f"git {' '.join(args[:2])} failed: {detail}")
     return proc.stdout
 
 
 def repo_root(start: Path) -> Path | None:
-    out = _git(["rev-parse", "--show-toplevel"], start).strip()
+    try:
+        out = _git(["rev-parse", "--show-toplevel"], start).strip()
+    except GitError:
+        return None
     return Path(out) if out else None
+
+
+def _unquote_path(target: str) -> str:
+    """Undo git's C-style quoting of unusual paths (``"b/a \\"b\\".py"``)."""
+    if len(target) >= 2 and target[0] == '"' and target[-1] == '"':
+        return re.sub(r"\\(.)", r"\1", target[1:-1])
+    return target
 
 
 def parse_staged_diff(diff: str) -> list[tuple[str, int, str]]:
@@ -276,7 +239,7 @@ def parse_staged_diff(diff: str) -> list[tuple[str, int, str]]:
     line_no = 0
     for raw in diff.splitlines():
         if raw.startswith("+++ "):
-            target = raw[4:].strip()
+            target = _unquote_path(raw[4:].strip())
             # "+++ b/some/path" — or /dev/null for a deletion.  # noqa: null-device
             # git emits the literal string below; it is diff syntax, not a path
             # we open, so the portable-devnull rule doesn't apply.
@@ -297,55 +260,27 @@ def parse_staged_diff(diff: str) -> list[tuple[str, int, str]]:
     return added
 
 
-def load_allowlist(root: Path) -> list[re.Pattern[str]]:
-    """Compile ``.secretsallow`` into regexes. Unreadable/invalid lines are skipped."""
-    path = root / ALLOWLIST_FILENAME
-    if not path.is_file():
-        return []
-    out: list[re.Pattern[str]] = []
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return []
-    for raw in text.splitlines():
-        entry = raw.strip()
-        if not entry or entry.startswith("#"):
-            continue
-        try:
-            out.append(re.compile(entry))
-        except re.error:
-            print(f"{ALLOWLIST_FILENAME}: skipping invalid regex: {entry}", file=sys.stderr)
-    return out
-
-
-def _allowed(path: str, line: str, allowlist: Iterable[re.Pattern[str]]) -> bool:
-    if _PRAGMA_RE.search(line):
-        return True
-    return any(rx.search(path) or rx.search(line) for rx in allowlist)
-
-
-def _matches(path: str) -> bool:
+def _skipped(path: str) -> bool:
     return any(rx.search(path) for rx in SKIP_CONTENT)
 
 
 def scan_lines(
     lines: Iterable[tuple[str, int, str]],
-    allowlist: Iterable[re.Pattern[str]] = (),
+    allowlist=(),
     entropy: bool = False,
 ) -> list[Finding]:
     """Apply every pattern to each ``(path, line_no, text)`` triple."""
-    allowlist = list(allowlist)
+    allow = _coerce_allowlist(allowlist)
     findings: list[Finding] = []
     for path, line_no, text in lines:
-        if _matches(path):
-            continue
-        if _allowed(path, text, allowlist):
+        if _skipped(path) or allow.allows_path(path) or allow.allows_line(text):
             continue
         for pattern in PATTERNS:
             hit = pattern.search(text)
             if hit:
+                secret, prefix = hit
                 findings.append(
-                    Finding(path, line_no, pattern.name, pattern.hint, _redact(hit))
+                    Finding(path, line_no, pattern.name, pattern.hint, prefix + _redact(secret))
                 )
                 break            # one finding per line is enough to block
         else:
@@ -365,14 +300,12 @@ def scan_lines(
     return findings
 
 
-def blocked_files(paths: Iterable[str], allowlist: Iterable[re.Pattern[str]] = ()) -> list[Finding]:
+def blocked_files(paths: Iterable[str], allowlist=()) -> list[Finding]:
     """Findings for staged paths that should never be committed at all."""
-    allowlist = list(allowlist)
+    allow = _coerce_allowlist(allowlist)
     out: list[Finding] = []
     for path in paths:
-        if not path:
-            continue
-        if any(rx.search(path) for rx in allowlist):
+        if not path or allow.allows_path(path):
             continue
         for rx in BLOCKED_FILENAMES:
             if rx.search(path):
@@ -389,26 +322,61 @@ def blocked_files(paths: Iterable[str], allowlist: Iterable[re.Pattern[str]] = (
     return out
 
 
+_GIT_DIFF_OPTS = ("-c", "core.quotepath=false")
+
+
 def staged_paths(root: Path) -> list[str]:
-    out = _git(["diff", "--cached", "--name-only", "--diff-filter=ACMR"], root)
-    return [line.strip() for line in out.splitlines() if line.strip()]
+    out = _git([*_GIT_DIFF_OPTS, "diff", "--cached", "--name-only", "--diff-filter=ACMR"], root)
+    return [_unquote_path(line.strip()) for line in out.splitlines() if line.strip()]
 
 
 def scan_staged(root: Path, entropy: bool = False) -> list[Finding]:
+    """Scan what a commit would add. Raises ``GitError`` if git cannot be run."""
     allowlist = load_allowlist(root)
-    diff = _git(["diff", "--cached", "--unified=0", "--no-color"], root)
+    diff = _git(
+        [*_GIT_DIFF_OPTS, "diff", "--cached", "--unified=0", "--no-color",
+         "--no-ext-diff", "--no-textconv"],
+        root,
+    )
     findings = blocked_files(staged_paths(root), allowlist)
     findings.extend(scan_lines(parse_staged_diff(diff), allowlist, entropy))
     return findings
 
 
+def _git_visible_files(root: Path, target: Path) -> list[Path] | None:
+    """Tracked + untracked-but-not-ignored files under *target*, via git.
+
+    An ad-hoc ``--path`` scan inside a repo should see what a commit could
+    see: runtime logs and caches that ``.gitignore`` already excludes are
+    noise (and, being local-only, not a leak). Returns None outside a repo or
+    if git fails, so the caller can fall back to walking the tree.
+    """
+    try:
+        out = _git(
+            [*_GIT_DIFF_OPTS, "ls-files", "--cached", "--others", "--exclude-standard",
+             "-z", "--", str(target)],
+            root,
+        )
+    except GitError:
+        return None
+    return [root / _unquote_path(p) for p in out.split("\0") if p]
+
+
 def scan_path(target: Path, root: Path | None = None, entropy: bool = False) -> list[Finding]:
-    """Scan every readable text file under ``target`` (ad-hoc, not commit-time)."""
+    """Scan every readable text file under ``target`` (ad-hoc, not commit-time).
+
+    Inside a git repo, ``.gitignore``d files are skipped — they cannot be
+    committed, so they are not what this scanner guards against.
+    """
     base = root or target
     allowlist = load_allowlist(base)
     triples: list[tuple[str, int, str]] = []
     paths: list[str] = []
-    files = sorted(target.rglob("*")) if target.is_dir() else [target]
+    files = None
+    if target.is_dir() and root is not None:
+        files = _git_visible_files(root, target)
+    if files is None:
+        files = sorted(target.rglob("*")) if target.is_dir() else [target]
     for f in files:
         if not f.is_file():
             continue
@@ -419,7 +387,7 @@ def scan_path(target: Path, root: Path | None = None, entropy: bool = False) -> 
         except ValueError:
             rel = f.as_posix()
         paths.append(rel)
-        if _matches(rel):
+        if _skipped(rel):
             continue
         try:
             text = f.read_text(encoding="utf-8")
@@ -442,7 +410,8 @@ def report(findings: Sequence[Finding], *, hook_mode: bool) -> None:
     print("", file=sys.stderr)
     print("If a finding is a false positive, either:", file=sys.stderr)
     print(f"  - add '{ALLOW_PRAGMA}' as a comment on that line, or", file=sys.stderr)
-    print(f"  - add a regex for it to {ALLOWLIST_FILENAME} in the repo root.", file=sys.stderr)
+    print(f"  - add a regex for it to {ALLOWLIST_FILENAME} in the repo root", file=sys.stderr)
+    print(f"    (a path regex exempts the file; '{ALLOWLIST_LINE_PREFIX}<regex>' exempts matching lines).", file=sys.stderr)
     if hook_mode:
         print("  - last resort: git commit --no-verify (skips ALL pre-commit hooks).", file=sys.stderr)
     print("", file=sys.stderr)
@@ -470,7 +439,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if root is None:
             print("secret-scan: not inside a git repository", file=sys.stderr)
             return 2
-        findings = scan_staged(root, entropy=args.entropy)
+        try:
+            findings = scan_staged(root, entropy=args.entropy)
+        except GitError as exc:
+            print(f"secret-scan: the scan did NOT run — {exc}", file=sys.stderr)
+            print("secret-scan: refusing to pass an unscanned commit; fix git and retry,",
+                  file=sys.stderr)
+            print("             or bypass once with: git commit --no-verify", file=sys.stderr)
+            return 2
     else:
         target = args.path.expanduser()
         if not target.exists():

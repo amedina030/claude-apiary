@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook — block `git push` when the outgoing diff contains secrets.
+"""PreToolUse hook — block `git push` when the outgoing commits contain secrets.
 
 A companion to ``pre_push_doc_conformer`` (same fire-at-push design): the
 written rule "always sweep the diff for secrets before pushing" has the same
@@ -10,84 +10,72 @@ is attempted.
 Behaviour:
   - Fires on Bash tool calls that perform a ``git push`` (detection reused
     verbatim from ``pre_push_doc_conformer.command_pushes``).
-  - Computes the *outgoing* diff — the added lines in commits that are on
-    ``HEAD`` but not on any remote — and scans those added lines for
-    high-signal secret patterns (API keys, private keys, bearer tokens,
-    high-entropy ``client_secret``/``password``-style assignments, …).
-  - A match BLOCKS the push, reporting each offending ``file:line`` with the
-    secret value redacted (so the gate's own report never re-leaks it).
+  - Works out *what* is being pushed: the ref named on the command line
+    (``git push origin feature``), every branch for ``--all``/``--mirror``,
+    or ``HEAD`` when nothing is named. Honours ``git -C <dir> push``.
+  - Scans the added lines of **every outgoing commit individually** (commits
+    reachable from the pushed ref but from no ref on the target remote). A
+    secret committed and then removed two commits later is still in the
+    history being pushed, and a cumulative base..HEAD diff would not show it.
+  - Applies the shared rule table in ``core/secret_patterns`` — the same
+    literal patterns and the same generic ``key = value`` rule as the
+    commit-time gate, so the two can never disagree.
+  - A match BLOCKS the push, reporting each offending ``file:line`` and commit
+    with the secret redacted (so the gate's own report never re-leaks it).
 
-Override: append the detect-secrets convention ``pragma: allowlist secret``
-to a line to whitelist an intentional fixture/example. The marker is matched
-case-insensitively anywhere on the line.
+Override: append ``apiary:allow-secret`` or the detect-secrets convention
+``pragma: allowlist secret`` to a line to whitelist an intentional fixture.
 
-Fail-open on any *internal* error (bad payload, git not runnable, timeout):
-a buggy gate must never wedge your ability to push. Unlike the doc-conformer,
-this gate has no per-repo file guard — secret hygiene is universal, so it runs
-in every bootstrapped repo. Runner subprocesses are exempt (consistent with
-the other core hooks, #228).
+Failure policy. Internal errors *before* the scan (bad payload, git not on
+PATH) fail open so a buggy gate cannot wedge every push. But once we know a
+push is happening, a scan that does not complete — git timing out on a huge
+first push, or exiting non-zero — BLOCKS with a message saying the scan did
+not run: a security control that quietly stops working is worse than one that
+is loudly broken. Runner subprocesses are exempt (consistent with the other
+core hooks, #228).
 """
 from __future__ import annotations
 
-import math
+import os
 import re
+import shlex
+import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 # Make the repo root importable before any cross-import from `core` — this hook
-# is the only one with a top-level `core` import, so the sys.path setup that
-# other hooks defer into their functions must happen here at module scope
-# (stdlib → sys.path.insert → internal, per docs/standards/code-style.md).
-# Without it a fresh install crashes with `ModuleNotFoundError: No module
-# named 'core'` at import time, before main()'s own sys.path.insert runs.
+# has top-level `core` imports, so the sys.path setup that other hooks defer
+# into their functions must happen here at module scope (stdlib →
+# sys.path.insert → internal, per docs/standards/code-style.md).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from core import secret_patterns  # noqa: E402
 
 # The push detector is identical to the doc-conformer's; reuse it so the two
 # gates can never disagree about what counts as a push.
-from core.hooks.pre_push_doc_conformer import command_pushes
+from core.hooks.pre_push_doc_conformer import command_pushes  # noqa: E402
 
-# Git's well-known empty-tree object — used as the diff base when the oldest
-# outgoing commit is a root commit (no parent to diff against).
-_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-
-# detect-secrets-style inline allowlist marker. A line carrying this is an
-# intentional fixture/example and is skipped.
-# Both allowlist spellings: this gate shipped with the detect-secrets form,
-# the commit-time gate added its own, and each honours both so a line silenced
-# for one is silenced for the other.
 _ALLOW_PRAGMA = secret_patterns.PRAGMA_RE
 
-# The literal-credential table is shared with scripts/secret_scan.py so the two
-# gates cannot drift (#T-2026-260). The generic key=value rule below stays
-# local: it gates on entropy, while the commit-time gate filters placeholders
-# and prose instead. Both are defensible and tuned against different
-# false-positive pressures, so unifying them would change what this gate
-# blocks rather than merely de-duplicate.
-_PATTERNS = [(p.name, p.regex) for p in secret_patterns.PATTERNS]
+# Kept for callers/tests that import it by this name.
+_shannon_entropy = secret_patterns.shannon_entropy
 
-# Generic ``name = "value"`` / ``name: value`` assignments whose *name* names a
-# credential. These fire only when the value also clears the entropy gate, so
-# placeholders like ``password = "changeme"`` or ``api_key: your_key_here`` are
-# ignored while real high-entropy secrets are caught.
-_ASSIGNMENT = re.compile(
-    r"(?i)\b(client_secret|aws_secret_access_key|secret_key|api[_-]?key|"
-    r"access_token|auth_token|password|passwd|token)\b\s*[:=]\s*"
-    r"['\"]?([^\s'\"]{12,})['\"]?"
-)
-_ENTROPY_MIN = 4.0  # shannon bits/char; placeholder words fall well below this.
+_SHA_LINE = re.compile(r"^[0-9a-f]{40}$")
+_SEGMENT_SPLIT = re.compile(r"\|\||&&|;|\|")
+_OPTS_WITH_VALUE = {"-o", "--push-option", "--repo", "--receive-pack", "--exec", "-C", "-c"}
+_GIT_GLOBAL_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
+
+SCAN_TIMEOUT_SECONDS = 120
 
 
-def _shannon_entropy(s: str) -> float:
-    """Shannon entropy (bits per character) of *s*. 0.0 for empty input."""
-    if not s:
-        return 0.0
-    counts = {}
-    for ch in s:
-        counts[ch] = counts.get(ch, 0) + 1
-    n = len(s)
-    return -sum((c / n) * math.log2(c / n) for c in counts.values())
+class PushTarget(NamedTuple):
+    """What a ``git push`` command line is about to send."""
+
+    remote: str | None      # named remote, or None for "default"/URL
+    refs: tuple[str, ...]   # local refs to scan; ("HEAD",) when unnamed
+    everything: bool        # --all / --mirror / --branches
+    cwd: str | None         # from `git -C <dir>`, if given
 
 
 def scan_line(content: str):
@@ -98,15 +86,10 @@ def scan_line(content: str):
     """
     if not content or _ALLOW_PRAGMA.search(content):
         return []
-    hits = []
-    for rule, pat in _PATTERNS:
-        m = pat.search(content)
-        if m:
-            hits.append((rule, _redact(m.group(0))))
-    m = _ASSIGNMENT.search(content)
-    if m and _shannon_entropy(m.group(2)) >= _ENTROPY_MIN:
-        hits.append(("high-entropy-assignment", _redact(m.group(2))))
-    return hits
+    hit = secret_patterns.find_any(content)
+    if hit is None:
+        return []
+    return [(hit.rule, hit.prefix + _redact(hit.secret))]
 
 
 def _redact(secret: str) -> str:
@@ -115,6 +98,14 @@ def _redact(secret: str) -> str:
     if len(secret) <= 8:
         return secret[:2] + "***"
     return f"{secret[:4]}…{secret[-2:]} ({len(secret)} chars)"
+
+
+def _unquote_path(target: str) -> str:
+    """Undo git's C-style quoting of unusual paths (``"b/a \\"b\\".py"``)."""
+    if len(target) >= 2 and target[0] == '"' and target[-1] == '"':
+        inner = target[1:-1]
+        return re.sub(r"\\(.)", r"\1", inner)
+    return target
 
 
 def iter_added_lines(diff_text: str):
@@ -127,7 +118,7 @@ def iter_added_lines(diff_text: str):
     for raw in diff_text.splitlines():
         if raw.startswith("+++ "):
             # "+++ b/path/to/file" — strip the b/ prefix; "/dev/null" on delete.
-            target = raw[4:].strip()
+            target = _unquote_path(raw[4:].strip())
             if target.startswith("b/"):
                 target = target[2:]
             path = None if target == "/dev/null" else target
@@ -148,37 +139,144 @@ def iter_added_lines(diff_text: str):
             new_lineno += 1
 
 
-def scan_diff(diff_text: str):
+def scan_diff(diff_text: str, allowlist: secret_patterns.Allowlist | None = None):
     """Scan a unified diff's added lines. Return a list of
     ``(path, lineno, rule, redacted_preview)`` findings — empty if clean.
+
+    *allowlist* is the repo's ``.secretsallow`` (shared with the commit gate):
+    path rules exempt whole files, line rules exempt matching lines.
     """
+    allow = allowlist or secret_patterns.Allowlist()
     findings = []
     for path, lineno, content in iter_added_lines(diff_text):
+        if path and allow.allows_path(path):
+            continue
+        if allow.allows_line(content):
+            continue
         for rule, preview in scan_line(content):
             findings.append((path or "<unknown>", lineno, rule, preview))
     return findings
 
 
+def scan_patch_series(log_text: str, allowlist: secret_patterns.Allowlist | None = None):
+    """Scan ``git log -p --format=%H`` output: one patch per commit.
+
+    Returns ``(sha, path, lineno, rule, redacted_preview)`` tuples, de-duplicated
+    on ``(path, rule, preview)`` so a secret carried through several commits is
+    reported once, against the first commit that introduced it.
+    """
+    findings = []
+    seen = set()
+    sha = ""
+    chunk: list[str] = []
+
+    def flush():
+        for path, lineno, rule, preview in scan_diff("\n".join(chunk), allowlist):
+            key = (path, rule, preview)
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append((sha, path, lineno, rule, preview))
+
+    for raw in log_text.splitlines():
+        if _SHA_LINE.match(raw):
+            flush()
+            sha = raw
+            chunk = []
+            continue
+        chunk.append(raw)
+    flush()
+    return findings
+
+
+def _looks_like_url(token: str) -> bool:
+    return "://" in token or token.startswith("git@") or token.endswith(".git")
+
+
+def push_target(command: str) -> PushTarget:
+    """Parse the push segment of *command* into what will be pushed.
+
+    Handles compound commands (``git add . && git push origin main``), ``-C``,
+    ``--all``/``--mirror``, ``+ref``, ``src:dst`` refspecs, ``tag <name>``, and
+    deletions (``:ref`` — nothing outgoing). Unknown shapes fall back to HEAD,
+    which is the conservative choice: HEAD is what an unqualified push sends.
+    """
+    for segment in _SEGMENT_SPLIT.split(command):
+        try:
+            toks = shlex.split(segment, posix=True)
+        except ValueError:
+            toks = segment.split()
+        if "git" not in toks:
+            continue
+        i = toks.index("git") + 1
+        cwd = None
+        # git's own global options come before the subcommand.
+        while i < len(toks) and toks[i].startswith("-"):
+            tok = toks[i]
+            if tok in _GIT_GLOBAL_WITH_VALUE and i + 1 < len(toks):
+                if tok == "-C":
+                    cwd = toks[i + 1]
+                i += 2
+                continue
+            if tok.startswith("-C") and len(tok) > 2:
+                cwd = tok[2:]
+            i += 1
+        if i >= len(toks) or toks[i] != "push":
+            continue
+        i += 1
+        everything = False
+        positional: list[str] = []
+        while i < len(toks):
+            tok = toks[i]
+            if tok in ("--all", "--mirror", "--branches"):
+                everything = True
+            elif tok.startswith("-"):
+                if tok in _OPTS_WITH_VALUE and i + 1 < len(toks):
+                    i += 1
+            else:
+                positional.append(tok)
+            i += 1
+        remote = None
+        refs: list[str] = []
+        if positional:
+            remote = None if _looks_like_url(positional[0]) else positional[0]
+            specs = positional[1:]
+            j = 0
+            while j < len(specs):
+                spec = specs[j]
+                if spec == "tag" and j + 1 < len(specs):
+                    refs.append(specs[j + 1])
+                    j += 2
+                    continue
+                src = spec.lstrip("+").split(":", 1)[0]
+                if src:                     # ":ref" is a deletion — nothing outgoing
+                    refs.append(src)
+                j += 1
+        return PushTarget(remote, tuple(refs) or ("HEAD",), everything, cwd)
+    return PushTarget(None, ("HEAD",), False, None)
+
+
+def outgoing_log_args(target: PushTarget, verified_refs: list[str]) -> list[str]:
+    """Build the ``git log`` argument list for the outgoing patch series."""
+    refs = ["--branches"] if target.everything else (verified_refs or ["HEAD"])
+    remotes = f"--remotes={target.remote}" if target.remote else "--remotes"
+    return [
+        "-c", "core.quotepath=false",
+        "log", "-p", "--no-color", "--no-ext-diff", "--no-textconv", "--format=%H",
+        *refs, "--not", remotes,
+    ]
+
+
 def main():
-    """Entry point. Fail-open on any internal error — never wedge a push."""
+    """Entry point. Fail-open only on internal errors *before* the scan."""
     try:
         _run()
     except Exception:
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
         from core.hook_context import hook_allow
         hook_allow()
 
 
-def _run():  # pragma: no cover — pure logic lives in scan_diff (tested);
-    #                               this is the I/O + subprocess shell.
-    import os
-    import subprocess
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+def _run():  # pragma: no cover — the pure pieces are tested; this is the shell.
     from core.hook_context import hook_allow, hook_block, read_payload
 
     if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
@@ -196,57 +294,79 @@ def _run():  # pragma: no cover — pure logic lives in scan_diff (tested);
         hook_allow()
         return
 
+    target = push_target(command)
     cwd = payload.get("cwd") or os.getcwd()
+    if target.cwd:
+        cwd = str((Path(cwd) / target.cwd).resolve())
 
     def _git(*args, timeout=30):
         return subprocess.run(
             ["git", "-C", str(cwd), *args],
-            capture_output=True, text=True, timeout=timeout, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout, check=False,
         )
 
-    # Outgoing commits: on HEAD, on no remote. Empty → nothing new to leak.
+    # Everything up to here is "is this even a push we can inspect?" — git
+    # missing entirely is an internal error and fails open. From the first
+    # real git call on, a scan that doesn't complete blocks.
     try:
-        rev = _git("rev-list", "HEAD", "--not", "--remotes")
+        verified = [
+            r for r in target.refs
+            if _git("rev-parse", "--verify", "--quiet", r).returncode == 0
+        ]
     except (OSError, subprocess.SubprocessError):
         hook_allow()
         return
-    if rev.returncode != 0:
-        hook_allow()
-        return
-    shas = rev.stdout.split()
-    if not shas:
-        hook_allow()
-        return
 
-    # Diff base = parent of the oldest outgoing commit, or the empty tree if it
-    # is a root commit. Gives the cumulative added lines about to be pushed.
-    oldest = shas[-1]
     try:
-        parent = _git("rev-parse", "--verify", "--quiet", f"{oldest}^")
-        base = parent.stdout.strip() if parent.returncode == 0 else _EMPTY_TREE
-        diff = _git("diff", "--no-color", base, "HEAD", timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        hook_allow()
+        log = _git(*outgoing_log_args(target, verified), timeout=SCAN_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        hook_block(
+            f"Push blocked: the secret scan did not finish within "
+            f"{SCAN_TIMEOUT_SECONDS}s, so the outgoing commits were NOT checked. "
+            "Run `python scripts/secret_scan.py --path .` in the repo, then push "
+            "from a terminal if it is clean."
+        )
         return
-    if diff.returncode != 0:
-        hook_allow()
+    except (OSError, subprocess.SubprocessError) as exc:
+        hook_block(
+            "Push blocked: the secret scan could not run git "
+            f"({exc.__class__.__name__}), so the outgoing commits were NOT checked."
+        )
+        return
+    if log.returncode != 0:
+        hook_block(
+            "Push blocked: the secret scan could not list the outgoing commits, "
+            "so they were NOT checked.\n\n" + (log.stderr or "").strip()
+        )
         return
 
-    findings = scan_diff(diff.stdout)
+    # The repo's .secretsallow applies here exactly as it does at commit time,
+    # so a fixture file exempted for one gate is exempted for the other.
+    allowlist = secret_patterns.Allowlist()
+    try:
+        top = _git("rev-parse", "--show-toplevel")
+        if top.returncode == 0 and top.stdout.strip():
+            allowlist = secret_patterns.load_allowlist(Path(top.stdout.strip()))
+    except (OSError, subprocess.SubprocessError):
+        pass                                # no allowlist → strictest scan
+
+    findings = scan_patch_series(log.stdout, allowlist)
     if not findings:
         hook_allow()
         return
 
-    lines = [f"  {path}:{lineno}  [{rule}]  {preview}"
-             for path, lineno, rule, preview in findings]
+    lines = [f"  {path}:{lineno}  @{sha[:8]}  [{rule}]  {preview}"
+             for sha, path, lineno, rule, preview in findings]
     hook_block(
-        "Push blocked: possible secret(s) in the outgoing diff. The values "
+        "Push blocked: possible secret(s) in the outgoing commits. The values "
         "below are about to leave your machine — verify each, then remove or "
-        "rotate it before pushing.\n\n"
+        "rotate it before pushing. A secret that was later deleted is still in "
+        "the history being pushed; rewrite the commits, don't just remove the line.\n\n"
         + "\n".join(lines)
         + "\n\nIf a hit is an intentional fixture/example, append "
-        "'pragma: allowlist secret' to that line to whitelist it. The gate "
-        "fails open on internal errors — only real pattern matches block."
+        "'apiary:allow-secret' (or 'pragma: allowlist secret') to that line, "
+        "or add a path regex for the file to the repo-root .secretsallow."
     )
 
 
