@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Runner never pushes, never sweeps, never runs unbounded (2026-08-26)
+
+Review runner Bug 9 and the permissions note.
+
+- `runner/approval.py` no longer pushes. A fully-resolved run is
+  squash-merged to master locally, reported as `merged-locally`, and a todo
+  asks the operator to review and push. The unattended push from the
+  interactive checkout was the worst path in the package.
+- `auto_harden.commit_all` uses `git add -u` plus the round's declared files
+  instead of `git add -A`, which swept the operator's untracked scratch
+  files into "harden round fixes" commits.
+- `claude_subprocess.run_claude` passes `--disallowedTools "Bash(git push *)"
+  "Bash(git push:*)"` and `--max-turns 150` on every stage call, so a
+  subprocess can neither push (whatever the operator's own settings allow)
+  nor loop until the timeout. Both are parameters for callers that need
+  something else.
+
 ### GUI: no lost messages on attach, no raw Ctrl+C, no orphaned claude (2026-08-26)
 
 Review gui #2/#3/#4/#12.

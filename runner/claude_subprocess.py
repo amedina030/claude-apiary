@@ -104,12 +104,23 @@ def _build_subprocess_env(parent_env: dict[str, str] | None = None,
 # unbounded memory growth for unexpectedly large subprocess outputs.
 _MAX_OUTPUT_BYTES = 50 * 1024 * 1024  # 50 MB
 
+# Every runner-spawned claude gets these regardless of what the operator's
+# own Claude Code settings allow (review runner: the subprocess inherited
+# `Bash(git push *)` from .claude/settings.local.json). Both rule spellings
+# are passed because Claude Code accepted `Bash(cmd:*)` before `Bash(cmd *)`.
+DEFAULT_DISALLOWED_TOOLS = ("Bash(git push *)", "Bash(git push:*)")
+# Hard ceiling on agentic turns per stage call so a looping subprocess
+# cannot run until the timeout alone stops it.
+DEFAULT_MAX_TURNS = 150
+
 
 def run_claude(
     prompt: str,
     *,
     timeout: int | None = 300,
     model: str | None = None,
+    max_turns: int | None = DEFAULT_MAX_TURNS,
+    disallowed_tools=DEFAULT_DISALLOWED_TOOLS,
 ) -> tuple[int, str, str]:
     """Run a `claude -p` subprocess and return (returncode, stdout, stderr).
 
@@ -124,6 +135,11 @@ def run_claude(
     model:
         If given, passed as ``--model <model>``.  Must be a non-empty,
         non-whitespace string.
+    max_turns:
+        Passed as ``--max-turns``; ``None`` removes the ceiling.
+    disallowed_tools:
+        Permission rules passed as ``--disallowedTools``; the default denies
+        ``git push``. Pass an empty sequence to send none.
 
     Returns
     -------
@@ -142,6 +158,13 @@ def run_claude(
     cmd = ["claude", "-p", "-", "--output-format", "json"]
     if model:
         cmd.extend(["--model", model])
+    if max_turns is not None:
+        if int(max_turns) <= 0:
+            raise ValueError(f"max_turns must be positive, got {max_turns!r}")
+        cmd.extend(["--max-turns", str(int(max_turns))])
+    rules = [r for r in (disallowed_tools or ()) if r]
+    if rules:
+        cmd.extend(["--disallowedTools", *rules])
 
     env = _build_subprocess_env()
 

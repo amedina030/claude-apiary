@@ -3,7 +3,7 @@
 Approval — Stage 6 of the runner.
 
 Reads the harden verdict and either:
-  - all_resolved: squash merge to master, push, write decision note
+  - all_resolved: squash merge to master (locally — never pushes), write decision note
   - has_unresolved: leave branch, write TODO note
 
 Produces a final runner report aggregating all stage artifacts.
@@ -96,12 +96,14 @@ def squash_merge(branch: str, message: str) -> tuple[bool, str]:
     return True, ""
 
 
-def push() -> tuple[bool, str]:
-    """Push current branch to remote. Returns (success, error)."""
-    result = git("push")
-    if result.returncode != 0:
-        return False, result.stderr.strip()
-    return True, ""
+# There is deliberately no push() here. The runner merges to master locally
+# and stops; pushing is the operator's call (review runner Bug 9 / security:
+# an unattended push from the interactive checkout was the worst-case path).
+MERGED_LOCALLY_NOTE = (
+    "RUNNER MERGED LOCALLY: {title}. Branch {branch} squash-merged to master "
+    "in the working checkout but NOT pushed — review `git log master` and push "
+    "when satisfied."
+)
 
 
 # -- Scribe helper --
@@ -343,24 +345,13 @@ def main():
                     print(f"Merge failed: {err}", file=sys.stderr)
                     exit_code = 1
             else:
-                # Push
-                ok, err = push()
-                if not ok:
-                    path_taken = "push-failed"
-                    print(f"Push failed: {err}", file=sys.stderr)
-                    write_scribe_note(
-                        "todo",
-                        f"RUNNER PUSH FAILED: {title}. Branch {branch} merged locally but push failed: {err}. "
-                        f"Push manually."
-                    )
-                    exit_code = 1
-                else:
-                    path_taken = "auto-merged"
-                    write_scribe_note(
-                        "decision",
-                        f"RUNNER COMPLETE: {title}. Auto-merged {branch} to master. "
-                        f"{total_resolved} findings resolved across {harden_rounds} harden rounds."
-                    )
+                path_taken = "merged-locally"
+                print(f"Merged {branch} to master locally; not pushed", file=sys.stderr)
+                write_scribe_note(
+                    "todo",
+                    MERGED_LOCALLY_NOTE.format(title=title, branch=branch)
+                    + f" {total_resolved} findings resolved across {harden_rounds} harden rounds."
+                )
 
     elif verdict == "defender_failed":
         # Harden run is structurally broken — defender produced no responses
@@ -424,24 +415,14 @@ def main():
                         print(f"Merge failed: {err}", file=sys.stderr)
                         exit_code = 1
                 else:
-                    ok, err = push()
-                    if not ok:
-                        path_taken = "push-failed"
-                        print(f"Push failed: {err}", file=sys.stderr)
-                        write_scribe_note(
-                            "todo",
-                            f"RUNNER PUSH FAILED: {title}. Branch {branch} merged locally but push failed: {err}. "
-                            f"Push manually."
-                        )
-                        exit_code = 1
-                    else:
-                        path_taken = "auto-merged"
-                        write_scribe_note(
-                            "decision",
-                            f"RUNNER COMPLETE: {title}. Auto-merged {branch} to master. "
-                            f"{total_resolved} findings resolved, {len(deferrals)} deferrals accepted "
-                            f"across {harden_rounds} harden rounds."
-                        )
+                    path_taken = "merged-locally"
+                    print(f"Merged {branch} to master locally; not pushed", file=sys.stderr)
+                    write_scribe_note(
+                        "todo",
+                        MERGED_LOCALLY_NOTE.format(title=title, branch=branch)
+                        + f" {total_resolved} findings resolved, {len(deferrals)} deferrals accepted "
+                        f"across {harden_rounds} harden rounds."
+                    )
         else:
             path_taken = "pending-review"
             unresolved_list = ", ".join(unresolved) if unresolved else "unknown"

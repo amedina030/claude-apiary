@@ -1,12 +1,58 @@
 #!/usr/bin/env python3
 """Unit tests for runner/claude_subprocess.py env allowlist."""
 import unittest
+import subprocess
+from unittest import mock
 
 from runner.claude_subprocess import (
     ALLOW_ALL_ENV_VAR,
     RUNNER_SUBPROCESS_ENV_VAR,
     _build_subprocess_env,
 )
+
+
+class TestRunClaudeCommand(unittest.TestCase):
+    """The argv every runner stage spawns: git push denied, turns capped."""
+
+    def _argv(self, **kwargs):
+        from runner import claude_subprocess as cs
+        captured = {}
+
+        def fake_run(cmd, **run_kwargs):
+            captured["cmd"] = list(cmd)
+            return subprocess.CompletedProcess(cmd, 1, stdout=b"", stderr=b"stub")
+
+        with mock.patch.object(cs.subprocess, "run", fake_run):
+            rc, _out, _err = cs.run_claude("hello", **kwargs)
+        self.assertEqual(rc, 1)
+        return captured["cmd"]
+
+    def test_default_denies_git_push_and_caps_turns(self):
+        from runner import claude_subprocess as cs
+        cmd = self._argv()
+        self.assertEqual(cmd[:5], ["claude", "-p", "-", "--output-format", "json"])
+        i = cmd.index("--disallowedTools")
+        self.assertEqual(tuple(cmd[i + 1:i + 1 + len(cs.DEFAULT_DISALLOWED_TOOLS)]),
+                         cs.DEFAULT_DISALLOWED_TOOLS)
+        self.assertIn("Bash(git push *)", cmd)
+        j = cmd.index("--max-turns")
+        self.assertEqual(cmd[j + 1], str(cs.DEFAULT_MAX_TURNS))
+
+    def test_model_and_overrides(self):
+        cmd = self._argv(model="sonnet", max_turns=7, disallowed_tools=("Bash(rm *)",))
+        self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
+        self.assertEqual(cmd[cmd.index("--max-turns") + 1], "7")
+        self.assertEqual(cmd[cmd.index("--disallowedTools") + 1:], ["Bash(rm *)"])
+
+    def test_none_and_empty_remove_the_flags(self):
+        cmd = self._argv(max_turns=None, disallowed_tools=())
+        self.assertNotIn("--max-turns", cmd)
+        self.assertNotIn("--disallowedTools", cmd)
+
+    def test_non_positive_max_turns_rejected(self):
+        from runner import claude_subprocess as cs
+        with self.assertRaises(ValueError):
+            cs.run_claude("x", max_turns=0)
 
 
 class TestBuildSubprocessEnv(unittest.TestCase):

@@ -765,7 +765,7 @@ Verdicts written to the artifact:
 
 ## runner/approval.py
 
-Approval — Stage 6. Reads the harden verdict and either auto-merges (all resolved), flags for review (unresolved findings), or halts on `defender_failed` without merging or writing a note. Includes a deferral review sub-step that uses Claude to evaluate deferred findings on the `has_unresolved` path.
+Approval — Stage 6. Reads the harden verdict and either squash-merges to master **locally** (all resolved — it never pushes; a todo asks the operator to review and push), flags for review (unresolved findings), or halts on `defender_failed` without merging or writing a note. Includes a deferral review sub-step that uses Claude to evaluate deferred findings on the `has_unresolved` path.
 
 ```bash
 python -m runner.approval runner/hardens/<uuid>.json
@@ -775,7 +775,7 @@ python -m runner.approval runner/hardens/<uuid>.json
 |----------|----------|-------------|
 | `harden_result` | yes | Path to harden result JSON |
 
-Output: `runner/reports/<uuid>.json`. Path taken: `auto-merged`, `pending-review`, `defender-failed`, or a merge/push error. Exits non-zero on `defender_failed` so `overnight.jsonl` records the failure.
+Output: `runner/reports/<uuid>.json`. Path taken: `merged-locally`, `pending-review`, `defender-failed`, or a merge error. Exits non-zero on `defender_failed` so `overnight.jsonl` records the failure.
 
 ## runner/draft_ticket.py
 

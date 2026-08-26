@@ -59,8 +59,17 @@ def checkout(branch: str):
         raise RuntimeError(f"Git checkout failed: {result.stderr.strip()}")
 
 
-def commit_all(message: str):
-    git("add", "-A")
+def commit_all(message: str, paths=()):
+    """Commit the defender's fixes: modified tracked files plus *paths*.
+
+    Not ``git add -A`` — in interactive mode the runner works in the
+    operator's checkout, and ``-A`` swept every untracked scratch file into a
+    "harden round fixes" commit (review runner Bug 9).
+    """
+    git("add", "-u")
+    existing = [p for p in paths if Path(p).exists()]
+    if existing:
+        git("add", "--", *existing)
     result = git("commit", "-m", message)
     if result.returncode != 0:
         # No changes to commit is OK
@@ -461,7 +470,7 @@ def main():
 
             # Commit defender fixes
             try:
-                commit_all(f"runner/{uuid} harden round {round_num} fixes")
+                commit_all(f"runner/{uuid} harden round {round_num} fixes", changed_files)
             except RuntimeError as e:
                 print(f"  Git warning: {e}", file=sys.stderr)
 
