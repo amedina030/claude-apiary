@@ -81,6 +81,29 @@ Notes are primarily for Claude's own use — to maintain continuity across sessi
 
 ---
 
+## Note templates
+
+Each note type has a template at `<state-dir>/scribe/templates/<type>.md`, seeded from `scribe/default_templates/` when the repo was bootstrapped. Read one before writing an unfamiliar type:
+
+```bash
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py template show handoff
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py template list
+```
+
+Most templates are **guidance only** — they describe what a good note of that type contains and never block a write. Three declare `required:` sections in their frontmatter, and `notes.py add` rejects content that omits any of them:
+
+| Type | Required sections |
+|---|---|
+| `handoff` | What was done · Key decisions · What's pending · Where it stopped |
+| `decision` | Context · Decision · Why · Consequences |
+| `blocker` | Blocked on · Tried · Unblock when |
+
+A section counts as present when it appears as a Markdown heading (`### What was done`) or a bold label (`**Why:**`), case-insensitive. On rejection the CLI prints the template and exits 1 — add the missing sections and re-run. `--force` writes anyway and logs what was missing; use it only when the note genuinely has no such section, not to skip the work. The check runs on `add` only: existing notes are never validated or rewritten, and editing a template only affects notes written after the edit.
+
+To change the shape for this repo, edit `<state-dir>/scribe/templates/<type>.md` — bootstrap never overwrites an existing template.
+
+---
+
 ## When to write a learning
 
 Learnings are project-specific things you discover during task execution. They persist indefinitely (no auto-archive) and are loaded into every session startup context.

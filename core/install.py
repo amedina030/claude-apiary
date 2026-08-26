@@ -85,6 +85,7 @@ def install(
     slug = f"{name}-{uid}"
     state_dir = state.repos_dir(apiary) / slug
     state_dir.mkdir(parents=True, exist_ok=True)
+    _scaffold_scribe_templates(state_dir)
 
     apiary_version = state.read_apiary_version(apiary)
     now = state._now_iso()
@@ -368,6 +369,31 @@ _GITIGNORE_PRESENT = (".claude/", "/.claude/", ".claude", "/.claude",
 
 # The old spelling, which works but offers no way to track repo-owned commands.
 _GITIGNORE_BLANKET = (".claude/", "/.claude/", ".claude", "/.claude")
+
+
+def _scaffold_scribe_templates(state_dir: Path) -> None:
+    """Seed ``<state-dir>/scribe/templates/`` with the bundled per-type templates.
+
+    Bootstrap (and self-bootstrap, which routes through :func:`install`) is the
+    one moment every managed repo passes through, so it is where the templates
+    land. Existing templates are never overwritten — re-running install must
+    not clobber a user's edits. Best-effort: a repo without templates still
+    works (the gate simply doesn't apply), so a failure warns, never raises.
+    """
+    try:
+        from scribe.notes import SCRIBE_SUBDIR, scaffold_default_templates
+    except Exception as exc:  # noqa: BLE001 - never fail an install over this
+        print(f"  scribe templates : SKIPPED (import failed: {exc})")
+        return
+    try:
+        written = scaffold_default_templates(state_dir / SCRIBE_SUBDIR)
+    except OSError as exc:
+        print(f"  scribe templates : SKIPPED ({exc.__class__.__name__}: {exc})")
+        return
+    if written:
+        print(f"  scribe templates : wrote {', '.join(written)}")
+    else:
+        print("  scribe templates : already present")
 
 
 def _install_secret_scan_hook(target_root: Path) -> None:

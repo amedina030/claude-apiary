@@ -338,21 +338,20 @@ class TestScribeNotes(unittest.TestCase):
         self.assertEqual(result['content'], 'show me')
 
     # ------------------------------------------------------------------
-    # Template gate (T-2026-212)
+    # Template gate (deep review §5a-B, option C — required sections only)
     # ------------------------------------------------------------------
 
-    def _write_template(self, note_type: str, body: str) -> str:
+    def _write_template(self, note_type: str, body: str) -> None:
         path = notes.template_path(self.tmp_dir, note_type)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding='utf-8')
-        return notes.template_hash(body)
 
     def _add_args(self, **overrides):
         defaults = dict(
             type='todo', content='body text', content_file=None,
             summary='', brief_summary='',
             session_id='sess1', auto=False, role='', mission='',
-            if_no_handoff_for=None, ack_template='',
+            if_no_handoff_for=None, force=False,
         )
         defaults.update(overrides)
         return self._make_args(**defaults)
@@ -368,41 +367,39 @@ class TestScribeNotes(unittest.TestCase):
         notes.cmd_add(self._add_args())
         self.assertEqual(len(self.store.list_notes(note_type='todo')), 1)
 
-    def test_template_gate_blocks_without_ack(self):
-        self._write_template('todo', 'must include a target dir.')
+    def test_template_gate_without_required_no_block(self):
+        # Guidance-only template (no `required:`) never blocks a write.
+        self._write_template('todo', 'name the file the work starts from.')
+        notes.cmd_add(self._add_args())
+        self.assertEqual(len(self.store.list_notes(note_type='todo')), 1)
+
+    def test_template_gate_blocks_on_missing_section(self):
+        self._write_template('todo', '---\nrequired: [Goal, Done when]\n---\n## Goal\n')
         with self.assertRaises(SystemExit):
-            notes.cmd_add(self._add_args())
+            notes.cmd_add(self._add_args(content='## Goal\nship it'))
         # Note must NOT be created when the gate trips.
         self.assertEqual(len(self.store.list_notes(note_type='todo')), 0)
 
-    def test_template_gate_passes_with_correct_hash(self):
-        h = self._write_template('todo', 'must include a target dir.')
-        notes.cmd_add(self._add_args(ack_template=h))
+    def test_template_gate_passes_when_sections_present(self):
+        self._write_template('todo', '---\nrequired: [Goal, Done when]\n---\n')
+        notes.cmd_add(self._add_args(content='## Goal\nship it\n\n## Done when\ngreen\n'))
         self.assertEqual(len(self.store.list_notes(note_type='todo')), 1)
-
-    def test_template_gate_rejects_wrong_hash(self):
-        self._write_template('todo', 'must include a target dir.')
-        with self.assertRaises(SystemExit):
-            notes.cmd_add(self._add_args(ack_template='deadbeefcafe'))
-        self.assertEqual(len(self.store.list_notes(note_type='todo')), 0)
 
     def test_template_gate_only_affects_matching_type(self):
         # Template for 'todo' must not block adding a 'context' note.
-        self._write_template('todo', 'todos need a target dir.')
+        self._write_template('todo', '---\nrequired: [Goal]\n---\n')
         notes.cmd_add(self._add_args(type='context'))
         self.assertEqual(len(self.store.list_notes(note_type='context')), 1)
 
-    def test_template_gate_detects_mid_flight_edit(self):
-        h_old = self._write_template('todo', 'version 1')
-        # User edits the template between Claude reading and writing.
-        h_new = self._write_template('todo', 'version 2 — new rules')
-        self.assertNotEqual(h_old, h_new)
+    def test_template_gate_picks_up_an_edited_template(self):
+        # No cached hash to go stale: each add reads the file as it is now.
+        self._write_template('todo', '---\nrequired: [Goal]\n---\n')
+        notes.cmd_add(self._add_args(content='## Goal\nv1'))
+        self._write_template('todo', '---\nrequired: [Goal, Risk]\n---\n')
         with self.assertRaises(SystemExit):
-            notes.cmd_add(self._add_args(ack_template=h_old))
-        self.assertEqual(len(self.store.list_notes(note_type='todo')), 0)
-        # Re-acking with new hash succeeds.
-        notes.cmd_add(self._add_args(ack_template=h_new))
-        self.assertEqual(len(self.store.list_notes(note_type='todo')), 1)
+            notes.cmd_add(self._add_args(content='## Goal\nv2'))
+        notes.cmd_add(self._add_args(content='## Goal\nv2\n\n## Risk\nnone'))
+        self.assertEqual(len(self.store.list_notes(note_type='todo')), 2)
 
     def test_template_path_helper(self):
         p = notes.template_path(self.tmp_dir, 'todo')
@@ -411,13 +408,8 @@ class TestScribeNotes(unittest.TestCase):
     def test_template_text_returns_none_when_missing(self):
         self.assertIsNone(notes.template_text(self.tmp_dir, 'todo'))
 
-    def test_template_hash_deterministic(self):
-        self.assertEqual(notes.template_hash('abc'), notes.template_hash('abc'))
-        self.assertNotEqual(notes.template_hash('abc'), notes.template_hash('abcd'))
-        self.assertEqual(len(notes.template_hash('abc')), notes.TEMPLATE_HASH_LEN)
-
     def test_cmd_template_show_prints_content(self):
-        h = self._write_template('todo', 'use a target dir')
+        self._write_template('todo', 'use a target dir')
         args = self._make_args(template_action='show', type='todo')
         # Just verify it runs without raising; output goes to stdout.
         notes.cmd_template(args)

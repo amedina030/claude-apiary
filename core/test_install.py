@@ -170,6 +170,57 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(mp["main_apiary_uid"], 1)
 
 
+class ScribeTemplateScaffoldTests(unittest.TestCase):
+    """Deep review §5a-B: bootstrap seeds <state-dir>/scribe/templates/."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.apiary = _make_fake_apiary(self.root)
+        self.target = self.root / "demo"
+        self.target.mkdir()
+        _git_init(self.target)
+
+    def _templates_dir(self, result) -> Path:
+        return result.state_dir / "scribe" / "templates"
+
+    def test_install_scaffolds_a_template_per_type(self):
+        from scribe.notes import VALID_TYPES
+
+        result = install_mod.install(self.target, apiary_repo=self.apiary)
+        tpl_dir = self._templates_dir(result)
+        for note_type in VALID_TYPES:
+            self.assertTrue((tpl_dir / f"{note_type}.md").is_file(), f"missing {note_type}.md")
+
+    def test_reinstall_never_overwrites_an_edited_template(self):
+        result = install_mod.install(self.target, apiary_repo=self.apiary)
+        handoff = self._templates_dir(result) / "handoff.md"
+        handoff.write_text("MY OWN TEMPLATE\n", encoding="utf-8")
+        install_mod.install(self.target, apiary_repo=self.apiary)
+        self.assertEqual(handoff.read_text(encoding="utf-8"), "MY OWN TEMPLATE\n")
+
+    def test_deleted_template_is_not_recreated_mid_session_but_is_on_reinstall(self):
+        result = install_mod.install(self.target, apiary_repo=self.apiary)
+        todo = self._templates_dir(result) / "todo.md"
+        todo.unlink()
+        install_mod.install(self.target, apiary_repo=self.apiary)
+        self.assertTrue(todo.is_file())
+
+    def test_self_bootstrap_scaffolds_too(self):
+        from core import self_bootstrap as sb
+        from scribe.notes import VALID_TYPES
+
+        # _make_fake_apiary copies everything install needs; self-bootstrap
+        # additionally checks for a migrations/ sentinel.
+        (self.apiary / "migrations").mkdir(exist_ok=True)
+        _git_init(self.apiary)
+        result = sb.self_bootstrap(self.apiary)
+        tpl_dir = self._templates_dir(result)
+        for note_type in VALID_TYPES:
+            self.assertTrue((tpl_dir / f"{note_type}.md").is_file(), f"missing {note_type}.md")
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -20,7 +20,6 @@ Usage:
     notes.py repair [--dry-run]
 """
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -52,14 +51,16 @@ SCRIBE_SUBDIR = "scribe"
 
 VALID_TYPES = ["todo", "handoff", "decision", "wishlist", "reference", "blocker", "context", "general"]
 
-# Per-type formatting templates that gate `scribe add`. When a non-empty
-# templates/<type>.md exists, the caller must ack its current hash before
-# the write is allowed. See T-2026-212.
+# Per-type formatting templates that gate `scribe add`. A template whose
+# frontmatter declares `required:` sections rejects content that omits any of
+# them; a template with no `required:` is guidance the model can read via
+# `notes.py template show <type>` and is never enforced. The hash-ack flow
+# (T-2026-212) was removed in the 2026-08 review (§5a-B, option C) — one
+# check, one attempt, `--force` to bypass.
 TEMPLATES_DIRNAME = "templates"
-TEMPLATE_HASH_LEN = 12
-# Bundled default templates shipped with apiary (tracked). Bootstrap may copy
-# these into a target's live <state-dir>/scribe/templates/ — see
-# scaffold_handoff_template. Not the live template dir.
+# Bundled default templates shipped with apiary (tracked). `apiary install`
+# copies these into a target's live <state-dir>/scribe/templates/ — see
+# scaffold_default_templates. Not the live template dir.
 DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parent / "default_templates"
 
 _PREFIX_TO_TYPE: dict[str, str] = {
@@ -203,11 +204,6 @@ def template_text(state_dir: Path, note_type: str) -> "str | None":
     return text
 
 
-def template_hash(text: str) -> str:
-    """Short content hash used to detect mid-flight template edits."""
-    return hashlib.sha256(text.encode('utf-8')).hexdigest()[:TEMPLATE_HASH_LEN]
-
-
 def template_required_sections(text: str) -> list:
     """Return the ``required:`` section names declared in a template's frontmatter.
 
@@ -236,23 +232,31 @@ def missing_required_sections(content: str, required: list) -> list:
     return [s for s in required if not _section_present(content, s)]
 
 
-def scaffold_handoff_template(state_dir: Path, *, force: bool = False) -> bool:
-    """Copy the bundled default handoff template into ``<state-dir>/templates/``.
+def scaffold_default_templates(state_dir: Path) -> list:
+    """Copy bundled per-type templates into ``<state-dir>/templates/``.
 
-    Idempotent — skips when ``handoff.md`` already exists unless *force*. Returns
-    True when it wrote the file. **Not** called automatically: turning the
-    handoff gate on repo-wide first requires the handoff writers (``/wrapup``) to
-    ack the template hash and conform (see MIGRATION_NOTES).
+    *state_dir* is the scribe state dir (``<target-state-dir>/scribe``). One
+    template per note type in ``VALID_TYPES`` is copied from
+    ``scribe/default_templates/`` when the bundled file exists.
+
+    **Never overwrites.** An existing ``templates/<type>.md`` is the user's,
+    edits included, so it is left alone — which also makes this safe to call
+    on every ``apiary install`` (bootstrap and self-bootstrap are idempotent).
+    Returns the sorted list of note types actually written.
     """
-    src = DEFAULT_TEMPLATES_DIR / "handoff.md"
-    dst = Path(state_dir) / TEMPLATES_DIRNAME / "handoff.md"
-    if dst.exists() and not force:
-        return False
-    if not src.is_file():
-        return False
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text(src.read_text(encoding='utf-8'), encoding='utf-8')
-    return True
+    dst_dir = Path(state_dir) / TEMPLATES_DIRNAME
+    written: list = []
+    for note_type in VALID_TYPES:
+        src = DEFAULT_TEMPLATES_DIR / f"{note_type}.md"
+        if not src.is_file():
+            continue
+        dst = dst_dir / f"{note_type}.md"
+        if dst.exists():
+            continue
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        dst.write_text(src.read_text(encoding='utf-8'), encoding='utf-8')
+        written.append(note_type)
+    return sorted(written)
 
 
 def _now_iso():
@@ -465,34 +469,31 @@ def cmd_add(args):
         )
         sys.exit(1)
 
-    # Template gate (T-2026-212 hash-ack + spec §5.8 required-sections, layered).
-    # When a per-type template exists, the caller must (a) ack its current hash
-    # and (b) include every `required:` section the template declares. --force
-    # bypasses BOTH. A template with no `required:` keeps pure hash-ack behavior.
+    # Template gate (§5a-B option C): one check, one attempt. When the type's
+    # template declares `required:` sections, content missing any of them is
+    # rejected with the template inlined so the retry has what it needs. A
+    # template with no `required:` is guidance only and never blocks. --force
+    # bypasses the check and says so on stderr. Forward-only: this runs on
+    # `add`, never on existing notes.
     tpl_text = template_text(store.state_dir, args.type)
     force = bool(getattr(args, 'force', False))
-    if tpl_text is not None and not force:
-        expected = template_hash(tpl_text)
-        provided = (getattr(args, 'ack_template', '') or '').strip()
-        if provided != expected:
+    required = template_required_sections(tpl_text) if tpl_text is not None else []
+    if required:
+        missing = missing_required_sections(content, required)
+        if missing and force:
             print(
-                f'Template gate: a template exists for type {args.type!r} '
-                f'and must be acknowledged before writing.\n\n'
-                f'--- {args.type}.md (hash {expected}) ---\n'
-                f'{tpl_text.rstrip()}\n'
-                f'--- end ---\n\n'
-                f'Re-run with --ack-template {expected} after composing '
-                f'a body that conforms to the template above.',
+                f'[template gate bypassed via --force: {args.type} note missing '
+                f'{", ".join(missing)}]',
                 file=sys.stderr,
             )
-            sys.exit(1)
-        required = template_required_sections(tpl_text)
-        missing = missing_required_sections(content, required) if required else []
-        if missing:
+        elif missing:
             print(
                 f'content missing required section(s): {", ".join(missing)}\n'
-                f'  template: {template_path(store.state_dir, args.type)}\n'
-                f'  pass --force to bypass',
+                f'  template: {template_path(store.state_dir, args.type)}\n\n'
+                f'--- {args.type}.md ---\n'
+                f'{tpl_text.rstrip()}\n'
+                f'--- end ---\n\n'
+                f'Add the missing section(s) and re-run, or pass --force to bypass.',
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -1462,8 +1463,11 @@ def cmd_template(args):
     if action == 'list':
         for t in VALID_TYPES:
             text = template_text(store.state_dir, t)
-            if text is not None:
-                print(f"{t:10s} hash={template_hash(text)}  {template_path(store.state_dir, t)}")
+            if text is None:
+                continue
+            required = template_required_sections(text)
+            label = f"required: {', '.join(required)}" if required else 'guidance only'
+            print(f"{t:10s} {label:60s} {template_path(store.state_dir, t)}")
         return
 
     note_type = args.type
@@ -1477,11 +1481,13 @@ def cmd_template(args):
         if text is None:
             print(
                 f"(no template for type {note_type!r}; "
-                f"create {path} to enable the gate)",
+                f"create {path} to add one)",
                 file=sys.stderr,
             )
             sys.exit(1)
-        print(f"# template for {note_type} (hash {template_hash(text)})")
+        required = template_required_sections(text)
+        label = f"required: {', '.join(required)}" if required else 'guidance only'
+        print(f"# template for {note_type} ({label})")
         print(text, end='' if text.endswith('\n') else '\n')
         return
 
@@ -1521,19 +1527,15 @@ def main():
                         help="Add this tag only if no active note already carries it; "
                              "otherwise skip the add and exit 0.")
     p_add.add_argument("--force", action="store_true",
-                        help="Bypass the template gate (both hash-ack and required-section checks).")
-    p_add.add_argument("--ack-template", default="", dest="ack_template",
-                        help="Acknowledge the current template hash. Required "
-                             "when a non-empty templates/<type>.md exists. The "
-                             "hash is printed in the gate failure message of a "
-                             "prior add attempt, or via `scribe template show`.")
+                        help="Bypass the template gate's required-section check "
+                             "(logs a line to stderr naming what was missing).")
 
     # template — inspect per-type formatting templates that gate `add`
     p_template = sub.add_parser("template",
                                 help="Inspect per-type formatting templates that gate `add`")
     p_template_sub = p_template.add_subparsers(dest="template_action")
     p_template_show = p_template_sub.add_parser("show",
-                                                help="Print the template content (and current hash) for a type")
+                                                help="Print the template content for a type")
     p_template_show.add_argument("type", choices=VALID_TYPES)
     p_template_path = p_template_sub.add_parser("path",
                                                 help="Print the absolute file path for a type's template")

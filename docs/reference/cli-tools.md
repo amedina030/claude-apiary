@@ -37,7 +37,7 @@ Core note and learning management.
 | `drop` | `notes.py drop <ID>` | Close a note without marking it done (status → dropped) |
 | `unarchive` | `notes.py unarchive <ID>` | Move a note back from its year's archive to active |
 | `show` | `notes.py show <ID>` | Alias of `get` |
-| `template` | `notes.py template show <type>` | Inspect per-type formatting templates that gate `add` (sub-actions: `show`, `path`, `list`) |
+| `template` | `notes.py template show <type>` | Inspect the per-type templates that gate `add` (sub-actions: `show`, `path`, `list`) |
 | `supersede` | `notes.py supersede <ID> --content "<text>"` | Archive a learning and write a replacement |
 | `archive-learning` | `notes.py archive-learning <ID>` | Archive a learning by ID (e.g. `L-2026-5`) |
 | `repair` | `notes.py repair [--dry-run]` | Repair index/data inconsistencies |
@@ -67,7 +67,6 @@ Core note and learning management.
 | `--content-file PATH` | add, learn | Read content from a UTF-8 file instead of `--content`. Mutually exclusive with `--content`; one of the two is required. Use it for any body that is long or awkward on argv — backticks and `/`-prefixed tokens trigger shell substitution, and Windows caps a command line at 32,767 chars, so multi-kilobyte content (an incubator spec, a `/wrapup` handoff) must go through a file |
 | `--summary TEXT` | add | One-line abstract shown in lists and startup. Required for `--type handoff` |
 | `--brief-summary TEXT` | add, update, learn | One-sentence GUI-sidebar headline; auto-derived if omitted |
-| `--ack-template HASH` | add | Acknowledge the current template hash; required when a non-empty `templates/<type>.md` exists |
 | `--unique-tag TAG` | add | Add the tag only if no active note already carries it; otherwise skip the add (exit 0) |
 | `--add-tag TAG` | update | Add a tag (repeatable, order-preserving, idempotent) |
 | `--remove-tag TAG` | update | Remove a tag (repeatable; applied before `--add-tag`) |
@@ -78,7 +77,11 @@ Core note and learning management.
 | `--area GLOB` | learn, supersede, learnings | Area glob — repeatable on `learn`/`supersede`; exact-match filter on `learnings` |
 | `--supersedes ID` | learn | ID of a prior learning this one replaces (e.g. `L-2026-5`) |
 | `--dry-run` | repair, backfill-brief | Report what would change without writing |
-| `--force` | add, backfill-brief | On `add`, bypass the template gate (hash-ack + required sections); on `backfill-brief`, re-derive `brief_summary` even for entries that already have one |
+| `--force` | add, backfill-brief | On `add`, bypass the template gate's required-section check (logs to stderr what was missing); on `backfill-brief`, re-derive `brief_summary` even for entries that already have one |
+
+### Note templates
+
+`apiary install` seeds `<state-dir>/scribe/templates/<type>.md` from the bundled defaults in `scribe/default_templates/` — one per note type, and an existing file is never overwritten. A template whose frontmatter declares `required: [...]` makes `add` reject content that omits any of those sections (heading or `**Bold:**` label, case-insensitive); a template with no `required:` key is guidance only and never blocks. Defaults that enforce: `handoff` (What was done / Key decisions / What's pending / Where it stopped, matching `/wrapup`), `decision` (Context / Decision / Why / Consequences), `blocker` (Blocked on / Tried / Unblock when). The check is forward-only — it runs on `add`, never on existing notes — and `--force` bypasses it.
 
 ## scribe/backup_indexes.py
 
