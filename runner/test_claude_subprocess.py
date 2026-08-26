@@ -62,7 +62,7 @@ class TestBuildSubprocessEnv(unittest.TestCase):
             "SSH_AUTH_SOCK": "/tmp/ssh",
             "GPG_PRIVATE_KEY": "----",
             "DATABASE_PASSWORD": "hunter2",
-            "OPENAI_API_KEY": "sk-other",
+            "OPENAI_API_KEY": "sk-other",  # apiary:allow-secret
             "PATH": "/usr/bin",
         }
         env = _build_subprocess_env(parent, is_windows=False)

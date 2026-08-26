@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+### Secret-scanning hardening (2026-08-26)
+
+A repo-wide review found both gates leakier than their docs claimed. Fixed:
+
+- **The generic `key = value` rule never fired inside a `_`-joined name.** A
+  `\b` cannot match between `secret` and `_access` in `aws_secret_access_key`,
+  so the single most-leaked credential shape passed both gates. The key may
+  now carry prefixes and suffixes (`DB_PASSWORD`, `my_password_value`), and
+  suffixes that name something *about* a credential (`password_file`,
+  `token_url`, `secret_name`) are excluded instead. Quoted values may contain
+  any character, so passwords with punctuation are caught; indirection
+  (`get_config()`, `${VAR}`) is judged on the value, not on a trailing comment.
+- **One shared generic rule.** The push gate's Shannon-entropy bar was
+  mathematically unreachable for any value under 16 characters and for hex
+  keys of any length, while placeholders like `your_api_key_here` sit *above*
+  real 16-char keys. Entropy is now only a floor for repetitive filler; both
+  gates use the same placeholder / indirection / credential-signal filters in
+  `core/secret_patterns.py`, and the parity suite covers the generic rule too.
+- **New literal rules:** AWS secret keys (by key name — they have no prefix),
+  GitHub fine-grained PATs, GitLab, Stripe, npm, PyPI, SendGrid, Slack
+  webhooks, Twilio, JWTs, Azure storage keys; `ENCRYPTED` and `PGP … BLOCK`
+  private-key headers.
+- **The push gate scans every outgoing commit individually**, on the ref
+  actually being pushed (honouring `git -C`, `--all`, refspecs), against the
+  named remote. A secret committed and deleted two commits later is in the
+  history being pushed and is now reported with its commit; the old cumulative
+  `base..HEAD` diff could not see it.
+- **Fail closed where it matters.** The commit gate's `_git()` returned `""`
+  on any error, so a locked index or missing `git` produced "clean" — it now
+  exits 2 and says the scan did not run. The push gate blocks (with the
+  reason) when git times out or errors mid-scan; it still fails open only on
+  internal errors before the scan starts.
+- **Findings no longer reprint the credential.** The commit gate's `_redact`
+  truncated at 100 characters — longer than every real key. Both gates now
+  show `abcd…yz (n chars)` plus the key name.
+- **Hook blocks are real blocks.** `core/hook_context.hook_block` emitted
+  `permissionDecision: "block"`, which is not in Claude Code's documented
+  `allow|deny|ask` vocabulary; it now emits `deny` with
+  `permissionDecisionReason`, the legacy top-level `decision`/`reason` pair,
+  and exits 2 with the reason on stderr.
+- `.secretsallow` entries are path rules unless prefixed `line:`; more
+  credential-by-convention filenames are blocked (`*.key`, `.netrc`,
+  `.git-credentials`, `kubeconfig`, `service-account*.json`, …); git output is
+  read with `core.quotepath=false`/`--no-ext-diff`/`--no-textconv` and quoted
+  paths are unquoted.
+
 ### Commit-time secret scanning (2026-08)
 
 Every apiary-managed repo can now block a *commit* that would introduce a

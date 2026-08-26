@@ -165,10 +165,13 @@ Current session identity. Written by `/startup`, read by hooks. Located at repo 
 ## .secretsallow
 
 Per-repo allowlist for `scripts/secret_scan.py`. Lives at the repo root and is
-committed, so the exemption travels with the repo. One regex per line, tested
-against both the repo-relative path and the offending line; blank lines and
-lines starting with `#` are ignored. An invalid regex is skipped with a warning
-rather than failing the scan.
+committed, so the exemption travels with the repo. One regex per line; blank
+lines and lines starting with `#` are ignored. A plain entry is tested against
+the repo-relative **path** and exempts that whole file; an entry prefixed
+`line:` is tested against the offending **line** instead and exempts matching
+lines anywhere. (Earlier versions tested every entry against both, so a loose
+path regex silenced any line containing that word.) An invalid regex is
+skipped with a warning rather than failing the scan.
 
 ```
 # The scanner's own pattern table and fixtures are credential-shaped by
