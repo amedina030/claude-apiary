@@ -26,7 +26,7 @@ Walk the user through the project's learning corpus, one tag group at a time, so
       python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py get <ID>
       ```
 
-   b. Ask (via `AskUserQuestion` when possible) what to do with the group:
+   b. Ask, in plain prose (no multiple-choice picker), what to do with the group:
       - **Keep all** — nothing to change, move to next tag.
       - **Review individually** — walk through each entry and ask per-entry action.
       - **Archive all** — archive every learning in this group (rare; useful for retired tech).

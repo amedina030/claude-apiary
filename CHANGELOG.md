@@ -20,6 +20,68 @@
   under Task Scheduler; `cron_health repair --apply` recreated them with
   the venv interpreter after confirming the registered commands (1.4).
   Compass synthesis keeps running per §6 (keep, fix, measure).
+- **`/budgeter-log`, `/budgeter-warn`, `/budgeter-session-warn` toggled the
+  wrong file** (`~/.claude/<flag>-enabled`) while the hooks read
+  `<repo>/.claude/apiary/flags/<flag>-enabled` — they reported ON and changed
+  nothing (B4). Replaced by one `/budgeter <log|warn|session-warn>` that
+  shells out to a new `core/flags.py` CLI (`toggle|enable|disable|status
+  <name>`, prints ON/OFF, exit 0/1), so the toggle and the hooks share one
+  code path. Already-bootstrapped repos keep the three stale command files
+  until re-bootstrapped (`apiary install` does not prune — tracked).
+- **`apiary doctor <check> --fix` works.** The console script never declared
+  `--fix`, so the one remediation the docs and doctor's own messages point at
+  exited 2. `core/cli.py` gets its first tests (29) — every verb's argv, and
+  the `--fix` seam through the real `doctor.main`.
+- `docs/check_cli_claims.py` reconciles console scripts (`CONSOLE_SCRIPTS`
+  maps `apiary` → `core/cli.py`), so the `apiary` section is checked like
+  every other tool; its cli-tools.md section was rewritten to match
+  (Subcommands/Flags tables, the missing `doctor stale`, a first-run
+  prompt / `--force` narrative that never existed removed). The checker now
+  also runs in the docs pre-commit hook next to `docs/check.py`
+  (re-run `python scripts/install_repo_hooks.py` to pick it up).
+- **Scribe: mutations on archived notes actually write now.** `update_note`
+  searches the year's `archive/` index when the active index misses, and
+  `done`/`drop`/`defer`/`resume`/`update` exit 1 instead of printing false
+  success. Done notes auto-archive one day after being *marked* done
+  (`status_changed_at`), not one day after creation. `list` no longer
+  archives as a side effect — that sweep is the new `notes.py tidy` — and
+  `notes.py mark-reviewed` stamps the learnings review marker that
+  `/review-learnings` was writing to the wrong directory (`/notes learning`
+  → `learnings` fixed too).
+- **Scribe note templates, one per type (§5a-B, option C).** Bootstrap seeds
+  `<state-dir>/scribe/templates/` from `scribe/default_templates/`, never
+  overwriting. `handoff`, `decision` and `blocker` enforce their required
+  sections on `add` (handoff matches `/wrapup`'s structure, pinned by a
+  test); the other five types are guidance only. The `--ack-template` hash
+  handshake is gone — one check, one attempt, `--force` bypasses and logs
+  what it skipped. Existing notes are never validated or rewritten.
+- **`researcher/_yaml_mini` corrupted frontmatter on every read.** `dumps`
+  quoted ambiguous values but `loads` never unquoted them, and any `#`
+  started a comment, so `/research verify` (load → mutate → dump) degraded
+  any title with a colon or URL with a fragment, compounding each pass.
+  Quotes are now unquoted only when symmetric, `#` opens a comment only at
+  line start or after whitespace; round-trip tests cover the failing inputs.
+  Captures inherits the fix.
+- **Incubator no longer passes the `/refine` spec on argv** (B9): it stages
+  the body to a temp file and uses `scribe/notes.py --content-file` (now on
+  `learn` too), so multi-kilobyte specs migrate instead of dying at the
+  Windows command-line cap. Spawn's git/scribe `OSError`s are reported (exit
+  5) not raised; the partial-failure recovery hint says "close the original"
+  instead of duplicating the spec (B10); spawned-repo templates drop the
+  crashing `report.py --since 7d` example and the dead `.apiary/` gitignore
+  rules.
+- **Runner: the monolithic executor stamps `schema_version`** on its artifact
+  and asserts the plan's, so stage 5 no longer rejects everything stage 4
+  produced. Stage 4's default flips back to the per-step `executor`:
+  `executor.mode` was introduced 2026-04-14, one day after the last
+  runner-produced commit, so the monolithic path has never completed a run.
+  A test drives stage 4 into `auto_harden.main` over a real temp repo.
+- **Compass:** `backfill.py` stamps `captured_at` from the transcript's mtime
+  instead of the backfill time (restoring the recency ordering synthesis
+  weights on); `synthesize.py` caps its prompt at the 50 most recent sessions
+  (`--max-sessions`, 0 = no cap) and writes `personality.md` atomically. The
+  tmp+replace helper is now shared as `core/utils/atomic.py` with budgeter's
+  two copies pointed at it (four more copies remain for Phase 3).
 
 ### Runner never pushes, never sweeps, never runs unbounded (2026-08-26)
 
