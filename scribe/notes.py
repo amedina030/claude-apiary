@@ -330,8 +330,14 @@ def _run_auto_archive_store(store) -> int:
       handoff  - keep only the latest per role/mission, archive the rest
       context  - archive after 3 days (mid-session checkpoints decay fast)
       decision - archive after 30 days (historical record, not live state)
-      done     - archive after 1 day (any type marked done)
+      done     - archive 1 day after the note was *marked* done
       todo/wishlist/blocker - keep until done
+
+    The "done" clock reads ``status_changed_at`` (stamped by update_note on
+    every status transition) and only falls back to ``timestamp`` for legacy
+    rows written before that field existed. Measuring from creation instead
+    archived notes the moment they were closed, which is what made them
+    vanish out from under a follow-up ``update``.
     """
     now = datetime.now(timezone.utc)
     context_cutoff = now - timedelta(days=3)
@@ -356,7 +362,12 @@ def _run_auto_archive_store(store) -> int:
         ntype = n.get('type', '')
         if ts is None:
             continue
-        if n.get('status') == 'done' and ts < done_cutoff:
+        # Done notes age out from when they were marked done, not when they
+        # were created (falling back to creation only for pre-status_changed_at
+        # rows). The rest of the chain is unchanged, so a done note that is not
+        # yet 1 day old can still be archived by its type's own rule.
+        done_ts = _parse_timestamp(n.get('status_changed_at', '')) or ts
+        if n.get('status') == 'done' and done_ts < done_cutoff:
             to_archive_ids.append((n['type'], n['year'], n['seq']))
         elif ntype == 'handoff':
             key = (n.get('role', 'user'), n.get('mission', 'general'))
@@ -537,11 +548,9 @@ def cmd_list(args):
         status = 'all' if args.all else 'active'
         source = 'active'
 
-    # Run auto-archive before listing active notes (only for unfiltered queries)
-    if not args.archive and not args.search and not args.type and not args.session and not args.role and not args.mission:
-        archived_count = _run_auto_archive_store(store)
-        if archived_count:
-            print(f'[auto-archived {archived_count} notes]', file=sys.stderr)
+    # `list` is a read command and no longer mutates state. Auto-archive runs
+    # from `add`, from session startup, and on demand via `notes.py tidy` —
+    # listing notes must not make them disappear (Phase 1.5).
 
     # Get notes from store
     note_type = args.type if args.type else None
@@ -735,6 +744,23 @@ def _external_ticket_links(note: dict) -> list:
     return refs
 
 
+def _require_updated(updated, display_id: str):
+    """Exit 1 when ``store.update_note`` reported that nothing was written.
+
+    ``update_note`` is archive-aware, so ``None`` here means the note really
+    is gone (deleted or moved between the read and the write) — printing
+    "Marked X as done." in that case is the failure mode fixed in Phase 1.5.
+    """
+    if updated is None:
+        print(
+            f'Error: note {display_id} could not be updated — no matching index '
+            'entry in the active or archive index. Run `notes.py repair`.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return updated
+
+
 def cmd_done(args):
     store = args.store
     note_type, year, seq = _parse_id_arg(str(args.id), store)
@@ -748,7 +774,7 @@ def cmd_done(args):
     if note.get('status') == 'done':
         print(f'Note {args.id} is already marked done.')
         return
-    store.update_note(note_type, year, seq, status='done')
+    _require_updated(store.update_note(note_type, year, seq, status='done'), args.id)
     # External-ticket close signal (spec §5.14 / A2). Non-destructive: surfaces
     # the link for the Asana tool to observe; never closes a local note.
     if note_type == 'todo':
@@ -775,7 +801,7 @@ def cmd_drop(args):
     if note.get('status') == 'done':
         print(f'Error: note {args.id} is already done; cannot drop.', file=sys.stderr)
         sys.exit(1)
-    store.update_note(note_type, year, seq, status='dropped')
+    _require_updated(store.update_note(note_type, year, seq, status='dropped'), args.id)
     print(f'Marked {args.id} as dropped.')
 
 
@@ -798,7 +824,7 @@ def cmd_defer(args):
             file=sys.stderr,
         )
         sys.exit(1)
-    store.update_note(note_type, year, seq, status='deferred')
+    _require_updated(store.update_note(note_type, year, seq, status='deferred'), args.id)
     print(f'Deferred {args.id}. Use "resume {args.id}" to bring it back.')
 
 
@@ -815,7 +841,7 @@ def cmd_resume(args):
     if note.get('status') != 'deferred':
         print(f'Note {args.id} is not deferred (status: {note.get("status", "?")}).')
         return
-    store.update_note(note_type, year, seq, status='active')
+    _require_updated(store.update_note(note_type, year, seq, status='active'), args.id)
     print(f'Resumed {args.id}.')
 
 
@@ -876,7 +902,7 @@ def cmd_update(args):
         kwargs['add_tags'] = add_tags
     if remove_tags:
         kwargs['remove_tags'] = remove_tags
-    store.update_note(note_type, year, seq, **kwargs)
+    _require_updated(store.update_note(note_type, year, seq, **kwargs), args.id)
     print(f'Updated {args.id}.')
 
 
@@ -903,6 +929,40 @@ def cmd_archive(args):
         print('Nothing to archive.')
         return
     print(f"Archived {archived_count} notes (before {cutoff.strftime('%Y-%m-%d')}).")
+
+
+def cmd_tidy(args):
+    """Run the auto-archive sweep explicitly.
+
+    The same policy `add` and session startup apply, exposed as a verb so a
+    read command (`list`) never has to mutate state to keep the active view
+    tidy. Safe to run any time; prints what it moved.
+    """
+    archived = _run_auto_archive_store(args.store)
+    if not archived:
+        print('Nothing to tidy.')
+        return
+    print(f'Tidied {archived} notes into the archive.')
+
+
+def cmd_mark_reviewed(args):
+    """Stamp the learnings review marker the startup banner reads.
+
+    Writes/touches ``<state-dir>/scribe/learnings/last_review``; its mtime is
+    what ``core/startup._review_staleness_marker`` compares against the
+    30-day threshold. Exists so `/review-learnings` can call a verb through
+    the launcher instead of a `python -c` one-liner that resolved the wrong
+    state dir.
+    """
+    marker = args.store.state_dir / LEARNING_FOLDER / 'last_review'
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text('', encoding='utf-8')
+        os.utime(marker)
+    except OSError as e:
+        print(f'Error: could not stamp {marker}: {e}', file=sys.stderr)
+        sys.exit(1)
+    print(f'Stamped learnings review: {marker}')
 
 
 def cmd_migrate(args):
@@ -1534,6 +1594,14 @@ def main():
     p_archive = sub.add_parser("archive")
     p_archive.add_argument("--before", help="Archive notes before this date (YYYY-MM-DD)")
 
+    # tidy — run the auto-archive sweep on demand (list no longer does it)
+    sub.add_parser("tidy",
+                   help="Run the auto-archive retention sweep now (add and startup run it too)")
+
+    # mark-reviewed — stamp learnings/last_review for the startup nudge
+    sub.add_parser("mark-reviewed",
+                   help="Stamp the learnings review timestamp the startup banner reads")
+
     # migrate
     p_migrate = sub.add_parser("migrate")
     p_migrate.add_argument("path", help="Path to old notes.md file")
@@ -1637,7 +1705,8 @@ def main():
         'add': cmd_add, 'list': cmd_list, 'get': cmd_get, 'show': cmd_get,
         'done': cmd_done, 'drop': cmd_drop, 'defer': cmd_defer, 'resume': cmd_resume,
         'unarchive': cmd_unarchive,
-        'update': cmd_update, 'archive': cmd_archive,
+        'update': cmd_update, 'archive': cmd_archive, 'tidy': cmd_tidy,
+        'mark-reviewed': cmd_mark_reviewed,
         'learn': cmd_learn, 'learnings': cmd_learnings, 'unlearn': cmd_unlearn,
         'archive-learning': cmd_archive_learning,
         'supersede': cmd_supersede,

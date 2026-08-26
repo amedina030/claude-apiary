@@ -2,6 +2,7 @@
 """Tests for scribe/notes.py — ScribeStore-backed CLI commands."""
 import json
 import subprocess
+import os
 import sys
 import tempfile
 import unittest
@@ -101,10 +102,13 @@ class TestScribeNotes(unittest.TestCase):
         self.assertEqual(len(arch_list), 1)
 
     def test_auto_archive_old_done_notes(self):
-        # Add note and manually backdate its index entry
+        # Add note, mark it done, then backdate the completion stamp — done
+        # notes age from status_changed_at, not from creation.
         entry = self.store.add_note('todo', 'old done note', 'sess1')
+        self.store.update_note('todo', entry['year'], entry['seq'], status='done')
         old_ts = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
-        self.store.update_note('todo', entry['year'], entry['seq'], status='done', timestamp=old_ts)
+        self.store.update_note('todo', entry['year'], entry['seq'],
+                               timestamp=old_ts, status_changed_at=old_ts)
         count = notes._run_auto_archive_store(self.store)
         self.assertGreaterEqual(count, 1)
 
@@ -467,6 +471,230 @@ class TestContentFileParserWiring(unittest.TestCase):
                 result = self._both(subcommand)
                 self.assertEqual(result.returncode, 2, result.stdout)
                 self.assertIn('not allowed with argument', result.stderr)
+class TestArchiveAwareMutations(unittest.TestCase):
+    """Phase 1.5 bug 1: done/drop/defer/resume/update on an archived note."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp.name)
+        self.store = ScribeStore(self.tmp_dir)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _make_args(self, **kwargs):
+        return type('Args', (), {'store': self.store, **kwargs})()
+
+    def _archived_todo(self, content='archived body'):
+        entry = self.store.add_note('todo', content, 'sess1')
+        self.store.archive_note('todo', entry['year'], entry['seq'])
+        return entry
+
+    def test_update_note_finds_archived_entry(self):
+        entry = self._archived_todo()
+        updated = self.store.update_note('todo', entry['year'], entry['seq'], status='done')
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated['status'], 'done')
+        self.assertTrue(updated.get('_from_archive'))
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(got['status'], 'done')
+        self.assertTrue(got.get('_from_archive'))
+
+    def test_update_note_does_not_resurrect_into_active_index(self):
+        entry = self._archived_todo()
+        self.store.update_note('todo', entry['year'], entry['seq'], status='done')
+        self.assertEqual(len(self.store.list_notes(status='active')), 0)
+        self.assertEqual(len(self.store.list_notes(status='archived')), 1)
+
+    def test_update_note_rewrites_archived_body(self):
+        entry = self._archived_todo()
+        self.store.update_note('todo', entry['year'], entry['seq'], content='NEW BODY')
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(got['content'], 'NEW BODY')
+        md = (self.tmp_dir / 'todos' / str(entry['year']) / 'archive'
+              / f"{entry['seq']}.md")
+        self.assertEqual(md.read_text(encoding='utf-8'), 'NEW BODY')
+        # No stray body left in (or created in) the active dir.
+        self.assertFalse((self.tmp_dir / 'todos' / str(entry['year'])
+                          / f"{entry['seq']}.md").exists())
+
+    def test_update_note_missing_returns_none(self):
+        self.assertIsNone(self.store.update_note('todo', 2026, 999, status='done'))
+
+    def test_cmd_done_marks_archived_note(self):
+        entry = self._archived_todo()
+        notes.cmd_done(self._make_args(id=entry['display_id']))
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(got['status'], 'done')
+
+    def test_cmd_drop_marks_archived_note(self):
+        entry = self._archived_todo()
+        notes.cmd_drop(self._make_args(id=entry['display_id']))
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(got['status'], 'dropped')
+
+    def test_cmd_defer_and_resume_archived_note(self):
+        entry = self._archived_todo()
+        notes.cmd_defer(self._make_args(id=entry['display_id']))
+        self.assertEqual(
+            self.store.get_note('todo', entry['year'], entry['seq'])['status'], 'deferred')
+        notes.cmd_resume(self._make_args(id=entry['display_id']))
+        self.assertEqual(
+            self.store.get_note('todo', entry['year'], entry['seq'])['status'], 'active')
+
+    def test_cmd_update_content_on_archived_note(self):
+        entry = self._archived_todo()
+        args = self._make_args(id=entry['display_id'], content='REVISED',
+                               session_id=None, brief_summary='',
+                               add_tag=[], remove_tag=[])
+        notes.cmd_update(args)
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(got['content'], 'REVISED')
+
+    def test_cmd_update_add_tag_on_archived_note(self):
+        entry = self._archived_todo()
+        args = self._make_args(id=entry['display_id'], content=None,
+                               session_id=None, brief_summary='',
+                               add_tag=['ticket:K-1'], remove_tag=[])
+        notes.cmd_update(args)
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertEqual(got.get('tags'), ['ticket:K-1'])
+
+    def test_require_updated_exits_on_none(self):
+        with self.assertRaises(SystemExit):
+            notes._require_updated(None, 'T-2026-1')
+
+    def test_require_updated_passes_entry_through(self):
+        entry = {'seq': 1}
+        self.assertIs(notes._require_updated(entry, 'T-2026-1'), entry)
+
+
+class TestAutoArchivePolicy(unittest.TestCase):
+    """Phase 1.5 bug 3: done notes age from status_changed_at, not creation."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp.name)
+        self.store = ScribeStore(self.tmp_dir)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _is_archived(self, entry):
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        return bool(got.get('_from_archive'))
+
+    def test_old_note_marked_done_now_is_kept(self):
+        entry = self.store.add_note('todo', 'created long ago', 'sess1')
+        old_ts = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+        self.store.update_note('todo', entry['year'], entry['seq'], timestamp=old_ts)
+        # Marked done just now — status_changed_at is fresh.
+        self.store.update_note('todo', entry['year'], entry['seq'], status='done')
+        self.assertEqual(notes._run_auto_archive_store(self.store), 0)
+        self.assertFalse(self._is_archived(entry))
+
+    def test_note_done_two_days_ago_is_archived(self):
+        entry = self.store.add_note('todo', 'closed a while back', 'sess1')
+        self.store.update_note('todo', entry['year'], entry['seq'], status='done')
+        stale = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        self.store.update_note('todo', entry['year'], entry['seq'],
+                               status_changed_at=stale)
+        self.assertEqual(notes._run_auto_archive_store(self.store), 1)
+        self.assertTrue(self._is_archived(entry))
+
+    def test_legacy_done_row_without_status_changed_at_uses_timestamp(self):
+        entry = self.store.add_note('todo', 'legacy row', 'sess1')
+        old_ts = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+        # Simulate a pre-status_changed_at index row.
+        year_dir = self.tmp_dir / 'todos' / str(entry['year'])
+        rows = ScribeStore._read_index(year_dir)
+        for r in rows:
+            r['status'] = 'done'
+            r['timestamp'] = old_ts
+            r.pop('status_changed_at', None)
+        ScribeStore._write_index(year_dir, rows)
+        self.assertEqual(notes._run_auto_archive_store(self.store), 1)
+        self.assertTrue(self._is_archived(entry))
+
+
+class TestTidyAndMarkReviewed(unittest.TestCase):
+    """Phase 1.5: `list` is read-only; `tidy` and `mark-reviewed` are verbs."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp.name)
+        self.store = ScribeStore(self.tmp_dir)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _make_args(self, **kwargs):
+        return type('Args', (), {'store': self.store, **kwargs})()
+
+    def _stale_done_note(self):
+        entry = self.store.add_note('todo', 'closed long ago', 'sess1')
+        self.store.update_note('todo', entry['year'], entry['seq'], status='done')
+        # Backdate the completion stamp in a second call: update_note re-stamps
+        # status_changed_at whenever `status` is among the kwargs.
+        stale = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        self.store.update_note('todo', entry['year'], entry['seq'],
+                               status_changed_at=stale)
+        return entry
+
+    def test_list_does_not_archive(self):
+        entry = self._stale_done_note()
+        args = self._make_args(archive=False, search=None, type=None, session=None,
+                               role=None, mission=None, all=True, deferred=False,
+                               last=None)
+        notes.cmd_list(args)
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertFalse(got.get('_from_archive'))
+        self.assertEqual(len(self.store.list_notes(status='archived')), 0)
+
+    def test_tidy_archives_stale_done_notes(self):
+        entry = self._stale_done_note()
+        notes.cmd_tidy(self._make_args())
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertTrue(got.get('_from_archive'))
+
+    def test_tidy_is_a_noop_when_nothing_is_stale(self):
+        self.store.add_note('todo', 'fresh', 'sess1')
+        notes.cmd_tidy(self._make_args())
+        self.assertEqual(len(self.store.list_notes(status='archived')), 0)
+
+    def test_add_still_auto_archives(self):
+        entry = self._stale_done_note()
+        args = self._make_args(type='todo', content='new one', content_file=None,
+                               summary='', brief_summary='', session_id='sess1',
+                               auto=False, role='', mission='',
+                               if_no_handoff_for=None, tags='', unique_tag='',
+                               force=False)
+        notes.cmd_add(args)
+        got = self.store.get_note('todo', entry['year'], entry['seq'])
+        self.assertTrue(got.get('_from_archive'))
+
+    def test_mark_reviewed_creates_marker(self):
+        notes.cmd_mark_reviewed(self._make_args())
+        marker = self.tmp_dir / 'learnings' / 'last_review'
+        self.assertTrue(marker.is_file())
+
+    def test_mark_reviewed_refreshes_existing_marker(self):
+        marker = self.tmp_dir / 'learnings' / 'last_review'
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text('', encoding='utf-8')
+        old = datetime.now(timezone.utc) - timedelta(days=40)
+        os.utime(marker, (old.timestamp(), old.timestamp()))
+        notes.cmd_mark_reviewed(self._make_args())
+        refreshed = datetime.fromtimestamp(marker.stat().st_mtime, tz=timezone.utc)
+        self.assertLess((datetime.now(timezone.utc) - refreshed).total_seconds(), 60)
+
+    def test_mark_reviewed_marker_is_where_startup_looks(self):
+        # core.startup._review_staleness_marker reads <scribe-state-dir>/
+        # learnings/last_review — the same path cmd_mark_reviewed stamps.
+        from core.startup import _review_staleness_marker
+        self.assertIn('never reviewed', _review_staleness_marker(self.tmp_dir))
+        notes.cmd_mark_reviewed(self._make_args())
+        self.assertEqual(_review_staleness_marker(self.tmp_dir), '')
 
 
 if __name__ == '__main__':

@@ -579,6 +579,13 @@ class ScribeStore:
         ``brief_summary`` kwarg, brief_summary is re-derived from the new
         content so the sidebar stays in sync. Returns the updated entry dict,
         or None if not found.
+
+        Archive-aware: the active index is searched first, then the year's
+        ``archive/`` index. An archived note is updated in place (the body
+        stays in ``archive/<seq>.md``) and the returned dict carries
+        ``_from_archive: True``, mirroring :meth:`get_note`. Without this,
+        every ``done``/``drop``/``defer``/``resume``/``update`` on an
+        auto-archived note reported success and changed nothing.
         """
         content_update = kwargs.pop('content', None)
         add_tags = kwargs.pop('add_tags', None)
@@ -587,35 +594,59 @@ class ScribeStore:
         year_dir = type_dir / str(year)
         if not year_dir.exists():
             return None
-        entries = self._read_index(year_dir)
+        updated = self._update_index_entry(
+            year_dir, seq, kwargs, content_update, add_tags, remove_tags)
+        if updated is not None:
+            return updated
+        archive_dir = year_dir / ARCHIVE_DIRNAME
+        if not archive_dir.exists():
+            return None
+        updated = self._update_index_entry(
+            archive_dir, seq, kwargs, content_update, add_tags, remove_tags)
+        if updated is None:
+            return None
+        return {**updated, '_from_archive': True}
+
+    def _update_index_entry(self, folder: Path, seq: int, kwargs: dict,
+                            content_update: str | None,
+                            add_tags: list | None,
+                            remove_tags: list | None) -> dict | None:
+        """Apply an update to the entry with *seq* in *folder*'s index.
+
+        *folder* is either a year dir or that year's ``archive/`` dir — the
+        body file lives beside the index in both cases. Returns the updated
+        entry, or None when *folder* holds no such entry.
+        """
+        entries = self._read_index(folder)
         for i, entry in enumerate(entries):
-            if entry.get('seq') == seq:
-                entries[i] = {**entry, **kwargs}
-                # Stamp status_changed_at on any status transition (done/drop/
-                # defer/resume), but never on a content-only edit. Mirrors the
-                # source scribe oracle (spec §5.6).
-                if 'status' in kwargs:
-                    entries[i]['status_changed_at'] = datetime.now(timezone.utc).isoformat()
-                # Tag mutation: remove-all-occurrences then add-if-absent, so
-                # the result is a dedup'd, order-preserving list (spec §5.14).
-                if add_tags or remove_tags:
-                    tags = list(entries[i].get('tags') or [])
-                    if remove_tags:
-                        rm = set(remove_tags)
-                        tags = [t for t in tags if t not in rm]
-                    for t in (add_tags or []):
-                        if t not in tags:
-                            tags.append(t)
-                    entries[i]['tags'] = tags
-                if content_update is not None:
-                    self._write_note_file(year_dir, seq, content_update)
-                    entries[i]['has_body'] = bool(content_update)
-                    if 'brief_summary' not in kwargs:
-                        entries[i]['brief_summary'] = derive_brief_summary(content_update)
-                if 'brief_summary' in kwargs and len(entries[i].get('brief_summary', '')) > BRIEF_SUMMARY_MAX:
-                    entries[i]['brief_summary'] = entries[i]['brief_summary'][:BRIEF_SUMMARY_MAX].rstrip()
-                self._write_index(year_dir, entries)
-                return entries[i]
+            if entry.get('seq') != seq:
+                continue
+            entries[i] = {**entry, **kwargs}
+            # Stamp status_changed_at on any status transition (done/drop/
+            # defer/resume), but never on a content-only edit. Mirrors the
+            # source scribe oracle (spec §5.6).
+            if 'status' in kwargs:
+                entries[i]['status_changed_at'] = datetime.now(timezone.utc).isoformat()
+            # Tag mutation: remove-all-occurrences then add-if-absent, so
+            # the result is a dedup'd, order-preserving list (spec §5.14).
+            if add_tags or remove_tags:
+                tags = list(entries[i].get('tags') or [])
+                if remove_tags:
+                    rm = set(remove_tags)
+                    tags = [t for t in tags if t not in rm]
+                for t in (add_tags or []):
+                    if t not in tags:
+                        tags.append(t)
+                entries[i]['tags'] = tags
+            if content_update is not None:
+                self._write_note_file(folder, seq, content_update)
+                entries[i]['has_body'] = bool(content_update)
+                if 'brief_summary' not in kwargs:
+                    entries[i]['brief_summary'] = derive_brief_summary(content_update)
+            if 'brief_summary' in kwargs and len(entries[i].get('brief_summary', '')) > BRIEF_SUMMARY_MAX:
+                entries[i]['brief_summary'] = entries[i]['brief_summary'][:BRIEF_SUMMARY_MAX].rstrip()
+            self._write_index(folder, entries)
+            return entries[i]
         return None
 
     def archive_note(self, note_type: str, year: int, seq: int) -> dict | None:

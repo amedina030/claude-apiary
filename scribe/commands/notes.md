@@ -18,7 +18,7 @@ Query notes using the scribe tool.
 - `/notes reference` → `notes.py list --type reference`
 - `/notes context` → `notes.py list --type context`
 - `/notes general` → `notes.py list --type general`
-- `/notes learning` → `notes.py list --type learning`
+- `/notes learning` (or `learnings`) → `notes.py learnings` (learnings are a separate store — `list --type` does not accept them)
 - `/notes search <keyword>` → `notes.py list --search "<keyword>"`
 - `/notes session <id>` → `notes.py list --session "<id>"`
 - `/notes last <N>` → `notes.py list --last <N>`

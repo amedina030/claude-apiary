@@ -27,6 +27,8 @@ Core note and learning management.
 | `resume` | `notes.py resume <ID>` | Undo a defer — return the note to active |
 | `update` | `notes.py update <ID> --content "<text>"` | Update note content (e.g. `T-2026-1`) |
 | `archive` | `notes.py archive [--before YYYY-MM-DD]` | Archive old notes |
+| `tidy` | `notes.py tidy` | Run the auto-archive retention sweep now. `add` and session startup run the same sweep; `list` never does |
+| `mark-reviewed` | `notes.py mark-reviewed` | Stamp `<state-dir>/scribe/learnings/last_review` — the marker the startup banner's review nudge reads |
 | `learn` | `notes.py learn (--content "<text>" \| --content-file PATH)` | Add a learning |
 | `learnings` | `notes.py learnings` | List all learnings |
 | `unlearn` | `notes.py unlearn <ID>` | Remove a learning (e.g. `L-2026-3`) |
@@ -48,7 +50,7 @@ Core note and learning management.
 | Flag | Applies to | Description |
 |------|-----------|-------------|
 | `--project PROJECT` | all | Project key override (default: derived from cwd) |
-| `--type TYPE` | add, list | Note type: `todo`, `handoff`, `decision`, `wishlist`, `reference`, `blocker`, `context`, `general`, `learning` |
+| `--type TYPE` | add, list | Note type: `todo`, `handoff`, `decision`, `wishlist`, `reference`, `blocker`, `context`, `general`. Learnings are a separate store — use the `learnings` subcommand, not `--type learning` |
 | `--content TEXT` | add, update, learn | Note/learning content |
 | `--session-id ID` | add, update, learn | Associate with a session |
 | `--auto` | add | Mark as auto-generated |

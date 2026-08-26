@@ -54,16 +54,16 @@ Walk the user through the project's learning corpus, one tag group at a time, so
 4. Handle the `untagged` group specially — prompt the user whether to auto-tag it via the retrotag script instead of walking one-by-one:
 
    ```bash
-   python scripts/retrotag_learnings.py
+   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scripts/retrotag_learnings.py
    ```
 
 5. When every tag group has been processed, stamp the review timestamp so the startup nudge quiets down:
 
    ```bash
-   python -c "from pathlib import Path; from scribe.notes import scribe_state_dir; p = scribe_state_dir() / 'learnings' / 'last_review'; p.parent.mkdir(parents=True, exist_ok=True); p.write_text('', encoding='utf-8'); import os, time; os.utime(p)"
+   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py mark-reviewed
    ```
 
-   The python form above is preferred — it resolves the per-target state dir via the registry, so it works regardless of cwd.
+   Always go through the launcher: it exports `APIARY_TARGET_STATE_DIR`, so the marker lands in the per-target state dir the startup banner actually reads.
 
 6. Report the summary to the user: N kept, M archived, K superseded.
 
