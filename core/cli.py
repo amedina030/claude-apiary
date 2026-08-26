@@ -7,7 +7,7 @@ tested in isolation:
     apiary install --target <repo>     core/install.py
     apiary uninstall --target <repo>   core/uninstall.py
     apiary self-bootstrap              core/self_bootstrap.py
-    apiary doctor [check]              core/doctor.py
+    apiary doctor [check] [--fix]      core/doctor.py
     apiary mailbox                     core/mailbox.py
     apiary cascade-fix                 core/cascade.py
     apiary version                     prints <main-apiary>/VERSION
@@ -86,6 +86,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     forwarded: list[str] = []
     if args.subcommand:
         forwarded.append(args.subcommand)
+    if args.fix:
+        forwarded.append("--fix")
     if args.apiary_repo is not None:
         forwarded.extend(["--apiary-repo", str(args.apiary_repo)])
     return doctor.main(forwarded)
@@ -165,6 +167,11 @@ def main(argv: list[str] | None = None) -> int:
         "subcommand", nargs="?",
         choices=tuple(_doctor.CHECKS),
         help="single check to run; omit to run all",
+    )
+    p_doctor.add_argument(
+        "--fix", action="store_true",
+        help=("apply safe fixes for the named check (supported: "
+              f"{', '.join(_doctor.FIXES)}); requires a check name"),
     )
     _add_apiary_repo_arg(p_doctor)
     p_doctor.set_defaults(func=_cmd_doctor)

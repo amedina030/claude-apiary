@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""``apiary doctor`` — read-only consistency checks for the per-repo install model.
+"""``apiary doctor`` — consistency checks for the per-repo install model.
 
-Phase-0 scaffold. All subcommands report findings; none mutate state. The
-``--fix`` flag is reserved for a later phase once the pointer/mailbox/cascade
-write paths exist.
+Every check is read-only: running a check reports findings and mutates
+nothing. Passing ``--fix`` alongside a check name opts into that check's
+writer, where one exists — see ``FIXES`` below (``mailbox``, ``pointers``).
 
-Subcommands (per MIGRATION-PLAN.md §7.6):
+Subcommands:
 
 - ``pointers``      — main-apiary's self-pointer matches its actual cwd
 - ``registry``      — every registry entry: path exists; uid/version present
@@ -21,9 +21,9 @@ Subcommands (per MIGRATION-PLAN.md §7.6):
 
 Usage::
 
-    python ~/.claude/apiary_launch.py core/doctor.py
-    python ~/.claude/apiary_launch.py core/doctor.py registry
-    python ~/.claude/apiary_launch.py core/doctor.py mailbox
+    poetry run apiary doctor
+    poetry run apiary doctor registry
+    poetry run apiary doctor mailbox --fix
 
 Exit code is 0 when all checks pass and 1 when any check reports a problem,
 so the doctor can be wired into CI or a pre-commit hook later.
@@ -43,18 +43,19 @@ from core.utils import state
 
 
 # A check returns (notes, issues). Notes are informational and never fail
-# a run; issues do. The split lets phase-0-expected status (e.g. self-pointer
-# files not yet created) print without making the doctor exit nonzero.
+# a run; issues do. The split lets expected-but-worth-saying status (e.g. a
+# machine where `apiary self-bootstrap` has not been run yet, so there is no
+# self-pointer to compare) print without making the doctor exit nonzero.
 CheckResult = tuple[list[str], list[str]]
 
 
 def check_pointers(apiary: Path) -> CheckResult:
     """Verify main-apiary's own self-pointer matches its actual location.
 
-    Phase-0 limitation: the per-repo pin files (``<apiary>/.claude/apiary/*``)
-    are populated in phase 1 by ``apiary self-bootstrap``. If they don't
-    exist yet, that's expected during the migration window — report as a
-    note, not an issue.
+    The pin files (``<apiary>/.claude/apiary/*``) are written by
+    ``apiary self-bootstrap``. A checkout where that has never been run has
+    no self-pointer to compare against, which is a setup step outstanding
+    rather than drift — report it as a note, not an issue.
     """
     notes: list[str] = []
     issues: list[str] = []
@@ -63,7 +64,7 @@ def check_pointers(apiary: Path) -> CheckResult:
         notes.append(
             "main-apiary's self-pointer not yet written "
             f"(expected at {state.self_pointer_path(apiary)}); "
-            "run `apiary self-bootstrap` once phase 1 lands."
+            "run `apiary self-bootstrap` to write it."
         )
         return notes, issues
     recorded = Path(self_p.get("real_path", ""))
@@ -110,7 +111,11 @@ def check_registry(apiary: Path) -> CheckResult:
 
 
 def check_mailbox(apiary: Path) -> CheckResult:
-    """Report pending forwarding messages. Processing is phase-1 work."""
+    """Report pending forwarding messages.
+
+    Draining them is a write, so it lives behind ``--fix`` (:func:`_fix_mailbox`)
+    or the standalone ``apiary mailbox`` verb.
+    """
     forwarding = apiary / ".apiary" / "forwarding"
     if not forwarding.is_dir():
         return [f"mailbox dir not yet created at {forwarding}"], []
@@ -119,7 +124,7 @@ def check_mailbox(apiary: Path) -> CheckResult:
         return [], []
     return [], [
         f"{len(pending)} pending forwarding message(s) at {forwarding} "
-        "— run `apiary doctor mailbox --fix` once phase 1 lands."
+        "— run `apiary doctor mailbox --fix` to drain them."
     ]
 
 
