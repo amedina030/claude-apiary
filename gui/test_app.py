@@ -61,10 +61,6 @@ class LogBubbleAnomalyTest(unittest.TestCase):
         self.assertFalse(self.log_path.exists())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class StartPermissionBridgeTest(unittest.TestCase):
     """The MCP flag must never read "1" without a live bridge behind it
     (review C-2): a failed loopback bind used to leave APIARY_PERMISSION_MCP=1
@@ -140,3 +136,7 @@ class StartPermissionBridgeTest(unittest.TestCase):
             app._start_permission_bridge()
         self.assertIsNone(app._permission_bridge)
         self.assertNotIn("APIARY_PERMISSION_MCP", os.environ)
+
+
+if __name__ == "__main__":
+    unittest.main()
