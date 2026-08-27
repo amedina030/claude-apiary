@@ -907,13 +907,9 @@ def validate(data: dict, banned_tokens: dict | None = None) -> list[str]:
                     if isinstance(f, str) and f not in created_files and not _resolve_repo_path(Path(f)).exists():
                         errors.append(f"{label}: file not found: {f}")
 
-        # depends_on references valid step numbers
-        deps = step.get("depends_on", [])
-        if isinstance(deps, list):
-            for dep in deps:
-                if isinstance(dep, int) and dep not in seen_numbers and dep >= num:
-                    # Forward reference — may still be valid if the step exists later
-                    pass  # Checked via cycle detection instead
+        # depends_on references are not checked here: a forward reference is
+        # legitimate as long as the step exists later, so validity is decided
+        # by _detect_cycles below rather than per-step.
 
     # Circular dependency check
     errors.extend(_detect_cycles(steps))

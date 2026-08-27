@@ -314,7 +314,7 @@ def detect_global_unexpected_writes(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Chained executor — runner stage 4 (single-subprocess variant)"
+        description="Monolithic executor — runner stage 4 (single-subprocess variant)"
     )
     parser.add_argument("plan", help="Path to plan JSON file")
     args = parser.parse_args()
@@ -399,7 +399,7 @@ def main():
     }
     persist_execution_log(log_path, execution_log)
 
-    print(f"Chained executor: running plan with {len(plan.get('steps', []))} "
+    print(f"Monolithic executor: running plan with {len(plan.get('steps', []))} "
           f"steps in one subprocess (timeout {MONOLITHIC_TIMEOUT}s)",
           file=sys.stderr)
 
@@ -421,7 +421,7 @@ def main():
     if rc != 0:
         execution_log["status"] = "aborted"
         execution_log["error"] = (
-            f"Chained subprocess exited rc={rc}. "
+            f"Monolithic subprocess exited rc={rc}. "
             f"stderr: {stderr.strip()[:500]}"
         )
         persist_execution_log(log_path, execution_log)

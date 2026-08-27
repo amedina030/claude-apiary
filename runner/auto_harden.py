@@ -315,10 +315,6 @@ def run_defender(findings: list[dict], files: list[str]) -> list[dict] | None:
         text = extract_text(stdout)
         response_json = extract_json_from_text(text)
 
-        # Debug: log what we got back
-        print(f"  DEBUG defender stdout len={len(stdout)}, text len={len(text)}, json len={len(response_json)}", file=sys.stderr)
-        print(f"  DEBUG response_json first 500: {response_json[:500]!r}", file=sys.stderr)
-
         # Validate
         valid, output = validate_response(response_json, expected_ids)
         if valid:
