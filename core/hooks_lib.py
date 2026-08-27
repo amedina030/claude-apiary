@@ -11,6 +11,9 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+from core.utils.atomic import write_json_atomic
+from core.utils.jsonio import read_json_object
+
 # Env override for the Python interpreter baked into generated commands.
 # No single bare name (`python` / `python3` / `py`) is portable across
 # macOS, Linux, and Windows, so callers never hardcode one — they resolve
@@ -168,20 +171,16 @@ def hook_cmd(
 
 def load_settings(path: Path) -> Dict[str, Any]:
     """Load settings.json, returning empty dict if missing or invalid."""
-    if not path.exists():
-        return {}
-    with open(path, encoding="utf-8") as f:
-        try:
-            return json.load(f)
-        except json.JSONDecodeError:
-            return {}
+    return read_json_object(path) or {}
 
 
 def save_settings(path: Path, settings: Dict[str, Any]) -> None:
-    """Write settings.json, creating parent dirs as needed."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(settings, f, indent=2)
+    """Write settings.json, creating parent dirs as needed.
+
+    Atomic: an interrupted install must not leave the user with a truncated
+    settings.json — Claude Code would then start with no hooks at all
+    (review X-3 flagged this as the one non-atomic writer left in core)."""
+    write_json_atomic(path, settings, indent=2)
 
 
 def register_hooks(settings_path: Path, new_hooks: Dict[str, List],

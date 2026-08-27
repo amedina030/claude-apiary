@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from compass import store
 from core.hooks.extract_transcript import extract_conversation, read_session_jsonl
 from core.utils.project import get_project_key, project_key_from_path
+from core.utils.timeutil import ISO_FORMAT, now_iso
 from runner.claude_subprocess import run_claude
 
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
@@ -131,8 +132,8 @@ def _captured_at(transcript_path: Path) -> str:
     except OSError:
         # Unreadable stat is not worth failing the session over; now() is
         # the same (wrong but harmless) answer this used to give always.
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return datetime.fromtimestamp(mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return now_iso()
+    return datetime.fromtimestamp(mtime, timezone.utc).strftime(ISO_FORMAT)
 
 
 def _truncate_messages(conversation: list[dict]) -> list[dict]:

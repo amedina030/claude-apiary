@@ -56,6 +56,7 @@ class NoChangesError(RuntimeError):
 
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
+from core.utils.atomic import write_json_atomic
 from .git_lib import git, format_git_error as _format_git_error
 
 
@@ -303,11 +304,9 @@ def persist_execution_log(log_path: Path, execution_log: dict):
 
     The atomic-write pattern (write to .tmp, os.replace) ensures the
     log file is never partially written even if the process dies
-    mid-flush.
+    mid-flush. ``core.utils.atomic`` owns that pattern.
     """
-    tmp = log_path.with_suffix(log_path.suffix + ".tmp")
-    tmp.write_text(json.dumps(execution_log, indent=2), encoding="utf-8")
-    os.replace(tmp, log_path)
+    write_json_atomic(log_path, execution_log, indent=2)
 
 
 def validate_resume_state(

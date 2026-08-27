@@ -15,7 +15,6 @@ in the history ring buffer (#223). The constant name matches the canonical
 import os
 import sys
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -23,6 +22,7 @@ from core.hook_context import run_standalone
 from core.utils.filelock import FileLock
 from core.session import dump_history, load_history, sessions_dir, sweep_stale_session_files
 from core.utils.atomic import write_text_atomic
+from core.utils.timeutil import now_iso
 
 MAX_HISTORY = 10
 
@@ -56,7 +56,7 @@ def _append_to_history(session_id, transcript_path):
         history.append({
             "session_id": session_id,
             "transcript_path": transcript_path,
-            "ended_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "ended_at": now_iso(),
             "role": role,
             "mission": mission,
             "registered": registered,

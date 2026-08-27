@@ -20,15 +20,20 @@ Dimensions config ships with the compass module at ``compass/dimensions.json``.
 from __future__ import annotations
 
 import json
-import os
 import re
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-APIARY_STATE_DIRNAME = ".apiary"
+# Path resolution and the two names that describe it live in core.utils.state -
+# re-exported here so callers (and tests) can keep saying ``store.<NAME>``
+# while there is exactly one definition in the tree (review X-3).
+from core.utils.state import (  # noqa: F401
+    LEGACY_STATE_DIRNAME as APIARY_STATE_DIRNAME,
+    TARGET_STATE_DIR_ENV,
+    resolve_state_dir,
+)
+
 COMPASS_SUBDIR = "compass"
-TARGET_STATE_DIR_ENV = "APIARY_TARGET_STATE_DIR"
 
 OBSERVATIONS_DIRNAME = "observations"
 ARCHIVE_DIRNAME = "archive"
@@ -48,40 +53,15 @@ VALID_VOLATILITY = frozenset({"stable", "volatile"})
 _SESSION_ID_RE = re.compile(r"^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$|^[0-9a-f]{8}$")
 
 
-def _git_repo_root(start: Path | None = None) -> Path | None:
-    """Return the git repo root containing *start* (or cwd), or None."""
-    cwd = str(start) if start is not None else str(Path.cwd())
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (FileNotFoundError, OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0:
-        return None
-    top = result.stdout.strip()
-    return Path(top) if top else None
-
-
 def compass_dir(start: Path | None = None) -> Path:
     """Return the compass state directory.
 
-    Resolution order:
-      1. ``APIARY_TARGET_STATE_DIR`` env var (set by the per-repo launcher, .claude/apiary/launch.py, after
-         the registry resolver runs) — returns ``<state_dir>/compass/``.
-      2. ``<repo-root>/.apiary/compass/`` via git rev-parse on *start*.
-      3. ``<cwd>/.apiary/compass/`` when not inside a git repo.
+    Delegates to :func:`core.utils.state.resolve_state_dir`, which is the
+    one place the precedence lives (launcher env var → the repo's pins →
+    the legacy ``.apiary/pointer`` breadcrumb → ``<repo>/.apiary/`` →
+    ``<cwd>/.apiary/`` outside a git repo). See its docstring.
     """
-    env_dir = os.environ.get(TARGET_STATE_DIR_ENV, "").strip()
-    if env_dir:
-        return Path(env_dir) / COMPASS_SUBDIR
-    root = _git_repo_root(start) or (start or Path.cwd())
-    return Path(root) / APIARY_STATE_DIRNAME / COMPASS_SUBDIR
+    return resolve_state_dir(start, subdir=COMPASS_SUBDIR, cwd_fallback=True)
 
 
 def observations_dir(start: Path | None = None) -> Path:

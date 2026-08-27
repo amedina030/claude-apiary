@@ -106,7 +106,7 @@ class BackupIndexesTests(unittest.TestCase):
         test_argv = ['backup_indexes.py', '--retain', '5']
 
         with unittest.mock.patch('sys.argv', test_argv), \
-             unittest.mock.patch.object(backup_indexes, 'resolve_state_dir', return_value=self.state_dir):
+             unittest.mock.patch.object(backup_indexes, 'resolve_backup_source', return_value=self.state_dir):
             result = backup_indexes.main()
 
         self.assertEqual(result, 0)

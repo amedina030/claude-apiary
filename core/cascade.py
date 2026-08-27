@@ -40,7 +40,8 @@ def cascade_fix(new_main_apiary_path: Path) -> CascadeReport:
     """Rewrite every bootstrapped repo's ``main-apiary-pointer.json`` to
     point at *new_main_apiary_path*.
 
-    Skips main-apiary's own entry (uid 1) and any registry entry whose
+    Skips main-apiary's own entry (``state.MAIN_APIARY_UID``) and any
+    registry entry whose
     ``real_path`` no longer exists or no longer has a per-repo pin file.
     Skipped entries are returned in the report so the caller can surface
     them; ``apiary doctor unreachable`` covers persistent gone-repo state.
@@ -55,7 +56,7 @@ def cascade_fix(new_main_apiary_path: Path) -> CascadeReport:
                 uid = int(uid_str)
             except ValueError:
                 continue
-            if uid == 1:
+            if uid == state.MAIN_APIARY_UID:
                 continue  # main-apiary's own entry; updated by the caller
             real_path = entry.get("real_path", "")
             if not real_path:

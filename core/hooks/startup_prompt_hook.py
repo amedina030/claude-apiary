@@ -28,8 +28,8 @@ from core.session import SessionId
 from core.hook_context import HookResult, context_block, run_standalone
 from core.sanitizer import sanitize_and_report
 from core.startup import run_init, run_summary
-from core.utils.state import find_state_dir
-from scribe.notes import _git_repo_root
+from core.utils.gitutil import git_root
+from core.utils.state import find_state_dir, state_dir_from_env
 
 
 def _strip_frontmatter(md: str) -> str:
@@ -55,10 +55,7 @@ def _strip_frontmatter(md: str) -> str:
 # back to <apiary-repo>/.apiary/hooks/ when the env var is not set so
 # the legacy in-repo layout still works during the migration window.
 def _hook_state_dir() -> Path:
-    env_dir = os.environ.get("APIARY_TARGET_STATE_DIR", "").strip()
-    if env_dir:
-        return Path(env_dir)
-    return PROJECT_ROOT / ".apiary"
+    return state_dir_from_env() or (PROJECT_ROOT / ".apiary")
 
 
 def _log_sanitizer_hits(site: str, hits: dict[str, int], session_id: str) -> None:
@@ -122,7 +119,7 @@ def run(payload: dict):
     # on the session's cwd → registry → <state-dir>/scribe/. Sessions started
     # outside a git repo skip notes/summary/learnings injection rather than
     # falsely loading apiary's own state.
-    session_repo_root = _git_repo_root(Path(cwd))
+    session_repo_root = git_root(Path(cwd))
     skip_notes_injection = session_repo_root is None
 
     # --- 1. Init: identity ---

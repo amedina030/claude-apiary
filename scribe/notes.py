@@ -22,7 +22,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path as _PathImport
@@ -89,6 +88,7 @@ def _load_session_identity():
 
 
 from core.utils.project import get_project_key  # moved to core; re-exported
+from core.utils.state import resolve_state_dir
 
 
 _PROJECT_KEY_RE = re.compile(r'^[A-Za-z0-9_.\-]{1,200}$')
@@ -116,52 +116,17 @@ def _project_key(project_override=None):
     return get_project_key(Path.cwd())
 
 
-def _git_repo_root(start: Path | None = None) -> Path | None:
-    """Return the git repo root containing *start* (or cwd), or None.
-
-    Uses ``git rev-parse --show-toplevel`` via list-form subprocess for
-    portability. Returns None when git is unavailable, when *start* is not
-    inside a repo, or when the command fails for any other reason.
-    """
-    cwd = str(start) if start is not None else str(Path.cwd())
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (FileNotFoundError, OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0:
-        return None
-    top = result.stdout.strip()
-    if not top:
-        return None
-    return Path(top)
-
-
 def scribe_state_dir(start: Path | None = None) -> Path | None:
     """Return the scribe state *directory* under the active layout.
 
-    Resolution order:
-      1. ``APIARY_TARGET_STATE_DIR`` env var (set by the per-repo launcher
-         after the registry resolver runs) — returns ``<state_dir>/scribe/``.
-      2. ``<git-repo-root>/.apiary/scribe/`` via git rev-parse on *start*
-         (or cwd). Pre-migration in-repo path retained for unmigrated
-         targets that haven't been re-bootstrapped yet.
-      3. ``None`` when *start* is not inside a git repo — callers decide
-         whether to fall back further or error.
+    Delegates to :func:`core.utils.state.resolve_state_dir` — the one place
+    the precedence lives (launcher env var → the repo's pins → the legacy
+    ``.apiary/pointer`` breadcrumb → ``<repo>/.apiary/scribe/``). Returns
+    ``None`` when *start* is not inside a git repo at all: scribe has no
+    cwd fallback, because writing notes into whatever directory the shell
+    happened to be in is worse than saying "I don't know where they go".
     """
-    env_dir = os.environ.get("APIARY_TARGET_STATE_DIR", "").strip()
-    if env_dir:
-        return Path(env_dir) / SCRIBE_SUBDIR
-    root = _git_repo_root(start)
-    if root is None:
-        return None
-    return root / APIARY_STATE_DIRNAME / SCRIBE_SUBDIR
+    return resolve_state_dir(start, subdir=SCRIBE_SUBDIR)
 
 
 def template_path(state_dir: Path, note_type: str) -> Path:
@@ -265,10 +230,6 @@ def scaffold_default_templates(state_dir: Path) -> list:
     except OSError:
         pass
     return sorted(written)
-
-
-def _now_iso():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _parse_timestamp(ts):

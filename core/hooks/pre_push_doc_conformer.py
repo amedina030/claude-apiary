@@ -98,6 +98,7 @@ def run(payload: dict):  # pragma: no cover — pure logic lives in
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     from core.hook_context import HookResult
+    from core.utils.gitutil import git_root
 
     # Runner subprocesses are one-shot workers; the push gate is out of scope
     # for them (consistent with the other core hooks, #228).
@@ -114,16 +115,9 @@ def run(payload: dict):  # pragma: no cover — pure logic lives in
 
     # Resolve the git root of the repo being pushed (from the session cwd).
     cwd = payload.get("cwd") or os.getcwd()
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=10, check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+    root = git_root(cwd)
+    if root is None:
         return None
-    if proc.returncode != 0 or not proc.stdout.strip():
-        return None
-    root = Path(proc.stdout.strip())
 
     # No-op unless the repo being pushed actually ships the conformer.
     conformer = root / "docs" / "check_cli_claims.py"

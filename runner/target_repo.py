@@ -18,6 +18,8 @@ import os
 from pathlib import Path
 from typing import Optional, Union
 
+from core.utils.state import state_dir_from_env
+
 from .config_loader import get as cfg
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -113,7 +115,6 @@ def resolve_target_repo(
 
 _RUNNER_STATE_DIR = ".apiary/runner"
 _RUNNER_SUBDIR = "runner"
-_TARGET_STATE_DIR_ENV = "APIARY_TARGET_STATE_DIR"
 
 
 def _default_target(target: Optional[Path]) -> Path:
@@ -132,15 +133,22 @@ def artifacts_root(target: Optional[Path] = None) -> Path:
       1. ``APIARY_TARGET_STATE_DIR`` env var (set by the per-repo launcher, .claude/apiary/launch.py, after
          the registry resolver runs) — returns ``<state_dir>/runner/``.
          Used when the caller did not pass an explicit *target* override.
+         Read through ``core.utils.state.state_dir_from_env`` so the env
+         var is named in exactly one place (review X-3).
       2. ``<target>/.apiary/runner/`` — legacy in-repo path. Used when an
          explicit *target* is passed (e.g. multi-repo runner orchestrating
          a different repo than the one apiary is registered against), or
          as a fallback when the env var is unset.
+
+    Deliberately *not* ``resolve_state_dir``: an explicit *target* here
+    means "this other repo's in-tree artifacts", and consulting that
+    repo's pins would silently redirect a multi-repo run's artifacts to
+    the centralized store.
     """
     if target is None:
-        env_state = os.environ.get(_TARGET_STATE_DIR_ENV, "").strip()
-        if env_state:
-            return Path(env_state) / _RUNNER_SUBDIR
+        env_state = state_dir_from_env()
+        if env_state is not None:
+            return env_state / _RUNNER_SUBDIR
     return _default_target(target) / _RUNNER_STATE_DIR
 
 

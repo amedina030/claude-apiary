@@ -25,10 +25,6 @@ from core import cascade
 from core.utils import state
 from core.utils.filelock import FileLock
 
-# Main-apiary's UID is reserved at slot 1 by convention.
-_MAIN_APIARY_UID = 1
-
-
 @dataclasses.dataclass
 class DriftReport:
     """Result of a drift check. ``action`` is one of:
@@ -75,7 +71,7 @@ def check_and_handle(repo_root: Path) -> DriftReport:
 
     # Main-apiary itself takes the cascade-fix path instead of the
     # ordinary registry-update path. Detect by reserved uid=1.
-    if int(self_p.get("uid", -1)) == _MAIN_APIARY_UID:
+    if int(self_p.get("uid", -1)) == state.MAIN_APIARY_UID:
         return _handle_main_apiary_drift(repo_root, self_p)
 
     main_p = state.read_main_apiary_pointer(repo_root)
@@ -96,7 +92,7 @@ def check_and_handle(repo_root: Path) -> DriftReport:
 
     if not drifted:
         # Refresh last_drift_check and exit fast.
-        self_p["last_drift_check"] = state._now_iso()
+        self_p["last_drift_check"] = state.now_iso()
         state.write_self_pointer(repo_root, self_p)
         return DriftReport(action="none")
 
@@ -139,7 +135,7 @@ def _handle_drift(
     uid = int(self_p["uid"])
     name = self_p["name"]
     version = state.read_apiary_version(apiary_path)
-    now = state._now_iso()
+    now = state.now_iso()
 
     with FileLock(state.registry_path(apiary_path)):
         registry = state._load_registry(apiary_path)
@@ -207,28 +203,28 @@ def _handle_main_apiary_drift(repo_root: Path, self_p: dict) -> DriftReport:
     recorded = Path(self_p.get("real_path", "")).resolve() if self_p.get("real_path") else None
     if recorded == repo_root:
         # No drift — refresh check timestamp and return.
-        self_p["last_drift_check"] = state._now_iso()
+        self_p["last_drift_check"] = state.now_iso()
         state.write_self_pointer(repo_root, self_p)
         return DriftReport(action="none")
 
     # Main-apiary moved. Update its own pin files first so the cascade
     # writes valid paths into bootstrapped repos.
-    now = state._now_iso()
+    now = state.now_iso()
     self_p["real_path"] = str(repo_root)
     self_p["last_drift_check"] = now
     state.write_self_pointer(repo_root, self_p)
     state.write_main_apiary_pointer(repo_root, {
         "main_apiary_path": str(repo_root),
-        "main_apiary_uid": _MAIN_APIARY_UID,
+        "main_apiary_uid": state.MAIN_APIARY_UID,
         "registered_at": now,
     })
 
     # Update its own registry entry (real_path moves).
     with FileLock(state.registry_path(repo_root)):
         registry = state._load_registry(repo_root)
-        if str(_MAIN_APIARY_UID) in registry:
-            registry[str(_MAIN_APIARY_UID)]["real_path"] = str(repo_root)
-            registry[str(_MAIN_APIARY_UID)]["last_used"] = now
+        if str(state.MAIN_APIARY_UID) in registry:
+            registry[str(state.MAIN_APIARY_UID)]["real_path"] = str(repo_root)
+            registry[str(state.MAIN_APIARY_UID)]["last_used"] = now
             state._save_registry(repo_root, registry)
 
     cascade_report = cascade.cascade_fix(repo_root)
@@ -236,7 +232,12 @@ def _handle_main_apiary_drift(repo_root: Path, self_p: dict) -> DriftReport:
     msg = f"main-apiary moved to {repo_root}; cascade-fix updated {n} bootstrapped repo(s)"
     if cascade_report.skipped:
         msg += f" ({len(cascade_report.skipped)} skipped)"
-    return DriftReport(action="move", old_uid=_MAIN_APIARY_UID, new_uid=_MAIN_APIARY_UID, message=msg)
+    return DriftReport(
+        action="move",
+        old_uid=state.MAIN_APIARY_UID,
+        new_uid=state.MAIN_APIARY_UID,
+        message=msg,
+    )
 
 
 def _classify_as_copy(entry: dict | None, repo_root: Path, uid: int) -> bool:

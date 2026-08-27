@@ -1,8 +1,9 @@
 """Tests for the researcher subsystem.
 
 Each test isolates state to a fresh ``tempfile.TemporaryDirectory()`` by
-monkey-patching ``store._git_repo_root`` to return the temp path. This
-keeps tests off real user data and avoids depending on git being runnable.
+monkey-patching the shared ``core.utils.state.git_root`` resolver to return
+the temp path. This keeps tests off real user data and avoids depending on
+git being runnable.
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ class ResearcherTestCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp_path = Path(self._tmp.name)
         self._patch = mock.patch(
-            "researcher.store._git_repo_root",
+            "core.utils.state.git_root",
             return_value=self.tmp_path,
         )
         self._patch.start()

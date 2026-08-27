@@ -85,17 +85,25 @@ def session_tmp_dir(warn: bool = True) -> Path:
 
 
 def sessions_dir(warn: bool = True) -> Path:
-    """``<state-dir>/sessions`` for the current target."""
-    from core.utils import state
-    sd = state.state_dir_from_env()
-    if sd is None:
-        from core.flags import _per_repo_root
-        repo = _per_repo_root()
-        if repo is not None:
-            sd = state.find_state_dir(Path(repo))
-    if sd is None:
-        return _fallback_root(warn) / SESSIONS_DIRNAME
-    return Path(sd) / SESSIONS_DIRNAME
+    """``<state-dir>/sessions`` for the current target.
+
+    ``legacy_in_repo=False``: unlike scribe/compass/researcher/captures,
+    session files never fall back to ``<repo>/.apiary/`` — a hook firing in
+    a repo apiary does not manage must not grow an un-ignored state tree
+    there. The OS temp dir is the fallback instead (see ``_fallback_root``).
+    """
+    from core.utils.state import resolve_state_dir, state_dir_from_env
+    sd = state_dir_from_env()
+    if sd is not None:
+        return sd / SESSIONS_DIRNAME
+    # No launcher env: find the repo the way flags does (CLAUDE_PROJECT_DIR /
+    # APIARY_TARGET_REPO, then git), then let the shared resolver read its pins.
+    from core.flags import _per_repo_root
+    repo = _per_repo_root()
+    sd = None if repo is None else resolve_state_dir(
+        repo=repo, subdir=SESSIONS_DIRNAME, use_env=False, legacy_in_repo=False,
+    )
+    return sd if sd is not None else _fallback_root(warn) / SESSIONS_DIRNAME
 
 
 # Session files are small but numerous (~5 flags + 1 identity per session);

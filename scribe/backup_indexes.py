@@ -16,7 +16,14 @@ BACKUPS_DIRNAME = 'backups'
 DEFAULT_RETAIN = 30
 
 
-def resolve_state_dir(project: str | None = None) -> Path:
+def resolve_backup_source(project: str | None = None) -> Path:
+    """The scribe state dir to back up, with the legacy per-project fallback.
+
+    Not ``core.utils.state.resolve_state_dir`` — this one adds the
+    ``~/.claude/projects/<key>/`` fallback that only the backup CLI still
+    honours, and it is named apart so there is exactly one
+    ``resolve_state_dir`` in the tree (review X-3).
+    """
     sd = scribe_state_dir()
     if sd is None:
         sd = PROJECTS_DIR / _project_key(project)
@@ -72,7 +79,7 @@ def main() -> int:
     parser.add_argument('--project', default=None, help='Project key override')
     args = parser.parse_args()
 
-    state_dir = resolve_state_dir(args.project)
+    state_dir = resolve_backup_source(args.project)
     if not state_dir.exists():
         print('No scribe state directory found.', file=sys.stderr)
         return 0

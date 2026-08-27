@@ -27,6 +27,7 @@ from core import context_rules as cr
 from core import launcher_template
 from core.hooks_lib import load_settings, register_hooks, save_settings
 from core.utils import state
+from core.utils.atomic import write_json_atomic, write_text_atomic
 from core.utils.filelock import FileLock
 
 # Top-level keys in <repo>/.claude/settings.json that apiary owns outright:
@@ -102,7 +103,7 @@ def install(
     previous = _read_bootstrap_state(state_dir)
 
     apiary_version = state.read_apiary_version(apiary)
-    now = state._now_iso()
+    now = state.now_iso()
 
     # Per-repo .claude/apiary/ files
     pin = state.pin_dir(target_root)
@@ -112,7 +113,7 @@ def install(
     _write_launcher(pin / "launch.py")
     state.write_main_apiary_pointer(target_root, {
         "main_apiary_path": str(apiary),
-        "main_apiary_uid": 1,
+        "main_apiary_uid": state.MAIN_APIARY_UID,
         "registered_at": registered_at,
     })
     # Always rewritten, never merely created: an existing pin that disagrees
@@ -173,13 +174,13 @@ def _resolve_target(target_repo: Path) -> Path:
     target = Path(target_repo).resolve()
     if not target.is_dir():
         raise InstallError(f"target {target} is not a directory")
-    git_root = state._git_repo_root(target)
-    if git_root is None:
+    root = state.git_root(target)
+    if root is None:
         raise InstallError(
             f"target {target} is not inside a git repository — "
             "apiary requires a git repo to identify the target"
         )
-    return git_root.resolve()
+    return root.resolve()
 
 
 def _readoptable_uid(pinned: dict | None, registry: dict) -> int | None:
@@ -213,7 +214,7 @@ def _register_or_update(
     """
     repos_root = state.repos_dir(apiary)
     repos_root.mkdir(parents=True, exist_ok=True)
-    now = state._now_iso()
+    now = state.now_iso()
     apiary_version = state.read_apiary_version(apiary)
 
     with FileLock(state.registry_path(apiary)):
@@ -263,10 +264,7 @@ def _register_or_update(
 def _write_launcher(launcher_path: Path) -> None:
     """Write the per-repo launcher shim atomically. Marks executable on
     Unix-like systems (no-op on Windows)."""
-    launcher_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = launcher_path.with_name(launcher_path.name + ".tmp")
-    tmp.write_text(launcher_template.LAUNCHER_PY, encoding="utf-8")
-    tmp.replace(launcher_path)
+    write_text_atomic(launcher_path, launcher_template.LAUNCHER_PY)
     try:
         launcher_path.chmod(launcher_path.stat().st_mode | 0o755)
     except OSError:
@@ -664,10 +662,8 @@ def _write_bootstrap_state(
         "bootstrapped_at": existing.get("bootstrapped_at", now_iso) if not is_first_install else now_iso,
         "last_updated_at": now_iso,
     }
-    tmp = p.with_name(p.name + ".tmp")
     try:
-        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        tmp.replace(p)
+        write_json_atomic(p, payload, indent=2, sort_keys=True, trailing_newline=True)
     except OSError as exc:
         raise InstallError(
             f"could not write {p} ({exc.__class__.__name__}: {exc}). The repo is "

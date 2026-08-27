@@ -5,10 +5,8 @@ individual .md files organized into type folders, each with its own
 index.jsonl for fast listing.
 """
 import json
-import os
 import re
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +14,7 @@ from pathlib import Path
 # Repo-root import for core.utils
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core import frontmatter as fm_lib
+from core.utils.atomic import write_text_atomic
 from core.utils.filelock import FileLock
 
 # --- Constants ---
@@ -225,25 +224,6 @@ class ScribeStore:
         return entries
 
     @staticmethod
-    def _atomic_write(path: Path, text: str) -> None:
-        """Write *text* to *path* atomically: temp file in the same dir, then
-        ``os.replace``. A process kill mid-write leaves either the old file or
-        the new one intact — never a torn line. Cleans up the temp file if the
-        replace doesn't happen. Caller holds the FileLock on *path*.
-        """
-        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix='.' + path.name + '.', suffix='.tmp')
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                f.write(text)
-            os.replace(tmp_name, path)
-        except BaseException:
-            try:
-                os.unlink(tmp_name)
-            except OSError:
-                pass
-            raise
-
-    @staticmethod
     def _write_index(type_dir: Path, entries: list[dict]) -> None:
         """Overwrite a folder's index.jsonl with the given entries.
 
@@ -252,7 +232,7 @@ class ScribeStore:
         idx_path = type_dir / INDEX_FILENAME
         with FileLock(idx_path):
             lines = [json.dumps(e, separators=(',', ':')) for e in entries]
-            ScribeStore._atomic_write(idx_path, '\n'.join(lines) + ('\n' if lines else ''))
+            write_text_atomic(idx_path, '\n'.join(lines) + ('\n' if lines else ''))
 
     @staticmethod
     def _append_index(type_dir: Path, entry: dict) -> None:
@@ -266,7 +246,7 @@ class ScribeStore:
             existing = idx_path.read_text(encoding='utf-8') if idx_path.exists() else ''
             if existing and not existing.endswith('\n'):
                 existing += '\n'
-            ScribeStore._atomic_write(idx_path, existing + json.dumps(entry, separators=(',', ':')) + '\n')
+            write_text_atomic(idx_path, existing + json.dumps(entry, separators=(',', ':')) + '\n')
 
     # --- Per-(type,year) sequence counter ---
 

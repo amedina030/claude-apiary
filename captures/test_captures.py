@@ -1,8 +1,9 @@
 """Tests for the captures subsystem.
 
 Each test isolates state to a fresh ``tempfile.TemporaryDirectory()`` by
-monkey-patching ``store._git_repo_root`` to return the temp path. This
-keeps tests off real user data and avoids depending on git being runnable.
+monkey-patching the shared ``core.utils.state.git_root`` resolver to return
+the temp path. This keeps tests off real user data and avoids depending on
+git being runnable.
 """
 from __future__ import annotations
 
@@ -37,7 +38,7 @@ class CapturesTestCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp_path = Path(self._tmp.name)
         self._patch = mock.patch(
-            "captures.store._git_repo_root",
+            "core.utils.state.git_root",
             return_value=self.tmp_path,
         )
         self._patch.start()

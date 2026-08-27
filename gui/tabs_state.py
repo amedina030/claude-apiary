@@ -19,11 +19,12 @@ can't block the GUI from starting.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from core.utils.atomic import write_json_atomic
+from core.utils.jsonio import read_json_object
 from gui.paths import state_dir
 
 
@@ -46,13 +47,8 @@ def load(path: Optional[Path] = None) -> tuple[list[TabEntry], int]:
     - Legacy string entries upgrade to TabEntry with default settings.
     """
     p = path or TABS_PATH
-    if not p.is_file():
-        return [], -1
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return [], -1
-    if not isinstance(data, dict):
+    data = read_json_object(p)
+    if data is None:
         return [], -1
     raw_tabs = data.get("tabs", [])
     if not isinstance(raw_tabs, list):
@@ -101,8 +97,6 @@ def save(entries: list[TabEntry], active_idx: int, path: Optional[Path] = None) 
             ],
             "active_idx": int(active_idx),
         }
-        tmp = p.with_suffix(p.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        tmp.replace(p)
+        write_json_atomic(p, payload, indent=2)
     except OSError:
         pass

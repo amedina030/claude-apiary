@@ -18,6 +18,9 @@ Not to be confused with:
 * ``scripts/install_repo_hooks.py`` — main-apiary's OWN ``.git/hooks``, which
   chains doc-conformance and the secret scan. This module deliberately refuses
   to target main-apiary so the two never fight over ``pre-commit``.
+
+"Which repo is this?" is ``core.utils.gitutil.git_root``; this module used to
+carry its own ``current_repo`` copy of it (review X-3).
 """
 
 from __future__ import annotations
@@ -33,23 +36,6 @@ HOOK_SOURCE = REPO_ROOT / "docs" / "hooks" / "pre-commit-secret-scan"
 # Substring identifying a hook we own. Both the per-repo hook and main-apiary's
 # combined hook contain it, so we never clobber either.
 OWNED_MARKER = "secret_scan.py"
-
-
-def current_repo(start: Path) -> Path | None:
-    """Git toplevel for *start*, or None when it isn't inside a work tree."""
-    try:
-        proc = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=str(start),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-        )
-    except (OSError, ValueError):
-        return None
-    out = proc.stdout.strip()
-    return Path(out) if proc.returncode == 0 and out else None
 
 
 def configured_hooks_path(repo: Path) -> str:

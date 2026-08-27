@@ -13,7 +13,6 @@ by standard sections (Summary / Context / Findings / Code / Caveats).
 """
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import sys
@@ -23,9 +22,16 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core import frontmatter  # noqa: E402
 
-APIARY_STATE_DIRNAME = ".apiary"
+# Path resolution and the two names that describe it live in core.utils.state -
+# re-exported here so callers (and tests) can keep saying ``store.<NAME>``
+# while there is exactly one definition in the tree (review X-3).
+from core.utils.state import (  # noqa: F401
+    LEGACY_STATE_DIRNAME as APIARY_STATE_DIRNAME,
+    TARGET_STATE_DIR_ENV,
+    resolve_state_dir,
+)
+
 RESEARCHER_SUBDIR = "research"
-TARGET_STATE_DIR_ENV = "APIARY_TARGET_STATE_DIR"
 TAGS_FILENAME = "tags.yaml"
 
 FRONTMATTER_DELIM = "---"
@@ -42,41 +48,15 @@ ENTRY_FIELDS = (
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
-def _git_repo_root(start: Path | None = None) -> Path | None:
-    """Return the git repo root containing *start* (or cwd), or None."""
-    cwd = str(start) if start is not None else str(Path.cwd())
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (FileNotFoundError, OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0:
-        return None
-    top = result.stdout.strip()
-    return Path(top) if top else None
-
-
 def research_dir(start: Path | None = None) -> Path:
     """Return the researcher state directory.
 
-    Resolution order:
-      1. ``APIARY_TARGET_STATE_DIR`` env var (set by the per-repo launcher, .claude/apiary/launch.py, after
-         the registry resolver runs) — returns ``<state_dir>/research/``.
-      2. Legacy in-repo path via git rev-parse on *start* — used for
-         unmigrated targets only.
-      3. ``<cwd>/.apiary/research/`` when not inside a git repo.
+    Delegates to :func:`core.utils.state.resolve_state_dir`, which is the
+    one place the precedence lives (launcher env var → the repo's pins →
+    the legacy ``.apiary/pointer`` breadcrumb → ``<repo>/.apiary/`` →
+    ``<cwd>/.apiary/`` outside a git repo). See its docstring.
     """
-    env_dir = os.environ.get(TARGET_STATE_DIR_ENV, "").strip()
-    if env_dir:
-        return Path(env_dir) / RESEARCHER_SUBDIR
-    root = _git_repo_root(start) or (start or Path.cwd())
-    return Path(root) / APIARY_STATE_DIRNAME / RESEARCHER_SUBDIR
+    return resolve_state_dir(start, subdir=RESEARCHER_SUBDIR, cwd_fallback=True)
 
 
 def tags_file(start: Path | None = None) -> Path:

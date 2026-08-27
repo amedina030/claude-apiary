@@ -28,9 +28,18 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
+
+# `python core/flags.py toggle <flag>` is a documented entry point (the
+# /budgeter-* skills invoke it through the launcher), and Python only puts
+# the script's own directory on sys.path — not the repo root the import
+# below needs.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from core.utils.gitutil import git_root  # noqa: E402
 
 PIN_FLAGS_SUBPATH = ".claude/apiary/flags"
 
@@ -52,16 +61,7 @@ def _per_repo_root() -> Path | None:
             return Path(val)
     # Last-ditch: cwd's git root. Cheap enough for one git invocation per
     # process; only matters outside hooks (CLI tools).
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5, check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return Path(result.stdout.strip())
-    except (FileNotFoundError, OSError, subprocess.SubprocessError):
-        pass
-    return None
+    return git_root()
 
 
 def _flag_path(flag_name: str) -> Path:
