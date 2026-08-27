@@ -2,7 +2,25 @@
 
 ## Unreleased
 
-### Phase 4 — engineering plumbing (2026-08-27; ruff/format follow in a later commit)
+### Phase 4 — engineering plumbing (2026-08-27)
+
+- **ruff + ruff format.** `E,F,I,PLW1514,S602,S605` at line-length 100
+  (chosen to keep the format pass a format pass — 1,103 lines exceeded 88,
+  268 exceeded 100), gated in CI and on staged files at commit time. All
+  530 findings cleared: dead imports/locals, import order, ambiguous
+  names, one lambda assignment; `E402` (the mandated `sys.path.insert`
+  bootstrap) and `E501` (67 survivors, all single literals/regexes — `ruff
+  format --check` is the real width gate) baselined with the reasoning in
+  `pyproject.toml`. There were zero `open()` calls without an encoding and
+  zero `shell=True` calls to fix. The tree was reformatted in one
+  no-functional-change commit (263 files; suite identical either side).
+  `docs/` is excluded pending its own pass.
+- Runner config defaults now match `runner/config.json` — the harden round
+  count, the detached token cap, three stage timeouts and two stage models
+  had all drifted — pinned by an AST-scanning test. `python -m
+  runner.mark_done` → `runner.ticket mark-done` (shim kept one release);
+  the orchestrator tests no longer write lockfiles into the real
+  `.apiary/runner/locks/`.
 
 - **CI:** first GitHub Actions workflow — ubuntu/windows/macos × Python
   3.11/3.12 running the suite, both doc checkers, the secret scan and a
@@ -30,7 +48,42 @@
 - `code-style.md` no longer claims "no pytest" or an unqualified stdlib-only
   rule; restated as what the repo actually does.
 
-### Phase 3 — consolidate (2026-08-27; 3.5 scribe split and 3.6 runner land separately)
+### Phase 3 — consolidate (2026-08-27)
+
+- **3.5 scribe split** — the 1,634-line `notes.py` becomes 706 lines of
+  argparse and printing over `scribe/{policy,maintenance,infer,templates,
+  formatting,paths,cli_args}.py`; `core/startup.py`, `core/install.py` and
+  the learnings hook no longer import the CLI module. **The lost-update
+  race is fixed**: every read-modify-write of an index holds the FileLock
+  across the whole operation — a stress test that lost 100 of 100
+  concurrently appended rows before the fix now passes, along with a
+  two-process append test. Bodies are written before their index rows and
+  archive moves use `os.replace`, so a crash mid-write leaves something
+  `repair` rebuilds instead of something it deletes. **Tag inference is off
+  by default** (`--infer` / `--no-infer` / `APIARY_SCRIBE_INFER=1`) — `/wrapup`
+  spawns no `claude -p` per learning any more; `scripts/retrotag_learnings.py`
+  is `notes.py retrotag`. New `backup` / `restore` verbs; the layout check
+  is lazy (nine stats instead of ~45 mkdirs on the PreToolUse hot path). A
+  lock timeout is one line + exit 1 instead of a traceback.
+- **3.6 runner consolidation + the revive programme's first step** — a
+  hermetic end-to-end test (`runner/test_e2e_pipeline.py`) drives all six
+  REAL stages through `python -m runner.run` (interactive and `--detached`)
+  with a fake `claude` on `PATH`, against a temp git repo with a bare
+  origin: artifacts, one branch per run, the run-history row, and that
+  nothing is ever pushed. Then, guarded by it: one branch per run owned by
+  the orchestrator (the executor used to create a second `runner/<uuid>`;
+  the morning queue table now joins by uuid); `validate_plan` resolves
+  paths against the plan's `target_repo`; `detached_lib` git calls require
+  an explicit cwd; the worktree-dir mismatch that made pruning scan an
+  empty dir; failed setups counted against `max_restarts`; `run_lock`
+  keeps a heartbeat; `<usage>` emitted on non-zero exits; `--abort`
+  archives from the state dir; `encoding="utf-8"` on every subprocess;
+  `stage_lib.py` / a finished `git_lib.py` replace five `run_claude`
+  wrappers, five JSON salvagers, two retry loops and six UUID guards; the
+  five ticket CLIs collapse into `python -m runner.ticket` (old entry points
+  are shims for one release); `_run_detached_impl` and three >200-line
+  `main()`s split into named steps (443 → 152, 365 → 55, 285 → 35, 213 →
+  35). `claude` is resolved via `which` (an npm `claude.cmd` used to fail).
 
 - **3.1 One hook dispatcher per event** (`core/hooks/dispatch.py
   {pre|post|stop|prompt|session-start}`) replaces the 18-entry
