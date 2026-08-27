@@ -33,10 +33,19 @@ WORKTREES_DIR = worktrees_dir()
 _SLUG_RE = re.compile(r'[^a-z0-9]+')
 
 
-def slugify(title: str) -> str:
-    """Lowercase, replace non-alnum with '-', strip leading/trailing '-'. Returns 'item' if empty."""
+def slugify(title: str, *, max_length: int | None = None,
+            fallback: str = 'item') -> str:
+    """Lowercase, replace runs of non-alnum with '-', strip leading/trailing '-'.
+
+    The one slugifier in the package: the run branch uses it uncapped with an
+    'item' fallback, and ticket filenames use it capped at 60 with an empty
+    fallback so a title that slugs to nothing is reported rather than silently
+    written as `item.json`. There were three near-identical copies (review X-3).
+    """
     s = _SLUG_RE.sub('-', (title or '').lower()).strip('-')
-    return s or 'item'
+    if max_length is not None:
+        s = s[:max_length].strip('-')
+    return s or fallback
 
 
 def _git(args: list, *, cwd: Path) -> subprocess.CompletedProcess:

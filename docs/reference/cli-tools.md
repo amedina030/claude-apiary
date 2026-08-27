@@ -759,11 +759,51 @@ Stage timeout is configurable via `runner/config.json` under `orchestrator.stage
 
 ### Multi-repo (`--target-repo`)
 
-All runner artifacts (specs/plans/executions/hardens/reports) always live under apiary's `runner/<dir>/<uuid>.json`, regardless of target. Only the executor's code-change diff lands in the target repo, on a `runner/<slug>-<uuid>` branch off its `master`. A single apiary checkout therefore holds the centralized run history across every target repo it has run against; each `run_history.jsonl` entry carries a `target_repo` field to disambiguate.
+All runner artifacts (intake/specs/plans/executions/hardens/reports) live under the apiary state dir — `$APIARY_TARGET_STATE_DIR/runner/<dir>/<uuid>.json` when invoked through the per-repo launcher, else `<target>/.apiary/runner/` — regardless of target. Only the executor's code-change diff lands in the target repo, on a single `runner/<slug>-<uuid>` branch off its `master`; the whole run works on that one branch, and its name is passed to every stage in `APIARY_RUNNER_BRANCH`. Plan validation resolves file paths against the target repo (from the plan's `target_repo` field), so a step may touch a file that exists only there. A single apiary checkout therefore holds the centralized run history across every target repo it has run against; each `run_history.jsonl` entry carries a `target_repo` field to disambiguate.
+
+## runner/ticket.py
+
+One CLI for the runner's ticket lifecycle: draft a backlog ticket, promote it to intake, create an intake directly, bridge a `/refine` handoff note into either, and validate the result. Replaces four separate scripts that between them carried three `slugify` implementations, three note readers, and three places that shelled out to `validate_intake` instead of importing it.
+
+```bash
+python -m runner.ticket draft --title "Add caching" --problem "..." --description "..." --scope "api/cache.py"
+python -m runner.ticket promote add-caching
+python -m runner.ticket create-intake --title "Add caching" --problem "..." --description "..." --scope "api/cache.py"
+python -m runner.ticket from-note --note C-2026-5 --title "Add caching"
+python -m runner.ticket validate <path-to-intake.json>
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `draft` | Create a backlog draft ticket at `backlog/<slug>.json` |
+| `create-intake` | Create a validated intake file at `intake/<uuid>.json` |
+| `promote` | Move a backlog draft into intake, validating on the way |
+| `from-note` | Bridge a `/refine` handoff scribe note into intake (or `--backlog`) |
+| `validate` | Validate an intake JSON file already on disk |
+
+| Argument / Flag | Applies to | Required | Description |
+|-----------------|------------|----------|-------------|
+| `slug` | `promote` | yes | Backlog ticket slug — the filename **without** directory or `.json` extension |
+| `file` | `validate` | yes | Path to intake JSON file |
+| `--title TEXT` | draft, create-intake, from-note | yes | Short title for the task (also the backlog slug) |
+| `--problem TEXT` | draft, create-intake | yes* | Problem statement (min 20 chars) |
+| `--description TEXT` | draft, create-intake | yes* | Detailed description (min 20 chars) |
+| `--scope TEXT` | draft, create-intake | yes* | What's in scope for this runner run |
+| `--context TEXT` | draft, create-intake | no | Additional context |
+| `--from-todo ID` | draft, create-intake | no | Scribe note ID — seeds `--description` only |
+| `--explore-hints CSV` | create-intake, from-note | no | Comma-separated repo-relative paths the refiner should start with |
+| `--note ID` | `from-note` | yes | Scribe note ID containing the refiner handoff |
+| `--backlog` | `from-note` | no | Write to `backlog/<slug>.json` instead of `intake/<uuid>.json` |
+
+\* Required unless `--from-todo` fills it.
+
+**Deprecated entry points, kept for one release:** `runner/create_intake.py` → `ticket create-intake`, `runner/draft_ticket.py` → `ticket draft`, `runner/promote.py` → `ticket promote`, `runner/refine_to_intake.py` → `ticket from-note`. They are thin shims with identical flags; the sections below document them until they are removed.
 
 ## runner/create_intake.py
 
-Create an intake file for the autonomous runner. Generates a UUID-keyed JSON at `runner/intake/<uuid>.json`.
+Create an intake file for the autonomous runner. Generates a UUID-keyed JSON at `runner/intake/<uuid>.json`. **Shim** for `python -m runner.ticket create-intake`.
 
 ```bash
 python -m runner.create_intake --title "Add caching" --problem "Repeated DB queries" --description "Add Redis cache layer" --scope "api/cache.py"
@@ -873,7 +913,7 @@ Exit 0 on valid. Exit 1 with error details on invalid.
 
 ## runner/executor.py
 
-Executor — Stage 4. Reads a validated plan JSON, creates a feature branch (`runner/<uuid>`), and executes each step via Claude Code subprocess.
+Executor — Stage 4. Reads a validated plan JSON, works on the run's branch, and executes each step via a Claude Code subprocess, committing per step.
 
 ```bash
 python -m runner.executor runner/plans/<uuid>.json
@@ -883,9 +923,11 @@ python -m runner.executor runner/plans/<uuid>.json
 |----------|----------|-------------|
 | `plan` | yes | Path to plan JSON file |
 
-Output: `runner/executions/<uuid>.json`. Creates branch `runner/<uuid>`. Model and retries configurable via `runner/config.json` under `executor`.
+Output: the execution log under `<state>/runner/executions/<uuid>.json`. Model and retries configurable via `runner/config.json` under `executor`.
 
-**Edge case:** Fails if branch `runner/<uuid>` already exists (not idempotent for re-runs).
+**Branch:** one branch per run, named by the orchestrator and passed in `APIARY_RUNNER_BRANCH`. In detached mode that is the branch the worktree was created on (`runner/<slug>-<uuid>`) and the executor stays on it; interactive mode uses `runner/<uuid>`. Invoked standalone with no env var, it falls back to `runner/<uuid>`.
+
+**Re-runs are idempotent:** an existing run branch is checked out (not recreated), steps already committed on it are carried forward as passed, and a git-vs-log disagreement aborts rather than guessing.
 
 ## runner/auto_harden.py
 

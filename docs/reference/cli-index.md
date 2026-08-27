@@ -33,8 +33,9 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `harden/validate_response.py` | Validate Defender output | --expected-ids, --check-files |
 | `harden/round_counter.py` | Track harden/refine round counts | start, tick, reset, status, defender |
 | `python -m runner.run` | End-to-end runner orchestrator | `<intake_path>` |
-| `python -m runner.create_intake` | Create runner intake file | --from-todo, --title, --problem, --description, --scope, --context |
-| `python -m runner.refine_to_intake` | Bridge refiner scribe note into runner intake/backlog | --note, --title, --backlog, --explore-hints |
+| `python -m runner.ticket` | Ticket lifecycle: draft, promote, create, bridge, validate | draft, create-intake, promote, from-note, validate |
+| `python -m runner.create_intake` | Create runner intake file (shim for `ticket create-intake`) | --from-todo, --title, --problem, --description, --scope, --context, --explore-hints |
+| `python -m runner.refine_to_intake` | Bridge refiner scribe note into runner intake/backlog (shim for `ticket from-note`) | --note, --title, --backlog, --explore-hints |
 | `python -m runner.validate_intake` | Validate intake JSON | `<file>` |
 | `python -m runner.auto_refine` | Autonomous refiner (stage 2) | `<intake>` |
 | `python -m runner.validate_spec` | Validate spec JSON | `<file>` |
@@ -43,8 +44,8 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `python -m runner.executor` | Code executor (stage 4) | `<plan>` |
 | `python -m runner.auto_harden` | Autonomous hardener (stage 5) | `<execution_log>` |
 | `python -m runner.approval` | Approval gate (stage 6) | `<harden_result>` |
-| `python -m runner.draft_ticket` | Create backlog draft ticket | --title, --problem, --description, --scope, --context, --from-todo (only fills description) |
-| `python -m runner.promote` | Promote backlog draft to intake | `<slug>` (filename without dir or .json extension) |
+| `python -m runner.draft_ticket` | Create backlog draft ticket (shim for `ticket draft`) | --title, --problem, --description, --scope, --context, --from-todo (only fills description) |
+| `python -m runner.promote` | Promote backlog draft to intake (shim for `ticket promote`) | `<slug>` (filename without dir or .json extension) |
 | `python -m runner.cron_health check` | Inspect OS-scheduler drift against `cron_registry/<hostname>.json` | none |
 | `python -m runner.cron_health repair` | Fix scheduler drift (dry-run default) | `--apply` |
 | `runner/cost_emit.py` | Emit usage XML from Claude envelope | Library — no CLI |
