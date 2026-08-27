@@ -767,7 +767,18 @@ def main():
 
     handler = COMMANDS.get(args.command)
     if handler:
-        handler(args)
+        try:
+            handler(args)
+        except TimeoutError as e:
+            # FileLock gave up: another apiary process (a hook, a second
+            # session) is holding an index lock. A traceback here is not an
+            # answer; say what to do. `add` writes the body before the row, so
+            # a body without a row may be left behind — `repair` reattaches it.
+            die(
+                f"index busy — could not acquire a scribe lock ({e}). "
+                "Retry in a moment; if this was `add`, run `notes.py repair` to "
+                "reattach any body written before the lock timed out."
+            )
     else:
         parser.print_help()
 
