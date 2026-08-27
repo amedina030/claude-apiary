@@ -27,7 +27,6 @@ from gui.pty_wrapper import contains_ctrl_c
 from gui.scribe_aggregator import ScribeAggregatorService, aggregate
 from gui.subagent_tracker import SubagentTracker
 from gui.transcript import (
-    Message,
     SessionDiscovery,
     TranscriptTail,
     iter_jsonl_records,
@@ -231,9 +230,6 @@ class Session:
         except Exception:
             pass
 
-    def restart_pty(self) -> bool:
-        return self._start_pty(restart=True)
-
     def stop(self) -> None:
         if self.subagent_tracker is not None:
             try:
@@ -268,8 +264,8 @@ class Session:
 
     # --- pty spawn ------------------------------------------------------------
 
-    def _start_pty(self, restart: bool = False) -> bool:
-        if self.pty is not None and not restart and self.pty.is_alive():
+    def _start_pty(self) -> bool:
+        if self.pty is not None and self.pty.is_alive():
             return True
         if self.pty is not None:
             try:
@@ -279,8 +275,8 @@ class Session:
             self.pty = None
 
         # Prepend --permission-mode acceptEdits when the per-tab "auto-accept
-        # edits" toggle is on. Spawn-time only: flipping the toggle mid-session
-        # requires a pty restart (App.set_session_accept_edits handles that).
+        # edits" toggle is on. Spawn-time only, and there is no UI to flip it:
+        # the stored value comes from tabs.json and is read once, here.
         extra = ["--permission-mode", "acceptEdits"] if self.accept_edits else []
         # Opt-in: route permission prompts through a local MCP server instead
         # of scraping the TUI banner. Enable with APIARY_PERMISSION_MCP=1; the

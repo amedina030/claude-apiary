@@ -66,8 +66,11 @@ Auto-created on first run under `<main-apiary>/.apiary/gui/apiary_gui/`:
 
 - `theme.json` — CSS variable values (hot-reloads)
 - `launch.json` — Claude Code spawn args + cwd
-- `apiary_repos.json` — list of apiary repos to aggregate scribe notes from
 - `captures/` — raw pty-output captures (only populated when capture mode is on)
+
+The list of repos whose scribe notes the sidebar can aggregate is *not* a GUI
+config file — it comes from `<main-apiary>/.repos/registry.json`, the same
+registry `apiary install` writes. There is no GUI-only filter file.
 
 ## Capturing pty output for new prompt handlers
 

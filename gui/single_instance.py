@@ -11,7 +11,6 @@ that's not load-bearing for the "don't double-launch" requirement.
 from __future__ import annotations
 
 import sys
-from typing import Optional
 
 
 _DEFAULT_NAME = "Global\\apiary_gui_singleton_v1"

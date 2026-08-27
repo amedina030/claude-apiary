@@ -21,8 +21,7 @@ from __future__ import annotations
 
 import json
 import threading
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -196,16 +195,14 @@ class TranscriptTail:
     """Replay-then-tail a single JSONL transcript file.
 
     Polls on a short interval (default 500ms) instead of using watchdog so the
-    behavior stays portable and dependency-light. Watchdog is wired in by the
-    higher-level service for instant file-event triggers; this class is the
-    pure read loop.
+    behavior stays portable and dependency-light. No file-event wiring exists;
+    the poll is the only trigger.
     """
 
     def __init__(
         self,
         path: Path,
         on_message: Callable[[Message], None],
-        on_skip: Optional[Callable[[int], None]] = None,
         poll_interval: float = 0.5,
         on_record: Optional[Callable[[dict], None]] = None,
         start_at: int = 0,
@@ -215,13 +212,15 @@ class TranscriptTail:
         in between is lost and nothing is rendered twice (review gui #2)."""
         self.path = path
         self.on_message = on_message
-        self.on_skip = on_skip or (lambda _n: None)
         self.on_record = on_record
         self.poll_interval = poll_interval
         self._pos = max(0, int(start_at))
         self._buf = b""
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        # Diagnostic counter of unparseable lines / read failures. Nothing
+        # surfaces it to the UI today; it is here for inspection under a
+        # debugger or a test.
         self._skipped = 0
 
     def start(self) -> None:
@@ -233,12 +232,6 @@ class TranscriptTail:
         if self._thread is not None:
             self._thread.join(timeout=2.0)
 
-    def poke(self) -> None:
-        """Wake the loop early — call from a watchdog file-event handler."""
-        # Polling is short enough that an extra signal doesn't help unless we add
-        # a Condition. Kept as a no-op stub for the watchdog wiring.
-        return
-
     def _run(self) -> None:
         while not self._stop.is_set():
             try:
@@ -246,9 +239,9 @@ class TranscriptTail:
             except FileNotFoundError:
                 pass
             except Exception:
-                # Don't crash the tail thread; surface skip counter on next event.
+                # Don't crash the tail thread; count the failure and retry on
+                # the next poll.
                 self._skipped += 1
-                self.on_skip(self._skipped)
             self._stop.wait(self.poll_interval)
 
     def _read_new_bytes(self) -> None:
@@ -277,7 +270,6 @@ class TranscriptTail:
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 self._skipped += 1
-                self.on_skip(self._skipped)
                 continue
             if self.on_record is not None and isinstance(rec, dict):
                 try:

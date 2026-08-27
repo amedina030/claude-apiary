@@ -75,9 +75,6 @@ class GuiBridge:
     def __init__(self, app: "App") -> None:
         self._app = app
 
-    def ping(self) -> str:
-        return "ok"
-
     def send_input(self, text: str) -> bool:
         sess = self._app.active
         return sess.send_input(text) if sess is not None else False
@@ -103,10 +100,6 @@ class GuiBridge:
         """
         sess = self._app.active
         return sess.send_bytes(values) if sess is not None else False
-
-    def restart_pty(self) -> bool:
-        sess = self._app.active
-        return sess.restart_pty() if sess is not None else False
 
     def pty_resize(self, rows, cols) -> bool:
         sess = self._app.active
@@ -291,9 +284,6 @@ class GuiBridge:
 
     # --- session / tab surface ---------------------------------------------------
 
-    def list_sessions(self) -> list[dict]:
-        return self._app._sessions_descriptor()
-
     def picker_context(self) -> dict:
         """Initial context for the themed folder picker (recents, home, initial path)."""
         return picker.picker_context()
@@ -317,16 +307,6 @@ class GuiBridge:
         if not isinstance(session_id, str):
             return False
         return self._app.close_session(session_id)
-
-    def set_session_setting(self, session_id: str, key: str, value) -> bool:
-        """Per-tab permission toggles (T-2026-176).
-
-        key='accept_edits'  -> restarts the pty so --permission-mode acceptEdits
-                               takes effect on the next claude invocation.
-        """
-        if not isinstance(session_id, str) or not isinstance(key, str):
-            return False
-        return self._app.set_session_setting(session_id, key, bool(value))
 
     def resolve_permission(
         self,
@@ -721,30 +701,6 @@ class App:
             ],
             self._active_idx,
         )
-
-    def set_session_setting(self, session_id: str, key: str, value: bool) -> bool:
-        """Update a per-tab permission toggle.
-
-        Mid-session behavior:
-        - ``accept_edits``: stored only. Applied to the pty lazily — the
-          frontend sends Shift+Tab chord(s) to cycle claude's live permission
-          mode (no pty restart, session history preserved). The stored value
-          is ALSO consumed on the NEXT spawn of this tab (new-tab creation or
-          explicit restart) via --permission-mode acceptEdits.
-        """
-        for s in self._sessions:
-            if s.session_id != session_id:
-                continue
-            if key == "accept_edits":
-                if s.accept_edits == value:
-                    return True
-                s.accept_edits = value
-            else:
-                return False
-            self._push_sessions()
-            self._persist_tabs()
-            return True
-        return False
 
     def open_session(self, cwd: str) -> Optional[str]:
         """Create a new Session at ``cwd`` and make it active. Returns the new

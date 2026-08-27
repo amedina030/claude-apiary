@@ -268,46 +268,42 @@ class AggregatePointerTests(unittest.TestCase):
 
 class RepoRegistryTests(unittest.TestCase):
     """Post-2026-05 the GUI's repo registry reads from main-apiary's
-    ``.repos/registry.json`` directly. The legacy JSON-list config file
-    is only consulted as a fallback when main-apiary's registry can't
-    be located (rare — broken setup)."""
+    ``.repos/registry.json`` directly — it is the only source."""
 
     def test_load_returns_real_paths_from_registry(self):
-        # Use a tmpdir as the deprecated cfg path so we don't fall back
-        # to it; load() reads main-apiary's actual registry on this
-        # machine. Registry has the four bootstrapped repos at minimum.
+        # Hermetic: point the resolver at a temp registry rather than reading
+        # the operator's real one, which is absent in a worktree and varies
+        # per machine (T-2026-274).
+        import unittest.mock as _mock
         with tempfile.TemporaryDirectory() as tmp:
-            cfg = Path(tmp) / "apiary_repos.json"
-            repos, err = repo_registry.load(cfg)
+            tmp_p = Path(tmp)
+            live = tmp_p / "live-repo"
+            live.mkdir()
+            reg = tmp_p / "registry.json"
+            reg.write_text(
+                json.dumps({
+                    "1": {"real_path": str(live)},
+                    "2": {"real_path": str(tmp_p / "deleted-repo")},
+                    "3": {"real_path": ""},
+                    "4": "not-a-dict",
+                }),
+                encoding="utf-8",
+            )
+            with _mock.patch.object(repo_registry, "_registry_path", return_value=reg):
+                repos, err = repo_registry.load()
             self.assertIsNone(err, f"unexpected error: {err}")
-            # Each returned entry must be a real directory.
+            # Entries that no longer exist on disk (and malformed rows) are
+            # dropped; each returned entry is a real directory.
+            self.assertEqual([r.resolve() for r in repos], [live.resolve()])
             for r in repos:
                 self.assertTrue(r.is_dir(), f"non-dir: {r}")
 
-    def test_load_legacy_fallback_when_no_registry(self):
-        # Simulate a broken setup where main-apiary's registry is missing
-        # by pointing the resolver at an empty tmp directory. Falls
-        # through to the legacy JSON-list config path.
+    def test_load_returns_error_when_registry_missing(self):
         import unittest.mock as _mock
         with tempfile.TemporaryDirectory() as tmp:
             tmp_p = Path(tmp)
-            cfg = tmp_p / "apiary_repos.json"
-            real = tmp_p / "real-repo"
-            real.mkdir()
-            cfg.write_text(json.dumps([str(real), "C:/no/such/path"]), encoding="utf-8")
-            with _mock.patch.object(repo_registry, "_registry_path", return_value=tmp_p / "missing.json"):
-                repos, err = repo_registry.load(cfg)
-            self.assertIsNone(err)
-            self.assertEqual(len(repos), 1)
-            self.assertEqual(repos[0].resolve(), real.resolve())
-
-    def test_load_returns_error_when_neither_registry_nor_legacy_exist(self):
-        import unittest.mock as _mock
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_p = Path(tmp)
-            cfg = tmp_p / "missing-config.json"
             with _mock.patch.object(repo_registry, "_registry_path", return_value=tmp_p / "missing-registry.json"):
-                repos, err = repo_registry.load(cfg)
+                repos, err = repo_registry.load()
             self.assertEqual(repos, [])
             self.assertIsNotNone(err)
 
@@ -355,9 +351,8 @@ class RepoRegistryTests(unittest.TestCase):
             reg.write_text(
                 json.dumps({"1": {"real_path": str(registered)}}), encoding="utf-8"
             )
-            cfg = checkout / "unused-legacy.json"
             with _mock.patch.object(sys, "frozen", True, create=True),                     _mock.patch.object(sys, "executable", str(exe)):
-                repos, err = repo_registry.load(cfg)
+                repos, err = repo_registry.load()
             self.assertIsNone(err)
             self.assertEqual([r.resolve() for r in repos], [registered.resolve()])
 

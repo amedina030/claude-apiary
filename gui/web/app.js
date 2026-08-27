@@ -2852,9 +2852,9 @@
   }
 
   // Tab-aware routing: each push from the backend carries the session_id
-  // it came from. Non-active session pushes are dropped on the floor for
-  // now (Phase 3 will buffer them per-tab). session_id is empty for app-
-  // global pushes (theme, notes) — those always apply.
+  // it came from. Non-active session pushes are dropped on the floor —
+  // switching tabs replays that session's transcript from disk. session_id
+  // is empty for app-global pushes (theme, notes) — those always apply.
   let activeSessionId = "";
   function pushIsForActive(sid) {
     if (!sid) return true;          // app-global
@@ -2966,10 +2966,9 @@
     },
     onPtyExit(code, sessionId) {
       if (!pushIsForActive(sessionId)) return;
-      toast(`Claude Code exited (code ${code}) — restart from menu`, "error");
+      toast(`Claude Code exited (code ${code}) — close this tab and open a new one`, "error");
     },
     onSessions(arrJson) {
-      // Phase 2: data only. Phase 3 renders the tab bar.
       try {
         const arr = typeof arrJson === "string" ? JSON.parse(arrJson) : arrJson;
         if (Array.isArray(arr)) {

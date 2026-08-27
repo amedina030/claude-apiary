@@ -185,12 +185,21 @@ class PermissionMcpTests(unittest.TestCase):
         self.assertIn("after rotation", self.mod.LOG_PATH.read_text(encoding="utf-8"))
 
     def test_paths_default_under_gui_state_dir_not_home(self):
+        # The point of the assertion is *where the code puts state*, not what
+        # the checkout happens to be called: assert containment in
+        # gui.paths.state_dir() and absence from ~/.claude. A literal
+        # ".claude not in parts" check fails in a worktree under .claude/
+        # (T-2026-274).
         from gui.paths import state_dir
         self.mod.LOG_PATH = None
         self.mod.CONFIG_PATH = None
-        self.assertEqual(self.mod.log_path(), state_dir() / self.mod.LOG_FILE_NAME)
-        self.assertEqual(self.mod.config_path(), state_dir() / self.mod.CONFIG_FILE_NAME)
-        self.assertNotIn(".claude", self.mod.log_path().parts)
+        sd = state_dir()
+        self.assertEqual(self.mod.log_path(), sd / self.mod.LOG_FILE_NAME)
+        self.assertEqual(self.mod.config_path(), sd / self.mod.CONFIG_FILE_NAME)
+        self.assertTrue(self.mod.log_path().is_relative_to(sd))
+        home_claude = Path.home() / ".claude"
+        self.assertFalse(self.mod.log_path().is_relative_to(home_claude))
+        self.assertFalse(self.mod.config_path().is_relative_to(home_claude))
         self.mod.LOG_PATH = Path(self._tmp.name) / "permission_mcp.log"
 
     def test_write_mcp_config_default_dest_is_config_path(self):
