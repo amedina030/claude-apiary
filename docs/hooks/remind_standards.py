@@ -7,12 +7,11 @@ standards doc based on the file being modified. Tracks which reminders have alre
 been shown this session to avoid repetition.
 """
 import sys
-import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apiary root
 
-from core.hook_context import context_block, hook_allow, read_payload
+from core.hook_context import HookResult, context_block, run_standalone
 from core.session import SessionId
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -77,47 +76,39 @@ def _classify_file(file_path: str) -> str | None:
     return None
 
 
-def main():
-    try:
-        payload = read_payload()
+def run(payload: dict) -> HookResult | None:
+    """Return the standards reminder on the session's first write of a kind."""
+    tool_name = payload.get("tool_name", "")
+    if tool_name not in ("Write", "Edit"):
+        return None
 
-        tool_name = payload.get("tool_name", "")
-        if tool_name not in ("Write", "Edit"):
-            hook_allow()
-            return
+    session_id = payload.get("session_id", "")
+    if not session_id:
+        return None
 
-        session_id = payload.get("session_id", "")
-        if not session_id:
-            hook_allow()
-            return
+    # Extract file path from tool input
+    tool_input = payload.get("tool_input", {})
+    if not isinstance(tool_input, dict):
+        return None
+    file_path = tool_input.get("file_path", "")
+    if not file_path:
+        return None
 
-        # Extract file path from tool input
-        tool_input = payload.get("tool_input", {})
-        file_path = tool_input.get("file_path", "")
-        if not file_path:
-            hook_allow()
-            return
+    category = _classify_file(file_path)
+    if not category:
+        return None
 
-        category = _classify_file(file_path)
-        if not category:
-            hook_allow()
-            return
+    # Check if already reminded this session
+    if _already_reminded(session_id, category):
+        return None
 
-        # Check if already reminded this session
-        if _already_reminded(session_id, category):
-            hook_allow()
-            return
-
-        # Mark as reminded and inject context
-        _mark_reminded(session_id, category)
-        standard_path = STANDARDS[category]
-        reminder = f"Standards: read {standard_path} before proceeding (first write of this type this session)"
-        hook_allow(context_block("docs", reminder))
-
-    except Exception:
-        # Hooks must not crash
-        hook_allow()
+    # Mark as reminded and inject context
+    _mark_reminded(session_id, category)
+    standard_path = STANDARDS[category]
+    reminder = (f"Standards: read {standard_path} before proceeding "
+                "(first write of this type this session)")
+    return HookResult(context=context_block("docs", reminder))
 
 
 if __name__ == "__main__":
-    main()
+    run_standalone(run)

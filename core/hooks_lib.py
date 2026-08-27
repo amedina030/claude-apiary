@@ -98,6 +98,7 @@ def hook_cmd(
     *,
     repo_root: Path = None,
     per_repo_launcher: bool = False,
+    args: tuple[str, ...] = (),
 ) -> str:
     """Build a hook command string using bash-compatible paths.
 
@@ -115,7 +116,16 @@ def hook_cmd(
     *repo_root* is **main-apiary's** root, not the bootstrapped repo's —
     the path is made relative so the launcher can re-resolve it against
     main-apiary at runtime.
+
+    *args* are appended verbatim after the script (the dispatcher's event
+    verb: ``... core/hooks/dispatch.py pre``). Restricted to a conservative
+    slug so a command string can never be broken — or extended — by an
+    argument.
     """
+    for arg in args:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", arg or ""):
+            raise ValueError(f"hook_cmd arg must be a plain token, got {arg!r}")
+    suffix = ("".join(f" {a}" for a in args))
     if repo_root is not None:
         if not per_repo_launcher:
             # The third mode (`python "$HOME/.claude/apiary_launch.py" <rel>`)
@@ -135,13 +145,13 @@ def hook_cmd(
         # always valid on the machine that wrote it. The script path stays
         # portable via $CLAUDE_PROJECT_DIR.
         exe = to_bash_path(python_exe or resolve_python())
-        return f'"{exe}" "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" {rel}'
+        return f'"{exe}" "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" {rel}{suffix}'
     if per_repo_launcher:
         raise ValueError("per_repo_launcher=True requires repo_root")
     exe = python_exe or resolve_python()
     # Quote both paths — the interpreter or script can live under a home dir
     # with a space/apostrophe, which would otherwise break the unquoted command.
-    return f'"{to_bash_path(exe)}" "{to_bash_path(script_path)}"'
+    return f'"{to_bash_path(exe)}" "{to_bash_path(script_path)}"{suffix}'
 
 
 def load_settings(path: Path) -> Dict[str, Any]:

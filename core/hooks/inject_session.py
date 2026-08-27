@@ -19,37 +19,32 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.session import SessionId
-from core.hook_context import context_block, hook_allow, read_payload
+from core.hook_context import HookResult, context_block, run_standalone
 
 
-def main():
+def run(payload: dict) -> HookResult | None:
+    """Return the session-id context block on the session's first tool call."""
     # Runner subprocesses skip this hook entirely (#228).
     if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
-        hook_allow()
-        return
-
-    payload = read_payload()
+        return None
 
     raw_id = payload.get("session_id", "")
     if not raw_id:
-        hook_allow()
-        return
+        return None
 
     try:
         sid = SessionId(raw_id)
     except ValueError:
-        hook_allow()
-        return
+        return None
 
     flag_file = sid.flag_path("session_injected")
     flag_file.parent.mkdir(parents=True, exist_ok=True)
     if flag_file.exists():
-        hook_allow()
-        return
+        return None
 
     flag_file.write_text("1", encoding="utf-8")
-    hook_allow(context_block("session", f"session_id: {sid.full}"))
+    return HookResult(context=context_block("session", f"session_id: {sid.full}"))
 
 
 if __name__ == "__main__":
-    main()
+    run_standalone(run)

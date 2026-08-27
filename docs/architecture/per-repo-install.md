@@ -155,8 +155,9 @@ prompts the user to run `apiary update`.
 
 ## Drift detection (`core/drift.py`)
 
-On every session open in a bootstrapped repo, the PreToolUse hook
-`core/hooks/per_repo_drift_check.py` runs:
+On the first tool call of a session in a bootstrapped repo, the PreToolUse
+hook `core/hooks/per_repo_drift_check.py` — first in the dispatcher's chain,
+guarded by a once-per-session flag file — runs:
 
 1. Read self-pointer; if missing, the repo isn't bootstrapped. Skip silently.
 2. Verify main-apiary is reachable: the path `main_apiary_path` exists and

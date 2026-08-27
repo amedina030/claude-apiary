@@ -69,62 +69,49 @@ def should_remind(tool_name: str, already_reminded: bool) -> bool:
     return tool_name in RESEARCH_TOOLS
 
 
-def main():
-    """Entry point. Wrapped for fail-open behavior; never raises."""
-    try:
-        _run()
-    except Exception:
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-        from core.hook_context import hook_allow
-        hook_allow()
-
-
-def _run():  # pragma: no cover — exercised via integration; logic lives in
-    #                               should_remind / reminder_text (unit-tested).
+def run(payload: dict):
+    """Return the once-per-session researcher nudge, or None."""
     import os
     import sys
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-    from core.hook_context import context_block, hook_allow, read_payload
+    from core.hook_context import HookResult, context_block
     from core.session import SessionId
 
     # Runner subprocesses are one-shot workers — the nudge is pure token bloat
     # for them (consistent with the other core hooks, #228).
     if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
-        hook_allow()
-        return
+        return None
 
-    payload = read_payload()
     tool_name = payload.get("tool_name") or ""
     if tool_name not in RESEARCH_TOOLS:
-        hook_allow()
-        return
+        return None
 
     raw_id = payload.get("session_id", "")
     if not raw_id:
         # No session id → can't gate once-per-session. Stay silent rather than
         # risk nagging on every research call.
-        hook_allow()
-        return
+        return None
     try:
         sid = SessionId(raw_id)
     except ValueError:
-        hook_allow()
-        return
+        return None
 
     flag_file = sid.flag_path(REMINDED_FLAG)
-    already = flag_file.exists()
-    if not should_remind(tool_name, already):
-        hook_allow()
-        return
+    if not should_remind(tool_name, flag_file.exists()):
+        return None
 
     flag_file.parent.mkdir(parents=True, exist_ok=True)
     flag_file.write_text("1", encoding="utf-8")
-    hook_allow(context_block("researcher", reminder_text()))
+    return HookResult(context=context_block("researcher", reminder_text()))
 
 
 if __name__ == "__main__":  # pragma: no cover
-    main()
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+    from core.hook_context import run_standalone
+
+    run_standalone(run)

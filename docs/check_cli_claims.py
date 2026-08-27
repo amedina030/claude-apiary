@@ -47,6 +47,9 @@ SKIP_HEADERS = {
     "gui/capture_session.py",       # requires the gui poetry group
     "gui/packaging/build.py",       # build script, not an argparse CLI
     "gui/packaging/make_icon.py",   # build script, not an argparse CLI
+    "core/hooks/dispatch.py",       # hook entry point: one positional verb,
+                                    # hand-parsed — argparse would cost an
+                                    # import on the hottest path in the toolkit
     "Test scripts",                 # prose category, not a tool
 }
 

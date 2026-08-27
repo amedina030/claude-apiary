@@ -7,25 +7,23 @@ This hook reads the final transcript, computes the delta against the last
 PRE's baseline, and logs it before cleaning up.
 """
 import sys
-import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apiary root
 
 from budgeter.lib import logger
 from core import flags
+from core.hook_context import run_standalone
 
 
-def main():
-    """Never crash, and always reach cleanup: a Stop hook that dies before
-    ``cleanup_session`` leaves the baseline (possibly the corrupt one that
-    killed it) for the next session to trip over (review B1)."""
-    try:
-        payload = json.loads(sys.stdin.buffer.read())
-    except json.JSONDecodeError as exc:
-        print(f"[budgeter] stop_session: unreadable payload: {exc}", file=sys.stderr)
-        sys.exit(0)
+def run(payload: dict):
+    """Log the final tool call and clean up. Never returns context.
 
+    Always reaches cleanup: a Stop hook that dies before ``cleanup_session``
+    leaves the baseline (possibly the corrupt one that killed it) for the next
+    session to trip over (review B1). The ``finally`` here keeps that true even
+    though the caller — dispatcher or standalone shim — also catches.
+    """
     session_id = payload.get("session_id", "")
     try:
         _log_final_call(payload, session_id)
@@ -37,6 +35,7 @@ def main():
                 logger.cleanup_session(session_id)
             except Exception as exc:  # noqa: BLE001
                 print(f"[budgeter] stop_session cleanup failed: {exc!r}", file=sys.stderr)
+    return None
 
 
 def _log_final_call(payload, session_id):
@@ -63,4 +62,4 @@ def _log_final_call(payload, session_id):
 
 
 if __name__ == "__main__":
-    main()
+    run_standalone(run, event="Stop")

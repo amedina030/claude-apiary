@@ -387,32 +387,49 @@ def outgoing_log_args(
     ]
 
 
-def main():
-    """Entry point. Fail-open only on internal errors *before* the scan."""
+class _Block(Exception):
+    """A gate decision raised from deep inside the scan.
+
+    ``_scan_target`` and its helpers decide to block several call-frames down.
+    They used to be handed ``hook_context.hook_block`` (print + ``sys.exit(2)``),
+    which cannot work in the in-process dispatcher — one gate would take the
+    whole chain down. They are handed :func:`_block` instead, and ``run``
+    turns the raised reason into a ``HookResult``.
+    """
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _block(reason: str):
+    raise _Block(reason)
+
+
+def run(payload: dict):  # pragma: no cover — the pure pieces are tested;
+    #                      this is the shell.
+    """Block a ``git push`` whose outgoing commits add a secret."""
+    from core.hook_context import HookResult
+
     try:
-        _run()
-    except Exception:
-        from core.hook_context import hook_allow
-        hook_allow()
+        return _scan(payload)
+    except _Block as blocked:
+        return HookResult(block_reason=blocked.reason)
 
 
-def _run():  # pragma: no cover — the pure pieces are tested; this is the shell.
-    from core.hook_context import hook_allow, hook_block, read_payload
+def _scan(payload: dict):  # pragma: no cover — subprocess shell.
+    from core.hook_context import HookResult
 
     if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
-        hook_allow()
-        return
+        return None
 
-    payload = read_payload()
     if (payload.get("tool_name") or "") != "Bash":
-        hook_allow()
-        return
+        return None
 
     tool_input = payload.get("tool_input") or {}
     command = tool_input.get("command") if isinstance(tool_input, dict) else ""
     if not command or not command_pushes(command):
-        hook_allow()
-        return
+        return None
 
     base_cwd = payload.get("cwd") or os.getcwd()
     findings = []
@@ -423,26 +440,24 @@ def _run():  # pragma: no cover — the pure pieces are tested; this is the shel
         if not target.refs and not target.everything:
             continue                        # deletions only — nothing outgoing
         if target.cwd == UNRESOLVED_CWD:
-            hook_block(
+            _block(
                 "Push blocked: the secret scan cannot follow a `cd` whose target "
                 "is computed (`cd $(...)`, `cd $VAR`, `cd -`, `popd`), so it "
                 "cannot tell which repo this push leaves from. Run the push "
                 "from inside the repo, or use `git -C <dir> push`."
             )
-        found = _scan_target(target, base_cwd, hook_block)
+        found = _scan_target(target, base_cwd, _block)
         if found is None:                   # git unusable: fail open — unless
             if findings:                    # an earlier target already found something
                 break
-            hook_allow()
-            return
+            return None
         findings.extend(found)
     if not findings:
-        hook_allow()
-        return
+        return None
 
     lines = [f"  {path}:{lineno}  @{sha[:8]}  [{rule}]  {preview}"
              for sha, path, lineno, rule, preview in findings]
-    hook_block(
+    return HookResult(block_reason=(
         "Push blocked: possible secret(s) in the outgoing commits. The values "
         "below are about to leave your machine — verify each, then remove or "
         "rotate it before pushing. A secret that was later deleted is still in "
@@ -451,13 +466,17 @@ def _run():  # pragma: no cover — the pure pieces are tested; this is the shel
         + "\n\nIf a hit is an intentional fixture/example, append "
         "'apiary:allow-secret' (or 'pragma: allowlist secret') to that line, "
         "or add a path regex for the file to the repo-root .secretsallow."
-    )
+    ))
 
 
 def _scan_target(target, base_cwd, hook_block):  # pragma: no cover — shell
     """Scan one push target. Returns its findings, or None when git itself is
     unusable (the caller decides whether to fail open). Blocks (never
-    returns) on a scan that could not complete."""
+    returns) on a scan that could not complete.
+
+    *hook_block* is injected — :func:`_block` in production — so the gate's
+    deep decisions surface as a value the dispatcher can act on rather than a
+    ``sys.exit`` that would kill every hook after it."""
     cwd = base_cwd
     if target.cwd:
         cwd = str((Path(cwd) / target.cwd).resolve())
@@ -534,4 +553,6 @@ def _destination_tips(_git, url: str) -> list[str]:  # pragma: no cover — netw
     return sorted(set(tips))
 
 if __name__ == "__main__":  # pragma: no cover
-    main()
+    from core.hook_context import run_standalone
+
+    run_standalone(run)

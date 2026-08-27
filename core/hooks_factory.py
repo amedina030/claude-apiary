@@ -1,15 +1,23 @@
 """Hook entry builders for apiary's per-repo install.
 
-Constructs the per-tool ``hooks`` dicts that ``apiary install`` writes
-into each bootstrapped repo's ``.claude/settings.json``. See
+Constructs the ``hooks`` dict that ``apiary install`` writes into each
+bootstrapped repo's ``.claude/settings.json``. See
 ``docs/architecture/per-repo-install.md`` for context.
+
+**One entry per event.** Until 2026-08 this module emitted one settings.json
+entry per hook per matcher — 11 PreToolUse + 5 PostToolUse + 2 Stop — and each
+of those spawned two interpreters through the launcher (~18 per Bash tool
+call, ≈1.7 s; review X-1). Now every event points at a single dispatcher,
+``core/hooks/dispatch.py <verb>``, which reads the payload once and runs the
+whole chain in-process. The per-hook matchers moved into the dispatcher's
+registry (``core.hooks.dispatch._registry``) — that is where a new hook is
+registered now, not here.
 
 Hook commands always go through the per-repo launcher
 (``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``) post-migration.
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -22,115 +30,39 @@ from core.hooks_lib import hook_cmd, resolve_python
 # Honors the APIARY_PYTHON override; falls back to the running interpreter.
 PYTHON = resolve_python()
 
-BUDGETER_DIR = REPO_ROOT / "budgeter"
-SCRIBE_DIR = REPO_ROOT / "scribe"
-DOCS_DIR = REPO_ROOT / "docs"
 CORE_DIR = REPO_ROOT / "core"
+DISPATCHER = CORE_DIR / "hooks" / "dispatch.py"
+
+# settings.json event name -> the dispatcher verb that handles it. Mirrors
+# ``core.hooks.dispatch.EVENTS``; the parity test in
+# ``core/hooks/test_dispatch.py`` keeps the two from drifting apart.
+EVENT_VERBS: dict[str, str] = {
+    "PreToolUse": "pre",
+    "PostToolUse": "post",
+    "Stop": "stop",
+    "UserPromptSubmit": "prompt",
+}
 
 
-def _per_repo_kwargs() -> dict:
-    """Common keyword args for ``hook_cmd`` in per-repo install mode."""
-    return {"repo_root": REPO_ROOT, "per_repo_launcher": True}
+def dispatch_cmd(verb: str) -> str:
+    """The launcher command that runs the dispatcher for one event verb."""
+    return hook_cmd(
+        DISPATCHER, PYTHON,
+        repo_root=REPO_ROOT, per_repo_launcher=True, args=(verb,),
+    )
 
 
-def build_budgeter_hooks() -> dict:
-    """Return the budgeter PreToolUse / PostToolUse / Stop hook entries.
+def build_dispatch_hooks() -> dict:
+    """Return the whole settings.json ``hooks`` dict: one entry per event.
 
-    Reads the monitored-tools list from ``budgeter/config.json`` (same
-    set the legacy global install used). Falls back to ``("Agent", "Bash")``
-    if the file is missing or malformed.
+    The matcher is empty (every tool) because the dispatcher re-applies each
+    hook's matcher in-process against ``tool_name`` — a hook whose matcher does
+    not match is never even imported.
     """
-    try:
-        with open(BUDGETER_DIR / "config.json", encoding="utf-8") as f:
-            tools = json.load(f).get("monitored_tools", ["Agent", "Bash"])
-    except (FileNotFoundError, json.JSONDecodeError):
-        tools = ["Agent", "Bash"]
-    kw = _per_repo_kwargs()
-    pre_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "pre_tool_use.py", PYTHON, **kw)
-    post_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "post_tool_use.py", PYTHON, **kw)
-    stop_cmd = hook_cmd(BUDGETER_DIR / "hooks" / "stop_session.py", PYTHON, **kw)
-    return {
-        "PreToolUse": [
-            {"matcher": tool, "hooks": [{"type": "command", "command": pre_cmd}]}
-            for tool in tools
-        ],
-        "PostToolUse": [
-            {"matcher": tool, "hooks": [{"type": "command", "command": post_cmd}]}
-            for tool in tools
-        ],
-        "Stop": [
-            {"hooks": [{"type": "command", "command": stop_cmd}]}
-        ],
-    }
-
-
-def build_core_hooks() -> dict:
-    """Core-tool hooks: startup context, session-id injection, learnings
-    injector, research reminder, error reminder, push gates."""
-    kw = _per_repo_kwargs()
-    prompt_startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_prompt_hook.py", PYTHON, **kw)
-    session_cmd = hook_cmd(CORE_DIR / "hooks" / "inject_session.py", PYTHON, **kw)
-    error_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "context_rule_error_reminder.py", PYTHON, **kw)
-    learnings_inject_cmd = hook_cmd(CORE_DIR / "hooks" / "learnings_inject_hook.py", PYTHON, **kw)
-    research_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "research_capture_reminder.py", PYTHON, **kw)
-    pre_push_conformer_cmd = hook_cmd(CORE_DIR / "hooks" / "pre_push_doc_conformer.py", PYTHON, **kw)
-    pre_push_secret_cmd = hook_cmd(CORE_DIR / "hooks" / "pre_push_secret_scan.py", PYTHON, **kw)
-    return {
-        "UserPromptSubmit": [
-            {"hooks": [{"type": "command", "command": prompt_startup_cmd}]},
-        ],
-        "PreToolUse": [
-            {"matcher": "", "hooks": [{"type": "command", "command": session_cmd}]},
-            # One registration, not three. The hook already re-checks
-            # `tool_name in ('Edit', 'Write', 'Bash')` on the payload and
-            # allows through otherwise, so a single alternation matcher
-            # covers exactly the same calls at a third of the processes.
-            {"matcher": "Edit|Write|Bash",
-             "hooks": [{"type": "command", "command": learnings_inject_cmd}]},
-            # Research-capture reminder: nudge to persist durable findings via
-            # the researcher. Matches web-research tools plus the subagent tool
-            # (Agent here, Task in stock Claude Code) so research run inside a
-            # subagent is still caught — the hook fires in the parent at spawn.
-            {"matcher": "WebSearch|WebFetch|Agent|Task",
-             "hooks": [{"type": "command", "command": research_reminder_cmd}]},
-            # Pre-push doc-conformer gate: blocks a `git push` when the repo's
-            # docs/check_cli_claims.py reports CLI-doc drift. No-op in repos
-            # that don't ship the conformer (guarded by file existence), so
-            # it's inert in target repos.
-            {"matcher": "Bash",
-             "hooks": [{"type": "command", "command": pre_push_conformer_cmd}]},
-            # Pre-push secret-scan gate: blocks a `git push` when the outgoing
-            # diff's added lines contain high-signal secrets (API keys, private
-            # keys, bearer tokens, high-entropy credential assignments). Runs
-            # in every repo (secret hygiene is universal); fails open on error.
-            {"matcher": "Bash",
-             "hooks": [{"type": "command", "command": pre_push_secret_cmd}]},
-        ],
-        "PostToolUse": [
-            {"matcher": "Bash", "hooks": [{"type": "command", "command": error_reminder_cmd}]},
-        ],
-    }
-
-
-def build_scribe_hooks() -> dict:
-    """Scribe transcript-saver Stop hook."""
-    save_cmd = hook_cmd(
-        CORE_DIR / "hooks" / "save_transcript.py", PYTHON, **_per_repo_kwargs(),
-    )
-    return {
-        "Stop": [
-            {"hooks": [{"type": "command", "command": save_cmd}]},
-        ],
-    }
-
-
-def build_docs_hooks() -> dict:
-    """Docs standards-reminder PreToolUse hook."""
-    remind_cmd = hook_cmd(
-        DOCS_DIR / "hooks" / "remind_standards.py", PYTHON, **_per_repo_kwargs(),
-    )
-    return {
-        "PreToolUse": [
-            {"matcher": "", "hooks": [{"type": "command", "command": remind_cmd}]},
-        ],
-    }
+    hooks: dict[str, list] = {}
+    for event, verb in EVENT_VERBS.items():
+        entry: dict = {"hooks": [{"type": "command", "command": dispatch_cmd(verb)}]}
+        if event in ("PreToolUse", "PostToolUse"):
+            entry = {"matcher": "", **entry}
+        hooks[event] = [entry]
+    return hooks

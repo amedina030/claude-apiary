@@ -88,44 +88,29 @@ def command_pushes(command: str) -> bool:
     return any(_segment_pushes(seg) for seg in _SEGMENT_SPLIT.split(command))
 
 
-def main():
-    """Entry point. Fail-open on any internal error — never wedge a push."""
-    try:
-        _run()
-    except Exception:
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-        from core.hook_context import hook_allow
-        hook_allow()
-
-
-def _run():  # pragma: no cover — pure logic lives in command_pushes (tested);
-    #                               this is the I/O + subprocess shell.
+def run(payload: dict):  # pragma: no cover — pure logic lives in
+    #                       command_pushes (tested); this is the subprocess shell.
+    """Block a ``git push`` when the pushed repo's doc-conformer reports drift."""
     import os
     import subprocess
     import sys
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-    from core.hook_context import hook_allow, hook_block, read_payload
+    from core.hook_context import HookResult
 
     # Runner subprocesses are one-shot workers; the push gate is out of scope
     # for them (consistent with the other core hooks, #228).
     if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
-        hook_allow()
-        return
+        return None
 
-    payload = read_payload()
     if (payload.get("tool_name") or "") != "Bash":
-        hook_allow()
-        return
+        return None
 
     tool_input = payload.get("tool_input") or {}
     command = tool_input.get("command") if isinstance(tool_input, dict) else ""
     if not command or not command_pushes(command):
-        hook_allow()
-        return
+        return None
 
     # Resolve the git root of the repo being pushed (from the session cwd).
     cwd = payload.get("cwd") or os.getcwd()
@@ -135,18 +120,15 @@ def _run():  # pragma: no cover — pure logic lives in command_pushes (tested);
             capture_output=True, text=True, timeout=10, check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        hook_allow()
-        return
+        return None
     if proc.returncode != 0 or not proc.stdout.strip():
-        hook_allow()
-        return
+        return None
     root = Path(proc.stdout.strip())
 
     # No-op unless the repo being pushed actually ships the conformer.
     conformer = root / "docs" / "check_cli_claims.py"
     if not conformer.is_file():
-        hook_allow()
-        return
+        return None
 
     try:
         result = subprocess.run(
@@ -156,22 +138,26 @@ def _run():  # pragma: no cover — pure logic lives in command_pushes (tested);
     except (OSError, subprocess.SubprocessError):
         # Conformer not runnable → fail open; don't wedge the push on a
         # broken gate. Real drift (a clean nonzero exit) is handled below.
-        hook_allow()
-        return
+        return None
 
     if result.returncode == 0:
-        hook_allow()
-        return
+        return None
 
     detail = (result.stdout or "").strip() or (result.stderr or "").strip()
-    hook_block(
+    return HookResult(block_reason=(
         "Push blocked: doc-conformer (docs/check_cli_claims.py) found drift "
         "between docs/reference/cli-tools.md and the tools' real argparse. "
         "Fix the drift before pushing — usually the doc is the richer source, "
         "so prefer correcting the doc unless the code genuinely changed.\n\n"
         f"{detail}"
-    )
+    ))
 
 
 if __name__ == "__main__":  # pragma: no cover
-    main()
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+    from core.hook_context import run_standalone
+
+    run_standalone(run)

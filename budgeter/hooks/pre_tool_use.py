@@ -17,24 +17,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apiary ro
 
 from budgeter.lib import logger, estimator
 from core import flags
-from core.hook_context import context_block, join_contexts
-from core.hook_context import hook_allow, read_payload
+from core.hook_context import HookResult, context_block, join_contexts, run_standalone
 from core.session import SessionId
 
 
-def main():
-    """Never crash the tool call: any failure is one stderr line and a
-    no-objection response (review B1)."""
-    try:
-        _run()
-    except Exception as exc:  # noqa: BLE001 — hooks must not crash
-        print(f"[budgeter] pre_tool_use failed: {exc!r}", file=sys.stderr)
-        hook_allow()
+def run(payload: dict):
+    """Log the previous tool call's cost; return the session-length nudge.
 
-
-def _run():
-    payload = read_payload()
-
+    Never crashes the tool call: the dispatcher (and the standalone shim)
+    catch and log anything raised here (review B1).
+    """
     tool_name = payload.get("tool_name", "")
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
@@ -44,8 +36,7 @@ def _run():
     config = logger.load_config()
 
     if tool_name not in config.get("monitored_tools", ["Agent", "Bash"]):
-        hook_allow()
-        return
+        return None
 
     session_entries = logger.read_session_jsonl(transcript_path)
     tokens_now = logger.get_cumulative_tokens(session_entries)
@@ -169,8 +160,8 @@ def _run():
             except ValueError:
                 pass
 
-    hook_allow(join_contexts(*blocks))
+    return HookResult(context=join_contexts(*blocks) or None)
 
 
 if __name__ == "__main__":
-    main()
+    run_standalone(run)

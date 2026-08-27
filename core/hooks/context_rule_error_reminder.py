@@ -25,7 +25,11 @@ nudge is just token bloat for them (#228).
 """
 import os
 import sys
-import json
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from core.hook_context import HookResult, run_standalone
 
 
 REMINDER = (
@@ -53,10 +57,6 @@ HOOK_DENY_MARKERS = (
     "permissionDecision",
     "Blocked by",
 )
-
-
-def _fail_open() -> None:
-    sys.exit(0)
 
 
 def _is_hook_denial(text: str) -> bool:
@@ -105,47 +105,20 @@ def _looks_like_failure(tool_response) -> bool:
     return False
 
 
-def _emit_reminder() -> None:
-    out = {
-        "hookSpecificOutput": {
-            "hookEventName": "PostToolUse",
-            "additionalContext": REMINDER,
-        }
-    }
-    print(json.dumps(out))
-    sys.exit(0)
+def run(payload: dict) -> HookResult | None:
+    """Return the behavioural reminder when a Bash call just failed."""
+    # Runner subprocesses skip this hook entirely (#228).
+    if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
+        return None
 
+    if payload.get("tool_name") != "Bash":
+        return None
 
-def main() -> None:
-    try:
-        # Runner subprocesses skip this hook entirely (#228).
-        if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
-            _fail_open()
+    if not _looks_like_failure(payload.get("tool_response")):
+        return None
 
-        raw = sys.stdin.read()
-        if not raw:
-            _fail_open()
-
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            _fail_open()
-
-        if payload.get("tool_name") != "Bash":
-            _fail_open()
-
-        tool_response = payload.get("tool_response")
-        if not _looks_like_failure(tool_response):
-            _fail_open()
-
-        _emit_reminder()
-
-    except SystemExit:
-        raise
-    except Exception:
-        # Hooks must never crash the session.
-        _fail_open()
+    return HookResult(context=REMINDER)
 
 
 if __name__ == "__main__":
-    main()
+    run_standalone(run, event="PostToolUse")

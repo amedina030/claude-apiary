@@ -173,4 +173,5 @@ These are written into each bootstrapped repo by `apiary install --target <repo>
 | `core/launcher_template.LAUNCHER_PY` | `<repo>/.claude/apiary/launch.py` |
 | (generated) | `<repo>/.claude/apiary/{main-apiary-pointer,self-pointer,version}.json` |
 | Resolved profile + `core/hooks_factory` | `<repo>/.claude/settings.json` |
+| (runtime, `core/hooks/dispatch.py`) | `<repo>/.claude/apiary/hooks.log` — one line + traceback per hook failure, rotated to `hooks.log.1` at 1 MiB |
 | `core/context_rules` rendered zone | `<repo>/CLAUDE.md` (sentinel-bounded) |

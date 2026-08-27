@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from core.hook_context import run_standalone
 from core.utils.filelock import FileLock
 from core.session import dump_history, load_history, sessions_dir, sweep_stale_session_files
 from core.utils.atomic import write_text_atomic
@@ -67,32 +68,23 @@ def _append_to_history(session_id, transcript_path):
         write_text_atomic(hist, dump_history(history))
 
 
-def main():
-    """Stop hook: never crash (a FileLock timeout or an OSError used to
-    surface as a hook error at the end of every turn — review Bug 11)."""
-    try:
-        _run()
-    except Exception as exc:  # noqa: BLE001 — hooks must not crash
-        print(f"[save_transcript] failed: {exc!r}", file=sys.stderr)
-    sys.exit(0)
+def run(payload: dict):
+    """Record this session in the history ring buffer. Never adds context.
 
-
-def _run():
+    Failures are the caller's problem to log (dispatcher → hooks.log, or the
+    standalone shim → stderr): a FileLock timeout or an OSError used to
+    surface as a hook error at the end of every turn (review Bug 11).
+    """
     # Runner stage subprocesses are not real user sessions — never log them
     # to the history or last-session records (#223).
     if os.environ.get(RUNNER_SUBPROCESS_ENV_VAR) == "1":
-        return
-
-    try:
-        payload = json.loads(sys.stdin.read())
-    except json.JSONDecodeError:
-        return
+        return None
 
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
 
     if not session_id or not transcript_path:
-        return
+        return None
 
     # Append to session history ring buffer
     _append_to_history(session_id, transcript_path)
@@ -105,7 +97,8 @@ def _run():
     )
     # Bound the per-session file growth (review S1, second half).
     sweep_stale_session_files()
+    return None
 
 
 if __name__ == "__main__":
-    main()
+    run_standalone(run, event="Stop")

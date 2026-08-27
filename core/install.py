@@ -217,32 +217,14 @@ def _write_per_repo_settings(
     """Generate ``<target>/.claude/settings.json`` with hooks dispatched
     through the per-repo launcher. Returns the sha256 of the written file.
 
-    Uses ``core/hooks_factory``'s ``build_*_hooks`` so every install gets
-    the same hook set, with the launcher path pointed at
-    ``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``.
+    One entry per event, each pointing at ``core/hooks/dispatch.py <verb>``
+    via ``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``. The individual hooks
+    and their matchers live in the dispatcher's registry, not here (review
+    X-1); ``core/hooks_factory`` builds the entries.
     """
     from core import hooks_factory
-    from core.hooks_lib import hook_cmd
 
-    hooks = {}
-    for builder in (
-        hooks_factory.build_core_hooks,
-        hooks_factory.build_budgeter_hooks,
-        hooks_factory.build_scribe_hooks,
-        hooks_factory.build_docs_hooks,
-    ):
-        for event, entries in builder().items():
-            hooks.setdefault(event, []).extend(entries)
-    # Per-repo-only drift check — runs first on PreToolUse so the rest
-    # of the chain sees an up-to-date self-pointer and registry entry.
-    drift_cmd = hook_cmd(
-        apiary / "core" / "hooks" / "per_repo_drift_check.py",
-        repo_root=apiary, per_repo_launcher=True,
-    )
-    hooks.setdefault("PreToolUse", []).insert(0, {
-        "matcher": "",
-        "hooks": [{"type": "command", "command": drift_cmd}],
-    })
+    hooks = hooks_factory.build_dispatch_hooks()
 
     settings_path = target_root / ".claude" / "settings.json"
     register_hooks(

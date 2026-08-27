@@ -154,16 +154,9 @@ def score_learnings(entries: list[dict], *,
     return scored[:top_n]
 
 
-def main():  # pragma: no cover — exercised by the hook-shell path
-    """Entry point. Wrapped for fail-open behavior; never raises."""
-    try:
-        _run()
-    except Exception:
-        from core.hook_context import hook_allow
-        hook_allow()
-
-
-def _run():  # pragma: no cover — covered by integration in Step 7
+def run(payload: dict):  # pragma: no cover — covered by integration; the
+    #                       ranking logic lives in score_learnings (unit-tested).
+    """Return the top-3 relevant learnings for this Edit/Write/Bash call."""
     # Deferred imports keep cold-start cheap on the hot PreToolUse path.
     import os
     import sys
@@ -173,61 +166,51 @@ def _run():  # pragma: no cover — covered by integration in Step 7
     sys.path.insert(0, str(project_root))
 
     from core.flags import is_enabled
-    from core.hook_context import context_block, hook_allow, read_payload
+    from core.hook_context import HookResult, context_block
     from core.sanitizer import sanitize_and_report
-    from scribe.notes import _git_repo_root, scribe_state_dir
+    from scribe.notes import scribe_state_dir
     from scribe.store import ScribeStore
 
     if not is_enabled('learnings-inject'):
-        hook_allow()
-        return
+        return None
 
     if os.environ.get('APIARY_RUNNER_SUBPROCESS') == '1':
-        hook_allow()
-        return
+        return None
 
-    payload = read_payload()
     tool_name = payload.get('tool_name') or ''
     if tool_name not in ('Edit', 'Write', 'Bash'):
-        hook_allow()
-        return
+        return None
 
     tool_input = payload.get('tool_input') or {}
     if not isinstance(tool_input, dict):
-        hook_allow()
-        return
+        return None
 
     target_path = None
     command = None
     if tool_name in ('Edit', 'Write'):
         target_path = tool_input.get('file_path') or ''
         if not target_path:
-            hook_allow()
-            return
+            return None
         target_path = _normalize_for_glob(target_path, payload.get('cwd'))
     else:  # Bash
         command = tool_input.get('command') or ''
         if not command:
-            hook_allow()
-            return
+            return None
 
     cwd = payload.get('cwd') or str(project_root)
     state_dir = scribe_state_dir(Path(cwd))
     if state_dir is None:
-        hook_allow()
-        return
+        return None
 
     try:
         store = ScribeStore(state_dir)
         entries = store.list_learnings()
     except Exception:
-        hook_allow()
-        return
+        return None
 
     top = score_learnings(entries, target_path=target_path, command=command)
     if not top:
-        hook_allow()
-        return
+        return None
 
     blocks: list[str] = []
     for entry in top:
@@ -246,10 +229,9 @@ def _run():  # pragma: no cover — covered by integration in Step 7
         blocks.append(f"--- relevant learning ({' · '.join(header_bits)}) ---\n{scrubbed}")
 
     if not blocks:
-        hook_allow()
-        return
+        return None
 
-    hook_allow(context_block('learnings', *blocks))
+    return HookResult(context=context_block('learnings', *blocks))
 
 
 def _normalize_for_glob(file_path: str, cwd: str | None) -> str:  # pragma: no cover
@@ -271,4 +253,10 @@ def _normalize_for_glob(file_path: str, cwd: str | None) -> str:  # pragma: no c
 
 
 if __name__ == '__main__':  # pragma: no cover
-    main()
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+    from core.hook_context import run_standalone
+
+    run_standalone(run)

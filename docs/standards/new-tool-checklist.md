@@ -35,9 +35,9 @@ When adding a new top-level tool to the project (like budgeter, scribe, or harde
 - [ ] Stdlib only — no external dependencies
 
 ### 2. Hooks (if applicable)
-- [ ] Hook scripts under `<tool>/hooks/`
-- [ ] Each hook has a silent try/except wrapper — hooks must not crash
-- [ ] Registered in `core/hooks_factory.py` via `core/hooks_lib.py`
+- [ ] Hook modules under `<tool>/hooks/`, each exposing `run(payload) -> HookResult | None`
+- [ ] `run_standalone(run, ...)` shim so `python <hook>.py` still works
+- [ ] Registered in `_registry()` in `core/hooks/dispatch.py` with a matcher (see [Adding a Hook](../guides/adding-a-hook.md))
 
 ### 3. Slash commands
 - [ ] Command markdown files under `<tool>/commands/`
@@ -56,7 +56,7 @@ When adding a new top-level tool to the project (like budgeter, scribe, or harde
 - [ ] Covers core logic and edge cases
 
 ### 6. Install integration
-- [ ] `core/hooks_factory.py` registers hooks (if any) in `settings.json`
+- [ ] Hooks (if any) registered in the dispatcher's `_registry()`; `core/hooks_factory.py` registers only the dispatcher, one entry per event
 - [ ] `apiary install` copies commands to `<repo>/.claude/commands/`
 - [ ] `poetry run apiary doctor` validates the new tool's installation
 - [ ] Uninstall instructions added to `SETUP.md`

@@ -9,7 +9,6 @@ tool_response.totalTokens and logs it directly.
 import os
 import re
 import sys
-import json
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -17,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apiary ro
 
 from budgeter.lib import logger
 from core import flags
+from core.hook_context import run_standalone
 
 
 # /harden encodes the run's request_id in the Agent description as "[rid:<id>]"
@@ -38,31 +38,21 @@ def _sanitize_request_id(value: str) -> str:
     return value
 
 
-def main():
-    """Never crash the tool call (review B1)."""
-    try:
-        _run()
-    except Exception as exc:  # noqa: BLE001 — hooks must not crash
-        print(f"[budgeter] post_tool_use failed: {exc!r}", file=sys.stderr)
+def run(payload: dict):
+    """Log an Agent spawn's exact token cost. Never returns context.
 
-
-def _run():
-    # Read the whole payload. A 64 KB cap used to drop exactly the most
-    # expensive Agent calls — tool_response carries the subagent's full
-    # return text — with no trace (review B6). Claude Code bounds the
-    # payload; we don't need to.
-    try:
-        payload = json.loads(sys.stdin.buffer.read())
-    except json.JSONDecodeError as exc:
-        print(f"[budgeter] post_tool_use: unreadable payload: {exc}", file=sys.stderr)
-        sys.exit(0)
-
+    Never crashes the tool call: the dispatcher (and the standalone shim)
+    catch and log anything raised here (review B1). The whole payload is read
+    — a 64 KB cap used to drop exactly the most expensive Agent calls, since
+    ``tool_response`` carries the subagent's full return text, with no trace
+    (review B6). Claude Code bounds the payload; we don't need to.
+    """
     tool_name = payload.get("tool_name", "")
     if tool_name != "Agent":
-        sys.exit(0)
+        return None
 
     if not flags.is_enabled("budgeter-log"):
-        sys.exit(0)
+        return None
 
     session_id = payload.get("session_id", "")
     cwd = payload.get("cwd", "")
@@ -70,10 +60,10 @@ def _run():
 
     tool_response = payload.get("tool_response")
     if not isinstance(tool_response, dict):
-        sys.exit(0)
+        return None
     total_tokens = max(0, tool_response.get("totalTokens", 0))
     if total_tokens == 0:
-        sys.exit(0)
+        return None
 
     baseline = logger.load_baseline(session_id)
 
@@ -111,7 +101,8 @@ def _run():
     if request_id:
         entry['request_id'] = request_id
     logger.append_entry(entry)
+    return None
 
 
 if __name__ == "__main__":
-    main()
+    run_standalone(run, event="PostToolUse")

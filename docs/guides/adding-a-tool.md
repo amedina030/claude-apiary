@@ -52,7 +52,7 @@ See [Adding a Command](adding-a-command.md).
 
 ### 7. Integrate with `apiary install`
 
-- Add the new tool's `hooks/` builder to `core/hooks_factory.py` (extend an existing builder if the hooks fit a current event set, or add a new `build_<tool>_hooks` and wire it into `core/install.py`).
+- Register the new tool's hooks in `_registry()` in `core/hooks/dispatch.py` — one `Hook(name, module, matcher)` row per hook, in the event's tuple. `core/hooks_factory.py` registers only the dispatcher itself, once per event, so a new hook needs no `settings.json` change and no re-bootstrap.
 - Slash commands placed under `<tool>/commands/*.md` are auto-discovered by `core/install._slash_command_sources`.
 - Add a doctor check in `core/doctor.py` if the tool introduces new on-disk state worth validating.
 - Add uninstall instructions to `SETUP.md`.

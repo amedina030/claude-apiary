@@ -25,7 +25,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.session import SessionId
-from core.hook_context import context_block, hook_allow, read_payload
+from core.hook_context import HookResult, context_block, run_standalone
 from core.sanitizer import sanitize_and_report
 from core.startup import run_init, run_summary
 from core.utils.state import find_state_dir
@@ -89,42 +89,29 @@ def _log_sanitizer_hits(site: str, hits: dict[str, int], session_id: str) -> Non
         pass
 
 
-def main():
-    try:
-        _run()
-    except Exception:
-        # Hooks must not crash — degrade to no context
-        hook_allow(event="UserPromptSubmit")
-
-
-def _run():
+def run(payload: dict):
+    """Build the first-message startup context block for this session."""
     # Runner subprocesses (auto_refine, auto_plan, etc.) set this env var
     # to skip the entire startup injection. Saves tens of KB of input tokens
     # per spawn — none of identity/notes/learnings/CLI-index is useful to a
     # one-shot runner worker.
     if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
-        hook_allow(event="UserPromptSubmit")
-        return
-
-    payload = read_payload()
+        return None
 
     raw_id = payload.get("session_id", "")
     if not raw_id:
-        hook_allow(event="UserPromptSubmit")
-        return
+        return None
 
     try:
         sid = SessionId(raw_id)
     except ValueError:
-        hook_allow(event="UserPromptSubmit")
-        return
+        return None
 
     # Run-once guard
     flag_file = sid.flag_path("startup_prompt_done")
     flag_file.parent.mkdir(parents=True, exist_ok=True)
     if flag_file.exists():
-        hook_allow(event="UserPromptSubmit")
-        return
+        return None
     flag_file.write_text("1", encoding="utf-8")
 
     parts = []
@@ -262,8 +249,8 @@ def _run():
         except Exception:
             pass
 
-    hook_allow(context_block("startup", *parts), event="UserPromptSubmit")
+    return HookResult(context=context_block("startup", *parts))
 
 
 if __name__ == "__main__":
-    main()
+    run_standalone(run, event="UserPromptSubmit")

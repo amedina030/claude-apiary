@@ -133,6 +133,8 @@ class TestHookSubprocess(unittest.TestCase):
         self.assertEqual(_additional_context(stdout), "")
 
     def test_empty_stdin_no_crash(self):
+        # The standalone shim answers an unreadable payload with the standard
+        # no-opinion response `{}` (hook_context.read_payload), not silence.
         proc = subprocess.run(
             [PYTHON, str(HOOK)],
             input="",
@@ -141,7 +143,7 @@ class TestHookSubprocess(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(proc.returncode, 0)
-        self.assertEqual(proc.stdout.strip(), "")
+        self.assertEqual(_additional_context(proc.stdout), "")
 
     def test_malformed_json_no_crash(self):
         proc = subprocess.run(
@@ -152,7 +154,7 @@ class TestHookSubprocess(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(proc.returncode, 0)
-        self.assertEqual(proc.stdout.strip(), "")
+        self.assertEqual(_additional_context(proc.stdout), "")
 
     def test_traceback_in_stdout_triggers(self):
         payload = {

@@ -929,11 +929,38 @@ Exit codes:
 
 See [Bootstrapping a repo](../guides/bootstrapping-a-repo.md) for profile authoring and the full workflow.
 
+## core/hooks/dispatch.py
+
+The hook dispatcher: the **only** hook command in a bootstrapped repo's `.claude/settings.json`. One process per Claude Code event — it reads the payload from stdin once and runs every relevant hook module in-process, in registry order, then prints one merged JSON response. Not something you normally type; documented here because it is the entry point every hook now goes through, and because it is the thing to run by hand when a hook misbehaves.
+
+Takes exactly one positional verb and no flags (a hand-rolled `sys.argv` check, not argparse — this is the hottest path in the toolkit and every import costs milliseconds on every tool call, so it is listed in `check_cli_claims.SKIP_HEADERS`).
+
+```bash
+# what settings.json runs
+python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" core/hooks/dispatch.py pre
+
+# reproduce a hook chain by hand with a synthetic payload
+echo '{"tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"<uuid>","cwd":"<repo>","transcript_path":""}' \
+  | python core/hooks/dispatch.py pre
+```
+
+| Verb | Event | Chain |
+|------|-------|-------|
+| `pre` | PreToolUse | drift check, session inject, learnings, research nudge, both push gates, budgeter, standards reminder |
+| `post` | PostToolUse | error-rule reminder, budgeter agent-cost logger |
+| `stop` | Stop | budgeter stop, transcript saver |
+| `prompt` | UserPromptSubmit | startup context injector |
+| `session-start` | SessionStart | (none registered yet) |
+
+Exit codes: `0` no objection (the merged `additionalContext`, or `{}`); `2` a gate blocked the call, with the `deny` JSON on stdout and the reason on stderr; `2` also for a bad verb. Never exits nonzero because a hook failed — per-hook exceptions are logged to `<repo>/.claude/apiary/hooks.log` (rotated at 1 MiB) and the chain continues.
+
+The hook contract (`run(payload) -> HookResult | None`), the registry, the matcher semantics and the log format are documented in [hooks.md](hooks.md).
+
 ## docs/check_cli_claims.py
 
 Reconcile the CLI claims in `cli-tools.md` against each tool's real argparse — reports drift when a documented subcommand/flag no longer exists, or a real one is undocumented. Sibling to `docs/check.py`; report-only, never rewrites the doc. Shells out to each tool's `--help`. Mark intentional omissions with an inline `<!-- cli-claims: ignore: --some-flag, somesubcmd -->` anywhere in a tool's section.
 
-A section is reconciled when its `##` header is a repo-relative `.py` path, or a console-script name listed in `CONSOLE_SCRIPTS` (the header is the command, so it is mapped to the module behind the entry point — `apiary` → `core/cli.py`). Sections in `SKIP_HEADERS` are libraries, redirect stubs, GUI-dependency scripts and prose categories, and are dropped silently; anything else that is not reconcilable is reported as `SKIP` rather than passing quietly. Run by `docs/hooks/pre-commit` on every commit and by `core/hooks/pre_push_doc_conformer.py` on every push — the two gates run the same check, so drift is normally fixed at commit time.
+A section is reconciled when its `##` header is a repo-relative `.py` path, or a console-script name listed in `CONSOLE_SCRIPTS` (the header is the command, so it is mapped to the module behind the entry point — `apiary` → `core/cli.py`). Sections in `SKIP_HEADERS` are libraries, redirect stubs, GUI-dependency scripts, hand-parsed entry points (`core/hooks/dispatch.py`) and prose categories, and are dropped silently; anything else that is not reconcilable is reported as `SKIP` rather than passing quietly. Run by `docs/hooks/pre-commit` on every commit and by `core/hooks/pre_push_doc_conformer.py` on every push — the two gates run the same check, so drift is normally fixed at commit time.
 
 ```bash
 python docs/check_cli_claims.py

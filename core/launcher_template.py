@@ -24,15 +24,24 @@ main-apiary and the per-target state directory, then dispatches to a script
 inside main-apiary. Exits 0 (silently) when main-apiary is unreachable so
 a missing checkout never blocks Claude Code session startup.
 
+The target runs IN THIS PROCESS via runpy, not as a second interpreter
+(review X-1). Spawning `[sys.executable, script]` doubled every hook's cost —
+~140-360 ms of Python startup per hook, ~18 starts per Bash tool call. Env
+vars are therefore set on os.environ (the target reads the same process's
+environment) and the target's SystemExit is propagated as this script's exit
+code, so exit-2 gates still block.
+
 Env vars set for the dispatched script:
 - APIARY_MAIN_REPO        — main-apiary's absolute path
+- APIARY_TARGET_REPO      — the repo this launcher belongs to
 - APIARY_TARGET_STATE_DIR — <main-apiary>/.repos/<name>-<uid>/, the
   per-target state dir scribe / runner / compass / etc. read.
 """
 import json
 import os
-import subprocess
+import runpy
 import sys
+import traceback
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -109,19 +118,34 @@ def main() -> int:
         )
         return 0  # do not block
 
-    env = os.environ.copy()
-    env["APIARY_MAIN_REPO"] = str(main_apiary)
+    os.environ["APIARY_MAIN_REPO"] = str(main_apiary)
     # The repo this launcher belongs to, so CLI tools invoked through it (e.g.
     # the /budgeter skill) resolve the SAME repo the hooks do, even when the
     # tool shell\'s cwd has wandered into a sibling checkout.
-    env["APIARY_TARGET_REPO"] = str(Path(__file__).resolve().parents[2])
+    os.environ["APIARY_TARGET_REPO"] = str(Path(__file__).resolve().parents[2])
     state_dir = _resolve_state_dir(main_apiary)
     if state_dir is not None:
-        env["APIARY_TARGET_STATE_DIR"] = str(state_dir)
-    return subprocess.run(
-        [sys.executable, str(script), *sys.argv[2:]],
-        env=env,
-    ).returncode
+        os.environ["APIARY_TARGET_STATE_DIR"] = str(state_dir)
+
+    # The target sees its own argv, as it would when spawned.
+    sys.argv = [str(script), *sys.argv[2:]]
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+    except SystemExit as exc:
+        code = exc.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        print(code, file=sys.stderr)
+        return 1
+    except BaseException:
+        # In-process now, so an uncaught error would otherwise surface as this
+        # launcher\'s traceback. Print it (same text the spawned child printed)
+        # and exit 1 — never 2, which Claude Code reads as "block the call".
+        traceback.print_exc()
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
