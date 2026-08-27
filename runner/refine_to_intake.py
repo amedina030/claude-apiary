@@ -16,6 +16,7 @@ Usage:
     refine_to_intake.py --note <note_id> --title "..." --backlog
     refine_to_intake.py --note <note_id> --title "..." --explore-hints "scribe/notes.py,core/startup.py"
 """
+
 import argparse
 import sys
 
@@ -31,5 +32,5 @@ def main():
     sys.exit(cmd_from_note(args, parser))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

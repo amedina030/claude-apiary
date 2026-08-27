@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Integration tests for run.py --detached flow. Uses unittest.mock to stub stages."""
+
 import io
 import json
 import os
@@ -27,13 +28,14 @@ from runner import target_repo as target_repo_module  # noqa: E402
 
 def _make_fake_usage(tokens: int = 1000) -> str:
     return (
-        f'<usage><total_tokens>{tokens}</total_tokens>'
-        f'<tool_uses>2</tool_uses><duration_ms>500</duration_ms></usage>'
+        f"<usage><total_tokens>{tokens}</total_tokens>"
+        f"<tool_uses>2</tool_uses><duration_ms>500</duration_ms></usage>"
     )
 
 
-def _make_cli_args(token_cap: int = 5_000_000, max_unreviewed: int = 5, intake=None,
-                   target_repo=None):
+def _make_cli_args(
+    token_cap: int = 5_000_000, max_unreviewed: int = 5, intake=None, target_repo=None
+):
     """Build a minimal namespace compatible with run_detached(cli_args)."""
     ns = mock.MagicMock()
     ns.token_cap = token_cap
@@ -46,20 +48,19 @@ def _make_cli_args(token_cap: int = 5_000_000, max_unreviewed: int = 5, intake=N
 
 
 def _init_git_repo(root: Path) -> None:
-    subprocess.run(['git', 'init', '-q', '-b', 'master'], cwd=str(root), check=True)
-    subprocess.run(['git', 'config', 'user.email', 't@t'], cwd=str(root), check=True)
-    subprocess.run(['git', 'config', 'user.name', 't'], cwd=str(root), check=True)
-    (root / 'README').write_text('x', encoding='utf-8')
-    subprocess.run(['git', 'add', '-A'], cwd=str(root), check=True)
-    subprocess.run(['git', 'commit', '-q', '-m', 'init'], cwd=str(root), check=True)
+    subprocess.run(["git", "init", "-q", "-b", "master"], cwd=str(root), check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(root), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(root), check=True)
+    (root / "README").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=str(root), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(root), check=True)
 
 
 class TestDetachedRun(unittest.TestCase):
-
     def setUp(self):
         # prune_stale_worktrees runs inside the real apiary repo by default
         # and would mutate disk state — mock it out for every detached test.
-        self._prune_patcher = mock.patch('runner.run.prune_stale_worktrees', return_value=[])
+        self._prune_patcher = mock.patch("runner.run.prune_stale_worktrees", return_value=[])
         self._prune_patcher.start()
         self.addCleanup(self._prune_patcher.stop)
 
@@ -73,7 +74,9 @@ class TestDetachedRun(unittest.TestCase):
         self.addCleanup(self._history_tmp.cleanup)
         self._history_path = Path(self._history_tmp.name) / "run_history.jsonl"
         self._history_patcher = mock.patch.object(
-            run_history_module, "RUN_HISTORY_FILE", self._history_path,
+            run_history_module,
+            "RUN_HISTORY_FILE",
+            self._history_path,
         )
         self._history_patcher.start()
         self.addCleanup(self._history_patcher.stop)
@@ -84,7 +87,8 @@ class TestDetachedRun(unittest.TestCase):
         self._tracker_tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tracker_tmp.cleanup)
         self._tracker_patcher = mock.patch.object(
-            run_tracker_module, "RUNS_DIR",
+            run_tracker_module,
+            "RUNS_DIR",
             Path(self._tracker_tmp.name) / "runs",
         )
         self._tracker_patcher.start()
@@ -105,15 +109,17 @@ class TestDetachedRun(unittest.TestCase):
         # .git entry. The tests fall back to APIARY_REPO_ROOT when they
         # don't supply --target-repo, so the patched root must be a real
         # git repo or that validation rejects the test fixture.
-        subprocess.run(['git', 'init', '-q', '-b', 'master'],
-                       cwd=str(fake_apiary), check=True)
+        subprocess.run(["git", "init", "-q", "-b", "master"], cwd=str(fake_apiary), check=True)
         self._apiary_root_patcher = mock.patch.object(
-            target_repo_module, "APIARY_REPO_ROOT", fake_apiary,
+            target_repo_module,
+            "APIARY_REPO_ROOT",
+            fake_apiary,
         )
         self._apiary_root_patcher.start()
         self.addCleanup(self._apiary_root_patcher.stop)
         self._locks_patcher = mock.patch.object(
-            run_lock_module, "LOCKS_DIR",
+            run_lock_module,
+            "LOCKS_DIR",
             fake_apiary / ".apiary" / "runner" / "locks",
         )
         self._locks_patcher.start()
@@ -123,18 +129,19 @@ class TestDetachedRun(unittest.TestCase):
             if _prior is not None:
                 self.addCleanup(os.environ.__setitem__, _env, _prior)
 
-    def _make_intake_file(self, directory: Path, uid: str = 'test-uuid-1234',
-                          title: str = 'Test Item') -> Path:
-        p = directory / f'{uid}.json'
-        p.write_text(json.dumps({'id': uid, 'title': title}), encoding='utf-8')
+    def _make_intake_file(
+        self, directory: Path, uid: str = "test-uuid-1234", title: str = "Test Item"
+    ) -> Path:
+        p = directory / f"{uid}.json"
+        p.write_text(json.dumps({"id": uid, "title": title}), encoding="utf-8")
         return p
 
     def _make_fake_worktree(self, td: Path, picked_path: Path) -> Path:
         """Create a worktree-shaped temp dir with runner/backlog/<picked.name>
         already in place. Tests use this in place of a real `git worktree add`
         because git_worktree_create is mocked."""
-        wt = td / 'wt'
-        wt_backlog = wt / 'runner' / 'backlog'
+        wt = td / "wt"
+        wt_backlog = wt / "runner" / "backlog"
         wt_backlog.mkdir(parents=True)
         (wt_backlog / picked_path.name).write_bytes(picked_path.read_bytes())
         return wt
@@ -142,37 +149,41 @@ class TestDetachedRun(unittest.TestCase):
     def _read_log(self, log_path: Path) -> list:
         if not log_path.exists():
             return []
-        return [json.loads(ln) for ln in log_path.read_text(encoding='utf-8').splitlines() if ln.strip()]
+        return [
+            json.loads(ln) for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()
+        ]
 
     def test_successful_detached_run(self):
         """All 6 stages pass → exit 0, log entry exit_status='ok', stages_completed=6."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            backlog = td / 'backlog'
+            backlog = td / "backlog"
             backlog.mkdir()
-            intake_dir = td / 'intake'
+            intake_dir = td / "intake"
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
             log_path = self._history_path
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
-                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
-                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
-                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(100), '', 0.1)),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", return_value=(True, wt_path, "")),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+                mock.patch(
+                    "runner.run.run_stage", return_value=(True, _make_fake_usage(100), "", 0.1)
+                ),
             ):
                 rc = run.run_detached(_make_cli_args())
 
             self.assertEqual(rc, 0)
             entries = self._read_log(log_path)
             self.assertEqual(len(entries), 1)
-            self.assertEqual(entries[0]['exit_status'], 'ok')
-            self.assertEqual(entries[0]['stages_completed'], 6)
+            self.assertEqual(entries[0]["exit_status"], "ok")
+            self.assertEqual(entries[0]["stages_completed"], 6)
 
     def test_artifacts_land_in_apiary_not_worktree(self):
         """Runner artifacts live under <apiary>/.apiary/runner/, never in the
@@ -186,70 +197,73 @@ class TestDetachedRun(unittest.TestCase):
              state dir, not the worktree.
         """
         from runner import target_repo
+
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
             # Make td resolvable as a git repo so resolve_target_repo accepts it.
-            subprocess.run(['git', 'init', '-q', '-b', 'master'], cwd=str(td), check=True)
+            subprocess.run(["git", "init", "-q", "-b", "master"], cwd=str(td), check=True)
             # Simulate apiary at td: runner artifacts will land under td/.apiary/runner/
-            apiary_runner = td / '.apiary' / 'runner'
-            backlog = apiary_runner / 'backlog'
+            apiary_runner = td / ".apiary" / "runner"
+            backlog = apiary_runner / "backlog"
             backlog.mkdir(parents=True)
-            intake_dir_path = apiary_runner / 'intake'
+            intake_dir_path = apiary_runner / "intake"
             intake_dir_path.mkdir(parents=True)
-            uid = 'phase2-abcd-ef01-2345-6789abcdef01'
+            uid = "phase2-abcd-ef01-2345-6789abcdef01"
             intake_file = self._make_intake_file(backlog, uid=uid)
             wt_path = self._make_fake_worktree(td, intake_file)
 
             captured_input_paths = []
 
-            def _capture_stage(name, module_name, input_path, cwd=None,
-                               extra_env=None):
+            def _capture_stage(name, module_name, input_path, cwd=None, extra_env=None):
                 captured_input_paths.append(Path(input_path))
-                return (True, _make_fake_usage(50), '', 0.1)
+                return (True, _make_fake_usage(50), "", 0.1)
 
             with (
-                mock.patch.object(target_repo, 'APIARY_REPO_ROOT', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
-                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
-                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
-                mock.patch('runner.run.run_stage', side_effect=_capture_stage),
+                mock.patch.object(target_repo, "APIARY_REPO_ROOT", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", return_value=(True, wt_path, "")),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+                mock.patch("runner.run.run_stage", side_effect=_capture_stage),
             ):
                 rc = run.run_detached(_make_cli_args())
 
             self.assertEqual(rc, 0)
             # intake landed under <apiary>/.apiary/runner/intake/, not the worktree.
-            apiary_intake = apiary_runner / 'intake' / f'{uid}.json'
-            self.assertTrue(apiary_intake.exists(),
-                            f'expected apiary intake at {apiary_intake}')
-            self.assertFalse(intake_file.exists(),
-                             'backlog source file should be removed after promotion')
+            apiary_intake = apiary_runner / "intake" / f"{uid}.json"
+            self.assertTrue(apiary_intake.exists(), f"expected apiary intake at {apiary_intake}")
+            self.assertFalse(
+                intake_file.exists(), "backlog source file should be removed after promotion"
+            )
             # worktree's runner/intake must NOT have been created/populated
-            wt_intake = wt_path / 'runner' / 'intake' / f'{uid}.json'
-            self.assertFalse(wt_intake.exists(),
-                             'worktree runner/intake must not be written to')
+            wt_intake = wt_path / "runner" / "intake" / f"{uid}.json"
+            self.assertFalse(wt_intake.exists(), "worktree runner/intake must not be written to")
             # every artifact path passed to stages must be rooted under the
             # apiary-runner state dir.
-            self.assertTrue(captured_input_paths, 'expected >=1 stage invocation')
+            self.assertTrue(captured_input_paths, "expected >=1 stage invocation")
             runner_root_resolved = apiary_runner.resolve()
             wt_resolved = wt_path.resolve()
             for p in captured_input_paths:
-                self.assertTrue(str(p.resolve()).startswith(str(runner_root_resolved)),
-                                f'artifact path {p} not rooted in apiary runner state {apiary_runner}')
-                self.assertFalse(str(p.resolve()).startswith(str(wt_resolved) + os.sep),
-                                 f'artifact path {p} incorrectly rooted in worktree')
+                self.assertTrue(
+                    str(p.resolve()).startswith(str(runner_root_resolved)),
+                    f"artifact path {p} not rooted in apiary runner state {apiary_runner}",
+                )
+                self.assertFalse(
+                    str(p.resolve()).startswith(str(wt_resolved) + os.sep),
+                    f"artifact path {p} incorrectly rooted in worktree",
+                )
 
     def _init_scratch_repo(self, root: Path) -> Path:
         """Create a minimal git repo for use as a phase-3 target_repo fixture."""
         root.mkdir(parents=True, exist_ok=True)
-        subprocess.run(['git', 'init', '-q', '-b', 'master'], cwd=str(root), check=True)
-        subprocess.run(['git', 'config', 'user.email', 't@t'], cwd=str(root), check=True)
-        subprocess.run(['git', 'config', 'user.name', 't'], cwd=str(root), check=True)
-        (root / 'README').write_text('x', encoding='utf-8')
-        subprocess.run(['git', 'add', '-A'], cwd=str(root), check=True)
-        subprocess.run(['git', 'commit', '-q', '-m', 'init'], cwd=str(root), check=True)
+        subprocess.run(["git", "init", "-q", "-b", "master"], cwd=str(root), check=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(root), check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=str(root), check=True)
+        (root / "README").write_text("x", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(root), check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(root), check=True)
         return root
 
     def test_target_repo_cli_flag_passed_to_worktree_create(self):
@@ -258,190 +272,211 @@ class TestDetachedRun(unittest.TestCase):
         git tree (not apiary's)."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            (td / 'backlog').mkdir()
-            (td / 'intake').mkdir()
-            intake_file = self._make_intake_file(td / 'backlog')
-            scratch = self._init_scratch_repo(td / 'scratch')
+            (td / "backlog").mkdir()
+            (td / "intake").mkdir()
+            intake_file = self._make_intake_file(td / "backlog")
+            scratch = self._init_scratch_repo(td / "scratch")
             wt_path = self._make_fake_worktree(td, intake_file)
 
             captured = {}
+
             def _capture(branch, *args, **kwargs):
-                captured['target_repo'] = kwargs.get('target_repo')
-                return (True, wt_path, '')
+                captured["target_repo"] = kwargs.get("target_repo")
+                return (True, wt_path, "")
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', side_effect=_capture),
-                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
-                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
-                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(50), '', 0.1)),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", side_effect=_capture),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+                mock.patch(
+                    "runner.run.run_stage", return_value=(True, _make_fake_usage(50), "", 0.1)
+                ),
             ):
                 rc = run.run_detached(_make_cli_args(target_repo=str(scratch)))
 
             self.assertEqual(rc, 0)
-            self.assertEqual(Path(captured['target_repo']).resolve(), scratch.resolve())
+            self.assertEqual(Path(captured["target_repo"]).resolve(), scratch.resolve())
 
     def test_target_repo_recorded_in_history_entry(self):
         """Phase 3: successful runs record the resolved target_repo in the
         run_history entry so multi-repo runs can be disambiguated later."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            (td / 'backlog').mkdir()
-            (td / 'intake').mkdir()
-            intake_file = self._make_intake_file(td / 'backlog')
-            scratch = self._init_scratch_repo(td / 'scratch')
+            (td / "backlog").mkdir()
+            (td / "intake").mkdir()
+            intake_file = self._make_intake_file(td / "backlog")
+            scratch = self._init_scratch_repo(td / "scratch")
             wt_path = self._make_fake_worktree(td, intake_file)
             log_path = self._history_path
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
-                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
-                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
-                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(50), '', 0.1)),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", return_value=(True, wt_path, "")),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+                mock.patch(
+                    "runner.run.run_stage", return_value=(True, _make_fake_usage(50), "", 0.1)
+                ),
             ):
                 rc = run.run_detached(_make_cli_args(target_repo=str(scratch)))
 
             self.assertEqual(rc, 0)
             entries = self._read_log(log_path)
             self.assertEqual(len(entries), 1)
-            self.assertEqual(entries[0]['exit_status'], 'ok')
-            self.assertEqual(Path(entries[0]['target_repo']).resolve(), scratch.resolve())
+            self.assertEqual(entries[0]["exit_status"], "ok")
+            self.assertEqual(Path(entries[0]["target_repo"]).resolve(), scratch.resolve())
 
     def test_target_repo_intake_field_used_when_no_cli(self):
         """Phase 3 precedence: with no --target-repo, intake.target_repo wins."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            (td / 'backlog').mkdir()
-            (td / 'intake').mkdir()
-            scratch = self._init_scratch_repo(td / 'scratch')
+            (td / "backlog").mkdir()
+            (td / "intake").mkdir()
+            scratch = self._init_scratch_repo(td / "scratch")
             # Intake JSON declares target_repo via its field
-            intake_path = td / 'backlog' / 'test-uuid-1234.json'
-            intake_path.write_text(json.dumps({
-                'id': 'test-uuid-1234',
-                'title': 'Test Item',
-                'target_repo': str(scratch),
-            }), encoding='utf-8')
+            intake_path = td / "backlog" / "test-uuid-1234.json"
+            intake_path.write_text(
+                json.dumps(
+                    {
+                        "id": "test-uuid-1234",
+                        "title": "Test Item",
+                        "target_repo": str(scratch),
+                    }
+                ),
+                encoding="utf-8",
+            )
             wt_path = self._make_fake_worktree(td, intake_path)
 
             captured = {}
+
             def _capture(branch, *args, **kwargs):
-                captured['target_repo'] = kwargs.get('target_repo')
-                return (True, wt_path, '')
+                captured["target_repo"] = kwargs.get("target_repo")
+                return (True, wt_path, "")
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_path),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', side_effect=_capture),
-                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
-                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
-                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(50), '', 0.1)),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_path),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", side_effect=_capture),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+                mock.patch(
+                    "runner.run.run_stage", return_value=(True, _make_fake_usage(50), "", 0.1)
+                ),
             ):
                 rc = run.run_detached(_make_cli_args())
 
             self.assertEqual(rc, 0)
-            self.assertEqual(Path(captured['target_repo']).resolve(), scratch.resolve())
+            self.assertEqual(Path(captured["target_repo"]).resolve(), scratch.resolve())
 
     def test_invalid_target_repo_aborts_before_worktree(self):
         """Phase 3: an unresolvable target_repo aborts with
         exit_status='target_repo_invalid' BEFORE any worktree is created."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            (td / 'backlog').mkdir()
-            (td / 'intake').mkdir()
-            intake_file = self._make_intake_file(td / 'backlog')
+            (td / "backlog").mkdir()
+            (td / "intake").mkdir()
+            intake_file = self._make_intake_file(td / "backlog")
             log_path = self._history_path
 
             create_calls = []
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create',
-                           side_effect=lambda *a, **kw: create_calls.append(kw) or (True, td, '')),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch(
+                    "runner.run.git_worktree_create",
+                    side_effect=lambda *a, **kw: create_calls.append(kw) or (True, td, ""),
+                ),
             ):
-                rc = run.run_detached(_make_cli_args(
-                    target_repo=str(td / 'does-not-exist-x9z2q'),
-                ))
+                rc = run.run_detached(
+                    _make_cli_args(
+                        target_repo=str(td / "does-not-exist-x9z2q"),
+                    )
+                )
 
             self.assertEqual(rc, 1)
             self.assertEqual(create_calls, [])  # aborted before worktree creation
             entries = self._read_log(log_path)
             self.assertEqual(len(entries), 1)
-            self.assertEqual(entries[0]['exit_status'], 'target_repo_invalid')
+            self.assertEqual(entries[0]["exit_status"], "target_repo_invalid")
 
     def test_token_cap_exceeded(self):
         """Stage returns 1000 tokens but cap is 500 → exit 1, exit_status='token_cap_exceeded'."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            backlog = td / 'backlog'
+            backlog = td / "backlog"
             backlog.mkdir()
-            intake_dir = td / 'intake'
+            intake_dir = td / "intake"
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
             log_path = self._history_path
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
-                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
-                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
-                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(1000), '', 0.1)),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", return_value=(True, wt_path, "")),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+                mock.patch(
+                    "runner.run.run_stage", return_value=(True, _make_fake_usage(1000), "", 0.1)
+                ),
             ):
                 rc = run.run_detached(_make_cli_args(token_cap=500))
 
             self.assertEqual(rc, 1)
             entries = self._read_log(log_path)
             self.assertEqual(len(entries), 1)
-            self.assertEqual(entries[0]['exit_status'], 'token_cap_exceeded')
+            self.assertEqual(entries[0]["exit_status"], "token_cap_exceeded")
 
     def test_stage_failure(self):
         """Second stage fails → exit 1, exit_status starts with 'stage_failed:'."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            backlog = td / 'backlog'
+            backlog = td / "backlog"
             backlog.mkdir()
-            intake_dir = td / 'intake'
+            intake_dir = td / "intake"
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
             log_path = self._history_path
 
-            stage_seq = iter([
-                (True, _make_fake_usage(100), '', 0.1),    # stage 1 ok
-                (False, '', 'simulated stage error', 0.2),  # stage 2 fails
-            ])
+            stage_seq = iter(
+                [
+                    (True, _make_fake_usage(100), "", 0.1),  # stage 1 ok
+                    (False, "", "simulated stage error", 0.2),  # stage 2 fails
+                ]
+            )
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
-                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
-                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
-                mock.patch('runner.run.run_stage', side_effect=lambda *a, **kw: next(stage_seq)),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", return_value=(True, wt_path, "")),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+                mock.patch("runner.run.run_stage", side_effect=lambda *a, **kw: next(stage_seq)),
             ):
                 rc = run.run_detached(_make_cli_args())
 
             self.assertEqual(rc, 1)
             entries = self._read_log(log_path)
             self.assertEqual(len(entries), 1)
-            self.assertTrue(entries[0]['exit_status'].startswith('stage_failed:'))
+            self.assertTrue(entries[0]["exit_status"].startswith("stage_failed:"))
 
     def test_hygiene_queue_full(self):
         """hygiene_precheck blocks run → exit 0, log entry contains 'queue full'."""
@@ -449,14 +484,14 @@ class TestDetachedRun(unittest.TestCase):
             log_path = self._history_path
 
             with (
-                mock.patch('runner.run.hygiene_precheck', return_value='queue full (5/5)'),
+                mock.patch("runner.run.hygiene_precheck", return_value="queue full (5/5)"),
             ):
                 rc = run.run_detached(_make_cli_args())
 
             self.assertEqual(rc, 0)
             entries = self._read_log(log_path)
             self.assertEqual(len(entries), 1)
-            self.assertIn('queue full', entries[0]['exit_status'])
+            self.assertIn("queue full", entries[0]["exit_status"])
 
     def test_backlog_empty(self):
         """No backlog items available → exit 0, log entry contains 'backlog empty'."""
@@ -464,43 +499,45 @@ class TestDetachedRun(unittest.TestCase):
             log_path = self._history_path
 
             with (
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=None),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=None),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
             ):
                 rc = run.run_detached(_make_cli_args())
 
             self.assertEqual(rc, 0)
             entries = self._read_log(log_path)
             self.assertEqual(len(entries), 1)
-            self.assertIn('backlog empty', entries[0]['exit_status'])
+            self.assertIn("backlog empty", entries[0]["exit_status"])
 
     def test_git_setup_failed(self):
         """git_worktree_create fails → exit 1, exit_status='git_setup_failed', 0 stages."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            backlog = td / 'backlog'
+            backlog = td / "backlog"
             backlog.mkdir()
-            intake_dir = td / 'intake'
+            intake_dir = td / "intake"
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             log_path = self._history_path
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create',
-                           return_value=(False, None, 'worktree path already exists')),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch(
+                    "runner.run.git_worktree_create",
+                    return_value=(False, None, "worktree path already exists"),
+                ),
             ):
                 rc = run.run_detached(_make_cli_args())
 
             self.assertEqual(rc, 1)
             entries = self._read_log(log_path)
             self.assertEqual(len(entries), 1)
-            self.assertEqual(entries[0]['exit_status'], 'git_setup_failed')
-            self.assertEqual(entries[0]['stages_completed'], 0)
+            self.assertEqual(entries[0]["exit_status"], "git_setup_failed")
+            self.assertEqual(entries[0]["stages_completed"], 0)
 
     def test_git_setup_failure_is_counted_against_max_restarts(self):
         """review runner Bug 4: the git_setup_failed early return skipped
@@ -509,18 +546,20 @@ class TestDetachedRun(unittest.TestCase):
         tripped and the ticket was re-picked forever."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            (td / 'backlog').mkdir()
-            (td / 'intake').mkdir()
-            intake_file = self._make_intake_file(td / 'backlog')
-            uuid = json.loads(intake_file.read_text(encoding='utf-8'))['id']
+            (td / "backlog").mkdir()
+            (td / "intake").mkdir()
+            intake_file = self._make_intake_file(td / "backlog")
+            uuid = json.loads(intake_file.read_text(encoding="utf-8"))["id"]
 
             patches = (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create',
-                           return_value=(False, None, 'worktree path already exists')),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch(
+                    "runner.run.git_worktree_create",
+                    return_value=(False, None, "worktree path already exists"),
+                ),
             )
             for _ in range(2):
                 with patches[0], patches[1], patches[2], patches[3], patches[4]:
@@ -528,43 +567,47 @@ class TestDetachedRun(unittest.TestCase):
                 self.assertEqual(rc, 1)
 
             tracker = run_tracker_module.load(uuid)
-            self.assertEqual(tracker['attempt_count'], 2)
-            self.assertEqual(tracker['last_exit_status'], 'git_setup_failed')
+            self.assertEqual(tracker["attempt_count"], 2)
+            self.assertEqual(tracker["last_exit_status"], "git_setup_failed")
 
             # A third night with max_restarts=2 gives up instead of retrying.
             with patches[0], patches[1], patches[2], patches[3], patches[4]:
-                with mock.patch('runner.run.cfg', side_effect=(
-                    lambda section, key, default=None:
-                    2 if (section, key) == ('detached', 'max_restarts') else default
-                )):
+                with mock.patch(
+                    "runner.run.cfg",
+                    side_effect=(
+                        lambda section, key, default=None: (
+                            2 if (section, key) == ("detached", "max_restarts") else default
+                        )
+                    ),
+                ):
                     rc = run.run_detached(_make_cli_args())
             self.assertEqual(rc, 1)
             entries = self._read_log(self._history_path)
-            self.assertEqual(entries[-1]['exit_status'], 'max_restarts_exceeded')
+            self.assertEqual(entries[-1]["exit_status"], "max_restarts_exceeded")
 
     def test_path_traversal_uuid_rejected(self):
         """ATK-008: intake uuid containing path separators is rejected before any worktree is created."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            backlog = td / 'backlog'
+            backlog = td / "backlog"
             backlog.mkdir()
-            intake_dir = td / 'intake'
+            intake_dir = td / "intake"
             intake_dir.mkdir()
-            evil = self._make_intake_file(backlog, uid='..\\evil')
+            evil = self._make_intake_file(backlog, uid="..\\evil")
             log_path = self._history_path
 
             create_branch_calls = []
 
             def _track_create(*args, **kwargs):
                 create_branch_calls.append(args)
-                return (True, td / 'wt', '')
+                return (True, td / "wt", "")
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=evil),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', side_effect=_track_create),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=evil),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", side_effect=_track_create),
             ):
                 rc = run.run_detached(_make_cli_args())
 
@@ -572,140 +615,150 @@ class TestDetachedRun(unittest.TestCase):
             self.assertEqual(create_branch_calls, [])  # rejected before worktree creation
             entries = self._read_log(log_path)
             self.assertEqual(len(entries), 1)
-            self.assertEqual(entries[0]['exit_status'], 'intake_invalid_id_path')
+            self.assertEqual(entries[0]["exit_status"], "intake_invalid_id_path")
 
     def test_branch_name_encodes_intake_uuid(self):
         """ATK-003/004/005: created branch name must contain the intake uuid so race-detection works."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            backlog = td / 'backlog'
+            backlog = td / "backlog"
             backlog.mkdir()
-            intake_dir = td / 'intake'
+            intake_dir = td / "intake"
             intake_dir.mkdir()
-            uid = 'abc12345-feed-face-cafe-1234567890ab'
+            uid = "abc12345-feed-face-cafe-1234567890ab"
             intake_file = self._make_intake_file(backlog, uid=uid)
             wt_path = self._make_fake_worktree(td, intake_file)
 
             captured = {}
 
             def _capture(branch, *args, **kwargs):
-                captured['branch'] = branch
-                return (True, wt_path, '')
+                captured["branch"] = branch
+                return (True, wt_path, "")
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', side_effect=_capture),
-                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
-                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
-                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(50), '', 0.1)),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", side_effect=_capture),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+                mock.patch(
+                    "runner.run.run_stage", return_value=(True, _make_fake_usage(50), "", 0.1)
+                ),
             ):
                 run.run_detached(_make_cli_args())
 
-            self.assertIn(uid, captured['branch'])
+            self.assertIn(uid, captured["branch"])
 
     def test_no_usage_abort_for_non_exempt_stage(self):
         """ATK-010: a non-exempt stage that emits no <usage> blocks aborts the run."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            backlog = td / 'backlog'
+            backlog = td / "backlog"
             backlog.mkdir()
-            intake_dir = td / 'intake'
+            intake_dir = td / "intake"
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
             log_path = self._history_path
 
-            stage_seq = iter([
-                (True, _make_fake_usage(50), '', 0.1),  # validate_intake (exempt anyway)
-                (True, '', '', 0.1),                    # auto_refine: no usage → abort
-            ])
+            stage_seq = iter(
+                [
+                    (True, _make_fake_usage(50), "", 0.1),  # validate_intake (exempt anyway)
+                    (True, "", "", 0.1),  # auto_refine: no usage → abort
+                ]
+            )
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
-                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
-                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
-                mock.patch('runner.run.run_stage', side_effect=lambda *a, **kw: next(stage_seq)),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", return_value=(True, wt_path, "")),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+                mock.patch("runner.run.run_stage", side_effect=lambda *a, **kw: next(stage_seq)),
             ):
                 rc = run.run_detached(_make_cli_args())
 
             self.assertEqual(rc, 1)
             entries = self._read_log(log_path)
             self.assertEqual(len(entries), 1)
-            self.assertEqual(entries[0]['exit_status'], 'no_usage_in_stage:auto_refine')
+            self.assertEqual(entries[0]["exit_status"], "no_usage_in_stage:auto_refine")
 
     def test_no_usage_exempt_stage_does_not_abort(self):
         """ATK-010: validate_intake (in NO_USAGE_STAGES) emitting no usage must not abort."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            backlog = td / 'backlog'
+            backlog = td / "backlog"
             backlog.mkdir()
-            intake_dir = td / 'intake'
+            intake_dir = td / "intake"
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
             log_path = self._history_path
 
             # validate_intake emits no usage; subsequent stages do.
-            stage_seq = iter([
-                (True, '', '', 0.1),                     # validate_intake: no usage, exempt
-                (True, _make_fake_usage(10), '', 0.1),   # auto_refine
-                (True, _make_fake_usage(10), '', 0.1),   # auto_plan
-                (True, _make_fake_usage(10), '', 0.1),   # executor
-                (True, _make_fake_usage(10), '', 0.1),   # auto_harden
-                (True, _make_fake_usage(10), '', 0.1),   # approval
-            ])
+            stage_seq = iter(
+                [
+                    (True, "", "", 0.1),  # validate_intake: no usage, exempt
+                    (True, _make_fake_usage(10), "", 0.1),  # auto_refine
+                    (True, _make_fake_usage(10), "", 0.1),  # auto_plan
+                    (True, _make_fake_usage(10), "", 0.1),  # executor
+                    (True, _make_fake_usage(10), "", 0.1),  # auto_harden
+                    (True, _make_fake_usage(10), "", 0.1),  # approval
+                ]
+            )
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
-                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
-                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
-                mock.patch('runner.run.run_stage', side_effect=lambda *a, **kw: next(stage_seq)),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", return_value=(True, wt_path, "")),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+                mock.patch("runner.run.run_stage", side_effect=lambda *a, **kw: next(stage_seq)),
             ):
                 rc = run.run_detached(_make_cli_args())
 
             self.assertEqual(rc, 0)
             entries = self._read_log(log_path)
-            self.assertEqual(entries[0]['exit_status'], 'ok')
-            self.assertEqual(entries[0]['stages_completed'], 6)
+            self.assertEqual(entries[0]["exit_status"], "ok")
+            self.assertEqual(entries[0]["stages_completed"], 6)
 
     def test_worktree_remove_failure_propagates(self):
         """ATK-002: failure to remove the worktree on exit must surface in exit_status and rc."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            backlog = td / 'backlog'
+            backlog = td / "backlog"
             backlog.mkdir()
-            intake_dir = td / 'intake'
+            intake_dir = td / "intake"
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
             log_path = self._history_path
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
-                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
-                mock.patch('runner.run.git_worktree_remove', return_value=(False, 'locked worktree')),
-                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(10), '', 0.1)),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", return_value=(True, wt_path, "")),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch(
+                    "runner.run.git_worktree_remove", return_value=(False, "locked worktree")
+                ),
+                mock.patch(
+                    "runner.run.run_stage", return_value=(True, _make_fake_usage(10), "", 0.1)
+                ),
             ):
                 rc = run.run_detached(_make_cli_args())
 
             self.assertEqual(rc, 1)
             entries = self._read_log(log_path)
-            self.assertEqual(entries[0]['exit_status'], 'worktree_remove_failed')
+            self.assertEqual(entries[0]["exit_status"], "worktree_remove_failed")
 
     def test_interrupt_during_stage_preserves_worktree(self):
         """Cleanup handler: a SIGTERM/SIGBREAK during a stage sets
@@ -714,9 +767,9 @@ class TestDetachedRun(unittest.TestCase):
         can inspect the partial state (spec/plan/stage stderr etc.)."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            backlog = td / 'backlog'
+            backlog = td / "backlog"
             backlog.mkdir()
-            intake_dir = td / 'intake'
+            intake_dir = td / "intake"
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
@@ -725,27 +778,28 @@ class TestDetachedRun(unittest.TestCase):
             # Stage 1 succeeds; stage 2 simulates the signal handler firing
             # mid-flight by flipping _interrupt_requested before returning.
             def _stage_side_effect(*args, **kwargs):
-                if not getattr(_stage_side_effect, 'fired', False):
+                if not getattr(_stage_side_effect, "fired", False):
                     _stage_side_effect.fired = True
-                    return (True, _make_fake_usage(50), '', 0.1)
+                    return (True, _make_fake_usage(50), "", 0.1)
                 run._interrupt_requested = True
-                return (False, '', 'killed by signal handler', 0.1)
+                return (False, "", "killed by signal handler", 0.1)
 
             remove_calls = []
+
             def _track_remove(*args, **kwargs):
                 remove_calls.append(args)
-                return (True, '')
+                return (True, "")
 
             try:
                 with (
-                    mock.patch('runner.run.SCRIPT_DIR', td),
-                    mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                    mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                    mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
-                    mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
-                    mock.patch('runner.run.git_worktree_remove', side_effect=_track_remove),
-                    mock.patch('runner.run.run_stage', side_effect=_stage_side_effect),
+                    mock.patch("runner.run.SCRIPT_DIR", td),
+                    mock.patch("runner.run.hygiene_precheck", return_value=None),
+                    mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                    mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                    mock.patch("runner.run.git_worktree_create", return_value=(True, wt_path, "")),
+                    mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                    mock.patch("runner.run.git_worktree_remove", side_effect=_track_remove),
+                    mock.patch("runner.run.run_stage", side_effect=_stage_side_effect),
                 ):
                     rc = run.run_detached(_make_cli_args())
             finally:
@@ -754,7 +808,7 @@ class TestDetachedRun(unittest.TestCase):
             self.assertEqual(rc, 1)
             entries = self._read_log(log_path)
             self.assertEqual(len(entries), 1)
-            self.assertEqual(entries[0]['exit_status'], 'interrupted')
+            self.assertEqual(entries[0]["exit_status"], "interrupted")
             # Worktree must be preserved on failure so the operator can
             # inspect partial artifacts.
             self.assertEqual(len(remove_calls), 0)
@@ -765,32 +819,35 @@ class TestDetachedRun(unittest.TestCase):
         spec, plan, and stage stderr that would otherwise be wiped."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            backlog = td / 'backlog'
+            backlog = td / "backlog"
             backlog.mkdir()
-            intake_dir = td / 'intake'
+            intake_dir = td / "intake"
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
             log_path = self._history_path
 
-            stage_seq = iter([
-                (True, _make_fake_usage(100), '', 0.1),    # stage 1 ok
-                (False, '', 'simulated error', 0.2),       # stage 2 fails
-            ])
+            stage_seq = iter(
+                [
+                    (True, _make_fake_usage(100), "", 0.1),  # stage 1 ok
+                    (False, "", "simulated error", 0.2),  # stage 2 fails
+                ]
+            )
             remove_calls = []
+
             def _track_remove(*args, **kwargs):
                 remove_calls.append(args)
-                return (True, '')
+                return (True, "")
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
-                mock.patch('runner.run.git_commit_all_in', return_value=(True, '')),
-                mock.patch('runner.run.git_worktree_remove', side_effect=_track_remove),
-                mock.patch('runner.run.run_stage', side_effect=lambda *a, **kw: next(stage_seq)),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", return_value=(True, wt_path, "")),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch("runner.run.git_worktree_remove", side_effect=_track_remove),
+                mock.patch("runner.run.run_stage", side_effect=lambda *a, **kw: next(stage_seq)),
             ):
                 err_buf = io.StringIO()
                 with redirect_stderr(err_buf):
@@ -798,42 +855,44 @@ class TestDetachedRun(unittest.TestCase):
 
             self.assertEqual(rc, 1)
             entries = self._read_log(log_path)
-            self.assertTrue(entries[0]['exit_status'].startswith('stage_failed:'))
+            self.assertTrue(entries[0]["exit_status"].startswith("stage_failed:"))
             # Worktree must NOT be removed on stage failure.
             self.assertEqual(len(remove_calls), 0)
             # T-2026-130: failure message must include the cleanup command
             # so the operator does not have to dig for the uuid.
             stderr = err_buf.getvalue()
             self.assertIn(str(wt_path), stderr)
-            self.assertIn(f'--cleanup {entries[0]["uuid"]}', stderr)
+            self.assertIn(f"--cleanup {entries[0]['uuid']}", stderr)
 
     def test_commit_failure_recorded(self):
         """ATK-001: silent commit failure must be reflected in exit_status, not 'ok'."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            backlog = td / 'backlog'
+            backlog = td / "backlog"
             backlog.mkdir()
-            intake_dir = td / 'intake'
+            intake_dir = td / "intake"
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
             log_path = self._history_path
 
             with (
-                mock.patch('runner.run.SCRIPT_DIR', td),
-                mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
-                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
-                mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
-                mock.patch('runner.run.git_commit_all_in', return_value=(False, 'index lock')),
-                mock.patch('runner.run.git_worktree_remove', return_value=(True, '')),
-                mock.patch('runner.run.run_stage', return_value=(True, _make_fake_usage(10), '', 0.1)),
+                mock.patch("runner.run.SCRIPT_DIR", td),
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+                mock.patch("runner.run.git_worktree_create", return_value=(True, wt_path, "")),
+                mock.patch("runner.run.git_commit_all_in", return_value=(False, "index lock")),
+                mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+                mock.patch(
+                    "runner.run.run_stage", return_value=(True, _make_fake_usage(10), "", 0.1)
+                ),
             ):
                 rc = run.run_detached(_make_cli_args())
 
             self.assertEqual(rc, 1)
             entries = self._read_log(log_path)
-            self.assertEqual(entries[0]['exit_status'], 'commit_failed')
+            self.assertEqual(entries[0]["exit_status"], "commit_failed")
 
     def test_queue_py_handles_missing_log(self):
         """Missing run_history.jsonl + unmerged branch → exit 0, 'unknown' appears in output."""
@@ -841,18 +900,22 @@ class TestDetachedRun(unittest.TestCase):
             td = Path(td_str)
 
             with (
-                mock.patch.object(runner_queue, 'RUN_HISTORY_FILE', td / 'no_such.jsonl'),
-                mock.patch.object(runner_queue, 'list_unmerged_runner_branches',
-                                  return_value=['runner/fake-item-00000001']),
-                mock.patch.object(runner_queue, 'load_ticket_summary',
-                                  return_value=('unknown', '')),
+                mock.patch.object(runner_queue, "RUN_HISTORY_FILE", td / "no_such.jsonl"),
+                mock.patch.object(
+                    runner_queue,
+                    "list_unmerged_runner_branches",
+                    return_value=["runner/fake-item-00000001"],
+                ),
+                mock.patch.object(
+                    runner_queue, "load_ticket_summary", return_value=("unknown", "")
+                ),
             ):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     rc = runner_queue.main()
 
         self.assertEqual(rc, 0)
-        self.assertIn('unknown', buf.getvalue())
+        self.assertIn("unknown", buf.getvalue())
 
 
 class TestIsolationGuards(unittest.TestCase):
@@ -866,7 +929,8 @@ class TestIsolationGuards(unittest.TestCase):
         # import time). We temporarily reset the patched RUN_HISTORY_FILE
         # back to the production default and confirm the guard fires.
         with mock.patch.object(
-            run_history_module, "RUN_HISTORY_FILE",
+            run_history_module,
+            "RUN_HISTORY_FILE",
             run_history_module._DEFAULT_RUN_HISTORY_FILE,
         ):
             with self.assertRaises(RuntimeError) as ctx:
@@ -879,10 +943,13 @@ class TestIsolationGuards(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td_str:
             target = Path(td_str) / "history.jsonl"
             with mock.patch.object(
-                run_history_module, "RUN_HISTORY_FILE", target,
+                run_history_module,
+                "RUN_HISTORY_FILE",
+                target,
             ):
                 ok = run_history_module.append_entry(
-                    {"uuid": "ok-check"}, path=target,
+                    {"uuid": "ok-check"},
+                    path=target,
                 )
             self.assertTrue(ok)
             self.assertTrue(target.exists())
@@ -910,8 +977,8 @@ class TestRunCleanup(unittest.TestCase):
 
     def test_find_branches_both_forms(self):
         refs = [
-            "runner/abc-123",            # interactive form
-            "runner/my-feature-abc-123", # detached form
+            "runner/abc-123",  # interactive form
+            "runner/my-feature-abc-123",  # detached form
             "runner/unrelated",
         ]
         out = run._find_runner_branches_from_refs(refs, "abc-123")
@@ -940,8 +1007,7 @@ class TestRunCleanup(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             executions = Path(tmp) / "executions"
             executions.mkdir()
-            (executions / "abc-123.json").write_text('{"uuid":"abc-123"}',
-                                                     encoding="utf-8")
+            (executions / "abc-123.json").write_text('{"uuid":"abc-123"}', encoding="utf-8")
             archived = run._archive_execution_log(executions, "abc-123")
             self.assertIsNotNone(archived)
             self.assertTrue(archived.exists())
@@ -952,9 +1018,7 @@ class TestRunCleanup(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             executions = Path(tmp) / "executions"
             executions.mkdir()
-            self.assertIsNone(
-                run._archive_execution_log(executions, "nope")
-            )
+            self.assertIsNone(run._archive_execution_log(executions, "nope"))
 
     def test_record_stage_cost_counts_malformed(self):
         # #249: a <usage> block missing a required field becomes
@@ -964,7 +1028,7 @@ class TestRunCleanup(unittest.TestCase):
         stage_costs = []
         good = _make_fake_usage(500)
         # Missing total_tokens value renders the block malformed.
-        bad = '<usage><total_tokens></total_tokens><tool_uses>1</tool_uses><duration_ms>10</duration_ms></usage>'
+        bad = "<usage><total_tokens></total_tokens><tool_uses>1</tool_uses><duration_ms>10</duration_ms></usage>"
         blended = good + "\n" + bad
         with mock.patch("runner.run.log_stage_cost"):
             run.record_stage_cost("executor", "uid", blended, "", stage_costs)
@@ -974,19 +1038,31 @@ class TestRunCleanup(unittest.TestCase):
     def test_print_cost_summary_flags_malformed_totals(self):
         stage_costs = [
             {
-                "stage": "executor", "tokens": 100, "tool_uses": 1,
-                "duration_ms": 10, "input_tokens": 0,
-                "cache_read_tokens": 0, "cache_create_tokens": 0,
-                "output_tokens": 0, "status": "logged",
-                "attempts": 1, "attempts_detail": [{"attempt": 1}],
+                "stage": "executor",
+                "tokens": 100,
+                "tool_uses": 1,
+                "duration_ms": 10,
+                "input_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_create_tokens": 0,
+                "output_tokens": 0,
+                "status": "logged",
+                "attempts": 1,
+                "attempts_detail": [{"attempt": 1}],
                 "malformed_count": 2,
             },
             {
-                "stage": "auto_harden", "tokens": 50, "tool_uses": 1,
-                "duration_ms": 10, "input_tokens": 0,
-                "cache_read_tokens": 0, "cache_create_tokens": 0,
-                "output_tokens": 0, "status": "logged",
-                "attempts": 1, "attempts_detail": [{"attempt": 1}],
+                "stage": "auto_harden",
+                "tokens": 50,
+                "tool_uses": 1,
+                "duration_ms": 10,
+                "input_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_create_tokens": 0,
+                "output_tokens": 0,
+                "status": "logged",
+                "attempts": 1,
+                "attempts_detail": [{"attempt": 1}],
                 "malformed_count": 1,
             },
         ]
@@ -1000,14 +1076,22 @@ class TestRunCleanup(unittest.TestCase):
         self.assertIn("auto_harden", out)
 
     def test_print_cost_summary_no_malformed_note_when_clean(self):
-        stage_costs = [{
-            "stage": "executor", "tokens": 100, "tool_uses": 1,
-            "duration_ms": 10, "input_tokens": 0,
-            "cache_read_tokens": 0, "cache_create_tokens": 0,
-            "output_tokens": 0, "status": "logged",
-            "attempts": 1, "attempts_detail": [{"attempt": 1}],
-            "malformed_count": 0,
-        }]
+        stage_costs = [
+            {
+                "stage": "executor",
+                "tokens": 100,
+                "tool_uses": 1,
+                "duration_ms": 10,
+                "input_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_create_tokens": 0,
+                "output_tokens": 0,
+                "status": "logged",
+                "attempts": 1,
+                "attempts_detail": [{"attempt": 1}],
+                "malformed_count": 0,
+            }
+        ]
         buf = io.StringIO()
         with redirect_stdout(buf):
             run.print_cost_summary(stage_costs)
@@ -1033,23 +1117,31 @@ class TestRunCleanup(unittest.TestCase):
         stage_costs = []
         with mock.patch("runner.run.log_stage_cost"):
             run.record_stage_cost(
-                "executor", "uid", _make_fake_usage(100), "", stage_costs,
+                "executor",
+                "uid",
+                _make_fake_usage(100),
+                "",
+                stage_costs,
             )
         self.assertEqual(stage_costs[0]["attempts"], 1)
         self.assertEqual(len(stage_costs[0]["attempts_detail"]), 1)
 
     def test_print_cost_summary_marks_retries(self):
-        stage_costs = [{
-            "stage": "executor",
-            "tokens": 1250,
-            "tool_uses": 4,
-            "duration_ms": 1000,
-            "input_tokens": 0, "cache_read_tokens": 0,
-            "cache_create_tokens": 0, "output_tokens": 0,
-            "status": "logged",
-            "attempts": 2,
-            "attempts_detail": [{"attempt": 1}, {"attempt": 2}],
-        }]
+        stage_costs = [
+            {
+                "stage": "executor",
+                "tokens": 1250,
+                "tool_uses": 4,
+                "duration_ms": 1000,
+                "input_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_create_tokens": 0,
+                "output_tokens": 0,
+                "status": "logged",
+                "attempts": 2,
+                "attempts_detail": [{"attempt": 1}, {"attempt": 2}],
+            }
+        ]
         buf = io.StringIO()
         with redirect_stdout(buf):
             run.print_cost_summary(stage_costs)
@@ -1057,17 +1149,21 @@ class TestRunCleanup(unittest.TestCase):
         self.assertIn("[2 attempts]", out)
 
     def test_print_cost_summary_no_retry_tag_for_single_attempt(self):
-        stage_costs = [{
-            "stage": "executor",
-            "tokens": 100,
-            "tool_uses": 1,
-            "duration_ms": 100,
-            "input_tokens": 0, "cache_read_tokens": 0,
-            "cache_create_tokens": 0, "output_tokens": 0,
-            "status": "logged",
-            "attempts": 1,
-            "attempts_detail": [{"attempt": 1}],
-        }]
+        stage_costs = [
+            {
+                "stage": "executor",
+                "tokens": 100,
+                "tool_uses": 1,
+                "duration_ms": 100,
+                "input_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_create_tokens": 0,
+                "output_tokens": 0,
+                "status": "logged",
+                "attempts": 1,
+                "attempts_detail": [{"attempt": 1}],
+            }
+        ]
         buf = io.StringIO()
         with redirect_stdout(buf):
             run.print_cost_summary(stage_costs)
@@ -1097,18 +1193,28 @@ class TestRunCleanup(unittest.TestCase):
             (td / "hardens").mkdir()
             (td / "reports").mkdir()
             intake_file = intake_dir / "abc-123.json"
-            intake_file.write_text(json.dumps({
-                "id": "abc-123", "title": "t",
-            }), encoding="utf-8")
+            intake_file.write_text(
+                json.dumps(
+                    {
+                        "id": "abc-123",
+                        "title": "t",
+                    }
+                ),
+                encoding="utf-8",
+            )
 
             argv = [
-                "run.py", str(intake_file), "--token-cap", "500",
+                "run.py",
+                str(intake_file),
+                "--token-cap",
+                "500",
             ]
             with (
                 mock.patch.object(sys, "argv", argv),
                 mock.patch("runner.run.SCRIPT_DIR", td),
-                mock.patch("runner.run.run_stage",
-                           return_value=(True, _make_fake_usage(1000), "", 0.1)),
+                mock.patch(
+                    "runner.run.run_stage", return_value=(True, _make_fake_usage(1000), "", 0.1)
+                ),
                 mock.patch("runner.run.print_cost_summary"),
             ):
                 with self.assertRaises(SystemExit) as ctx:
@@ -1123,16 +1229,23 @@ class TestRunCleanup(unittest.TestCase):
             for sub in ("intake", "specs", "plans", "executions", "hardens", "reports"):
                 (td / sub).mkdir()
             intake_file = td / "intake" / "abc-123.json"
-            intake_file.write_text(json.dumps({
-                "id": "abc-123", "title": "t",
-            }), encoding="utf-8")
+            intake_file.write_text(
+                json.dumps(
+                    {
+                        "id": "abc-123",
+                        "title": "t",
+                    }
+                ),
+                encoding="utf-8",
+            )
 
             argv = ["run.py", str(intake_file)]
             with (
                 mock.patch.object(sys, "argv", argv),
                 mock.patch("runner.run.SCRIPT_DIR", td),
-                mock.patch("runner.run.run_stage",
-                           return_value=(True, _make_fake_usage(1000), "", 0.1)),
+                mock.patch(
+                    "runner.run.run_stage", return_value=(True, _make_fake_usage(1000), "", 0.1)
+                ),
                 mock.patch("runner.run.print_cost_summary"),
             ):
                 # main() calls sys.exit at the end of a successful run?
@@ -1156,14 +1269,18 @@ class TestRunCleanup(unittest.TestCase):
     def test_should_prune_aborted_old_log(self):
         self.assertTrue(
             run._should_prune_log(
-                {"status": "aborted"}, mtime_epoch=1000.0, cutoff_epoch=2000.0,
+                {"status": "aborted"},
+                mtime_epoch=1000.0,
+                cutoff_epoch=2000.0,
             )
         )
 
     def test_should_not_prune_completed_log(self):
         self.assertFalse(
             run._should_prune_log(
-                {"status": "completed"}, mtime_epoch=1000.0, cutoff_epoch=2000.0,
+                {"status": "completed"},
+                mtime_epoch=1000.0,
+                cutoff_epoch=2000.0,
             )
         )
 
@@ -1171,21 +1288,27 @@ class TestRunCleanup(unittest.TestCase):
         # mtime > cutoff → too recent → keep
         self.assertFalse(
             run._should_prune_log(
-                {"status": "failed"}, mtime_epoch=3000.0, cutoff_epoch=2000.0,
+                {"status": "failed"},
+                mtime_epoch=3000.0,
+                cutoff_epoch=2000.0,
             )
         )
 
     def test_should_not_prune_missing_status(self):
         self.assertFalse(
             run._should_prune_log(
-                {"steps": []}, mtime_epoch=1000.0, cutoff_epoch=2000.0,
+                {"steps": []},
+                mtime_epoch=1000.0,
+                cutoff_epoch=2000.0,
             )
         )
 
     def test_should_not_prune_non_dict(self):
         self.assertFalse(
             run._should_prune_log(
-                None, mtime_epoch=1000.0, cutoff_epoch=2000.0,
+                None,
+                mtime_epoch=1000.0,
+                cutoff_epoch=2000.0,
             )
         )
 
@@ -1195,16 +1318,12 @@ class TestRunCleanup(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             executions = Path(tmp) / "executions"
             (executions / "archive").mkdir(parents=True)
-            (executions / "archive" / "abc-123.json").write_text(
-                '{"old":true}', encoding="utf-8")
-            (executions / "abc-123.json").write_text(
-                '{"new":true}', encoding="utf-8")
+            (executions / "archive" / "abc-123.json").write_text('{"old":true}', encoding="utf-8")
+            (executions / "abc-123.json").write_text('{"new":true}', encoding="utf-8")
             archived = run._archive_execution_log(executions, "abc-123")
             self.assertIsNotNone(archived)
             # The original archive file should still exist.
-            self.assertTrue(
-                (executions / "archive" / "abc-123.json").exists()
-            )
+            self.assertTrue((executions / "archive" / "abc-123.json").exists())
             # The new archive file should be distinct.
             self.assertNotEqual(
                 archived,
@@ -1212,5 +1331,5 @@ class TestRunCleanup(unittest.TestCase):
             )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

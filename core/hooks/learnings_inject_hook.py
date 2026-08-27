@@ -11,6 +11,7 @@ as a single context_block.
 Fail-open: any error path (missing payload field, corrupt index, state dir
 not resolvable) degrades to an empty allow — the tool call still proceeds.
 """
+
 from __future__ import annotations
 
 import fnmatch
@@ -43,9 +44,9 @@ def _area_is_specific(glob: str) -> bool:
     ``*`` / ``**`` globs or empty strings are treated as broad."""
     if not glob:
         return False
-    if glob in ('*', '**'):
+    if glob in ("*", "**"):
         return False
-    return '/' in glob or not glob.startswith('*')
+    return "/" in glob or not glob.startswith("*")
 
 
 def _tokenize_command(command: str) -> list[str]:
@@ -55,12 +56,13 @@ def _tokenize_command(command: str) -> list[str]:
         return []
     # Replace non-word runs with spaces, then split — keeps the implementation
     # dependency-free while discarding ``--flags``, quotes, and path separators.
-    cleaned = re.sub(r'[^A-Za-z0-9_]+', ' ', command).lower()
+    cleaned = re.sub(r"[^A-Za-z0-9_]+", " ", command).lower()
     return [tok for tok in cleaned.split() if tok]
 
 
-def _score_entry(entry: dict, *, target_path: str | None,
-                 command_tokens: list[str]) -> tuple[float, str | None, str | None]:
+def _score_entry(
+    entry: dict, *, target_path: str | None, command_tokens: list[str]
+) -> tuple[float, str | None, str | None]:
     """Return ``(score, matched_area, matched_tag)`` for one learning.
 
     - ``matched_area`` is the glob that fired against ``target_path`` (or None).
@@ -72,7 +74,7 @@ def _score_entry(entry: dict, *, target_path: str | None,
     matched_area: str | None = None
     matched_tag: str | None = None
 
-    areas = entry.get('areas') or []
+    areas = entry.get("areas") or []
     if target_path and areas:
         for glob in areas:
             if not isinstance(glob, str) or not glob:
@@ -83,7 +85,7 @@ def _score_entry(entry: dict, *, target_path: str | None,
                     score = candidate
                     matched_area = glob
 
-    tags = entry.get('tags') or []
+    tags = entry.get("tags") or []
     if command_tokens and tags:
         for tag in tags:
             if not isinstance(tag, str) or not tag:
@@ -99,10 +101,13 @@ def _score_entry(entry: dict, *, target_path: str | None,
     return score, matched_area, matched_tag
 
 
-def score_learnings(entries: list[dict], *,
-                    target_path: str | None = None,
-                    command: str | None = None,
-                    top_n: int = TOP_N_INJECTED) -> list[dict]:
+def score_learnings(
+    entries: list[dict],
+    *,
+    target_path: str | None = None,
+    command: str | None = None,
+    top_n: int = TOP_N_INJECTED,
+) -> list[dict]:
     """Rank ``entries`` by relevance to the current tool op and return top-N.
 
     Pure function — no I/O. Returns a new list of index-entry dicts
@@ -119,7 +124,7 @@ def score_learnings(entries: list[dict], *,
     if not entries or top_n <= 0:
         return []
 
-    command_tokens = _tokenize_command(command or '')
+    command_tokens = _tokenize_command(command or "")
 
     # Tie-breaking recency bump: sort by timestamp descending, take the top
     # _RECENCY_WINDOW, and add _RECENCY_BONUS to each of those entries'
@@ -127,7 +132,7 @@ def score_learnings(entries: list[dict], *,
     # the whole corpus when the caller just wants the fresh bump applied.
     by_time = sorted(
         entries,
-        key=lambda e: e.get('timestamp', ''),
+        key=lambda e: e.get("timestamp", ""),
         reverse=True,
     )
     recent_ids = {id(e) for e in by_time[:_RECENCY_WINDOW]}
@@ -135,21 +140,25 @@ def score_learnings(entries: list[dict], *,
     scored: list[dict] = []
     for entry in entries:
         score, matched_area, matched_tag = _score_entry(
-            entry, target_path=target_path, command_tokens=command_tokens,
+            entry,
+            target_path=target_path,
+            command_tokens=command_tokens,
         )
         if score <= 0:
             continue
         if id(entry) in recent_ids:
             score += _RECENCY_BONUS
-        scored.append({
-            **entry,
-            '_match_score': score,
-            '_matched_area': matched_area,
-            '_matched_tag': matched_tag,
-        })
+        scored.append(
+            {
+                **entry,
+                "_match_score": score,
+                "_matched_area": matched_area,
+                "_matched_tag": matched_tag,
+            }
+        )
 
     scored.sort(
-        key=lambda e: (-e['_match_score'], e.get('display_id', '')),
+        key=lambda e: (-e["_match_score"], e.get("display_id", "")),
     )
     return scored[:top_n]
 
@@ -175,33 +184,33 @@ def run(payload: dict):  # pragma: no cover — covered by integration; the
     from scribe.paths import scribe_state_dir
     from scribe.store import ScribeStore
 
-    if not is_enabled('learnings-inject'):
+    if not is_enabled("learnings-inject"):
         return None
 
-    if os.environ.get('APIARY_RUNNER_SUBPROCESS') == '1':
+    if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
         return None
 
-    tool_name = payload.get('tool_name') or ''
-    if tool_name not in ('Edit', 'Write', 'Bash'):
+    tool_name = payload.get("tool_name") or ""
+    if tool_name not in ("Edit", "Write", "Bash"):
         return None
 
-    tool_input = payload.get('tool_input') or {}
+    tool_input = payload.get("tool_input") or {}
     if not isinstance(tool_input, dict):
         return None
 
     target_path = None
     command = None
-    if tool_name in ('Edit', 'Write'):
-        target_path = tool_input.get('file_path') or ''
+    if tool_name in ("Edit", "Write"):
+        target_path = tool_input.get("file_path") or ""
         if not target_path:
             return None
-        target_path = _normalize_for_glob(target_path, payload.get('cwd'))
+        target_path = _normalize_for_glob(target_path, payload.get("cwd"))
     else:  # Bash
-        command = tool_input.get('command') or ''
+        command = tool_input.get("command") or ""
         if not command:
             return None
 
-    cwd = payload.get('cwd') or str(project_root)
+    cwd = payload.get("cwd") or str(project_root)
     state_dir = scribe_state_dir(Path(cwd))
     if state_dir is None:
         return None
@@ -218,16 +227,16 @@ def run(payload: dict):  # pragma: no cover — covered by integration; the
 
     blocks: list[str] = []
     for entry in top:
-        full = store.get_learning(entry['year'], entry['seq'])
+        full = store.get_learning(entry["year"], entry["seq"])
         if not full:
             continue
-        body = full.get('content') or entry.get('summary', '')
+        body = full.get("content") or entry.get("summary", "")
         if not body:
             continue
         header_bits = [f"L-{entry.get('year', '?')}-{entry.get('seq', '?')}"]
-        if entry.get('_matched_area'):
+        if entry.get("_matched_area"):
             header_bits.append(f"matched area: {entry['_matched_area']}")
-        if entry.get('_matched_tag'):
+        if entry.get("_matched_tag"):
             header_bits.append(f"matched tag: {entry['_matched_tag']}")
         scrubbed, _hits = sanitize_and_report(body)
         blocks.append(f"--- relevant learning ({' · '.join(header_bits)}) ---\n{scrubbed}")
@@ -235,7 +244,7 @@ def run(payload: dict):  # pragma: no cover — covered by integration; the
     if not blocks:
         return None
 
-    return HookResult(context=context_block('learnings', *blocks))
+    return HookResult(context=context_block("learnings", *blocks))
 
 
 def _normalize_for_glob(file_path: str, cwd: str | None) -> str:  # pragma: no cover
@@ -247,6 +256,7 @@ def _normalize_for_glob(file_path: str, cwd: str | None) -> str:  # pragma: no c
     to ``gui/web/app.js`` before fnmatch can see it.
     """
     from pathlib import Path, PurePosixPath
+
     p = Path(file_path)
     if cwd:
         try:
@@ -256,7 +266,7 @@ def _normalize_for_glob(file_path: str, cwd: str | None) -> str:  # pragma: no c
     return PurePosixPath(*p.parts).as_posix()
 
 
-if __name__ == '__main__':  # pragma: no cover
+if __name__ == "__main__":  # pragma: no cover
     import sys
     from pathlib import Path
 

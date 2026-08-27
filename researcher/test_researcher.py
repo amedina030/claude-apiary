@@ -5,6 +5,7 @@ monkey-patching the shared ``core.utils.state.git_root`` resolver to return
 the temp path. This keeps tests off real user data and avoids depending on
 git being runnable.
 """
+
 from __future__ import annotations
 
 import io
@@ -49,8 +50,11 @@ class TestAdd(ResearcherTestCase):
     def test_add_valid_entry_writes_file_with_populated_frontmatter(self) -> None:
         self._seed_tags("multiplayer", "networking")
         code, out, _err = self._run_cli(
-            "add", "unreal", "Replication basics",
-            "--tags", "multiplayer,networking",
+            "add",
+            "unreal",
+            "Replication basics",
+            "--tags",
+            "multiplayer,networking",
         )
         self.assertEqual(code, 0)
         path = self.tmp_path / ".apiary/research/unreal/replication-basics.md"
@@ -63,14 +67,23 @@ class TestAdd(ResearcherTestCase):
         self.assertEqual(fm["date_created"], date.today().isoformat())
         self.assertEqual(fm["date_last_verified"], date.today().isoformat())
         self.assertEqual(fm["sources"], [])
-        for section in ("## Summary", "## Context", "## Findings",
-                        "## Code / examples", "## Caveats"):
+        for section in (
+            "## Summary",
+            "## Context",
+            "## Findings",
+            "## Code / examples",
+            "## Caveats",
+        ):
             self.assertIn(section, body)
 
     def test_add_unknown_tag_exits_2_and_writes_no_file(self) -> None:
         self._seed_tags("multiplayer")
         code, _out, err = self._run_cli(
-            "add", "unreal", "Test", "--tags", "foo",
+            "add",
+            "unreal",
+            "Test",
+            "--tags",
+            "foo",
         )
         self.assertEqual(code, cli.EXIT_VALIDATION)
         self.assertIn("unknown tag", err)
@@ -79,10 +92,13 @@ class TestAdd(ResearcherTestCase):
 
     def test_add_duplicate_slug_same_topic_exits_2(self) -> None:
         self._seed_tags("multiplayer")
-        self._run_cli("add", "unreal", "Replication basics",
-                      "--tags", "multiplayer")
+        self._run_cli("add", "unreal", "Replication basics", "--tags", "multiplayer")
         code, _out, err = self._run_cli(
-            "add", "unreal", "Replication basics", "--tags", "multiplayer",
+            "add",
+            "unreal",
+            "Replication basics",
+            "--tags",
+            "multiplayer",
         )
         self.assertEqual(code, cli.EXIT_VALIDATION)
         self.assertIn("already exists", err)
@@ -92,24 +108,21 @@ class TestAdd(ResearcherTestCase):
         self._seed_tags()  # creates .apiary/research/ with empty tags
         # Wipe it to simulate truly first-use.
         import shutil
+
         shutil.rmtree(self.tmp_path / ".apiary")
         # register-tag will bootstrap.
         self._run_cli("register-tag", "first")
         self.assertTrue((self.tmp_path / ".apiary/research").is_dir())
         self.assertTrue((self.tmp_path / ".apiary/research/tags.yaml").is_file())
-        code, _out, _err = self._run_cli("add", "unreal", "First entry",
-                                         "--tags", "first")
+        code, _out, _err = self._run_cli("add", "unreal", "First entry", "--tags", "first")
         self.assertEqual(code, 0)
-        self.assertTrue(
-            (self.tmp_path / ".apiary/research/unreal/first-entry.md").exists()
-        )
+        self.assertTrue((self.tmp_path / ".apiary/research/unreal/first-entry.md").exists())
 
     def test_add_topic_is_normalized_to_kebab_case(self) -> None:
         self._seed_tags()
         code, out, _err = self._run_cli("add", "Unreal Engine", "Replication basics")
         self.assertEqual(code, 0)
-        expected = (self.tmp_path
-                    / ".apiary/research/unreal-engine/replication-basics.md")
+        expected = self.tmp_path / ".apiary/research/unreal-engine/replication-basics.md"
         self.assertIn(str(expected), out)
         self.assertTrue(expected.exists())
 
@@ -123,18 +136,13 @@ class TestAdd(ResearcherTestCase):
         self._run_cli("add", "unreal", "Replication basics")
         code, _out, _err = self._run_cli("add", "godot", "Replication basics")
         self.assertEqual(code, 0)
-        self.assertTrue(
-            (self.tmp_path / ".apiary/research/unreal/replication-basics.md").exists()
-        )
-        self.assertTrue(
-            (self.tmp_path / ".apiary/research/godot/replication-basics.md").exists()
-        )
+        self.assertTrue((self.tmp_path / ".apiary/research/unreal/replication-basics.md").exists())
+        self.assertTrue((self.tmp_path / ".apiary/research/godot/replication-basics.md").exists())
 
 
 class TestFind(ResearcherTestCase):
     def _seed_entry(self, topic: str, title: str, tags: list[str]) -> None:
-        self._run_cli("add", topic, title,
-                      *(["--tags", ",".join(tags)] if tags else []))
+        self._run_cli("add", topic, title, *(["--tags", ",".join(tags)] if tags else []))
 
     def test_find_returns_matching_entry_with_preview(self) -> None:
         self._seed_tags("multiplayer")
@@ -191,8 +199,7 @@ class TestShowVerify(ResearcherTestCase):
     def test_verify_bumps_date_last_verified(self) -> None:
         self._seed_tags()
         self._run_cli("add", "unreal", "Replication basics")
-        path = (self.tmp_path
-                / ".apiary/research/unreal/replication-basics.md")
+        path = self.tmp_path / ".apiary/research/unreal/replication-basics.md"
         fm, body = store.parse_entry(path)
         fm["date_last_verified"] = "2026-01-01"
         store.write_entry(path, fm, body)
@@ -207,7 +214,8 @@ class TestConfigErrors(ResearcherTestCase):
     def test_invalid_yaml_in_tags_exits_3(self) -> None:
         store.ensure_layout()
         store.tags_file().write_text(
-            ": : : not valid yaml\n", encoding="utf-8",
+            ": : : not valid yaml\n",
+            encoding="utf-8",
         )
         code, _out, err = self._run_cli("add", "unreal", "Test", "--tags", "x")
         self.assertEqual(code, cli.EXIT_CONFIG)

@@ -29,6 +29,7 @@ subprocess tests need so a live Claude session's ``APIARY_*`` /
 ``CLAUDE_PROJECT_DIR`` values cannot leak into the hook under test
 (subsystems/core.md §"Hermeticity" (a)).
 """
+
 from __future__ import annotations
 
 import atexit
@@ -58,8 +59,16 @@ APIARY_SENTINEL_MODULES = ("core/install.py", "core/cli.py")
 # Mirrors core.install._slash_command_sources. Only `<tool>/commands/*.md` is
 # copied — the rest of each tool tree is never read through the apiary path.
 COMMAND_TOOLS = (
-    "budgeter", "scribe", "core", "docs", "refiner",
-    "harden", "compass", "researcher", "runner", "incubator",
+    "budgeter",
+    "scribe",
+    "core",
+    "docs",
+    "refiner",
+    "harden",
+    "compass",
+    "researcher",
+    "runner",
+    "incubator",
 )
 
 # Env vars a live Claude Code session exports that would otherwise reach a
@@ -119,9 +128,20 @@ def _golden_git_dir() -> Path:
     seed.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=seed, check=True)
     subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
-         "commit", "--allow-empty", "-q", "-m", "init"],
-        cwd=seed, check=True,
+        [
+            "git",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "--allow-empty",
+            "-q",
+            "-m",
+            "init",
+        ],
+        cwd=seed,
+        check=True,
     )
     _golden_git = seed / ".git"
     return _golden_git
@@ -173,6 +193,7 @@ def make_fake_apiary(
         init_git_repo(fake)
     if self_bootstrap:
         from core import self_bootstrap as sb  # noqa: PLC0415 — import cost is real
+
         sb.self_bootstrap(fake)
     return fake
 
@@ -193,7 +214,8 @@ def hermetic_env(**overrides: str) -> dict[str, str]:
     write ``hermetic_env(APIARY_RUNNER_SUBPROCESS="1" if flag else "")``.
     """
     env = {
-        k: v for k, v in os.environ.items()
+        k: v
+        for k, v in os.environ.items()
         if not k.startswith(_LEAKY_PREFIXES) and k not in _LEAKY_NAMES
     }
     for key, value in overrides.items():

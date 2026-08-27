@@ -66,10 +66,12 @@ def load(path: Optional[Path] = None) -> tuple[list[TabEntry], int]:
             cand = Path(cwd_str)
             if not cand.is_dir():
                 continue
-            entries.append(TabEntry(
-                cwd=cand,
-                accept_edits=bool(raw.get("accept_edits", False)),
-            ))
+            entries.append(
+                TabEntry(
+                    cwd=cand,
+                    accept_edits=bool(raw.get("accept_edits", False)),
+                )
+            )
     if not entries:
         return [], -1
     try:

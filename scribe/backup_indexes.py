@@ -29,34 +29,38 @@ def resolve_backup_source(project: str | None = None) -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description='Backup scribe indexes with retention pruning.')
-    parser.add_argument('--retain', type=int, default=DEFAULT_RETAIN,
-                        help=f'Number of backup dirs to keep (default {DEFAULT_RETAIN})')
-    parser.add_argument('--project', default=None, help='Project key override')
+    parser = argparse.ArgumentParser(description="Backup scribe indexes with retention pruning.")
+    parser.add_argument(
+        "--retain",
+        type=int,
+        default=DEFAULT_RETAIN,
+        help=f"Number of backup dirs to keep (default {DEFAULT_RETAIN})",
+    )
+    parser.add_argument("--project", default=None, help="Project key override")
     args = parser.parse_args()
 
     try:
         state_dir = resolve_backup_source(args.project)
     except ProjectKeyError as e:
-        print(f'Error: {e}', file=sys.stderr)
+        print(f"Error: {e}", file=sys.stderr)
         return 1
     if not state_dir.exists():
-        print('No scribe state directory found.', file=sys.stderr)
+        print("No scribe state directory found.", file=sys.stderr)
         return 0
 
     backups_root = state_dir / BACKUPS_DIRNAME
     backups_root.mkdir(parents=True, exist_ok=True)
 
-    date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     target, count = create_backup(state_dir, backups_root, date_str)
-    print(f'Backup created: {target} ({count} files)')
+    print(f"Backup created: {target} ({count} files)")
 
     pruned = prune_backups(backups_root, args.retain)
     if pruned:
-        print(f'Pruned {len(pruned)} old backup(s)')
+        print(f"Pruned {len(pruned)} old backup(s)")
 
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

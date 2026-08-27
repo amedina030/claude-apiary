@@ -10,6 +10,7 @@ runner/ticket.py.
 Usage:
     promote.py <slug>
 """
+
 import argparse
 import sys
 
@@ -25,5 +26,5 @@ def main():
     sys.exit(cmd_promote(args, parser))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

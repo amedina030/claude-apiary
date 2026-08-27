@@ -5,6 +5,7 @@ Imports the hook module directly and exercises _looks_like_failure for the
 detection logic, plus runs the hook as a subprocess for end-to-end stdin
 payload handling and exact injected text.
 """
+
 import json
 import subprocess
 import sys

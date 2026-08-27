@@ -1,4 +1,5 @@
 """Tests for core/utils/gitutil.py — the one git-root resolver."""
+
 from __future__ import annotations
 
 import subprocess
@@ -16,7 +17,9 @@ from core.utils.gitutil import git_root, main_worktree_root
 def _git(*args: str, cwd: Path) -> None:
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
-        cwd=str(cwd), check=True, capture_output=True,
+        cwd=str(cwd),
+        check=True,
+        capture_output=True,
     )
 
 
@@ -60,8 +63,9 @@ class GitRootTests(unittest.TestCase):
 
     def test_missing_git_binary_returns_none(self) -> None:
         repo = self._repo()
-        with mock.patch("core.utils.gitutil.subprocess.run",
-                        side_effect=FileNotFoundError("no git")):
+        with mock.patch(
+            "core.utils.gitutil.subprocess.run", side_effect=FileNotFoundError("no git")
+        ):
             self.assertIsNone(git_root(repo))
 
     def test_git_timeout_returns_none_rather_than_raising(self) -> None:

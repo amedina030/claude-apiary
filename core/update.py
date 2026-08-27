@@ -26,6 +26,7 @@ Failure semantics follow ``migrations/README.md``: ``upgrade()`` raising
 leaves the pin at the last version that completed, aborts that repo's chain,
 and does not stop the other repos. The command exits 1 if any repo failed.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -61,6 +62,7 @@ class UpdateError(Exception):
 @dataclass
 class Migration:
     """One ``migrations/v<from>_to_v<to>.py`` module, already imported."""
+
     path: Path
     from_version: str
     to_version: str
@@ -98,6 +100,7 @@ class UpdateReport:
 
 # --- version helpers ------------------------------------------------------
 
+
 def parse_version(text: str) -> tuple[int, int, int] | None:
     """``"0.2.1"`` → ``(0, 2, 1)``; None for anything not 3-part numeric semver.
 
@@ -119,6 +122,7 @@ def _version_from_filename_part(part: str) -> str:
 
 
 # --- migration discovery --------------------------------------------------
+
 
 def load_migrations(apiary: Path) -> list[Migration]:
     """Import every migration module under ``<apiary>/migrations/``.
@@ -153,7 +157,7 @@ def load_migrations(apiary: Path) -> list[Migration]:
             )
         found.append(Migration(path, from_v, to_v, module))
 
-    found.sort(key=lambda m: (parse_version(m.to_version) or (0, 0, 0)))
+    found.sort(key=lambda m: parse_version(m.to_version) or (0, 0, 0))
     return found
 
 
@@ -171,7 +175,9 @@ def _import_migration(path: Path) -> ModuleType:
 
 
 def plan_chain(
-    migrations: list[Migration], from_version: str, to_version: str,
+    migrations: list[Migration],
+    from_version: str,
+    to_version: str,
 ) -> list[Migration]:
     """The migrations to run to get *from_version* to *to_version*.
 
@@ -206,6 +212,7 @@ def plan_chain(
 
 
 # --- the update itself ----------------------------------------------------
+
 
 def repo_version(repo: Path, registry_entry: dict | None = None) -> str | None:
     """The version *repo* is pinned to, or None when it has no pin.
@@ -254,35 +261,54 @@ def update_repo(
     repo = Path(real)
 
     def result(status: str, from_v: str, to_v: str, **kw) -> RepoResult:
-        return RepoResult(uid=uid, name=name, path=repo, from_version=from_v,
-                          to_version=to_v, status=status, **kw)
+        return RepoResult(
+            uid=uid, name=name, path=repo, from_version=from_v, to_version=to_v, status=status, **kw
+        )
 
     if not real or not repo.is_dir():
-        return result(SKIPPED, "?", apiary_version,
-                      detail=f"real_path does not exist: {real or '(empty)'}")
+        return result(
+            SKIPPED, "?", apiary_version, detail=f"real_path does not exist: {real or '(empty)'}"
+        )
 
     current = repo_version(repo, entry)
     if current is None:
-        return result(SKIPPED, "?", apiary_version,
-                      detail="no version pin — run `apiary install --target` first")
+        return result(
+            SKIPPED,
+            "?",
+            apiary_version,
+            detail="no version pin — run `apiary install --target` first",
+        )
 
     parsed_current, parsed_target = parse_version(current), parse_version(apiary_version)
     if parsed_current is None:
-        return result(SKIPPED, current, apiary_version,
-                      detail=f"pinned version {current!r} is not 3-part semver")
+        return result(
+            SKIPPED,
+            current,
+            apiary_version,
+            detail=f"pinned version {current!r} is not 3-part semver",
+        )
     if parsed_target is None:
-        return result(SKIPPED, current, apiary_version,
-                      detail=f"main-apiary VERSION {apiary_version!r} is not 3-part semver")
+        return result(
+            SKIPPED,
+            current,
+            apiary_version,
+            detail=f"main-apiary VERSION {apiary_version!r} is not 3-part semver",
+        )
     if parsed_current == parsed_target:
         return result(CURRENT, current, apiary_version)
     if parsed_current > parsed_target:
-        return result(SKIPPED, current, apiary_version,
-                      detail="repo is pinned ahead of main-apiary; update main-apiary first")
+        return result(
+            SKIPPED,
+            current,
+            apiary_version,
+            detail="repo is pinned ahead of main-apiary; update main-apiary first",
+        )
 
     chain = plan_chain(migrations, current, apiary_version)
     if dry_run:
-        return result(UPDATED, current, apiary_version,
-                      applied=[m.name for m in chain], detail="dry run")
+        return result(
+            UPDATED, current, apiary_version, applied=[m.name for m in chain], detail="dry run"
+        )
 
     reached = current
     for migration in chain:
@@ -290,8 +316,10 @@ def update_repo(
             migration.module.upgrade(repo)
         except Exception as exc:  # noqa: BLE001 — a migration may raise anything
             return result(
-                FAILED, current, apiary_version,
-                applied=[m.name for m in chain[:chain.index(migration)]],
+                FAILED,
+                current,
+                apiary_version,
+                applied=[m.name for m in chain[: chain.index(migration)]],
                 detail=f"{migration.name} failed: {exc}",
             )
         reached = migration.to_version
@@ -325,14 +353,14 @@ def update(
             if not real or Path(real).resolve() != wanted:
                 continue
         report.results.append(
-            update_repo(apiary, _uid_key(uid_str), entry, migrations,
-                        apiary_version, dry_run=dry_run)
+            update_repo(
+                apiary, _uid_key(uid_str), entry, migrations, apiary_version, dry_run=dry_run
+            )
         )
 
     if wanted is not None and not report.results:
         raise UpdateError(
-            f"{wanted} is not a registered repo. Run "
-            f"`apiary install --target \"{wanted}\"` first."
+            f'{wanted} is not a registered repo. Run `apiary install --target "{wanted}"` first.'
         )
     return report
 
@@ -346,10 +374,13 @@ def _uid_key(uid_str: str) -> int:
 
 # --- CLI ------------------------------------------------------------------
 
+
 def render(report: UpdateReport, *, dry_run: bool = False) -> str:
     """Human-readable summary. One line per repo, then a tally."""
-    lines = [f"main-apiary version: {report.apiary_version}"
-             + ("  (dry run — nothing written)" if dry_run else "")]
+    lines = [
+        f"main-apiary version: {report.apiary_version}"
+        + ("  (dry run — nothing written)" if dry_run else "")
+    ]
     for r in report.results:
         if r.status == CURRENT:
             lines.append(f"  [current] {r.name} (uid={r.uid}) at {r.from_version}")
@@ -359,11 +390,13 @@ def render(report: UpdateReport, *, dry_run: bool = False) -> str:
             continue
         applied = ", ".join(r.applied) if r.applied else "no migration needed"
         if r.status == FAILED:
-            lines.append(f"  [FAILED]  {r.name} (uid={r.uid}) "
-                         f"{r.from_version} -> {r.to_version}: {r.detail}")
+            lines.append(
+                f"  [FAILED]  {r.name} (uid={r.uid}) {r.from_version} -> {r.to_version}: {r.detail}"
+            )
             continue
-        lines.append(f"  [updated] {r.name} (uid={r.uid}) "
-                     f"{r.from_version} -> {r.to_version} ({applied})")
+        lines.append(
+            f"  [updated] {r.name} (uid={r.uid}) {r.from_version} -> {r.to_version} ({applied})"
+        )
     lines.append(
         f"{report.count(UPDATED)} updated, {report.count(CURRENT)} already current, "
         f"{report.count(SKIPPED)} skipped, {report.count(FAILED)} failed"
@@ -377,15 +410,20 @@ def main(argv: list[str] | None = None) -> int:
         description="Run pending migrations/ and re-pin bootstrapped repos.",
     )
     parser.add_argument(
-        "--target", type=Path, default=None,
+        "--target",
+        type=Path,
+        default=None,
         help="update only this repo (default: every registered repo)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="print the migrations that would run; write nothing",
     )
     parser.add_argument(
-        "--apiary-repo", type=Path, default=None,
+        "--apiary-repo",
+        type=Path,
+        default=None,
         help="path to main-apiary checkout (default: resolved via launcher / pointer)",
     )
     args = parser.parse_args(argv)

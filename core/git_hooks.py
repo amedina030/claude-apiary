@@ -77,8 +77,7 @@ def hooks_dir(repo: Path) -> tuple[Path, str | None]:
             "    git config --unset core.hooksPath"
         )
     return target, (
-        f"core.hooksPath redirects hooks to {target}; installing there rather "
-        "than in .git/hooks."
+        f"core.hooksPath redirects hooks to {target}; installing there rather than in .git/hooks."
     )
 
 
@@ -119,7 +118,7 @@ def install(repo: Path, force: bool = False, quiet: bool = False) -> int:
 
     target_dir, warning = hooks_dir(repo)
     if warning:
-        print(f"  WARNING: {warning}")      # never silenced: a dead gate must be loud
+        print(f"  WARNING: {warning}")  # never silenced: a dead gate must be loud
     if not target_dir.is_dir():
         try:
             target_dir.mkdir(parents=True, exist_ok=True)

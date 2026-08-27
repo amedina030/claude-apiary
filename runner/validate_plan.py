@@ -16,6 +16,7 @@ Exit 1 + prints error details on failure.
 Usage:
     validate_plan.py <path_to_plan.json>
 """
+
 import argparse
 import contextlib
 import json
@@ -58,6 +59,7 @@ def repo_root_scope(root):
     finally:
         _REPO_ROOT = previous
 
+
 VALID_TYPES = {"create", "modify", "delete", "test", "verify"}
 VALID_ACTIONS = {"create", "modify", "delete", "test", "verify"}
 # Models a plan step may request. Deliberately excludes fable, decided
@@ -66,7 +68,15 @@ VALID_ACTIONS = {"create", "modify", "delete", "test", "verify"}
 # behaviour are known here. The mismatch with the picker is intentional --
 # do not "fix" it by adding fable without revisiting that call.
 VALID_MODELS = {"opus", "sonnet", "haiku"}
-REQUIRED_STEP_FIELDS = ["step_number", "type", "description", "action", "files", "depends_on", "code_spec"]
+REQUIRED_STEP_FIELDS = [
+    "step_number",
+    "type",
+    "description",
+    "action",
+    "files",
+    "depends_on",
+    "code_spec",
+]
 
 # Post-condition types a plan may declare per step (#T-2026-122 phase 2).
 # Verified by the executor after the step's subprocess returns, regardless
@@ -75,17 +85,28 @@ REQUIRED_STEP_FIELDS = ["step_number", "type", "description", "action", "files",
 # Each entry: {"type": <name>, "file": <repo-relative path>, ...}
 POST_CONDITION_SCHEMA = {
     "file_contains": {"file", "text"},
-    "file_lacks":    {"file", "text"},
-    "file_exists":   {"file"},
-    "file_absent":   {"file"},
+    "file_lacks": {"file", "text"},
+    "file_exists": {"file"},
+    "file_absent": {"file"},
 }
 
 # Words that indicate a test code_spec is prose, not a shell command. The
 # executor passes test code_spec directly to subprocess.run(shell=True), so
 # 'Run python -m pytest ...' tries to execute literal 'Run' as a binary.
 _PROSE_STARTERS = {
-    "run", "execute", "use", "call", "then", "now", "this", "make",
-    "please", "here", "the", "we", "you",
+    "run",
+    "execute",
+    "use",
+    "call",
+    "then",
+    "now",
+    "this",
+    "make",
+    "please",
+    "here",
+    "the",
+    "we",
+    "you",
 }
 
 # Banned tokens are resolved per-run via _resolve_banned_tokens(target_repo).
@@ -139,6 +160,7 @@ def _resolve_banned_tokens(target_repo: str | None) -> dict:
         return default if isinstance(default, dict) else {}
     return {}
 
+
 # Phrases that, when found in a test-action step's description, indicate the
 # planner is using a test step as a gating audit run rather than a pass/fail
 # verification. The executor treats every test step as a hard gate (non-zero
@@ -155,7 +177,7 @@ _TEST_FAILURE_LANGUAGE = (
     "this run is expected to",
 )
 
-_SHELL_METACHARACTERS = [';', '&', '|', '>', '<', '`', '$(', '${']
+_SHELL_METACHARACTERS = [";", "&", "|", ">", "<", "`", "$(", "${"]
 
 
 # --- Path allowlist (#212, revised) ---
@@ -172,6 +194,7 @@ _SHELL_METACHARACTERS = [';', '&', '|', '>', '<', '`', '$(', '${']
 # against themselves — and the result must fall under REPO_ROOT. Resolving
 # against REPO_ROOT instead of cwd means validate_plan can be invoked from
 # anywhere without path rejection false positives (#232).
+
 
 def _resolve_repo_path(path: Path) -> Path:
     """Resolve `path` relative to REPO_ROOT if not already absolute.
@@ -208,7 +231,7 @@ def _rel_under_repo(resolved: Path):
     # normcase only changes case (and slash direction on Windows) — never
     # length — so slicing the original string by len(prefix) safely strips
     # the root while preserving the on-disk case of the tail.
-    rel = r[len(prefix):]
+    rel = r[len(prefix) :]
     return rel.replace("\\", "/")
 
 
@@ -262,9 +285,7 @@ def _check_post_conditions(steps: list[dict]) -> list[str]:
             file_val = cond.get("file")
             if isinstance(file_val, str) and file_val.strip():
                 if not _path_under_repo(Path(file_val)):
-                    errors.append(
-                        f"{clabel}: file '{file_val}' is outside the repo"
-                    )
+                    errors.append(f"{clabel}: file '{file_val}' is outside the repo")
     return errors
 
 
@@ -359,9 +380,9 @@ def _check_test_shell_metacharacters(steps: list[dict]) -> list[str]:
     for i, step in enumerate(steps):
         if not isinstance(step, dict):
             continue
-        if step.get('action') != 'test':
+        if step.get("action") != "test":
             continue
-        code_spec = step.get('code_spec', '')
+        code_spec = step.get("code_spec", "")
         if not isinstance(code_spec, str):
             continue
         if not code_spec.strip():
@@ -547,23 +568,51 @@ def _check_banned_tokens(steps: list[dict], banned_tokens: dict) -> list[str]:
         # "no shell=True") to describe what to check for absence of.
         if step.get("type") == "verify":
             continue
-        haystack = " ".join([
-            str(step.get("code_spec", "")),
-            str(step.get("description", "")),
-        ]).lower()
+        haystack = " ".join(
+            [
+                str(step.get("code_spec", "")),
+                str(step.get("description", "")),
+            ]
+        ).lower()
         for token, reason in banned_tokens.items():
             if patterns[token].search(haystack):
-                errors.append(
-                    f"step[{i}]: banned token '{token}' found in plan — {reason}"
-                )
+                errors.append(f"step[{i}]: banned token '{token}' found in plan — {reason}")
     return errors
 
 
-_STOPWORDS = frozenset({
-    "a", "an", "and", "are", "as", "at", "be", "by", "can", "do", "does",
-    "for", "from", "has", "have", "in", "is", "it", "its", "of", "on",
-    "or", "the", "this", "that", "to", "was", "with", "will",
-})
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "can",
+        "do",
+        "does",
+        "for",
+        "from",
+        "has",
+        "have",
+        "in",
+        "is",
+        "it",
+        "its",
+        "of",
+        "on",
+        "or",
+        "the",
+        "this",
+        "that",
+        "to",
+        "was",
+        "with",
+        "will",
+    }
+)
 
 # Strip punctuation/symbols for tokenization — re.findall(r"[a-z0-9_]+")
 # catches alphanumeric tokens and discards everything else.
@@ -677,8 +726,8 @@ def _check_file_overlap(steps: list) -> list:
 
 
 _REMOVAL_KEYWORDS = re.compile(
-    r'\b(remove|delete|drop|rip out|eliminate|strip)\b.*\b(function|method|class|constant|import|variable|attr)\b'
-    r'|\b(function|method|class|constant|import|variable|attr)\b.*\b(remove|delete|drop|rip out|eliminate|strip)\b',
+    r"\b(remove|delete|drop|rip out|eliminate|strip)\b.*\b(function|method|class|constant|import|variable|attr)\b"
+    r"|\b(function|method|class|constant|import|variable|attr)\b.*\b(remove|delete|drop|rip out|eliminate|strip)\b",
     re.IGNORECASE,
 )
 
@@ -699,10 +748,10 @@ def _is_python_symbol(name: str) -> bool:
     if len(name) < 6:
         return False
     # UPPER_CASE constants (e.g. LEARNING_FOLDER, TYPE_FOLDERS)
-    if name.isupper() and '_' in name:
+    if name.isupper() and "_" in name:
         return True
     # snake_case with underscore (e.g. add_learning, list_learnings)
-    if name.islower() and '_' in name:
+    if name.islower() and "_" in name:
         return True
     # CamelCase classes (e.g. ScribeStore)
     if name[0].isupper() and any(c.islower() for c in name) and any(c.isupper() for c in name[1:]):
@@ -762,15 +811,16 @@ def _check_removal_coverage(steps: list[dict]) -> list[str]:
             try:
                 result = subprocess.run(
                     ["git", "grep", "-l", "-w", "--", symbol],
-                    capture_output=True, text=True, encoding="utf-8", timeout=10,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=10,
                     cwd=str(_REPO_ROOT),
                 )
                 if result.returncode != 0:
                     continue
                 referencing_files = {
-                    f.strip().replace("\\", "/")
-                    for f in result.stdout.splitlines()
-                    if f.strip()
+                    f.strip().replace("\\", "/") for f in result.stdout.splitlines() if f.strip()
                 }
             except (OSError, subprocess.TimeoutExpired):
                 continue
@@ -779,10 +829,7 @@ def _check_removal_coverage(steps: list[dict]) -> list[str]:
             # Exclude this validator's own file — it references symbols as
             # part of grep patterns and test fixtures, not real usage.
             _SELF = "runner/validate_plan.py"
-            py_files = {
-                f for f in referencing_files
-                if f.endswith(".py") and f != _SELF
-            }
+            py_files = {f for f in referencing_files if f.endswith(".py") and f != _SELF}
 
             uncovered = py_files - plan_files
             if uncovered:
@@ -817,8 +864,7 @@ def _check_criteria_coverage(spec: dict, steps: list[dict]) -> list[str]:
 
     errors = []
     step_text = " ".join(
-        f"{s.get('description', '')} {s.get('code_spec', '')}"
-        for s in steps if isinstance(s, dict)
+        f"{s.get('description', '')} {s.get('code_spec', '')}" for s in steps if isinstance(s, dict)
     ).lower()
     # Normalize step text tokens the same way as criterion tokens so the
     # bigram match is consistent across punctuation noise in code_spec.
@@ -833,9 +879,9 @@ def _check_criteria_coverage(spec: dict, steps: list[dict]) -> list[str]:
             continue
         if not any(bg in step_normalized for bg in bigrams):
             errors.append(
-                f"Acceptance criterion [{i}] not covered by any step: "
-                f"'{criterion[:80]}...'" if len(criterion) > 80 else
-                f"Acceptance criterion [{i}] not covered by any step: '{criterion}'"
+                f"Acceptance criterion [{i}] not covered by any step: '{criterion[:80]}...'"
+                if len(criterion) > 80
+                else f"Acceptance criterion [{i}] not covered by any step: '{criterion}'"
             )
 
     return errors
@@ -920,11 +966,15 @@ def _validate(data: dict, banned_tokens: dict) -> list[str]:
         # Valid type and action
         step_type = step.get("type")
         if isinstance(step_type, str) and step_type not in VALID_TYPES:
-            errors.append(f"{label}: invalid type '{step_type}' (expected: {', '.join(sorted(VALID_TYPES))})")
+            errors.append(
+                f"{label}: invalid type '{step_type}' (expected: {', '.join(sorted(VALID_TYPES))})"
+            )
 
         action = step.get("action")
         if isinstance(action, str) and action not in VALID_ACTIONS:
-            errors.append(f"{label}: invalid action '{action}' (expected: {', '.join(sorted(VALID_ACTIONS))})")
+            errors.append(
+                f"{label}: invalid action '{action}' (expected: {', '.join(sorted(VALID_ACTIONS))})"
+            )
 
         # Optional per-step model field
         if "model" in step:
@@ -953,7 +1003,11 @@ def _validate(data: dict, banned_tokens: dict) -> list[str]:
             files = step.get("files", [])
             if isinstance(files, list):
                 for f in files:
-                    if isinstance(f, str) and f not in created_files and not _resolve_repo_path(Path(f)).exists():
+                    if (
+                        isinstance(f, str)
+                        and f not in created_files
+                        and not _resolve_repo_path(Path(f)).exists()
+                    ):
                         errors.append(f"{label}: file not found: {f}")
 
         # depends_on references are not checked here: a forward reference is

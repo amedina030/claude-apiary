@@ -1,4 +1,5 @@
 """Tests for ``core/cascade.py`` — main-apiary move propagation."""
+
 from __future__ import annotations
 
 import sys
@@ -20,13 +21,17 @@ def _make_main_apiary(root: Path) -> Path:
     self-pointer, so both are on (see core/drift.py::_verify_main_apiary).
     """
     return testing.make_fake_apiary(
-        root, name="main-apiary", git=True, self_bootstrap=True,
+        root,
+        name="main-apiary",
+        git=True,
+        self_bootstrap=True,
     )
 
 
 def _bootstrap_target(target: Path, apiary: Path) -> int:
     testing.init_git_repo(target)
     from core import install as install_mod
+
     return install_mod.install(target, apiary_repo=apiary).uid
 
 

@@ -22,13 +22,17 @@ def session_length_nudge(context_tokens, config):
     hard = config.get("session_warn_hard_tokens", 800000)
     soft = config.get("session_warn_soft_tokens", 600000)
     if context_tokens >= hard:
-        return ("hard",
-                f"Session context is very long ({context_tokens:,} tokens). "
-                "Suggest to the user that they start a new session now — "
-                "context-compression fidelity loss is likely beyond this point.")
+        return (
+            "hard",
+            f"Session context is very long ({context_tokens:,} tokens). "
+            "Suggest to the user that they start a new session now — "
+            "context-compression fidelity loss is likely beyond this point.",
+        )
     if context_tokens >= soft:
-        return ("soft",
-                f"Session context is getting long ({context_tokens:,} tokens). "
-                "Consider wrapping up at the next natural checkpoint and "
-                "suggesting the user start a fresh session.")
+        return (
+            "soft",
+            f"Session context is getting long ({context_tokens:,} tokens). "
+            "Consider wrapping up at the next natural checkpoint and "
+            "suggesting the user start a fresh session.",
+        )
     return (None, None)

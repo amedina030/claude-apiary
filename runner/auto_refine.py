@@ -11,6 +11,7 @@ Output: runner/specs/<uuid>.json
 Usage:
     auto_refine.py <path_to_intake.json>
 """
+
 import argparse
 import json
 import sys
@@ -103,11 +104,13 @@ def build_prompt(intake: dict, previous_errors: list[str] | None = None) -> str:
 
     explore_hints = intake.get("explore_hints") or []
 
-    parts.extend([
-        "",
-        "## Instructions",
-        "",
-    ])
+    parts.extend(
+        [
+            "",
+            "## Instructions",
+            "",
+        ]
+    )
     if explore_hints:
         parts.append(
             "1. Start by reading these files (they are the most relevant "
@@ -124,32 +127,36 @@ def build_prompt(intake: dict, previous_errors: list[str] | None = None) -> str:
             "1. Explore the codebase freely — read files, search for patterns, "
             "understand the existing architecture."
         )
-    parts.extend([
-        "2. Based on your exploration and the task description, produce a spec "
-        "that covers all aspects needed for implementation.",
-        "3. As you explore the codebase, keep track of every file you read. "
-        "For each file, record an entry in the files_examined array with: "
-        "'path' (relative to repo root), 'sha' (the git SHA of the file if "
-        "available, or null), and 'summary' (a one-line description of what "
-        "you learned from this file that is relevant to the spec). Include "
-        "ALL files you read during exploration, not just the ones directly "
-        "mentioned in the spec. This field is optional but strongly "
-        "encouraged — it helps downstream stages avoid redundant file reads.",
-        "4. Output ONLY valid JSON matching this schema (no markdown, no explanation):",
-        "",
-        "```json",
-        SPEC_SCHEMA,
-        "```",
-        "",
-        VALIDATION_RULES,
-    ])
+    parts.extend(
+        [
+            "2. Based on your exploration and the task description, produce a spec "
+            "that covers all aspects needed for implementation.",
+            "3. As you explore the codebase, keep track of every file you read. "
+            "For each file, record an entry in the files_examined array with: "
+            "'path' (relative to repo root), 'sha' (the git SHA of the file if "
+            "available, or null), and 'summary' (a one-line description of what "
+            "you learned from this file that is relevant to the spec). Include "
+            "ALL files you read during exploration, not just the ones directly "
+            "mentioned in the spec. This field is optional but strongly "
+            "encouraged — it helps downstream stages avoid redundant file reads.",
+            "4. Output ONLY valid JSON matching this schema (no markdown, no explanation):",
+            "",
+            "```json",
+            SPEC_SCHEMA,
+            "```",
+            "",
+            VALIDATION_RULES,
+        ]
+    )
 
     if previous_errors:
-        parts.extend([
-            "",
-            "## Previous attempt failed validation with these errors:",
-            "",
-        ])
+        parts.extend(
+            [
+                "",
+                "## Previous attempt failed validation with these errors:",
+                "",
+            ]
+        )
         for err in previous_errors:
             parts.append(f"- {err}")
         parts.append("")
@@ -171,7 +178,9 @@ def extract_spec(raw_output: str) -> dict:
     inside string values are all handled there, in one place, for every stage.
     """
     return extract_json(
-        raw_output, require_keys=("goal", "shape", "behavior"), allow_list=False,
+        raw_output,
+        require_keys=("goal", "shape", "behavior"),
+        allow_list=False,
     )
 
 
@@ -251,7 +260,9 @@ def main():
         best_spec["valid"] = False
         _write(spec_path, best_spec)
 
-    print(f"Failed after {MAX_RETRIES} attempts. Best attempt written to {spec_path}", file=sys.stderr)
+    print(
+        f"Failed after {MAX_RETRIES} attempts. Best attempt written to {spec_path}", file=sys.stderr
+    )
     for err in best_errors:
         print(f"  {err}", file=sys.stderr)
     sys.exit(1)

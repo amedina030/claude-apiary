@@ -28,6 +28,7 @@ Exit codes:
   2 — config or platform error (no registry, malformed JSON,
       unsupported OS, scheduler binary not on PATH)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -82,6 +83,7 @@ EXIT_CONFIG_ERROR = 2
 @dataclass(frozen=True)
 class RegistryEntry:
     """A canonical registry entry with placeholders resolved."""
+
     entry_id: str
     description: str
     command: list[str]
@@ -105,6 +107,7 @@ class RegistryEntry:
 @dataclass
 class EntryStatus:
     """Classification result for a single registry entry."""
+
     entry: RegistryEntry
     state: str  # "ok", "missing", or "broken"
     reason: str = ""
@@ -138,13 +141,13 @@ def _resolve_placeholders(value: str, apiary_root: Path) -> str:
 
 
 def load_registry(
-    path: Path = REGISTRY_PATH, apiary_root: Path = APIARY_REPO_ROOT,
+    path: Path = REGISTRY_PATH,
+    apiary_root: Path = APIARY_REPO_ROOT,
 ) -> list[RegistryEntry]:
     """Load and validate the registry. Raises RegistryError on problems."""
     if not path.exists():
         raise RegistryError(
-            f"registry not found at {path}; create it to start managing "
-            f"scheduled tasks"
+            f"registry not found at {path}; create it to start managing scheduled tasks"
         )
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -155,24 +158,16 @@ def load_registry(
         ) from exc
     entries = data.get("entries", [])
     if not isinstance(entries, list):
-        raise RegistryError(
-            f"registry at {path}: 'entries' must be a list"
-        )
+        raise RegistryError(f"registry at {path}: 'entries' must be a list")
     out: list[RegistryEntry] = []
     seen: set[str] = set()
     for i, raw in enumerate(entries):
         if not isinstance(raw, dict):
-            raise RegistryError(
-                f"registry at {path}: entries[{i}] must be an object"
-            )
+            raise RegistryError(f"registry at {path}: entries[{i}] must be an object")
         if "id" not in raw or not isinstance(raw["id"], str) or not raw["id"]:
-            raise RegistryError(
-                f"registry at {path}: entries[{i}] missing 'id' (non-empty string)"
-            )
+            raise RegistryError(f"registry at {path}: entries[{i}] missing 'id' (non-empty string)")
         if raw["id"] in seen:
-            raise RegistryError(
-                f"registry at {path}: duplicate entry id '{raw['id']}'"
-            )
+            raise RegistryError(f"registry at {path}: duplicate entry id '{raw['id']}'")
         seen.add(raw["id"])
         if "command" not in raw or not isinstance(raw["command"], list) or not raw["command"]:
             raise RegistryError(
@@ -203,11 +198,13 @@ def get_scheduler() -> SchedulerBackend:
     # Lazy import so non-Windows systems don't pay the import cost and
     # any Windows-specific imports in the module (future) stay quarantined.
     from .schedulers.windows import WindowsTaskScheduler
+
     return WindowsTaskScheduler()
 
 
 def classify_entry(
-    entry: RegistryEntry, observed: Optional[ObservedEntry],
+    entry: RegistryEntry,
+    observed: Optional[ObservedEntry],
 ) -> EntryStatus:
     """Decide whether a registry entry is ok/broken/missing vs what's observed.
 
@@ -223,30 +220,40 @@ def classify_entry(
         if observed is None:
             return EntryStatus(entry=entry, state="ok")
         return EntryStatus(
-            entry=entry, state="broken", observed=observed,
+            entry=entry,
+            state="broken",
+            observed=observed,
             reason="should not exist (disabled: true)",
         )
     if observed is None:
         return EntryStatus(entry=entry, state="missing")
     if entry.cwd and not Path(entry.cwd).is_dir():
         return EntryStatus(
-            entry=entry, state="broken", observed=observed,
+            entry=entry,
+            state="broken",
+            observed=observed,
             reason="cwd missing",
         )
     script = _literal_script_path(entry.command)
     if script is not None and not Path(script).exists():
         return EntryStatus(
-            entry=entry, state="broken", observed=observed,
+            entry=entry,
+            state="broken",
+            observed=observed,
             reason="script path missing",
         )
     if _normalize_command(entry.command) != _normalize_command(observed.command):
         return EntryStatus(
-            entry=entry, state="broken", observed=observed,
+            entry=entry,
+            state="broken",
+            observed=observed,
             reason="command drift",
         )
     if _normalize_schedule(entry.schedule) != _normalize_schedule(observed.schedule):
         return EntryStatus(
-            entry=entry, state="broken", observed=observed,
+            entry=entry,
+            state="broken",
+            observed=observed,
             reason="schedule drift",
         )
     return EntryStatus(entry=entry, state="ok", observed=observed)
@@ -289,7 +296,8 @@ def _normalize_schedule(schedule: dict) -> dict:
 
 
 def diff(
-    registry: list[RegistryEntry], observed: list[ObservedEntry],
+    registry: list[RegistryEntry],
+    observed: list[ObservedEntry],
 ) -> list[EntryStatus]:
     """Classify each registry entry against the observed state."""
     by_id = {e.entry_id: e for e in observed}
@@ -320,7 +328,8 @@ def format_table(statuses: list[EntryStatus]) -> str:
 
 
 def check(
-    registry: list[RegistryEntry], backend: SchedulerBackend,
+    registry: list[RegistryEntry],
+    backend: SchedulerBackend,
 ) -> tuple[list[EntryStatus], int]:
     """Read-only inspection. Returns (statuses, exit_code)."""
     observed = backend.list_entries(PREFIX)
@@ -330,7 +339,10 @@ def check(
 
 
 def repair(
-    registry: list[RegistryEntry], backend: SchedulerBackend, *, apply: bool,
+    registry: list[RegistryEntry],
+    backend: SchedulerBackend,
+    *,
+    apply: bool,
 ) -> tuple[list[EntryStatus], list[str], int]:
     """Fix drift. Returns (post_statuses, action_log, exit_code).
 
@@ -355,8 +367,11 @@ def repair(
                 actions.append(f"deleted {s.entry.entry_id}")
             if not s.entry.disabled:
                 backend.create_entry(
-                    PREFIX, s.entry.entry_id, s.entry.command,
-                    s.entry.cwd, s.entry.schedule,
+                    PREFIX,
+                    s.entry.entry_id,
+                    s.entry.command,
+                    s.entry.cwd,
+                    s.entry.schedule,
                 )
                 actions.append(f"created {s.entry.entry_id}")
         except SchedulerError as exc:
@@ -383,8 +398,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="cron_health",
         description=(
-            "Check or repair the host scheduler's entries against "
-            "apiary's canonical registry."
+            "Check or repair the host scheduler's entries against apiary's canonical registry."
         ),
     )
     subs = parser.add_subparsers(dest="cmd", required=True)
@@ -394,7 +408,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="dry-run by default; pass --apply to execute changes",
     )
     repair_p.add_argument(
-        "--apply", action="store_true",
+        "--apply",
+        action="store_true",
         help="execute the planned changes (default: dry-run)",
     )
     args = parser.parse_args(argv)

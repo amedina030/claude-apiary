@@ -20,6 +20,7 @@ Exit codes:
     2  validation error (unknown tag, duplicate slug, not found, bad ext)
     3  config/YAML parse error (invalid tags.yaml or frontmatter)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -182,8 +183,7 @@ def cmd_find(args: argparse.Namespace) -> int:
     ranked = _rank_hits(query, sidecars)
     if not ranked:
         print(
-            f"no captures match {query!r}; "
-            "add one with 'captures add <topic> <image-path>'",
+            f"no captures match {query!r}; add one with 'captures add <topic> <image-path>'",
             file=sys.stderr,
         )
         return EXIT_OK

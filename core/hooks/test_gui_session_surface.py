@@ -9,6 +9,7 @@ telling the session it's running inside the GUI. With the env var unset
 cwd is pointed at the temp HOME (not a git repo) so the hook skips notes /
 learnings injection and stays fast and isolated from real scribe state.
 """
+
 import json
 import subprocess
 import sys
@@ -39,7 +40,9 @@ def _run_hook(home: Path, *, gui_session: bool) -> subprocess.CompletedProcess:
     repo = home / "repo"
     (repo / ".claude" / "apiary" / "session-tmp").mkdir(parents=True, exist_ok=True)
     (repo / ".claude" / "apiary" / "self-pointer.json").write_text(
-        json.dumps({"schema_version": 1, "name": "repo", "uid": 1, "real_path": str(repo)}), encoding="utf-8")
+        json.dumps({"schema_version": 1, "name": "repo", "uid": 1, "real_path": str(repo)}),
+        encoding="utf-8",
+    )
     # A fresh first message; cwd at home keeps it out of any git repo.
     # hermetic_env clears the inherited APIARY_* — including a real
     # APIARY_GUI_SESSION when this suite is run from inside the GUI, which

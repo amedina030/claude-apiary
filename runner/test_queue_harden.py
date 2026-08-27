@@ -1,5 +1,6 @@
 """Tests for queue.load_harden_verdict — the helper that reads the runner
 harden artifact to expose its verdict in the review queue."""
+
 import json
 import tempfile
 import unittest
@@ -22,9 +23,7 @@ class LoadHardenVerdictTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def _write(self, uuid: str, payload: dict):
-        (self.hardens_dir / f"{uuid}.json").write_text(
-            json.dumps(payload), encoding="utf-8"
-        )
+        (self.hardens_dir / f"{uuid}.json").write_text(json.dumps(payload), encoding="utf-8")
 
     def test_empty_uuid_returns_na(self):
         self.assertEqual(queue.load_harden_verdict(""), "n/a")

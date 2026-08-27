@@ -23,6 +23,7 @@ Skipped entirely when ``APIARY_RUNNER_SUBPROCESS=1`` is set in the env —
 runner stage subprocesses are one-shot workers and the behavioral-rule
 nudge is just token bloat for them (#228).
 """
+
 import os
 import sys
 from pathlib import Path

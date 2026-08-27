@@ -15,6 +15,7 @@ on a bare clone whose dependencies are not installed yet.
 Exit code: 0 if there are no hard blockers (FAILs); 1 if any FAIL is present.
 WARN/INFO never change the exit code — the install can proceed past them.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -135,8 +136,7 @@ def check_claude(for_gui: bool) -> Result:
         return Result(
             status,
             "the `claude` CLI was not found on PATH.",
-            "Install Claude Code so the GUI can launch a session "
-            "(https://claude.ai/claude-code).",
+            "Install Claude Code so the GUI can launch a session (https://claude.ai/claude-code).",
         )
     if os.name == "nt" and _is_shim(found):
         return Result(
@@ -158,12 +158,12 @@ def _webview2_installed() -> bool:
         return False
     client = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
     locations = [
-        (winreg.HKEY_LOCAL_MACHINE,
-         r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\\" + client),
-        (winreg.HKEY_LOCAL_MACHINE,
-         r"SOFTWARE\Microsoft\EdgeUpdate\Clients\\" + client),
-        (winreg.HKEY_CURRENT_USER,
-         r"Software\Microsoft\EdgeUpdate\Clients\\" + client),
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\\" + client,
+        ),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\EdgeUpdate\Clients\\" + client),
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\EdgeUpdate\Clients\\" + client),
     ]
     for hive, subkey in locations:
         try:
@@ -189,9 +189,11 @@ def check_webview2() -> Result:
 
 
 def run(for_gui: bool) -> int:
-    print(f"preflight: {platform.system()} {platform.release()}, "
-          f"python {'.'.join(str(x) for x in sys.version_info[:3])}"
-          f"{' (+gui)' if for_gui else ''}")
+    print(
+        f"preflight: {platform.system()} {platform.release()}, "
+        f"python {'.'.join(str(x) for x in sys.version_info[:3])}"
+        f"{' (+gui)' if for_gui else ''}"
+    )
     print()
 
     results = [check_python(), check_git(), check_path_sanity(), check_claude(for_gui)]
@@ -215,8 +217,11 @@ def run(for_gui: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Pre-install environment check for claude-apiary.")
-    parser.add_argument("--gui", action="store_true",
-                        help="Also check desktop GUI prerequisites (pythonnet Python pin, WebView2).")
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Also check desktop GUI prerequisites (pythonnet Python pin, WebView2).",
+    )
     args = parser.parse_args()
     return run(for_gui=args.gui)
 

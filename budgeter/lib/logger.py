@@ -42,6 +42,7 @@ def _assert_isolated_in_test_mode(path, kind):
             f"Redirect via configure_for_project(cwd) or patch the module global."
         )
 
+
 # Project-level config filename placed inside a project's .claude/ directory
 _PROJECT_CONFIG_FILENAME = "budgeter.json"
 
@@ -226,11 +227,7 @@ def get_user_turn_number(session_entries):
             elif isinstance(content, list):
                 # Only count if there is at least one top-level text block
                 # (tool_result blocks have type "tool_result", not "text")
-                if any(
-                    isinstance(b, dict)
-                    and b.get("type") == "text"
-                    for b in content
-                ):
+                if any(isinstance(b, dict) and b.get("type") == "text" for b in content):
                     count += 1
     return count
 
@@ -247,7 +244,11 @@ def get_user_message_at_turn(session_entries, turn_number):
                 text = content.strip()
                 count += 1
             elif isinstance(content, list):
-                text_blocks = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                text_blocks = [
+                    b.get("text", "")
+                    for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                ]
                 if text_blocks:
                     text = " ".join(text_blocks).strip()
                     count += 1
@@ -329,8 +330,16 @@ def get_last_call_tokens(session_entries):
     )
 
 
-def build_cost_entry(baseline, session_id, transcript_path, tokens_now,
-                     last_input, last_cache, last_create, last_output):
+def build_cost_entry(
+    baseline,
+    session_id,
+    transcript_path,
+    tokens_now,
+    last_input,
+    last_cache,
+    last_create,
+    last_output,
+):
     """Build the log entry attributing the API call(s) since *baseline* to
     the tool recorded in it. Shared by the PRE and Stop hooks.
 
@@ -362,7 +371,10 @@ def build_cost_entry(baseline, session_id, transcript_path, tokens_now,
         "assistant_message": baseline.get("prev_assistant_message", ""),
         "user_message": baseline.get("user_message", ""),
         "tokens_delta": tokens_delta,
-        "context_tokens": prev_input + prev_cache + prev_create + baseline.get("baseline_output", 0),
+        "context_tokens": prev_input
+        + prev_cache
+        + prev_create
+        + baseline.get("baseline_output", 0),
         "net_tokens_delta": net_tokens_delta,
         "input_tokens_delta": input_growth,
         "cache_tokens_delta": cache_growth,
@@ -411,20 +423,37 @@ def load_baseline(session_id):
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, ValueError) as exc:
-            print(f"[budgeter] unreadable baseline {path.name}: {exc}; starting over",
-                  file=sys.stderr)
+            print(
+                f"[budgeter] unreadable baseline {path.name}: {exc}; starting over", file=sys.stderr
+            )
             return None
     return data if isinstance(data, dict) and "tokens" in data else None
 
 
-def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message="", baseline_input=0, baseline_cache=0, baseline_output=0, agent_description="", baseline_cache_creation=0):
+def save_baseline(
+    session_id,
+    tokens,
+    context_tokens=0,
+    prev_tool_name="",
+    prev_assistant_message="",
+    turn_number=0,
+    task_turn=None,
+    user_message="",
+    baseline_input=0,
+    baseline_cache=0,
+    baseline_output=0,
+    agent_description="",
+    baseline_cache_creation=0,
+):
     _assert_isolated_in_test_mode(TMP_DIR, "tmp")
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     path = _sid(session_id).tmp_path("baseline.json", TMP_DIR)
     with _file_lock(path):
         # Write to a sibling temp file and os.replace it in, so a hook killed
         # mid-write can never leave a truncated baseline behind (review B1).
-        write_json_atomic(path, {
+        write_json_atomic(
+            path,
+            {
                 "schema": BASELINE_SCHEMA,
                 "tokens": tokens,
                 "context_tokens": context_tokens,
@@ -438,7 +467,8 @@ def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_
                 "task_turn": task_turn if task_turn is not None else turn_number,
                 "user_message": user_message,
                 "agent_description": agent_description,
-        })
+            },
+        )
 
 
 def cleanup_session(session_id):

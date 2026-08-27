@@ -13,6 +13,7 @@ Skipped entirely when ``APIARY_RUNNER_SUBPROCESS=1`` is set in the env —
 runner stage subprocesses already know their own session_id and don't
 need the context injection (#228).
 """
+
 import os
 import sys
 from pathlib import Path

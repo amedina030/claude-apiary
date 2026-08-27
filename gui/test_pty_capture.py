@@ -55,8 +55,8 @@ class CaptureWriterTests(unittest.TestCase):
             w.write(b"\x1b[1mhello\x1b[0m")
             w.write("  world\r\n")
             w.write(None)  # ignored
-            w.write("")    # ignored
-            w.write(42)    # ignored (non-bytes, non-str)
+            w.write("")  # ignored
+            w.write(42)  # ignored (non-bytes, non-str)
             w.close()
             data = path.read_bytes()
             self.assertEqual(data, b"\x1b[1mhello\x1b[0m  world\r\n")
@@ -114,8 +114,9 @@ class ListCapturesTests(unittest.TestCase):
             (base / "20260419-090000-b.bin").write_bytes(b"")
             (base / "ignored.txt").write_text("x", encoding="utf-8")
             result = pty_capture.list_captures(base)
-            self.assertEqual([p.name for p in result],
-                             ["20260419-090000-b.bin", "20260419-100000-a.bin"])
+            self.assertEqual(
+                [p.name for p in result], ["20260419-090000-b.bin", "20260419-100000-a.bin"]
+            )
 
 
 if __name__ == "__main__":

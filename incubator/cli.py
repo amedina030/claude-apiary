@@ -16,6 +16,7 @@ Exit codes:
     4  spawn failure (git init failed, template write failed, ...)
     5  partial success (repo created, spec migration failed)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -71,7 +72,9 @@ def _run_scribe(
         # chars). Report it as a failed run so callers take their own recovery
         # path instead of the CLI dying with a traceback (B9).
         return subprocess.CompletedProcess(
-            args=cmd, returncode=1, stdout="",
+            args=cmd,
+            returncode=1,
+            stdout="",
             stderr=f"could not run scribe: {exc.__class__.__name__}: {exc}",
         )
 
@@ -145,15 +148,17 @@ def _fetch_spec(spec_note_id: str) -> tuple[str | None, str | None]:
     sep = out.find("\n---\n")
     if sep == -1:
         return None, "scribe get output did not contain a '---' separator"
-    return out[sep + len("\n---\n"):].rstrip("\n") + "\n", None
+    return out[sep + len("\n---\n") :].rstrip("\n") + "\n", None
 
 
 def _parse_goal_lines(spec: str) -> tuple[str, str, str]:
     """Pull the Problem/Solution/Value bullets out of the spec body."""
+
     def grab(label: str) -> str:
         pattern = rf"^- \*\*{label}:\*\*\s*(.+)$"
         match = re.search(pattern, spec, re.MULTILINE)
         return match.group(1).strip() if match else ""
+
     return grab("Problem"), grab("Solution"), grab("Value")
 
 
@@ -185,8 +190,9 @@ def _run_git_init(target: Path) -> tuple[bool, str]:
     return True, ""
 
 
-def _lay_down_skeleton(target: Path, project_slug: str, project_name: str,
-                       author: str, spec_content: str) -> None:
+def _lay_down_skeleton(
+    target: Path, project_slug: str, project_name: str, author: str, spec_content: str
+) -> None:
     """Write .gitignore, pyproject.toml, and CLAUDE.md."""
     problem, solution, value = _parse_goal_lines(spec_content)
     description = solution or f"{project_name} side project"
@@ -208,8 +214,12 @@ def _lay_down_skeleton(target: Path, project_slug: str, project_name: str,
         TEMPLATES_DIR / "CLAUDE.md.tmpl",
         {
             "__PROJECT_NAME__": project_name,
-            "__PROBLEM_LINE__": f"**Problem:** {problem}" if problem else "_Problem: see spec note._",
-            "__SOLUTION_LINE__": f"**Solution:** {solution}" if solution else "_Solution: see spec note._",
+            "__PROBLEM_LINE__": f"**Problem:** {problem}"
+            if problem
+            else "_Problem: see spec note._",
+            "__SOLUTION_LINE__": f"**Solution:** {solution}"
+            if solution
+            else "_Solution: see spec note._",
             "__VALUE_LINE__": f"**Value:** {value}" if value else "_Value: see spec note._",
         },
     )
@@ -245,9 +255,7 @@ def verify_spawn(target: Path) -> list[tuple[str, bool, str]]:
     # pointer, and a spawned repo carries no local .apiary/ dir at all
     # (55ae7ba), so it would report every healthy repo as unregistered.
     try:
-        registry = json.loads(
-            state.registry_path(APIARY_REPO).read_text(encoding="utf-8")
-        )
+        registry = json.loads(state.registry_path(APIARY_REPO).read_text(encoding="utf-8"))
         entry = state._find_entry_by_path(registry, target)
     except (OSError, json.JSONDecodeError, AttributeError) as exc:
         entry, detail = None, f"registry unreadable: {exc}"
@@ -334,8 +342,9 @@ def _install_secret_scan_hook(target: Path) -> tuple[bool, str]:
     return rc == 0, "installed" if rc == 0 else "installer refused (see output above)"
 
 
-def _migrate_spec(target: Path, spec_content: str, spec_note_id: str,
-                  session_id: str | None) -> tuple[bool, str, bool]:
+def _migrate_spec(
+    target: Path, spec_content: str, spec_note_id: str, session_id: str | None
+) -> tuple[bool, str, bool]:
     """Add the spec to the new repo's scribe, then close the original in apiary.
 
     The ``add`` runs through the **new repo's** launcher so the spec lands in the
@@ -375,10 +384,14 @@ def _migrate_spec(target: Path, spec_content: str, spec_note_id: str,
 
     done_result = _run_scribe(["done", spec_note_id], cwd=APIARY_REPO)
     if done_result.returncode != 0:
-        return False, (
-            f"spec was added to {target} but failed to close original {spec_note_id} "
-            f"in apiary: {(done_result.stderr or done_result.stdout).strip()}"
-        ), True
+        return (
+            False,
+            (
+                f"spec was added to {target} but failed to close original {spec_note_id} "
+                f"in apiary: {(done_result.stderr or done_result.stdout).strip()}"
+            ),
+            True,
+        )
     return True, add_result.stdout.strip(), True
 
 
@@ -478,13 +491,14 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     print(f"spawned: {target}")
     print(f"  slug:    {project_slug}")
     print(f"  author:  {author}")
-    print(f"  bootstrap: per-repo install OK "
-          f"(uid={install_result.uid} slug={install_result.slug})")
+    print(f"  bootstrap: per-repo install OK (uid={install_result.uid} slug={install_result.slug})")
     if hook_ok:
         print("  git hooks: secret-scan pre-commit installed")
     else:
-        print(f"  git hooks: WARNING - secret-scan pre-commit NOT installed ({hook_msg});"
-              " retrofit with `python .claude/apiary/launch.py scripts/install_git_hooks.py`")
+        print(
+            f"  git hooks: WARNING - secret-scan pre-commit NOT installed ({hook_msg});"
+            " retrofit with `python .claude/apiary/launch.py scripts/install_git_hooks.py`"
+        )
     print(f"  spec:    migrated from apiary {args.spec_note_id} -> new repo scribe")
     print("  verify:  all post-spawn checks passed")
     print()

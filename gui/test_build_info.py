@@ -34,21 +34,23 @@ class VersionStringTest(unittest.TestCase):
         )
 
     def test_empty_info_still_yields_a_string(self):
-        self.assertEqual(
-            build_info.version_string({}), f"{build_info.BASE_VERSION}+unknown"
-        )
+        self.assertEqual(build_info.version_string({}), f"{build_info.BASE_VERSION}+unknown")
 
 
 class GitStateTest(unittest.TestCase):
     def _with_git(self, results):
         """Patch _run_git with a canned {args-tuple: output} map."""
+
         def fake(args, cwd):
             return results.get(tuple(args))
+
         return mock.patch.object(build_info, "_run_git", side_effect=fake)
 
     def test_clean_checkout(self):
         rev = ("rev-parse", f"--short={build_info.COMMIT_LEN}", "HEAD")
-        with self._with_git({rev: "abc123def456", ("status", "--porcelain", "--untracked-files=no"): ""}):
+        with self._with_git(
+            {rev: "abc123def456", ("status", "--porcelain", "--untracked-files=no"): ""}
+        ):
             self.assertEqual(build_info.git_state(Path(".")), ("abc123def456", False))
 
     def test_modified_tracked_files_report_dirty(self):
@@ -69,9 +71,7 @@ class GitStateTest(unittest.TestCase):
             self.assertEqual(build_info.git_state(Path(".")), ("", False))
 
     def test_nonexistent_root_is_unknown(self):
-        self.assertEqual(
-            build_info.git_state(Path("no") / "such" / "dir"), ("", False)
-        )
+        self.assertEqual(build_info.git_state(Path("no") / "such" / "dir"), ("", False))
 
     def test_run_git_returns_none_when_git_is_absent(self):
         with mock.patch.object(build_info.subprocess, "run", side_effect=FileNotFoundError):
@@ -90,8 +90,12 @@ class WriteTest(unittest.TestCase):
         self.dest = Path(self._tmp.name) / "work"
 
     def test_write_creates_a_readable_stamp_and_returns_it(self):
-        info = {"version": "0.1.0", "commit": "deadbeefcafe", "dirty": False,
-                "built_at": "2026-08-26T00:00:00Z"}
+        info = {
+            "version": "0.1.0",
+            "commit": "deadbeefcafe",
+            "dirty": False,
+            "built_at": "2026-08-26T00:00:00Z",
+        }
         path, written = build_info.write(self.dest, info=info)
         self.assertEqual(path.name, build_info.BUILD_INFO_NAME)
         self.assertEqual(written, info)
@@ -129,9 +133,13 @@ class LoadTest(unittest.TestCase):
         return p
 
     def test_a_bundled_stamp_wins_over_live_git(self):
-        path = self._bundle(json.dumps({"version": "0.1.0", "commit": "bundled1234", "dirty": False}))
-        with mock.patch.object(build_info, "bundled_path", return_value=path), \
-             mock.patch.object(build_info, "collect") as collect:
+        path = self._bundle(
+            json.dumps({"version": "0.1.0", "commit": "bundled1234", "dirty": False})
+        )
+        with (
+            mock.patch.object(build_info, "bundled_path", return_value=path),
+            mock.patch.object(build_info, "collect") as collect,
+        ):
             info = build_info.load(refresh=True)
         collect.assert_not_called()
         self.assertEqual(info["commit"], "bundled1234")
@@ -140,22 +148,28 @@ class LoadTest(unittest.TestCase):
 
     def test_a_corrupt_stamp_falls_back_to_git(self):
         path = self._bundle("{ not json")
-        with mock.patch.object(build_info, "bundled_path", return_value=path), \
-             mock.patch.object(build_info, "collect", return_value={"commit": "live12345678"}):
+        with (
+            mock.patch.object(build_info, "bundled_path", return_value=path),
+            mock.patch.object(build_info, "collect", return_value={"commit": "live12345678"}),
+        ):
             info = build_info.load(refresh=True)
         self.assertEqual(info["commit"], "live12345678")
         self.assertEqual(info["origin"], "git")
 
     def test_no_bundle_and_no_git_is_unknown(self):
-        with mock.patch.object(build_info, "bundled_path", return_value=None), \
-             mock.patch.object(build_info, "collect", return_value={"commit": ""}):
+        with (
+            mock.patch.object(build_info, "bundled_path", return_value=None),
+            mock.patch.object(build_info, "collect", return_value={"commit": ""}),
+        ):
             info = build_info.load(refresh=True)
         self.assertEqual(info["origin"], "unknown")
         self.assertEqual(build_info.version_string(info), "0.1.0+unknown")
 
     def test_load_is_cached_and_returns_a_copy(self):
-        with mock.patch.object(build_info, "bundled_path", return_value=None), \
-             mock.patch.object(build_info, "collect", return_value={"commit": "a"}) as collect:
+        with (
+            mock.patch.object(build_info, "bundled_path", return_value=None),
+            mock.patch.object(build_info, "collect", return_value={"commit": "a"}) as collect,
+        ):
             first = build_info.load(refresh=True)
             first["commit"] = "mutated"
             second = build_info.load()
@@ -172,9 +186,11 @@ class McpHandshakeTest(unittest.TestCase):
     def test_initialize_reports_the_build_version(self):
         from gui import permission_mcp
 
-        with mock.patch.object(build_info, "_cached", None), \
-             mock.patch.object(build_info, "bundled_path", return_value=None), \
-             mock.patch.object(build_info, "collect", return_value={"commit": "abc123abc123"}):
+        with (
+            mock.patch.object(build_info, "_cached", None),
+            mock.patch.object(build_info, "bundled_path", return_value=None),
+            mock.patch.object(build_info, "collect", return_value={"commit": "abc123abc123"}),
+        ):
             result = permission_mcp.handle_initialize({})
         self.assertEqual(result["serverInfo"]["version"], "0.1.0+gabc123abc123")
 

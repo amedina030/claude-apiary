@@ -11,6 +11,7 @@ Usage:
     python report.py --grouped          # group by session only (no task breakdown)
     python report.py --by-agent         # per-agent-type token breakdown
 """
+
 import argparse
 import json
 import sys
@@ -31,8 +32,10 @@ def _read_jsonl(path):
         return []
     try:
         if path.stat().st_size > _MAX_LOG_BYTES:
-            print(f"Warning: {path.name} exceeds {_MAX_LOG_BYTES // (1024*1024)} MB — skipping to avoid OOM.",
-                  file=sys.stderr)
+            print(
+                f"Warning: {path.name} exceeds {_MAX_LOG_BYTES // (1024 * 1024)} MB — skipping to avoid OOM.",
+                file=sys.stderr,
+            )
             return []
     except OSError:
         return []
@@ -66,6 +69,7 @@ def entry_date(e):
 def short_session(session_id):
     try:
         from core.session import SessionId
+
         return SessionId(session_id).short
     except (ValueError, ImportError):
         return session_id[:8] if session_id else "unknown"
@@ -105,8 +109,12 @@ def _load_price_weights():
             config.get("price_weight_output", _DEFAULT_PRICE_WEIGHT_OUTPUT),
         )
     except Exception:
-        return (_DEFAULT_PRICE_WEIGHT_INPUT, _DEFAULT_PRICE_WEIGHT_CACHE,
-                _DEFAULT_PRICE_WEIGHT_CACHE_CREATION, _DEFAULT_PRICE_WEIGHT_OUTPUT)
+        return (
+            _DEFAULT_PRICE_WEIGHT_INPUT,
+            _DEFAULT_PRICE_WEIGHT_CACHE,
+            _DEFAULT_PRICE_WEIGHT_CACHE_CREATION,
+            _DEFAULT_PRICE_WEIGHT_OUTPUT,
+        )
 
 
 _price_weights_cache = None
@@ -206,7 +214,11 @@ def print_by_turn(entries, weighted=False):
             all_task_totals.append(task_total)
             t = task_entries[0]["timestamp"][11:19]
             user_turns = sorted(set(e.get("turn_number", task_num) for e in task_entries))
-            turns_label = f"turns {user_turns[0]}-{user_turns[-1]}" if len(user_turns) > 1 else f"turn {user_turns[0]}"
+            turns_label = (
+                f"turns {user_turns[0]}-{user_turns[-1]}"
+                if len(user_turns) > 1
+                else f"turn {user_turns[0]}"
+            )
             user_prompt = task_entries[0].get("user_message", "")
             print(f"  Task {task_num:<3}  {t}  {task_total:>10,} tokens  [{turns_label}]")
             if user_prompt:
@@ -245,7 +257,9 @@ def print_grouped(entries, weighted=False):
         first_ts = sess_entries[0]["timestamp"]
         d = first_ts[:10]
         t = first_ts[11:19]
-        print(f"Session {short_session(sid)}  {d} {t}  ({len(sess_entries)} calls, {sess_total:,} tokens)")
+        print(
+            f"Session {short_session(sid)}  {d} {t}  ({len(sess_entries)} calls, {sess_total:,} tokens)"
+        )
         print(f"  {'TIME':<8} {'TOOL':<7} {'DELTA':>10}  MESSAGE")
         print(f"  {'-' * 72}")
         for e in sess_entries:
@@ -286,7 +300,7 @@ def _agent_type(e):
         return at
     msg = e.get("assistant_message", "")
     if msg.startswith("[background] "):
-        return msg[len("[background] "):]
+        return msg[len("[background] ") :]
     return "unknown"
 
 
@@ -314,7 +328,9 @@ def print_by_agent(entries, weighted=False):
 
     print("-" * 76)
     all_deltas = [val(e) for e in agent_entries]
-    print(f"  {'TOTAL':<28} {len(agent_entries):>6} {sum(all_deltas):>12,} {median(all_deltas):>12,} {max(all_deltas):>12,}")
+    print(
+        f"  {'TOTAL':<28} {len(agent_entries):>6} {sum(all_deltas):>12,} {median(all_deltas):>12,} {max(all_deltas):>12,}"
+    )
     print()
 
     # Non-agent entries summary
@@ -354,7 +370,9 @@ def print_by_request(entries, weighted=False):
 
     print("-" * 90)
     all_deltas = [val(e) for e in entries]
-    print(f"  {'TOTAL':<38} {len(entries):>6} {sum(all_deltas):>14,} {median(all_deltas):>12,} {max(all_deltas):>12,}")
+    print(
+        f"  {'TOTAL':<38} {len(entries):>6} {sum(all_deltas):>14,} {median(all_deltas):>12,} {max(all_deltas):>12,}"
+    )
 
 
 def main():
@@ -362,12 +380,26 @@ def main():
     parser.add_argument("--date", help="Show only entries from this date (YYYY-MM-DD)")
     parser.add_argument("--since", help="Show entries from this date onwards (YYYY-MM-DD)")
     parser.add_argument("--flat", action="store_true", help="Flat list instead of session grouping")
-    parser.add_argument("--grouped", action="store_true", help="Group by session only (no task breakdown)")
-    parser.add_argument("--by-turn", action="store_true", help="Alias for default (session > task grouping)")
-    parser.add_argument("--by-agent", action="store_true", help="Show per-agent-type token breakdown")
-    parser.add_argument("--by-request", action="store_true", help="Group by request_id (sums multi-call chains like one runner run)")
+    parser.add_argument(
+        "--grouped", action="store_true", help="Group by session only (no task breakdown)"
+    )
+    parser.add_argument(
+        "--by-turn", action="store_true", help="Alias for default (session > task grouping)"
+    )
+    parser.add_argument(
+        "--by-agent", action="store_true", help="Show per-agent-type token breakdown"
+    )
+    parser.add_argument(
+        "--by-request",
+        action="store_true",
+        help="Group by request_id (sums multi-call chains like one runner run)",
+    )
     parser.add_argument("--all", action="store_true", help="Include zero-delta entries")
-    parser.add_argument("--weighted", action="store_true", help="Weight tokens by type: cache 0.1x, output 5x (relative to input)")
+    parser.add_argument(
+        "--weighted",
+        action="store_true",
+        help="Weight tokens by type: cache 0.1x, output 5x (relative to input)",
+    )
     args = parser.parse_args()
 
     entries = load_entries()

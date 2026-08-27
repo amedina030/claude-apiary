@@ -7,6 +7,7 @@ ever moved, and `auto_harden.branch_exists` promptly drifted: it never got
 the `refs/heads/` fix (ATK-006) that `executor.branch_exists` did. These
 tests pin the consolidated behaviour against a real repo.
 """
+
 import os
 import subprocess
 import tempfile
@@ -70,7 +71,8 @@ class GitLibRepoTest(unittest.TestCase):
         _run(self.repo, "add", "README.md")
         subprocess.run(
             ["git", "-C", str(self.repo), "commit", "-m", "Á → ünïcode subject"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         out = git_lib.git("log", "--format=%s", "-1", cwd=self.repo).stdout
         self.assertIn("ünïcode", out)
@@ -84,7 +86,8 @@ class TestRunBranchFromEnv(unittest.TestCase):
 
     def test_orchestrator_named_branch_wins(self):
         with mock.patch.dict(
-            os.environ, {git_lib.RUNNER_BRANCH_ENV: "runner/slug-abc"},
+            os.environ,
+            {git_lib.RUNNER_BRANCH_ENV: "runner/slug-abc"},
         ):
             self.assertEqual(git_lib.run_branch_from_env("abc"), "runner/slug-abc")
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for runner/target_repo.py."""
+
 import os
 import subprocess
 import tempfile
@@ -14,7 +15,8 @@ def _git_init(path: Path) -> None:
     """Initialize a bare-minimum git repo so resolve_target_repo accepts it."""
     subprocess.run(
         ["git", "init", "--quiet", str(path)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -55,7 +57,8 @@ class TestChooseTargetRepo(_EnvIsolation):
         intake = {"target_repo": "/from/intake"}
         with mock.patch.object(target_repo, "cfg", return_value="/from/config"):
             chosen = target_repo.choose_target_repo(
-                cli_override="/from/cli", intake=intake,
+                cli_override="/from/cli",
+                intake=intake,
             )
         self.assertEqual(chosen, Path("/from/cli"))
 
@@ -265,10 +268,12 @@ class TestArtifactPathHelpers(_EnvIsolation):
         `.runner-worktrees`, so prune scanned an empty directory forever
         (review runner Bug 4)."""
         from runner import detached_lib
+
         t = Path("/tmp/some-target").resolve()
         self.assertEqual(target_repo.worktrees_dir(t), t / ".runner-worktrees")
         self.assertEqual(
-            target_repo.worktrees_dir(t), detached_lib.worktrees_dir_for(t),
+            target_repo.worktrees_dir(t),
+            detached_lib.worktrees_dir_for(t),
         )
         self.assertNotEqual(
             target_repo.worktrees_dir(t).parent,

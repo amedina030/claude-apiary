@@ -1,4 +1,5 @@
 """Tests for compass.health — the facts behind ``apiary doctor compass``."""
+
 from __future__ import annotations
 
 import json
@@ -28,8 +29,11 @@ class HealthTests(unittest.TestCase):
 
     def add_observation(self, name: str) -> None:
         (self.observations / f"{name}.json").write_text(
-            json.dumps({"session_id": name, "captured_at": "2026-01-01T00:00:00Z",
-                        "observations": []}), encoding="utf-8")
+            json.dumps(
+                {"session_id": name, "captured_at": "2026-01-01T00:00:00Z", "observations": []}
+            ),
+            encoding="utf-8",
+        )
 
     def add_archived(self, week: str, name: str) -> None:
         folder = self.observations / "archive" / week
@@ -48,7 +52,8 @@ class HealthTests(unittest.TestCase):
         if arm is not None:
             payload["compass_arm"] = arm
         (self.state / "sessions" / f"identity-{name}.json").write_text(
-            json.dumps(payload), encoding="utf-8")
+            json.dumps(payload), encoding="utf-8"
+        )
 
     # --- collect ---------------------------------------------------------
 
@@ -100,9 +105,18 @@ class HealthTests(unittest.TestCase):
     def test_cached_evaluate_headline_is_surfaced(self):
         folder = self.compass / "evaluate"
         folder.mkdir(parents=True)
-        (folder / "last.json").write_text(json.dumps({
-            "headline": 0.83, "lift_over_majority": 0.04, "mode": "model",
-            "folds": 12, "computed_at": "2026-08-26T10:00:00+00:00"}), encoding="utf-8")
+        (folder / "last.json").write_text(
+            json.dumps(
+                {
+                    "headline": 0.83,
+                    "lift_over_majority": 0.04,
+                    "mode": "model",
+                    "folds": 12,
+                    "computed_at": "2026-08-26T10:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
         facts = health.collect(self.state)
         self.assertEqual(facts["last_evaluate"]["headline"], 0.83)
         note = " ".join(health.format_notes(facts))

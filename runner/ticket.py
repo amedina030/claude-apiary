@@ -21,6 +21,7 @@ The old module entry points (`runner.create_intake`, `runner.draft_ticket`,
 over these handlers, kept for one release so scripts and muscle memory don't
 break mid-flight.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -55,6 +56,7 @@ REQUIRED_SECTIONS = ["Goal", "Shape", "Behavior", "Boundaries", "Acceptance crit
 # Shared helpers
 # --------------------------------------------------------------------------- #
 
+
 def ticket_slug(title: str) -> str:
     """Filename slug for a backlog ticket (capped, empty allowed).
 
@@ -73,7 +75,9 @@ def read_note(note_id: str) -> str:
     """
     result = subprocess.run(
         [sys.executable, str(NOTES_SCRIPT), "get", str(note_id)],
-        capture_output=True, text=True, encoding="utf-8",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
     if result.returncode != 0:
         print(f"Note {note_id} not found", file=sys.stderr)
@@ -82,7 +86,7 @@ def read_note(note_id: str) -> str:
     lines = (result.stdout or "").splitlines()
     try:
         sep_index = lines.index("---")
-        content = "\n".join(lines[sep_index + 1:]).strip()
+        content = "\n".join(lines[sep_index + 1 :]).strip()
     except ValueError:
         content = (result.stdout or "").strip()
 
@@ -130,7 +134,7 @@ def _require_fields(args, description, *, parser=None) -> None:
     if not missing:
         return
     if parser is not None:
-        parser.error(f'the following arguments are required: {", ".join(missing)}')
+        parser.error(f"the following arguments are required: {', '.join(missing)}")
     print(f"Missing required fields: {', '.join(missing)}", file=sys.stderr)
     sys.exit(1)
 
@@ -165,6 +169,7 @@ def _base_record(args, description: str, source, record_id: str) -> dict:
 # --------------------------------------------------------------------------- #
 # Handoff-note parsing (was refine_to_intake)
 # --------------------------------------------------------------------------- #
+
 
 def parse_sections(text: str) -> dict:
     """Split a refiner handoff body into a {section_name: body_text} dict.
@@ -232,6 +237,7 @@ def map_to_intake(sections: dict) -> dict:
 # Subcommand handlers
 # --------------------------------------------------------------------------- #
 
+
 def cmd_draft(args, parser=None) -> int:
     """Write a backlog draft ticket at backlog/<slug>.json."""
     description, source = _seed_from_note(args)
@@ -239,8 +245,7 @@ def cmd_draft(args, parser=None) -> int:
 
     slug = ticket_slug(args.title)
     if not slug:
-        print("Error: title produces an empty slug (remove special characters)",
-              file=sys.stderr)
+        print("Error: title produces an empty slug (remove special characters)", file=sys.stderr)
         return 1
     file_path = BACKLOG_DIR / f"{slug}.json"
     if file_path.exists():
@@ -289,8 +294,10 @@ def cmd_promote(args, parser=None) -> int:
     required_keys = ["title", "problem", "description", "scope", "created_at"]
     missing_keys = [k for k in required_keys if k not in data]
     if missing_keys:
-        print(f"Error: backlog ticket is missing required fields: "
-              f"{', '.join(missing_keys)}", file=sys.stderr)
+        print(
+            f"Error: backlog ticket is missing required fields: {', '.join(missing_keys)}",
+            file=sys.stderr,
+        )
         return 1
 
     intake_id = data.get("id") or str(uuid_mod.uuid4())
@@ -390,6 +397,7 @@ def cmd_validate(args, parser=None) -> int:
 # Argument wiring — shared with the shim entry points
 # --------------------------------------------------------------------------- #
 
+
 def add_ticket_content_args(parser, *, explore_hints: bool) -> None:
     """The title/problem/description/scope block every creating command takes."""
     parser.add_argument("--title", help="Short title for the task")
@@ -397,13 +405,16 @@ def add_ticket_content_args(parser, *, explore_hints: bool) -> None:
     parser.add_argument("--description", help="Detailed description (min 20 chars)")
     parser.add_argument("--scope", help="What's in scope for this runner run")
     parser.add_argument("--context", default="", help="Additional context (optional)")
-    parser.add_argument("--from-todo", dest="from_todo",
-                        help="Scribe note ID to seed --description from")
+    parser.add_argument(
+        "--from-todo", dest="from_todo", help="Scribe note ID to seed --description from"
+    )
     if explore_hints:
         parser.add_argument(
-            "--explore-hints", dest="explore_hints", default="",
+            "--explore-hints",
+            dest="explore_hints",
+            default="",
             help="Comma-separated repo-relative paths the refiner should start "
-                 "with (optional; refiner can still branch out)",
+            "with (optional; refiner can still branch out)",
         )
 
 
@@ -415,14 +426,23 @@ def add_promote_args(parser) -> None:
 
 
 def add_from_note_args(parser) -> None:
-    parser.add_argument("--note", required=True,
-                        help="Scribe note ID containing the refiner handoff")
-    parser.add_argument("--title", required=True,
-                        help="Short title for the intake (refiner handoff has no title)")
-    parser.add_argument("--backlog", action="store_true",
-                        help="Write to backlog/<slug>.json instead of intake/<uuid>.json")
-    parser.add_argument("--explore-hints", dest="explore_hints", default="",
-                        help="Comma-separated repo-relative paths for the auto-refiner")
+    parser.add_argument(
+        "--note", required=True, help="Scribe note ID containing the refiner handoff"
+    )
+    parser.add_argument(
+        "--title", required=True, help="Short title for the intake (refiner handoff has no title)"
+    )
+    parser.add_argument(
+        "--backlog",
+        action="store_true",
+        help="Write to backlog/<slug>.json instead of intake/<uuid>.json",
+    )
+    parser.add_argument(
+        "--explore-hints",
+        dest="explore_hints",
+        default="",
+        help="Comma-separated repo-relative paths for the auto-refiner",
+    )
 
 
 def add_validate_args(parser) -> None:
@@ -439,8 +459,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_ticket_content_args(p_draft, explore_hints=False)
     p_draft.set_defaults(handler=cmd_draft)
 
-    p_intake = subs.add_parser(
-        "create-intake", help="Create a validated intake file directly")
+    p_intake = subs.add_parser("create-intake", help="Create a validated intake file directly")
     add_ticket_content_args(p_intake, explore_hints=True)
     p_intake.set_defaults(handler=cmd_create_intake)
 
@@ -449,7 +468,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_promote.set_defaults(handler=cmd_promote)
 
     p_note = subs.add_parser(
-        "from-note", help="Bridge a /refine handoff note into intake or backlog")
+        "from-note", help="Bridge a /refine handoff note into intake or backlog"
+    )
     add_from_note_args(p_note)
     p_note.set_defaults(handler=cmd_from_note)
 

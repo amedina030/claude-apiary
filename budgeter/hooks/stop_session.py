@@ -6,6 +6,7 @@ The last tool in a session has no subsequent PRE hook to capture its cost.
 This hook reads the final transcript, computes the delta against the last
 PRE's baseline, and logs it before cleaning up.
 """
+
 import sys
 from pathlib import Path
 
@@ -46,17 +47,28 @@ def _log_final_call(payload, session_id):
 
     if session_id and flags.is_enabled("budgeter-log"):
         baseline = logger.load_baseline(session_id)
-        if (logger.baseline_comparable(baseline) and baseline.get("prev_tool_name")
-                and baseline.get("prev_tool_name") != "Agent"):
+        if (
+            logger.baseline_comparable(baseline)
+            and baseline.get("prev_tool_name")
+            and baseline.get("prev_tool_name") != "Agent"
+        ):
             session_entries = logger.read_session_jsonl(transcript_path)
             tokens_now = logger.get_cumulative_tokens(session_entries)
-            last_input, last_cache, last_create, last_output = logger.get_last_call_tokens(session_entries)
+            last_input, last_cache, last_create, last_output = logger.get_last_call_tokens(
+                session_entries
+            )
             # Shrunk total = compaction; the PRE hook writes the marker, the
             # Stop hook must not log a phantom entry against it.
             if tokens_now > baseline["tokens"]:
                 entry = logger.build_cost_entry(
-                    baseline, session_id, transcript_path, tokens_now,
-                    last_input, last_cache, last_create, last_output,
+                    baseline,
+                    session_id,
+                    transcript_path,
+                    tokens_now,
+                    last_input,
+                    last_cache,
+                    last_create,
+                    last_output,
                 )
                 logger.append_entry(entry)
 

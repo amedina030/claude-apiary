@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for runner/abort.py (T-2026-128)."""
+
 import tempfile
 import time
 import unittest
@@ -56,6 +57,7 @@ class ArchiveArtifactsTests(unittest.TestCase):
         `runner/<dir>/<uuid>.json` inside the checkout — the pre-migration
         location — so every abort archived nothing."""
         from runner.target_repo import artifacts_root
+
         self.assertEqual(Path(self._orig_root), artifacts_root())
         self.assertNotEqual(
             Path(self._orig_root).resolve(),
@@ -63,7 +65,8 @@ class ArchiveArtifactsTests(unittest.TestCase):
             "artifacts must not be read out of the source tree",
         )
         self.assertEqual(
-            Path(abort_mod.CRASHES_DIR).name, "crashes",
+            Path(abort_mod.CRASHES_DIR).name,
+            "crashes",
         )
 
 
@@ -156,18 +159,23 @@ class AbortAllTests(unittest.TestCase):
 
 class BuildSummaryTests(unittest.TestCase):
     def test_summary_with_lock_data(self):
-        lock = {"stage": "plan", "step_number": 2, "pid": 1234,
-                "started_at": time.time() - 600, "worktree_path": "/tmp/wt"}
-        s = abort_mod._build_summary("uuid-1", lock, Path("/tmp/crashes/uuid-1"),
-                                      ["runner/slug-uuid-1"], True)
+        lock = {
+            "stage": "plan",
+            "step_number": 2,
+            "pid": 1234,
+            "started_at": time.time() - 600,
+            "worktree_path": "/tmp/wt",
+        }
+        s = abort_mod._build_summary(
+            "uuid-1", lock, Path("/tmp/crashes/uuid-1"), ["runner/slug-uuid-1"], True
+        )
         self.assertIn("uuid-1", s)
         self.assertIn("plan", s)
         self.assertIn("removed", s)
         self.assertIn("runner/slug-uuid-1", s)
 
     def test_summary_without_lock_data(self):
-        s = abort_mod._build_summary("uuid-2", None, Path("/tmp/crashes/uuid-2"),
-                                      [], True)
+        s = abort_mod._build_summary("uuid-2", None, Path("/tmp/crashes/uuid-2"), [], True)
         self.assertIn("corrupt or missing", s)
 
 

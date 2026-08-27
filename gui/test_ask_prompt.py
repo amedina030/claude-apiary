@@ -35,8 +35,14 @@ ASK_RECORD = {
                             "header": "Banner test",
                             "multiSelect": False,
                             "options": [
-                                {"label": "Renders perfectly", "description": "All options listed, no toast."},
-                                {"label": "Card shows, no highlight", "description": "Border missing."},
+                                {
+                                    "label": "Renders perfectly",
+                                    "description": "All options listed, no toast.",
+                                },
+                                {
+                                    "label": "Card shows, no highlight",
+                                    "description": "Border missing.",
+                                },
                                 {"label": "Truncated", "description": "Some options cut off."},
                                 {"label": "Red fallback toast", "description": "The old failure."},
                             ],
@@ -68,7 +74,10 @@ RESULT_RECORD = {
 # Ordinary assistant prose — must never look like a prompt.
 PLAIN_RECORD = {
     "type": "assistant",
-    "message": {"role": "assistant", "content": [{"type": "text", "text": "Here are 1. and 2. items"}]},
+    "message": {
+        "role": "assistant",
+        "content": [{"type": "text", "text": "Here are 1. and 2. items"}],
+    },
 }
 
 

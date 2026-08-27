@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for runner/run_lock.py (T-2026-128)."""
+
 import json
 import os
 import tempfile

@@ -20,6 +20,7 @@ Failure is always soft. Any subprocess error, timeout, or unparseable reply
 returns empty lists and the learning is still written — an untagged learning
 is recoverable (``retrotag`` exists for exactly that), a lost one is not.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,7 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 #: Set to 1/true/yes/on to infer tags for every `learn` in this session.
-INFER_ENV_VAR = 'APIARY_SCRIBE_INFER'
+INFER_ENV_VAR = "APIARY_SCRIBE_INFER"
 
 #: Budget for a single inference during `learn`/`supersede`. Short: the user
 #: is waiting, and an untagged learning is a perfectly good outcome.
@@ -39,13 +40,13 @@ DEFAULT_TIMEOUT = 10
 #: Budget per learning during `retrotag`, where nobody is waiting on a prompt.
 RETROTAG_TIMEOUT = 60
 
-_TRUTHY = {'1', 'true', 'yes', 'on'}
+_TRUTHY = {"1", "true", "yes", "on"}
 
 
 def env_opt_in(environ=None) -> bool:
     """True when the session-wide opt-in env var is set to a truthy value."""
     env = os.environ if environ is None else environ
-    return (env.get(INFER_ENV_VAR) or '').strip().lower() in _TRUTHY
+    return (env.get(INFER_ENV_VAR) or "").strip().lower() in _TRUTHY
 
 
 def inference_enabled(args=None, *, environ=None) -> bool:
@@ -55,9 +56,9 @@ def inference_enabled(args=None, *, environ=None) -> bool:
     Explicit ``--tags``/``--area`` make the question moot; the caller checks
     that first, because supplied tags are never overridden by inferred ones.
     """
-    if getattr(args, 'no_infer', False):
+    if getattr(args, "no_infer", False):
         return False
-    if getattr(args, 'infer', False):
+    if getattr(args, "infer", False):
         return True
     return env_opt_in(environ)
 
@@ -72,7 +73,7 @@ def resolve(args, content: str, store, tags: list, areas: list) -> tuple:
     if tags or areas or not inference_enabled(args):
         return tags, areas
     inferred = infer_tags_areas(content, store)
-    return (inferred.get('tags') or [], inferred.get('areas') or [])
+    return (inferred.get("tags") or [], inferred.get("areas") or [])
 
 
 def build_prompt(content: str, vocab: list) -> str:
@@ -82,13 +83,13 @@ def build_prompt(content: str, vocab: list) -> str:
     batch retrotag and a live learn produce the same shape of tag. (They were
     two near-identical copies before, in notes.py and a scripts/ one-shot.)
     """
-    vocab_line = ', '.join(vocab) if vocab else '(none yet)'
+    vocab_line = ", ".join(vocab) if vocab else "(none yet)"
     return (
         "You are tagging a project learning so it can be auto-surfaced when I later\n"
         "edit related files. Respond with a JSON object only — no prose, no markdown fence.\n\n"
         f"Existing tag vocabulary: {vocab_line}\n\n"
         'Return {"tags": [...], "areas": [...]} where:\n'
-        '- tags: 1-3 short lowercase tokens (prefer existing vocabulary; invent only if needed).\n'
+        "- tags: 1-3 short lowercase tokens (prefer existing vocabulary; invent only if needed).\n"
         '- areas: glob patterns matching file paths the learning applies to (e.g. "gui/**",\n'
         '  "scribe/notes.py", "core/hooks/*.py"). Empty list if not path-specific.\n\n'
         f"Learning content:\n{content}"
@@ -104,13 +105,13 @@ def parse_response(stdout: str) -> "dict | None":
     """
     try:
         envelope = json.loads(stdout)
-        inner = envelope.get('result', stdout) if isinstance(envelope, dict) else stdout
+        inner = envelope.get("result", stdout) if isinstance(envelope, dict) else stdout
     except json.JSONDecodeError:
         inner = stdout
     if not isinstance(inner, str):
         return None
     text = inner.strip()
-    fence = re.search(r'```(?:json)?\s*\n([\s\S]*?)```', text)
+    fence = re.search(r"```(?:json)?\s*\n([\s\S]*?)```", text)
     if fence:
         text = fence.group(1).strip()
     try:
@@ -123,8 +124,8 @@ def parse_response(stdout: str) -> "dict | None":
 def normalize(parsed: dict) -> dict:
     """Coerce a parsed reply to ``{'tags': [str], 'areas': [str]}``, dropping blanks."""
     return {
-        'tags': [str(t).strip() for t in (parsed.get('tags') or []) if str(t).strip()],
-        'areas': [str(a).strip() for a in (parsed.get('areas') or []) if str(a).strip()],
+        "tags": [str(t).strip() for t in (parsed.get("tags") or []) if str(t).strip()],
+        "areas": [str(a).strip() for a in (parsed.get("areas") or []) if str(a).strip()],
     }
 
 
@@ -135,22 +136,31 @@ def collect_vocab(store) -> list:
     inventing a synonym for a tag that already exists.
     """
     try:
-        return sorted({
-            t.strip() for entry in store.list_learnings()
-            for t in (entry.get('tags') or [])
-            if isinstance(t, str) and t.strip()
-        })
+        return sorted(
+            {
+                t.strip()
+                for entry in store.list_learnings()
+                for t in (entry.get("tags") or [])
+                if isinstance(t, str) and t.strip()
+            }
+        )
     except Exception:
         return []
 
 
 def _warn(message: str) -> None:
-    print(f'warning: {message}', file=sys.stderr)
+    print(f"warning: {message}", file=sys.stderr)
 
 
-def infer_tags_areas(content: str, store, *, model: "str | None" = None,
-                     timeout: int = DEFAULT_TIMEOUT, vocab: "list | None" = None,
-                     warn=_warn) -> dict:
+def infer_tags_areas(
+    content: str,
+    store,
+    *,
+    model: "str | None" = None,
+    timeout: int = DEFAULT_TIMEOUT,
+    vocab: "list | None" = None,
+    warn=_warn,
+) -> dict:
     """Ask a model for tags and areas. Returns ``{}`` on any failure.
 
     ``runner.claude_subprocess`` is imported lazily: it pulls in the runner
@@ -160,16 +170,16 @@ def infer_tags_areas(content: str, store, *, model: "str | None" = None,
     try:
         from runner.claude_subprocess import run_claude
     except Exception as e:  # runner missing or broken — not worth failing a write
-        warn(f'tag/area inference unavailable ({e})')
+        warn(f"tag/area inference unavailable ({e})")
         return {}
 
     prompt = build_prompt(content, collect_vocab(store) if vocab is None else vocab)
     rc, stdout, stderr = run_claude(prompt, timeout=timeout, model=model)
     if rc != 0 or not stdout.strip():
-        warn(f'tag/area inference failed ({stderr[:200] if stderr else "empty output"})')
+        warn(f"tag/area inference failed ({stderr[:200] if stderr else 'empty output'})")
         return {}
     parsed = parse_response(stdout)
     if parsed is None:
-        warn('tag/area inference returned unparseable JSON')
+        warn("tag/area inference returned unparseable JSON")
         return {}
     return normalize(parsed)

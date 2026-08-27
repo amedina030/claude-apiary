@@ -163,11 +163,13 @@ class Session:
         self._on_toast = lambda text, kind="": on_toast(text, kind, sid)
         self._on_notes = lambda notes, warnings: on_notes(notes, warnings, sid)
         self._on_agents = lambda agents: on_agents(agents, sid)
+
         # Transcript-sourced AskUserQuestion banner. The watcher reads the
         # structured tool_use/tool_result records (no xterm scraping), and these
         # callbacks route the pending prompt / its resolution to the active tab.
         def _noop(*_a, **_k):
             return None
+
         _push_ask = on_ask_prompt or _noop
         _push_ask_resolved = on_ask_prompt_resolved or _noop
         self.ask_watcher = AskPromptWatcher(
@@ -286,8 +288,10 @@ class Session:
         if mcp_on:
             cfg_path = write_mcp_config()
             extra += [
-                "--mcp-config", str(cfg_path),
-                "--permission-prompt-tool", permission_tool_arg(),
+                "--mcp-config",
+                str(cfg_path),
+                "--permission-prompt-tool",
+                permission_tool_arg(),
             ]
         argv = [self._command] + extra + self._args
         spawn_env = os.environ.copy()

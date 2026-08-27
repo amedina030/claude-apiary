@@ -8,6 +8,7 @@ The module imports cleanly on non-Windows hosts. All OS-specific calls
 happen inside ``WindowsTaskScheduler`` methods, which cron_health only
 instantiates after a platform check.
 """
+
 from __future__ import annotations
 
 import csv
@@ -34,12 +35,19 @@ class WindowsTaskScheduler(SchedulerBackend):
 
     def list_entries(self, prefix: str) -> list[ObservedEntry]:
         """Parse ``schtasks /query /fo CSV /v`` output, filtered to ``prefix``."""
-        result = self._run([
-            self._schtasks, "/query", "/fo", "CSV", "/v",
-        ])
+        result = self._run(
+            [
+                self._schtasks,
+                "/query",
+                "/fo",
+                "CSV",
+                "/v",
+            ]
+        )
         if result.returncode != 0:
             raise SchedulerError(
-                "schtasks /query failed", stderr=result.stderr,
+                "schtasks /query failed",
+                stderr=result.stderr,
             )
         rows = _parse_schtasks_csv(result.stdout)
         entries: list[ObservedEntry] = []
@@ -47,7 +55,7 @@ class WindowsTaskScheduler(SchedulerBackend):
             name = row.get("TaskName", "")
             if not name.startswith(prefix):
                 continue
-            entry_id = name[len(prefix):]
+            entry_id = name[len(prefix) :]
             if not entry_id:
                 # Just the prefix folder itself — skip.
                 continue
@@ -58,15 +66,23 @@ class WindowsTaskScheduler(SchedulerBackend):
             raw_cwd = (row.get("Start In", "") or "").strip()
             cwd = "" if raw_cwd.upper() == "N/A" else raw_cwd
             schedule = _parse_schedule(row)
-            entries.append(ObservedEntry(
-                entry_id=entry_id, command=command,
-                cwd=cwd, schedule=schedule,
-            ))
+            entries.append(
+                ObservedEntry(
+                    entry_id=entry_id,
+                    command=command,
+                    cwd=cwd,
+                    schedule=schedule,
+                )
+            )
         return entries
 
     def create_entry(
-        self, prefix: str, entry_id: str, command: list[str],
-        cwd: str, schedule: dict,
+        self,
+        prefix: str,
+        entry_id: str,
+        command: list[str],
+        cwd: str,
+        schedule: dict,
     ) -> None:
         full_name = prefix + entry_id
         # Build an XML task definition and pass it via /Create /XML.
@@ -77,10 +93,17 @@ class WindowsTaskScheduler(SchedulerBackend):
         xml_body = _build_task_xml(command, cwd, schedule)
         xml_file = _write_xml_utf16(xml_body)
         try:
-            result = self._run([
-                self._schtasks, "/Create", "/TN", full_name,
-                "/XML", str(xml_file), "/F",
-            ])
+            result = self._run(
+                [
+                    self._schtasks,
+                    "/Create",
+                    "/TN",
+                    full_name,
+                    "/XML",
+                    str(xml_file),
+                    "/F",
+                ]
+            )
         finally:
             try:
                 xml_file.unlink()
@@ -94,9 +117,15 @@ class WindowsTaskScheduler(SchedulerBackend):
 
     def delete_entry(self, prefix: str, entry_id: str) -> None:
         full_name = prefix + entry_id
-        result = self._run([
-            self._schtasks, "/Delete", "/tn", full_name, "/f",
-        ])
+        result = self._run(
+            [
+                self._schtasks,
+                "/Delete",
+                "/tn",
+                full_name,
+                "/f",
+            ]
+        )
         if result.returncode != 0:
             raise SchedulerError(
                 f"schtasks /Delete failed for {full_name}",
@@ -106,7 +135,10 @@ class WindowsTaskScheduler(SchedulerBackend):
     def _run(self, cmd: list[str]) -> subprocess.CompletedProcess:
         # Seam for tests to substitute subprocess behavior.
         return subprocess.run(
-            cmd, capture_output=True, text=True, encoding="utf-8",
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         )
 
 
@@ -161,10 +193,7 @@ def _build_task_xml(command: list[str], cwd: str, schedule: dict) -> str:
     start_time = schedule.get("time") or "00:00"
     start_boundary = f"2026-01-01T{start_time}:00"
     work_dir = xml_escape(cwd) if cwd else ""
-    work_dir_xml = (
-        f"      <WorkingDirectory>{work_dir}</WorkingDirectory>\n"
-        if work_dir else ""
-    )
+    work_dir_xml = f"      <WorkingDirectory>{work_dir}</WorkingDirectory>\n" if work_dir else ""
     return (
         '<?xml version="1.0" encoding="UTF-16"?>\n'
         '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n'
@@ -175,7 +204,7 @@ def _build_task_xml(command: list[str], cwd: str, schedule: dict) -> str:
         "      <ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>\n"
         "    </CalendarTrigger>\n"
         "  </Triggers>\n"
-        '  <Principals>\n'
+        "  <Principals>\n"
         '    <Principal id="Author">\n'
         "      <LogonType>InteractiveToken</LogonType>\n"
         "      <RunLevel>LeastPrivilege</RunLevel>\n"
@@ -225,6 +254,7 @@ def _write_xml_utf16(body: str) -> Path:
     path = Path(name)
     # Close fd before opening via Path to avoid double-open on Windows.
     import os  # local import so module-level imports stay lean
+
     os.close(fd)
     path.write_text(body, encoding="utf-16")
     return path
@@ -283,5 +313,3 @@ def _canonical_time(start_time: str) -> str:
     elif ampm == "PM" and hour != 12:
         hour += 12
     return f"{hour:02d}:{minute:02d}"
-
-

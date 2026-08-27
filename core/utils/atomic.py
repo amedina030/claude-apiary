@@ -17,6 +17,7 @@ This is the one copy. Phase 3.2 folded in the last hand-rolled
 ``scribe/store.py``, ``runner/executor.py`` and ``gui/tabs_state.py`` — so
 there is no eighth. The read half lives next door in ``core.utils.jsonio``.
 """
+
 from __future__ import annotations
 
 import json
@@ -72,7 +73,9 @@ def write_text_atomic(path: Path | str, text: str, *, encoding: str = "utf-8") -
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(
-        dir=str(target.parent), prefix=target.name + ".", suffix=".tmp",
+        dir=str(target.parent),
+        prefix=target.name + ".",
+        suffix=".tmp",
     )
     try:
         with os.fdopen(fd, "w", encoding=encoding) as handle:
@@ -88,9 +91,14 @@ def write_text_atomic(path: Path | str, text: str, *, encoding: str = "utf-8") -
         raise
 
 
-def write_json_atomic(path: Path | str, data, *, indent: int | None = None,
-                      sort_keys: bool = False,
-                      trailing_newline: bool = False) -> None:
+def write_json_atomic(
+    path: Path | str,
+    data,
+    *,
+    indent: int | None = None,
+    sort_keys: bool = False,
+    trailing_newline: bool = False,
+) -> None:
     """Serialize *data* as JSON and write it to *path* atomically."""
     text = json.dumps(data, indent=indent, sort_keys=sort_keys)
     if trailing_newline:

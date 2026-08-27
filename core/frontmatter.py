@@ -65,6 +65,7 @@ PreToolUse hot path and must not crash on a hand-edited ``.md``. Pass
 ``strict=True`` (researcher, captures, context rules) to get
 :class:`FrontmatterError` instead.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -86,8 +87,24 @@ _INDENT = "  "
 
 #: Characters that force quoting when they *start* a scalar.
 _LEADING_SPECIALS = (
-    "-", "?", ":", "[", "]", "{", "}", "&", "*", "!", "|", ">", "'", '"',
-    "%", "@", "`", "#",
+    "-",
+    "?",
+    ":",
+    "[",
+    "]",
+    "{",
+    "}",
+    "&",
+    "*",
+    "!",
+    "|",
+    ">",
+    "'",
+    '"',
+    "%",
+    "@",
+    "`",
+    "#",
 )
 
 
@@ -108,6 +125,7 @@ class FrontmatterError(ValueError):
 # --------------------------------------------------------------------------- #
 # Scalar reading
 # --------------------------------------------------------------------------- #
+
 
 def _strip_comment(text: str) -> str:
     """Drop a trailing ``#`` comment from an *unquoted* scalar.
@@ -177,7 +195,7 @@ def _parse_scalar(text: str) -> tuple[str, bool]:
         quote = text[0]
         end = _closing_quote(text, quote)
         if end != -1:
-            rest = text[end + 1:].strip()
+            rest = text[end + 1 :].strip()
             if rest == "" or rest.startswith("#"):
                 body = text[1:end]
                 if quote == '"':
@@ -239,7 +257,7 @@ def _split_flow_items(inner: str, commas: list[int], offset: int) -> list[str]:
     items: list[str] = []
     start = 0
     for pos in commas:
-        items.append(inner[start:pos - offset])
+        items.append(inner[start : pos - offset])
         start = pos - offset + 1
     items.append(inner[start:])
     return items
@@ -250,7 +268,7 @@ def _parse_value(text: str, line: int) -> Any:
     if text.startswith("["):
         end, commas = _scan_flow(text, 1)
         if end != -1:
-            rest = text[end + 1:].strip()
+            rest = text[end + 1 :].strip()
             if rest == "" or rest.startswith("#"):
                 inner = text[1:end]
                 if not inner.strip():
@@ -270,6 +288,7 @@ def _parse_value(text: str, line: int) -> Any:
 # --------------------------------------------------------------------------- #
 # Document reading
 # --------------------------------------------------------------------------- #
+
 
 def _tokenize(text: str) -> list[tuple[int, int, str]]:
     """Return ``(line_number, indent_column, stripped_content)`` per real line.
@@ -291,9 +310,7 @@ def _is_item(content: str) -> bool:
     return content.startswith("- ") or content == "-"
 
 
-def _parse_list(
-    tokens: list[tuple[int, int, str]], pos: int, indent: int
-) -> tuple[list[str], int]:
+def _parse_list(tokens: list[tuple[int, int, str]], pos: int, indent: int) -> tuple[list[str], int]:
     """Consume block-list items at column *indent* or deeper.
 
     Ragged indentation inside one list is accepted (the previous reader
@@ -380,7 +397,7 @@ def split(text: str) -> tuple[str, str] | None:
         return None
     for i in range(1, len(lines)):
         if lines[i].rstrip() == FENCE:
-            return "".join(lines[1:i]), "".join(lines[i + 1:])
+            return "".join(lines[1:i]), "".join(lines[i + 1 :])
     return None
 
 
@@ -396,9 +413,7 @@ def parse(text: str, *, strict: bool = False) -> tuple[dict[str, Any], str]:
     parts = split(text)
     if parts is None:
         if strict:
-            raise FrontmatterError(
-                "missing opening or closing '---' frontmatter fence"
-            )
+            raise FrontmatterError("missing opening or closing '---' frontmatter fence")
         return {}, text
     fm_text, body = parts
     try:
@@ -413,6 +428,7 @@ def parse(text: str, *, strict: bool = False) -> tuple[dict[str, Any], str]:
 # --------------------------------------------------------------------------- #
 # Writing
 # --------------------------------------------------------------------------- #
+
 
 def _needs_quoting(value: str, *, in_flow: bool = False) -> bool:
     if value == "":
@@ -445,15 +461,18 @@ def _dump_scalar(value: Any, *, in_flow: bool = False) -> str:
         return "true" if value else "false"
     text = str(value)
     if _needs_quoting(text, in_flow=in_flow):
-        escaped = (text.replace("\\", "\\\\").replace('"', '\\"')
-                   .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t"))
+        escaped = (
+            text.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+        )
         return f'"{escaped}"'
     return text
 
 
-def _dump_into(
-    data: dict[str, Any], level: int, lines: list[str], list_style: str
-) -> None:
+def _dump_into(data: dict[str, Any], level: int, lines: list[str], list_style: str) -> None:
     pad = _INDENT * level
     for key, value in data.items():
         if isinstance(value, dict):

@@ -4,6 +4,7 @@ Hook registration utilities for claude-apiary tools.
 Used by ``core/install.py`` to install/update hooks in Claude Code
 settings.json files and by ``core/uninstall.py`` to take them back out.
 """
+
 import json
 import os
 import re
@@ -37,6 +38,7 @@ def resolve_python() -> Path:
         return Path(override)
     return Path(sys.executable)
 
+
 # The checkout name that appeared in the absolute paths the retired global
 # installer wrote. Historical only, and NOT ownership on its own — see
 # _LEGACY_HOOK_DIRS. Callers decide what is apiary's through is_apiary_entry().
@@ -58,8 +60,8 @@ _MARKER_TOKEN = APIARY_HOOK_MARKER.strip()
 # Launcher shapes written before the marker existed. Each names a file only an
 # apiary install ever wrote, so they identify an entry on their own.
 _LEGACY_LAUNCHERS: tuple[str, ...] = (
-    "apiary_launch.py",              # retired global $HOME/.claude launcher
-    ".claude/apiary/launch.py",      # per-repo launcher, pre-marker installs
+    "apiary_launch.py",  # retired global $HOME/.claude launcher
+    ".claude/apiary/launch.py",  # per-repo launcher, pre-marker installs
     ".claude\\\\apiary\\\\launch.py",  # ditto, hand-edited Windows spelling
 )
 
@@ -70,10 +72,14 @@ _LEGACY_LAUNCHERS: tuple[str, ...] = (
 # how a user hook running `scripts/runner/lint.py` got deleted on every
 # install (Bug 8); nothing here matches a command that lacks both.
 _LEGACY_HOOK_DIRS: tuple[str, ...] = (
-    "/budgeter/hooks/", "\\\\budgeter\\\\hooks\\\\",
-    "/core/hooks/", "\\\\core\\\\hooks\\\\",
-    "/docs/hooks/", "\\\\docs\\\\hooks\\\\",
-    "/scribe/hooks/", "\\\\scribe\\\\hooks\\\\",
+    "/budgeter/hooks/",
+    "\\\\budgeter\\\\hooks\\\\",
+    "/core/hooks/",
+    "\\\\core\\\\hooks\\\\",
+    "/docs/hooks/",
+    "\\\\docs\\\\hooks\\\\",
+    "/scribe/hooks/",
+    "\\\\scribe\\\\hooks\\\\",
 )
 
 
@@ -100,7 +106,7 @@ def is_apiary_entry(entry: Any) -> bool:
 def to_bash_path(p: Path) -> str:
     """Convert a Windows path to bash-compatible form (e.g. D:/foo -> /d/foo)."""
     s = p.as_posix()
-    return re.sub(r'^([A-Za-z]):', lambda m: '/' + m.group(1).lower(), s)
+    return re.sub(r"^([A-Za-z]):", lambda m: "/" + m.group(1).lower(), s)
 
 
 def hook_cmd(
@@ -140,7 +146,7 @@ def hook_cmd(
     for arg in args:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", arg or ""):
             raise ValueError(f"hook_cmd arg must be a plain token, got {arg!r}")
-    suffix = ("".join(f" {a}" for a in args))
+    suffix = "".join(f" {a}" for a in args)
     if repo_root is not None:
         if not per_repo_launcher:
             # The third mode (`python "$HOME/.claude/apiary_launch.py" <rel>`)
@@ -160,7 +166,10 @@ def hook_cmd(
         # always valid on the machine that wrote it. The script path stays
         # portable via $CLAUDE_PROJECT_DIR.
         exe = to_bash_path(python_exe or resolve_python())
-        return f'"{exe}" "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" {rel}{suffix}' + APIARY_HOOK_MARKER
+        return (
+            f'"{exe}" "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" {rel}{suffix}'
+            + APIARY_HOOK_MARKER
+        )
     if per_repo_launcher:
         raise ValueError("per_repo_launcher=True requires repo_root")
     exe = python_exe or resolve_python()
@@ -183,8 +192,12 @@ def save_settings(path: Path, settings: Dict[str, Any]) -> None:
     write_json_atomic(path, settings, indent=2)
 
 
-def register_hooks(settings_path: Path, new_hooks: Dict[str, List],
-                   marker: str = APIARY_HOOK_MARKER, also_strip: List[str] = None) -> None:
+def register_hooks(
+    settings_path: Path,
+    new_hooks: Dict[str, List],
+    marker: str = APIARY_HOOK_MARKER,
+    also_strip: List[str] = None,
+) -> None:
     """
     Merge new_hooks into settings_path, replacing any entries that
     ``is_apiary_entry()`` recognizes as ours (or that contain *marker* / any
@@ -203,9 +216,9 @@ def register_hooks(settings_path: Path, new_hooks: Dict[str, List],
     for event, entries in new_hooks.items():
         existing = merged.get(event, [])
         cleaned = [
-            h for h in existing
-            if not any(m in json.dumps(h) for m in strip)
-            and not is_apiary_entry(h)
+            h
+            for h in existing
+            if not any(m in json.dumps(h) for m in strip) and not is_apiary_entry(h)
         ]
         merged[event] = cleaned + entries
 

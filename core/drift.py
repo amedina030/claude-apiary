@@ -11,6 +11,7 @@ under that same lock rather than queueing it for a separate consumer.
 See ``docs/architecture/per-repo-install.md`` for the verify, drift
 handling and copy-detection contracts.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -42,6 +43,7 @@ class DriftReport:
     - ``"not_bootstrapped"`` — pin files don't exist at this repo;
       apiary install was never run here.
     """
+
     action: str
     message: str = ""
     old_uid: int | None = None
@@ -80,7 +82,7 @@ def check_and_handle(repo_root: Path) -> DriftReport:
         return DriftReport(
             action="skip",
             message=f"main-apiary-pointer missing at {state.main_apiary_pointer_path(repo_root)}; "
-                    "running as vanilla session.",
+            "running as vanilla session.",
         )
 
     apiary_path = Path(main_p.get("main_apiary_path", ""))
@@ -104,28 +106,35 @@ def _verify_main_apiary(apiary_path: Path) -> str | None:
     """Returns a skip message if main-apiary is unreachable, or None if
     everything checks out."""
     if not apiary_path or not apiary_path.is_dir():
-        return (f"[apiary] main checkout not found at {apiary_path}; "
-                "running as vanilla session.")
+        return f"[apiary] main checkout not found at {apiary_path}; running as vanilla session."
     # Main-apiary must itself be bootstrapped (have its own self-pointer).
     main_self_path = state.self_pointer_path(apiary_path)
     if not main_self_path.is_file():
-        return (f"[apiary] {apiary_path} is not a valid main-apiary checkout "
-                f"(no {main_self_path.name}); running as vanilla session.")
+        return (
+            f"[apiary] {apiary_path} is not a valid main-apiary checkout "
+            f"(no {main_self_path.name}); running as vanilla session."
+        )
     main_self = state.read_self_pointer(apiary_path)
     if main_self is None:
-        return (f"[apiary] {apiary_path}/.claude/apiary/self-pointer.json malformed; "
-                "running as vanilla session.")
+        return (
+            f"[apiary] {apiary_path}/.claude/apiary/self-pointer.json malformed; "
+            "running as vanilla session."
+        )
     main_recorded = Path(main_self.get("real_path", "")).resolve()
     main_actual = apiary_path.resolve()
     if main_recorded != main_actual:
-        return (f"[apiary] main-apiary self-pointer out of sync: "
-                f"recorded={main_recorded} actual={main_actual}. "
-                f"Run `apiary doctor pointers` from {main_actual}.")
+        return (
+            f"[apiary] main-apiary self-pointer out of sync: "
+            f"recorded={main_recorded} actual={main_actual}. "
+            f"Run `apiary doctor pointers` from {main_actual}."
+        )
     return None
 
 
 def _handle_drift(
-    repo_root: Path, apiary_path: Path, self_p: dict,
+    repo_root: Path,
+    apiary_path: Path,
+    self_p: dict,
 ) -> DriftReport:
     """Classify move vs copy and apply the registry update inline.
 
@@ -168,7 +177,9 @@ def _handle_drift(
             }
             state._save_registry(apiary_path, registry)
             return DriftReport(
-                action="copy", old_uid=uid, new_uid=new_uid,
+                action="copy",
+                old_uid=uid,
+                new_uid=new_uid,
                 message=f"detected copy of repo uid={uid}; registered as new uid={new_uid}",
             )
 
@@ -183,16 +194,22 @@ def _handle_drift(
             # registry alone and say so — `apiary doctor registry` and
             # a re-run of `apiary install` are the repair paths.
             return DriftReport(
-                action="move", old_uid=uid, new_uid=uid,
-                message=(f"detected move, but registry has no entry for uid={uid}; "
-                         f"run `apiary install --target \"{repo_root}\"` to re-register"),
+                action="move",
+                old_uid=uid,
+                new_uid=uid,
+                message=(
+                    f"detected move, but registry has no entry for uid={uid}; "
+                    f'run `apiary install --target "{repo_root}"` to re-register'
+                ),
             )
         entry["real_path"] = str(repo_root)
         entry["last_used"] = now
         registry[str(uid)] = entry
         state._save_registry(apiary_path, registry)
         return DriftReport(
-            action="move", old_uid=uid, new_uid=uid,
+            action="move",
+            old_uid=uid,
+            new_uid=uid,
             message=f"detected move; updated registry path for uid={uid}",
         )
 
@@ -214,11 +231,14 @@ def _handle_main_apiary_drift(repo_root: Path, self_p: dict) -> DriftReport:
     self_p["real_path"] = str(repo_root)
     self_p["last_drift_check"] = now
     state.write_self_pointer(repo_root, self_p)
-    state.write_main_apiary_pointer(repo_root, {
-        "main_apiary_path": str(repo_root),
-        "main_apiary_uid": state.MAIN_APIARY_UID,
-        "registered_at": now,
-    })
+    state.write_main_apiary_pointer(
+        repo_root,
+        {
+            "main_apiary_path": str(repo_root),
+            "main_apiary_uid": state.MAIN_APIARY_UID,
+            "registered_at": now,
+        },
+    )
 
     # Update its own registry entry (real_path moves).
     with FileLock(state.registry_path(repo_root)):

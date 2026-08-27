@@ -23,6 +23,7 @@ git_root`` works. ``core.utils.state`` is deliberately *not* re-exported:
 it pulls in the registry, the file lock and a git subprocess, and hooks
 import this package on the tool-call hot path.
 """
+
 from core.utils.atomic import write_json_atomic, write_text_atomic
 from core.utils.gitutil import git_root, main_worktree_root
 from core.utils.jsonio import read_json_object

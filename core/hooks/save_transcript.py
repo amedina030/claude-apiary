@@ -12,6 +12,7 @@ runner stage subprocesses are not real user sessions and must not appear
 in the history ring buffer (#223). The constant name matches the canonical
 ``RUNNER_SUBPROCESS_ENV_VAR`` defined in ``runner/claude_subprocess.py``.
 """
+
 import json
 import os
 import sys
@@ -34,6 +35,7 @@ def history_path() -> Path:
 def last_session_path() -> Path:
     return sessions_dir() / "last-session.json"
 
+
 # Mirror of runner/claude_subprocess.py::RUNNER_SUBPROCESS_ENV_VAR. Hardcoded
 # rather than imported to avoid a core → runner dependency edge.
 RUNNER_SUBPROCESS_ENV_VAR = "APIARY_RUNNER_SUBPROCESS"
@@ -42,6 +44,7 @@ RUNNER_SUBPROCESS_ENV_VAR = "APIARY_RUNNER_SUBPROCESS"
 def _append_to_history(session_id, transcript_path):
     """Append session to history ring buffer with identity tags."""
     from core.session import load_identity
+
     identity = load_identity(session_id)
     role, mission, registered = identity["role"], identity["mission"], identity["registered"]
 
@@ -53,14 +56,16 @@ def _append_to_history(session_id, transcript_path):
         # Dedup: remove existing entry for this session_id
         history = [h for h in history if h.get("session_id") != session_id]
 
-        history.append({
-            "session_id": session_id,
-            "transcript_path": transcript_path,
-            "ended_at": now_iso(),
-            "role": role,
-            "mission": mission,
-            "registered": registered,
-        })
+        history.append(
+            {
+                "session_id": session_id,
+                "transcript_path": transcript_path,
+                "ended_at": now_iso(),
+                "role": role,
+                "mission": mission,
+                "registered": registered,
+            }
+        )
 
         # Cap at MAX_HISTORY
         history = history[-MAX_HISTORY:]
@@ -93,7 +98,8 @@ def run(payload: dict):
     last = last_session_path()
     last.parent.mkdir(parents=True, exist_ok=True)
     write_text_atomic(
-        last, json.dumps({"session_id": session_id, "transcript_path": transcript_path}),
+        last,
+        json.dumps({"session_id": session_id, "transcript_path": transcript_path}),
     )
     # Bound the per-session file growth (review S1, second half).
     sweep_stale_session_files()

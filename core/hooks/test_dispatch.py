@@ -6,6 +6,7 @@ order, fail-open isolation, context merging, gate exit 2, matcher gating.
 Plus the two things a refactor this wide can quietly break: every registered
 module still has a ``run``, and the dispatcher never emits a permission vote.
 """
+
 import io
 import json
 import subprocess
@@ -79,9 +80,16 @@ class DispatchTest(unittest.TestCase):
         # ...and the order the docs claim, core -> budgeter -> docs.
         self.assertEqual(
             [h.name for h in pre],
-            ["drift_check", "inject_session", "learnings_inject",
-             "research_reminder", "pre_push_doc_conformer", "pre_push_secret_scan",
-             "budgeter_pre", "remind_standards"],
+            [
+                "drift_check",
+                "inject_session",
+                "learnings_inject",
+                "research_reminder",
+                "pre_push_doc_conformer",
+                "pre_push_secret_scan",
+                "budgeter_pre",
+                "remind_standards",
+            ],
         )
 
     # --- fail-open isolation ----------------------------------------------
@@ -104,8 +112,7 @@ class DispatchTest(unittest.TestCase):
         def boom(_payload):
             raise ValueError("kaboom")
 
-        dispatch.dispatch("PreToolUse", {"tool_name": "Bash"},
-                          (self.fake.add("broken", boom),))
+        dispatch.dispatch("PreToolUse", {"tool_name": "Bash"}, (self.fake.add("broken", boom),))
         text = self.log.read_text(encoding="utf-8")
         self.assertIn("PreToolUse broken", text)
         self.assertIn("kaboom", text)
@@ -117,8 +124,10 @@ class DispatchTest(unittest.TestCase):
         def exits(_payload):
             raise SystemExit(2)
 
-        hooks = (self.fake.add("exiter", exits),
-                 self.fake.record("after", HookResult(context="[b] two")))
+        hooks = (
+            self.fake.add("exiter", exits),
+            self.fake.record("after", HookResult(context="[b] two")),
+        )
         result = dispatch.dispatch("PreToolUse", {"tool_name": "Bash"}, hooks)
         self.assertIn("exited 2", result.block_reason)
 
@@ -128,16 +137,20 @@ class DispatchTest(unittest.TestCase):
         def exits(_payload):
             raise SystemExit(0)
 
-        hooks = (self.fake.add("exiter", exits),
-                 self.fake.record("after", HookResult(context="[b] two")))
+        hooks = (
+            self.fake.add("exiter", exits),
+            self.fake.record("after", HookResult(context="[b] two")),
+        )
         result = dispatch.dispatch("PreToolUse", {"tool_name": "Bash"}, hooks)
         self.assertIsNone(result.block_reason)
         self.assertEqual(result.context, "[b] two")
         self.assertIn("exiter", self.log.read_text(encoding="utf-8"))
 
     def test_a_hook_returning_the_wrong_type_is_logged_not_fatal(self):
-        hooks = (self.fake.record("legacy", {"decision": "block"}),
-                 self.fake.record("after", HookResult(context="[b] two")))
+        hooks = (
+            self.fake.record("legacy", {"decision": "block"}),
+            self.fake.record("after", HookResult(context="[b] two")),
+        )
         result = dispatch.dispatch("PreToolUse", {"tool_name": "Bash"}, hooks)
         self.assertEqual(result.context, "[b] two")
         self.assertIn("expected HookResult", self.log.read_text(encoding="utf-8"))
@@ -151,8 +164,7 @@ class DispatchTest(unittest.TestCase):
         self.assertLess(self.log.stat().st_size, dispatch.LOG_MAX_BYTES)
 
     def test_log_failure_never_raises_when_the_path_is_unwritable(self):
-        with mock.patch.object(dispatch, "log_path",
-                               side_effect=OSError("no disk")):
+        with mock.patch.object(dispatch, "log_path", side_effect=OSError("no disk")):
             dispatch.log_failure("PreToolUse", "h", RuntimeError("x"))  # no raise
 
     # --- context merging ---------------------------------------------------
@@ -168,12 +180,13 @@ class DispatchTest(unittest.TestCase):
 
     def test_all_silent_hooks_produce_no_context(self):
         hooks = (self.fake.record("a"), self.fake.record("b"))
-        self.assertIsNone(
-            dispatch.dispatch("PreToolUse", {"tool_name": "Bash"}, hooks).context)
+        self.assertIsNone(dispatch.dispatch("PreToolUse", {"tool_name": "Bash"}, hooks).context)
 
     def test_main_prints_one_merged_json_object(self):
-        hooks = (self.fake.record("a", HookResult(context="[a] one")),
-                 self.fake.record("b", HookResult(context="[b] two")))
+        hooks = (
+            self.fake.record("a", HookResult(context="[a] one")),
+            self.fake.record("b", HookResult(context="[b] two")),
+        )
         out = self._main("pre", {"tool_name": "Bash"}, hooks)
         self.assertEqual(len(out.splitlines()), 1)
         spec = json.loads(out)["hookSpecificOutput"]
@@ -202,43 +215,55 @@ class DispatchTest(unittest.TestCase):
         hooks = (self.fake.record("gate", HookResult(block_reason="secret found")),)
         out = io.StringIO()
         err = io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err), \
-                mock.patch.object(dispatch, "_registry",
-                                  lambda: {"PreToolUse": hooks}), \
-                mock.patch("sys.stdin", io.StringIO(json.dumps({"tool_name": "Bash"}))):
+        with (
+            redirect_stdout(out),
+            redirect_stderr(err),
+            mock.patch.object(dispatch, "_registry", lambda: {"PreToolUse": hooks}),
+            mock.patch("sys.stdin", io.StringIO(json.dumps({"tool_name": "Bash"}))),
+        ):
             with self.assertRaises(SystemExit) as cm:
                 dispatch.main(["pre"])
         self.assertEqual(cm.exception.code, 2)
         payload = json.loads(out.getvalue())
         self.assertEqual(payload["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertEqual(payload["hookSpecificOutput"]["permissionDecisionReason"],
-                         "secret found")
+        self.assertEqual(payload["hookSpecificOutput"]["permissionDecisionReason"], "secret found")
         self.assertIn("secret found", err.getvalue())
 
     # --- matcher gating ----------------------------------------------------
 
     def test_a_non_matching_hook_is_never_run(self):
-        hooks = (self.fake.record("bash_only", HookResult(context="[x] y"), "Bash"),
-                 self.fake.record("always", HookResult(context="[z] w")))
+        hooks = (
+            self.fake.record("bash_only", HookResult(context="[x] y"), "Bash"),
+            self.fake.record("always", HookResult(context="[z] w")),
+        )
         result = dispatch.dispatch("PreToolUse", {"tool_name": "Read"}, hooks)
         self.assertEqual(self.fake.calls, ["always"])
         self.assertEqual(result.context, "[z] w")
 
     def test_a_non_matching_hook_is_not_even_imported(self):
-        with mock.patch.object(dispatch, "load_run",
-                               side_effect=AssertionError("imported!")) as loader:
-            dispatch.dispatch("PreToolUse", {"tool_name": "Read"},
-                              (dispatch.Hook("x", "core.does.not.exist", "Bash"),))
+        with mock.patch.object(
+            dispatch, "load_run", side_effect=AssertionError("imported!")
+        ) as loader:
+            dispatch.dispatch(
+                "PreToolUse",
+                {"tool_name": "Read"},
+                (dispatch.Hook("x", "core.does.not.exist", "Bash"),),
+            )
             loader.assert_not_called()
 
     def test_matcher_semantics(self):
         for matcher, tool, expected in [
-            ("", "Bash", True), (None, "Bash", True), ("*", "Bash", True),
-            ("Bash", "Bash", True), ("Bash", "BashOutput", False),
-            ("Edit|Write|Bash", "Write", True), ("Edit|Write|Bash", "Read", False),
+            ("", "Bash", True),
+            (None, "Bash", True),
+            ("*", "Bash", True),
+            ("Bash", "Bash", True),
+            ("Bash", "BashOutput", False),
+            ("Edit|Write|Bash", "Write", True),
+            ("Edit|Write|Bash", "Read", False),
             ("WebSearch|WebFetch|Agent|Task", "Task", True),
-            ("Bash", "", False), ("", "", True),
-            ("[unclosed", "[unclosed", True),   # bad regex -> equality
+            ("Bash", "", False),
+            ("", "", True),
+            ("[unclosed", "[unclosed", True),  # bad regex -> equality
             ("[unclosed", "Bash", False),
         ]:
             with self.subTest(matcher=matcher, tool=tool):
@@ -278,9 +303,11 @@ class DispatchTest(unittest.TestCase):
     def _main(self, verb, payload, hooks):
         out = io.StringIO()
         event = dispatch.EVENTS[verb]
-        with redirect_stdout(out), \
-                mock.patch.object(dispatch, "_registry", lambda: {event: hooks}), \
-                mock.patch("sys.stdin", io.StringIO(json.dumps(payload))):
+        with (
+            redirect_stdout(out),
+            mock.patch.object(dispatch, "_registry", lambda: {event: hooks}),
+            mock.patch("sys.stdin", io.StringIO(json.dumps(payload))),
+        ):
             dispatch.main([verb])
         return out.getvalue()
 
@@ -298,9 +325,9 @@ class RegistryIntegrityTest(unittest.TestCase):
     def test_every_hook_script_still_runs_standalone(self):
         """`python <hook>.py` must keep working mid-migration."""
         scripts = [
-            REPO / (h.module if h.module.endswith(".py")
-                    else h.module.replace(".", "/") + ".py")
-            for hooks in dispatch._registry().values() for h in hooks
+            REPO / (h.module if h.module.endswith(".py") else h.module.replace(".", "/") + ".py")
+            for hooks in dispatch._registry().values()
+            for h in hooks
         ]
         for script in scripts:
             with self.subTest(script=script.name):
@@ -310,6 +337,7 @@ class RegistryIntegrityTest(unittest.TestCase):
 
     def test_dispatcher_events_match_the_factory(self):
         from core import hooks_factory
+
         for event, verb in hooks_factory.EVENT_VERBS.items():
             self.assertEqual(dispatch.EVENTS[verb], event)
         # Every event the factory registers must have a chain to run.
@@ -318,8 +346,7 @@ class RegistryIntegrityTest(unittest.TestCase):
 
     def test_budgeter_matcher_mirrors_its_config(self):
         cfg = json.loads((REPO / "budgeter" / "config.json").read_text(encoding="utf-8"))
-        self.assertEqual(dispatch.budgeter_matcher(),
-                         "|".join(cfg["monitored_tools"]))
+        self.assertEqual(dispatch.budgeter_matcher(), "|".join(cfg["monitored_tools"]))
 
     def test_the_duplicate_helper_seam_is_still_marked(self):
         # §5a-C(2): the next hook lands in the pre chain, and the marker is
@@ -338,8 +365,11 @@ class EndToEndTest(unittest.TestCase):
         self.repo = self.home / "repo"
         (self.repo / ".claude" / "apiary" / "session-tmp").mkdir(parents=True)
         (self.repo / ".claude" / "apiary" / "self-pointer.json").write_text(
-            json.dumps({"schema_version": 1, "name": "repo", "uid": 1,
-                        "real_path": str(self.repo)}), encoding="utf-8")
+            json.dumps(
+                {"schema_version": 1, "name": "repo", "uid": 1, "real_path": str(self.repo)}
+            ),
+            encoding="utf-8",
+        )
 
     def _run(self, verb, payload):
         env = hermetic_env(
@@ -350,15 +380,25 @@ class EndToEndTest(unittest.TestCase):
         )
         return subprocess.run(
             [sys.executable, str(REPO / "core" / "hooks" / "dispatch.py"), verb],
-            input=json.dumps(payload), text=True, capture_output=True,
-            env=env, cwd=str(self.repo), timeout=120,
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            env=env,
+            cwd=str(self.repo),
+            timeout=120,
         )
 
     def test_pre_on_a_read_call_emits_valid_json_and_exits_0(self):
-        r = self._run("pre", {"tool_name": "Read",
-                              "tool_input": {"file_path": "x.txt"},
-                              "session_id": "aaaaaaaa-1111-2222-3333-444444444444",
-                              "cwd": str(self.repo), "transcript_path": ""})
+        r = self._run(
+            "pre",
+            {
+                "tool_name": "Read",
+                "tool_input": {"file_path": "x.txt"},
+                "session_id": "aaaaaaaa-1111-2222-3333-444444444444",
+                "cwd": str(self.repo),
+                "transcript_path": "",
+            },
+        )
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         out = json.loads(r.stdout)
         self.assertNotIn("permissionDecision", r.stdout)
@@ -366,27 +406,41 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("session_id", out["hookSpecificOutput"]["additionalContext"])
 
     def test_the_session_guard_makes_the_second_call_silent(self):
-        payload = {"tool_name": "Read", "tool_input": {"file_path": "x.txt"},
-                   "session_id": "bbbbbbbb-1111-2222-3333-444444444444",
-                   "cwd": str(self.repo), "transcript_path": ""}
+        payload = {
+            "tool_name": "Read",
+            "tool_input": {"file_path": "x.txt"},
+            "session_id": "bbbbbbbb-1111-2222-3333-444444444444",
+            "cwd": str(self.repo),
+            "transcript_path": "",
+        }
         self._run("pre", payload)
         r = self._run("pre", payload)
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         self.assertEqual(json.loads(r.stdout), {})
 
     def test_post_on_a_failed_bash_call_injects_the_reminder(self):
-        r = self._run("post", {"tool_name": "Bash",
-                               "tool_response": {"is_error": True, "stderr": "boom"},
-                               "session_id": "cccccccc-1111-2222-3333-444444444444"})
+        r = self._run(
+            "post",
+            {
+                "tool_name": "Bash",
+                "tool_response": {"is_error": True, "stderr": "boom"},
+                "session_id": "cccccccc-1111-2222-3333-444444444444",
+            },
+        )
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         spec = json.loads(r.stdout)["hookSpecificOutput"]
         self.assertEqual(spec["hookEventName"], "PostToolUse")
         self.assertIn("recover_from_trivial_errors", spec["additionalContext"])
 
     def test_post_on_a_successful_bash_call_says_nothing(self):
-        r = self._run("post", {"tool_name": "Bash",
-                               "tool_response": {"stdout": "ok", "exit_code": 0},
-                               "session_id": "dddddddd-1111-2222-3333-444444444444"})
+        r = self._run(
+            "post",
+            {
+                "tool_name": "Bash",
+                "tool_response": {"stdout": "ok", "exit_code": 0},
+                "session_id": "dddddddd-1111-2222-3333-444444444444",
+            },
+        )
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         self.assertEqual(json.loads(r.stdout), {})
 

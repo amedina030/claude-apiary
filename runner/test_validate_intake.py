@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for runner/validate_intake.py — field validation logic."""
+
 import subprocess
 import tempfile
 import unittest
@@ -12,7 +13,8 @@ def _git_init(path: Path) -> None:
     """Init a bare-minimum git repo so target_repo validation accepts it."""
     subprocess.run(
         ["git", "init", "--quiet", str(path)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
 
 

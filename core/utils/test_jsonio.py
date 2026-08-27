@@ -1,4 +1,5 @@
 """Tests for core/utils/jsonio.py — the one tolerant JSON-object reader."""
+
 from __future__ import annotations
 
 import sys

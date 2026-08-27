@@ -11,6 +11,7 @@ two copies it replaced had drifted: `repair` and `backfill-brief` disagreed
 about whether a year directory without an ``archive/`` subfolder was worth
 visiting.
 """
+
 from __future__ import annotations
 
 import os
@@ -38,7 +39,7 @@ from scribe.store import (
 ALL_FOLDER_NAMES: list[str] = list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]
 
 #: Where dated index snapshots live, under the scribe state dir.
-BACKUPS_DIRNAME = 'backups'
+BACKUPS_DIRNAME = "backups"
 #: How many dated snapshots `backup` keeps by default.
 DEFAULT_RETAIN = 30
 
@@ -52,13 +53,14 @@ def folder_to_note_type(folder_name: str) -> str:
     ``general`` so a stray directory cannot crash a repair run.
     """
     if folder_name == LEARNING_FOLDER:
-        return 'learning'
-    return _FOLDER_TO_TYPE.get(folder_name, 'general')
+        return "learning"
+    return _FOLDER_TO_TYPE.get(folder_name, "general")
 
 
 @dataclass(frozen=True)
 class IndexFolder:
     """One index.jsonl's worth of notes: where it is and what lives in it."""
+
     note_type: str
     year: int
     year_dir: Path
@@ -90,22 +92,23 @@ def iter_index_folders(state_dir: Path):
 
 def has_any_data(state_dir: Path) -> bool:
     """True when *state_dir* holds at least one of scribe's managed folders."""
-    return state_dir.exists() and any(
-        (state_dir / name).exists() for name in ALL_FOLDER_NAMES)
+    return state_dir.exists() and any((state_dir / name).exists() for name in ALL_FOLDER_NAMES)
 
 
 # --------------------------------------------------------------------------- #
 # repair
 # --------------------------------------------------------------------------- #
 
+
 def _prefix(dry_run: bool) -> str:
     """The ``(dry-run) `` marker every report headline shares."""
-    return '(dry-run) ' if dry_run else ''
+    return "(dry-run) " if dry_run else ""
 
 
 @dataclass
 class RepairReport:
     """What a repair pass found (and, unless dry-run, fixed)."""
+
     rebuilt: int = 0
     orphans: int = 0
     lines: list[str] = field(default_factory=list)
@@ -113,58 +116,60 @@ class RepairReport:
     found_data: bool = True
 
     def summary(self, dry_run: bool = False) -> str:
-        return (f'Repair {_prefix(dry_run)}complete: {self.rebuilt} entries rebuilt, '
-                f'{self.orphans} orphans {"detected" if dry_run else "removed"}')
+        return (
+            f"Repair {_prefix(dry_run)}complete: {self.rebuilt} entries rebuilt, "
+            f"{self.orphans} orphans {'detected' if dry_run else 'removed'}"
+        )
 
 
-def _rebuilt_entry(folder: Path, note_type: str, year: int, seq: int,
-                   is_archive: bool) -> dict:
+def _rebuilt_entry(folder: Path, note_type: str, year: int, seq: int, is_archive: bool) -> dict:
     """Reconstruct an index row from a body file that lost its entry.
 
     ``session`` is empty and ``timestamp`` comes from the file's mtime —
     both are the best that survives when the index row is gone.
     """
-    content = (folder / f'{seq}.md').read_text(encoding='utf-8')
-    mtime = (folder / f'{seq}.md').stat().st_mtime
+    content = (folder / f"{seq}.md").read_text(encoding="utf-8")
+    mtime = (folder / f"{seq}.md").stat().st_mtime
     return {
-        'display_id': f"{TYPE_PREFIXES.get(note_type, 'G')}-{year}-{seq}",
-        'type': note_type,
-        'year': year,
-        'seq': seq,
-        'status': 'archived' if is_archive else 'active',
-        'session': '',
-        'timestamp': datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
-        'summary': derive_summary(content),
-        'brief_summary': derive_brief_summary(content),
-        'has_body': bool(content),
+        "display_id": f"{TYPE_PREFIXES.get(note_type, 'G')}-{year}-{seq}",
+        "type": note_type,
+        "year": year,
+        "seq": seq,
+        "status": "archived" if is_archive else "active",
+        "session": "",
+        "timestamp": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
+        "summary": derive_summary(content),
+        "brief_summary": derive_brief_summary(content),
+        "has_body": bool(content),
     }
 
 
 def _body_seqs(folder: Path, report: RepairReport) -> set:
     """The seq numbers with a body file in *folder*; warns on odd filenames."""
     seqs = set()
-    for md_path in folder.glob('*.md'):
+    for md_path in folder.glob("*.md"):
         try:
             seqs.add(int(md_path.stem))
         except ValueError:
             report.warnings.append(
-                f'Warning: skipping non-integer filename {md_path.name} in {folder}')
+                f"Warning: skipping non-integer filename {md_path.name} in {folder}"
+            )
     return seqs
 
 
-def _repair_next_seq(spot: IndexFolder, entries: list, state_dir: Path,
-                     dry_run: bool, report: RepairReport) -> None:
+def _repair_next_seq(
+    spot: IndexFolder, entries: list, state_dir: Path, dry_run: bool, report: RepairReport
+) -> None:
     """Reset a year's ``next_seq`` to one past the highest seq it holds.
 
     Counts the archive too: an archived note's seq is spent, and reissuing it
     would collide with a body file that still exists.
     """
-    max_seq = max((e.get('seq', 0) for e in entries if isinstance(e.get('seq'), int)),
-                  default=0)
+    max_seq = max((e.get("seq", 0) for e in entries if isinstance(e.get("seq"), int)), default=0)
     arc_dir = spot.year_dir / ARCHIVE_DIRNAME
     if arc_dir.exists():
         for entry in ScribeStore._read_index(arc_dir):
-            seq = entry.get('seq', 0)
+            seq = entry.get("seq", 0)
             if isinstance(seq, int) and seq > max_seq:
                 max_seq = seq
     new_next_seq = max_seq + 1
@@ -172,7 +177,7 @@ def _repair_next_seq(spot: IndexFolder, entries: list, state_dir: Path,
     current_seq = 1
     if seq_path.exists():
         try:
-            current_seq = int(seq_path.read_text(encoding='utf-8').strip())
+            current_seq = int(seq_path.read_text(encoding="utf-8").strip())
         except ValueError:
             current_seq = 1
     if new_next_seq == current_seq:
@@ -180,8 +185,8 @@ def _repair_next_seq(spot: IndexFolder, entries: list, state_dir: Path,
     if not dry_run:
         write_text_atomic(seq_path, str(new_next_seq))
     report.lines.append(
-        f'  * next_seq for {spot.year_dir.relative_to(state_dir)}: '
-        f'{current_seq} -> {new_next_seq}')
+        f"  * next_seq for {spot.year_dir.relative_to(state_dir)}: {current_seq} -> {new_next_seq}"
+    )
 
 
 def repair(store: ScribeStore, *, dry_run: bool = False) -> RepairReport:
@@ -200,25 +205,28 @@ def repair(store: ScribeStore, *, dry_run: bool = False) -> RepairReport:
 
     for spot in iter_index_folders(state_dir):
         entries = ScribeStore._read_index(spot.folder)
-        indexed_seqs = {e.get('seq') for e in entries if isinstance(e.get('seq'), int)}
+        indexed_seqs = {e.get("seq") for e in entries if isinstance(e.get("seq"), int)}
         md_seqs = _body_seqs(spot.folder, report)
 
         new_entries = list(entries)
         for seq in sorted(md_seqs - indexed_seqs):
             new_entries.append(
-                _rebuilt_entry(spot.folder, spot.note_type, spot.year, seq, spot.is_archive))
+                _rebuilt_entry(spot.folder, spot.note_type, spot.year, seq, spot.is_archive)
+            )
             report.rebuilt += 1
             report.lines.append(
-                f'  + rebuilt entry {TYPE_PREFIXES.get(spot.note_type, "G")}-'
-                f'{spot.year}-{seq} in {spot.folder.relative_to(state_dir)}')
+                f"  + rebuilt entry {TYPE_PREFIXES.get(spot.note_type, 'G')}-"
+                f"{spot.year}-{seq} in {spot.folder.relative_to(state_dir)}"
+            )
 
         kept = []
         for entry in new_entries:
-            seq = entry.get('seq')
+            seq = entry.get("seq")
             if isinstance(seq, int) and seq not in md_seqs:
                 report.orphans += 1
                 report.lines.append(
-                    f'  - orphan entry seq={seq} in {spot.folder.relative_to(state_dir)}')
+                    f"  - orphan entry seq={seq} in {spot.folder.relative_to(state_dir)}"
+                )
             else:
                 kept.append(entry)
 
@@ -235,20 +243,25 @@ def repair(store: ScribeStore, *, dry_run: bool = False) -> RepairReport:
 # backfill-brief
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class BackfillReport:
     """What a brief_summary backfill changed."""
+
     updated: int = 0
     already_set: int = 0
     lines: list[str] = field(default_factory=list)
 
     def summary(self, dry_run: bool = False) -> str:
-        return (f'Backfill {_prefix(dry_run)}complete: {self.updated} updated, '
-                f'{self.already_set} already set.')
+        return (
+            f"Backfill {_prefix(dry_run)}complete: {self.updated} updated, "
+            f"{self.already_set} already set."
+        )
 
 
-def backfill_brief(store: ScribeStore, *, dry_run: bool = False,
-                   force: bool = False) -> BackfillReport:
+def backfill_brief(
+    store: ScribeStore, *, dry_run: bool = False, force: bool = False
+) -> BackfillReport:
     """Derive ``brief_summary`` for every entry that lacks one.
 
     A one-shot migration that stays safe to re-run: only entries with a
@@ -260,24 +273,27 @@ def backfill_brief(store: ScribeStore, *, dry_run: bool = False,
         entries = ScribeStore._read_index(spot.folder)
         changed = False
         for entry in entries:
-            seq = entry.get('seq')
+            seq = entry.get("seq")
             if not isinstance(seq, int):
                 continue
-            existing = (entry.get('brief_summary') or '').strip()
+            existing = (entry.get("brief_summary") or "").strip()
             if existing and not force:
                 report.already_set += 1
                 continue
-            md_path = spot.folder / f'{seq}.md'
-            source = (md_path.read_text(encoding='utf-8', errors='replace')
-                      if md_path.exists() else entry.get('summary', ''))
+            md_path = spot.folder / f"{seq}.md"
+            source = (
+                md_path.read_text(encoding="utf-8", errors="replace")
+                if md_path.exists()
+                else entry.get("summary", "")
+            )
             derived = derive_brief_summary(source)
             if derived == existing:
                 report.already_set += 1
                 continue
-            entry['brief_summary'] = derived
+            entry["brief_summary"] = derived
             report.updated += 1
             changed = True
-            report.lines.append(f'  + {entry.get("display_id", "?")}: {derived[:60]!r}')
+            report.lines.append(f"  + {entry.get('display_id', '?')}: {derived[:60]!r}")
         if changed and not dry_run:
             ScribeStore._write_index(spot.folder, entries)
     return report
@@ -287,6 +303,7 @@ def backfill_brief(store: ScribeStore, *, dry_run: bool = False,
 # mark-reviewed
 # --------------------------------------------------------------------------- #
 
+
 def mark_reviewed(store: ScribeStore) -> Path:
     """Stamp ``<scribe>/learnings/last_review`` and return its path.
 
@@ -294,9 +311,9 @@ def mark_reviewed(store: ScribeStore) -> Path:
     compares against the 30-day threshold; the contents are irrelevant.
     Raises ``OSError`` — the caller decides how loudly to fail.
     """
-    marker = store.state_dir / LEARNING_FOLDER / 'last_review'
+    marker = store.state_dir / LEARNING_FOLDER / "last_review"
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text('', encoding='utf-8')
+    marker.write_text("", encoding="utf-8")
     os.utime(marker)
     return marker
 
@@ -304,6 +321,7 @@ def mark_reviewed(store: ScribeStore) -> Path:
 # --------------------------------------------------------------------------- #
 # backup / restore
 # --------------------------------------------------------------------------- #
+
 
 def backups_root(state_dir: Path) -> Path:
     """The directory dated snapshots live in."""
@@ -361,9 +379,11 @@ def prune_backups(root: Path, retain: int) -> list:
 # retrotag
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class RetrotagReport:
     """What a retrotag pass tagged, skipped, and failed on."""
+
     total: int = 0
     processed: int = 0
     already_tagged: int = 0
@@ -371,14 +391,21 @@ class RetrotagReport:
     errors: list[str] = field(default_factory=list)
 
     def summary(self, dry_run: bool = False) -> str:
-        return (f'Retrotag {_prefix(dry_run)}complete: {self.processed} tagged, '
-                f'{self.already_tagged} already tagged, {len(self.errors)} error(s) '
-                f'of {self.total} learning(s).')
+        return (
+            f"Retrotag {_prefix(dry_run)}complete: {self.processed} tagged, "
+            f"{self.already_tagged} already tagged, {len(self.errors)} error(s) "
+            f"of {self.total} learning(s)."
+        )
 
 
-def retrotag(store: ScribeStore, *, dry_run: bool = False,
-             model: "str | None" = None, limit: "int | None" = None,
-             timeout: "int | None" = None) -> RetrotagReport:
+def retrotag(
+    store: ScribeStore,
+    *,
+    dry_run: bool = False,
+    model: "str | None" = None,
+    limit: "int | None" = None,
+    timeout: "int | None" = None,
+) -> RetrotagReport:
     """Infer tags and areas for every learning that has neither.
 
     Idempotent by construction: an entry with any tag or any area is left
@@ -392,39 +419,42 @@ def retrotag(store: ScribeStore, *, dry_run: bool = False,
     from scribe import infer  # local: pulls the runner subprocess wrapper
 
     report = RetrotagReport()
-    learnings = sorted(store.list_learnings(),
-                       key=lambda e: (e.get('year', 0), e.get('seq', 0)))
+    learnings = sorted(store.list_learnings(), key=lambda e: (e.get("year", 0), e.get("seq", 0)))
     if limit:
         learnings = learnings[:limit]
     report.total = len(learnings)
     vocab = infer.collect_vocab(store)
 
     for entry in learnings:
-        display_id = entry.get('display_id', f"L-{entry.get('year')}-{entry.get('seq')}")
-        if (entry.get('tags') or []) or (entry.get('areas') or []):
+        display_id = entry.get("display_id", f"L-{entry.get('year')}-{entry.get('seq')}")
+        if (entry.get("tags") or []) or (entry.get("areas") or []):
             report.already_tagged += 1
             continue
 
-        full = store.get_learning(entry['year'], entry['seq'])
-        body = (full.get('content') if full else '') or ''
+        full = store.get_learning(entry["year"], entry["seq"])
+        body = (full.get("content") if full else "") or ""
         if not body.strip():
-            report.errors.append(f'{display_id}: empty body, skipping')
+            report.errors.append(f"{display_id}: empty body, skipping")
             continue
 
         inferred = infer.infer_tags_areas(
-            body, store, model=model, vocab=vocab,
+            body,
+            store,
+            model=model,
+            vocab=vocab,
             timeout=timeout or infer.RETROTAG_TIMEOUT,
-            warn=lambda msg, _id=display_id: report.errors.append(f'{_id}: {msg}'))
+            warn=lambda msg, _id=display_id: report.errors.append(f"{_id}: {msg}"),
+        )
         if not inferred:
             continue
 
-        tags, areas = inferred['tags'], inferred['areas']
-        report.lines.append(f'  {display_id}: tags={tags} areas={areas}')
+        tags, areas = inferred["tags"], inferred["areas"]
+        report.lines.append(f"  {display_id}: tags={tags} areas={areas}")
         if not dry_run:
             try:
-                store.update_learning(entry['year'], entry['seq'], tags=tags, areas=areas)
+                store.update_learning(entry["year"], entry["seq"], tags=tags, areas=areas)
             except OSError as exc:
-                report.errors.append(f'{display_id}: write failed: {exc}')
+                report.errors.append(f"{display_id}: write failed: {exc}")
                 continue
             for tag in tags:
                 if tag not in vocab:
@@ -437,18 +467,19 @@ def retrotag(store: ScribeStore, *, dry_run: bool = False,
 @dataclass
 class RestoreReport:
     """What a restore copied back, and from where."""
+
     source: "Path | None" = None
     restored: int = 0
     lines: list[str] = field(default_factory=list)
 
     def summary(self, dry_run: bool = False) -> str:
-        where = self.source.name if self.source else '(nothing)'
-        return (f'Restore {_prefix(dry_run)}complete: {self.restored} index file(s) '
-                f'from {where}.')
+        where = self.source.name if self.source else "(nothing)"
+        return f"Restore {_prefix(dry_run)}complete: {self.restored} index file(s) from {where}."
 
 
-def restore_backup(state_dir: Path, date_str: "str | None" = None, *,
-                   dry_run: bool = False) -> RestoreReport:
+def restore_backup(
+    state_dir: Path, date_str: "str | None" = None, *, dry_run: bool = False
+) -> RestoreReport:
     """Copy the indexes from a dated snapshot back over the live ones.
 
     *date_str* defaults to the newest snapshot. Restoring an index older than
@@ -459,13 +490,13 @@ def restore_backup(state_dir: Path, date_str: "str | None" = None, *,
     """
     snapshots = list_backups(state_dir)
     if not snapshots:
-        raise FileNotFoundError(f'no snapshots under {backups_root(state_dir)}')
+        raise FileNotFoundError(f"no snapshots under {backups_root(state_dir)}")
     if date_str:
         matches = [d for d in snapshots if d.name == date_str]
         if not matches:
             raise FileNotFoundError(
-                f'no snapshot dated {date_str}; have '
-                f'{", ".join(d.name for d in snapshots)}')
+                f"no snapshot dated {date_str}; have {', '.join(d.name for d in snapshots)}"
+            )
         source = matches[0]
     else:
         source = snapshots[-1]
@@ -475,7 +506,7 @@ def restore_backup(state_dir: Path, date_str: "str | None" = None, *,
         rel = src.relative_to(source)
         dst = Path(state_dir) / rel
         report.restored += 1
-        report.lines.append(f'  + {rel.as_posix()}')
+        report.lines.append(f"  + {rel.as_posix()}")
         if not dry_run:
-            write_text_atomic(dst, src.read_text(encoding='utf-8'))
+            write_text_atomic(dst, src.read_text(encoding="utf-8"))
     return report

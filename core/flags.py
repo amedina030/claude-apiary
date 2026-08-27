@@ -23,6 +23,7 @@ CLI::
 Exit 0 on success, 1 when no bootstrapped repo is in scope or the flag
 name is malformed.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,7 +46,9 @@ PIN_FLAGS_SUBPATH = ".claude/apiary/flags"
 
 # Flag names become filenames — keep them to a conservative slug so a
 # caller can never walk out of the flags directory.
-_FLAG_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\Z")  # \Z: `$` would accept a trailing newline
+_FLAG_NAME_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*\Z"
+)  # \Z: `$` would accept a trailing newline
 
 
 class FlagsRepoUnresolved(RuntimeError):
@@ -155,8 +158,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not _FLAG_NAME_RE.match(name):
         print(
-            f"error: invalid flag name {name!r}; expected letters, digits, "
-            "'.', '_' or '-'",
+            f"error: invalid flag name {name!r}; expected letters, digits, '.', '_' or '-'",
             file=sys.stderr,
         )
         return 1

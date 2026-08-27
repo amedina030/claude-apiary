@@ -12,6 +12,7 @@ Layout::
 The image is the canonical artifact; the sidecar is metadata. Each capture
 pairs exactly one image with exactly one sidecar, sharing a stem.
 """
+
 from __future__ import annotations
 
 import re
@@ -38,9 +39,16 @@ TAGS_FILENAME = "tags.yaml"
 FRONTMATTER_DELIM = "---"
 SIDECAR_EXT = ".md"
 
-ALLOWED_IMAGE_EXTENSIONS = frozenset({
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
-})
+ALLOWED_IMAGE_EXTENSIONS = frozenset(
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".bmp",
+    }
+)
 
 ENTRY_FIELDS = (
     "title",

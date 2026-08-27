@@ -4,6 +4,7 @@ Apiary holds no local canonical (``K``) tickets, so marking a ticket-linked
 todo done is a no-op close *signal* — it must never raise and never close a
 local note.
 """
+
 import sys
 import tempfile
 import unittest
@@ -43,8 +44,9 @@ class TestCascade(unittest.TestCase):
 
     def test_done_never_cascades_into_a_local_note(self):
         target = self.store.add_note("todo", "local target", session_id="s")
-        linker = self.store.add_note("todo", "linker", session_id="s",
-                                     tags=[f"ticket:{target['display_id']}"])
+        linker = self.store.add_note(
+            "todo", "linker", session_id="s", tags=[f"ticket:{target['display_id']}"]
+        )
         self._done(linker["display_id"])
         after = self.store.get_note("todo", target["year"], target["seq"])
         self.assertEqual(after["status"], "active")  # untouched — no local cascade

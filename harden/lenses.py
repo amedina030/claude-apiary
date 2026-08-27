@@ -9,6 +9,7 @@ skill never hard-codes the list in more than one place.
 
 The taxonomy and the seam rules below mirror spec note C-2026-48.
 """
+
 import argparse
 import json
 import sys
@@ -44,10 +45,7 @@ LENS_BRIEFS: dict[str, str] = {
         "Error handling, exception paths, resource leaks, retries/recovery, "
         "concurrency (races, locks, shared state, deadlock)."
     ),
-    "complexity": (
-        "Convoluted local logic, dead code, within-unit duplication, "
-        "over-engineering."
-    ),
+    "complexity": ("Convoluted local logic, dead code, within-unit duplication, over-engineering."),
     "architecture": (
         "Module boundaries, coupling, dependency direction, pattern "
         "consistency, cross-module duplication, scale-if-repeated."
@@ -89,11 +87,16 @@ def main() -> None:
         for name, code in LENSES.items():
             print(f"{name}={code}")
     elif args.command == "json":
-        print(json.dumps({
-            "lenses": LENSES,
-            "briefs": LENS_BRIEFS,
-            "seam_rules": SEAM_RULES,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "lenses": LENSES,
+                    "briefs": LENS_BRIEFS,
+                    "seam_rules": SEAM_RULES,
+                },
+                indent=2,
+            )
+        )
     elif args.command == "list":
         for name in LENSES:
             print(name)

@@ -51,7 +51,9 @@ def _kill_process_tree(pid: int) -> None:
         try:
             subprocess.run(
                 [taskkill, "/PID", str(pid), "/T", "/F"],
-                capture_output=True, timeout=10, check=False,
+                capture_output=True,
+                timeout=10,
+                check=False,
                 # The windowed (console=False) build would otherwise flash a
                 # console for every tab close.
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -64,6 +66,7 @@ def _kill_process_tree(pid: int) -> None:
     if killpg and getpgid:
         try:
             import signal
+
             killpg(getpgid(pid), signal.SIGKILL)
         except (OSError, ProcessLookupError):
             pass
@@ -281,7 +284,7 @@ class PtyWrapper:
             return True
         try:
             for i in range(0, len(text), _SEND_CHUNK_SIZE):
-                proc.write(text[i:i + _SEND_CHUNK_SIZE])
+                proc.write(text[i : i + _SEND_CHUNK_SIZE])
             return True
         except Exception:
             return False

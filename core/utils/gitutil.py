@@ -7,6 +7,7 @@ core/hooks/pre_push_doc_conformer.py, scribe/notes.py, and the three
 ``*/store.py`` modules) — review finding X-3. Import ``git_root`` instead
 of writing a ninth.
 """
+
 from __future__ import annotations
 
 import subprocess

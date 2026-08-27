@@ -1,4 +1,5 @@
 """Tests for ``scripts/check_duplicates.py`` — the AST near-duplicate check."""
+
 from __future__ import annotations
 
 import contextlib
@@ -55,10 +56,18 @@ class TempTreeCase(unittest.TestCase):
 class NormalizationTests(TempTreeCase):
     def test_renamed_locals_and_arguments_still_match(self):
         _write(self.root, "a.py", _fn())
-        _write(self.root, "b.py", _fn(
-            name="process", arg="value", v1="cleaned", v2="result", v3="chunk",
-            doc='"""Completely different docstring."""',
-        ))
+        _write(
+            self.root,
+            "b.py",
+            _fn(
+                name="process",
+                arg="value",
+                v1="cleaned",
+                v2="result",
+                v3="chunk",
+                doc='"""Completely different docstring."""',
+            ),
+        )
         groups = cd.identical_groups(self._collect())
         self.assertEqual(len(groups), 1)
         self.assertEqual({f.path.name for f in groups[0]}, {"a.py", "b.py"})
@@ -73,8 +82,7 @@ class NormalizationTests(TempTreeCase):
         # _fn() is already indented one level, so it drops straight into a
         # class body or another def.
         _write(self.root, "a.py", "class Holder:\n" + _fn())
-        _write(self.root, "b.py",
-               "def outer():\n" + _fn(name="inner") + "    return inner\n")
+        _write(self.root, "b.py", "def outer():\n" + _fn(name="inner") + "    return inner\n")
         names = {f.qualname for f in self._collect()}
         self.assertIn("Holder.handle", names)
         self.assertIn("outer.inner", names)
@@ -90,8 +98,7 @@ class OverlapTests(TempTreeCase):
     def test_a_near_copy_is_reported_as_a_pair(self):
         _write(self.root, "a.py", _fn())
         # Same function with one statement dropped — a copy that drifted.
-        _write(self.root, "b.py",
-               _fn(name="process").replace("        out.sort()\n", ""))
+        _write(self.root, "b.py", _fn(name="process").replace("        out.sort()\n", ""))
         functions = self._collect()
         pairs = cd.near_duplicate_pairs(functions, 0.7)
         self.assertEqual(len(pairs), 1)
@@ -109,7 +116,10 @@ class OverlapTests(TempTreeCase):
 
     def test_unrelated_functions_score_below_the_threshold(self):
         _write(self.root, "a.py", _fn())
-        _write(self.root, "b.py", """
+        _write(
+            self.root,
+            "b.py",
+            """
         def unrelated(path):
             data = {}
             with open(path) as fh:
@@ -117,7 +127,8 @@ class OverlapTests(TempTreeCase):
                     key, _, value = line.partition("=")
                     data[key] = value
             return data
-        """)
+        """,
+        )
         self.assertEqual(cd.near_duplicate_pairs(self._collect(), 0.85), [])
 
     def test_overlap_of_a_body_with_itself_is_one(self):
@@ -172,16 +183,28 @@ class CliTests(TempTreeCase):
     def test_fail_on_identical_exits_1(self):
         _write(self.root, "a.py", _fn())
         _write(self.root, "b.py", _fn(name="process"))
-        rc, _ = self._run([
-            "--path", str(self.root), "--min-statements", "5", "--fail-on-identical",
-        ])
+        rc, _ = self._run(
+            [
+                "--path",
+                str(self.root),
+                "--min-statements",
+                "5",
+                "--fail-on-identical",
+            ]
+        )
         self.assertEqual(rc, 1)
 
     def test_fail_on_identical_still_exits_0_when_clean(self):
         _write(self.root, "a.py", _fn())
-        rc, _ = self._run([
-            "--path", str(self.root), "--min-statements", "5", "--fail-on-identical",
-        ])
+        rc, _ = self._run(
+            [
+                "--path",
+                str(self.root),
+                "--min-statements",
+                "5",
+                "--fail-on-identical",
+            ]
+        )
         self.assertEqual(rc, 0)
 
     def test_quiet_prints_one_line(self):

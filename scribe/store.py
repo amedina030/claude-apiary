@@ -4,6 +4,7 @@ Provides ScribeStore — a class that manages notes and learnings using
 individual .md files organized into type folders, each with its own
 index.jsonl for fast listing.
 """
+
 import json
 import re
 import sys
@@ -20,14 +21,14 @@ from core.utils.filelock import FileLock
 # --- Constants ---
 
 TYPE_FOLDERS: dict[str, str] = {
-    'todo': 'todos',
-    'handoff': 'handoffs',
-    'decision': 'decisions',
-    'wishlist': 'wishlists',
-    'blocker': 'blockers',
-    'context': 'context',
-    'general': 'general',
-    'reference': 'references',
+    "todo": "todos",
+    "handoff": "handoffs",
+    "decision": "decisions",
+    "wishlist": "wishlists",
+    "blocker": "blockers",
+    "context": "context",
+    "general": "general",
+    "reference": "references",
 }
 
 #: The note types ``add --type`` accepts, in the order --help lists them.
@@ -35,30 +36,36 @@ TYPE_FOLDERS: dict[str, str] = {
 #: type. One list, so the CLI, the installer and the template scaffolder
 #: cannot disagree about what a note type is.
 VALID_TYPES: list[str] = [
-    'todo', 'handoff', 'decision', 'wishlist',
-    'reference', 'blocker', 'context', 'general',
+    "todo",
+    "handoff",
+    "decision",
+    "wishlist",
+    "reference",
+    "blocker",
+    "context",
+    "general",
 ]
 
 TYPE_PREFIXES: dict[str, str] = {
-    'todo': 'T',
-    'handoff': 'H',
-    'decision': 'D',
-    'wishlist': 'W',
-    'reference': 'R',
-    'blocker': 'B',
-    'context': 'C',
-    'general': 'G',
-    'learning': 'L',
+    "todo": "T",
+    "handoff": "H",
+    "decision": "D",
+    "wishlist": "W",
+    "reference": "R",
+    "blocker": "B",
+    "context": "C",
+    "general": "G",
+    "learning": "L",
 }
 
-LEARNING_FOLDER = 'learnings'
+LEARNING_FOLDER = "learnings"
 
 # All managed folder names (type folders + learnings)
 _ALL_FOLDERS: list[str] = list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]
 
-INDEX_FILENAME = 'index.jsonl'
-NEXT_SEQ_FILENAME = 'next_seq'
-ARCHIVE_DIRNAME = 'archive'
+INDEX_FILENAME = "index.jsonl"
+NEXT_SEQ_FILENAME = "next_seq"
+ARCHIVE_DIRNAME = "archive"
 
 # Brief-summary cap — shorter than `summary` (300), aimed at one-line display
 # in the GUI sidebar. Lives next to summary on each index entry.
@@ -66,7 +73,7 @@ BRIEF_SUMMARY_MAX = 120
 
 # Fields serialized into learning .md frontmatter. Order is fixed to keep
 # diffs stable across re-writes.
-_LEARNING_FRONTMATTER_FIELDS = ('tags', 'areas', 'supersedes')
+_LEARNING_FRONTMATTER_FIELDS = ("tags", "areas", "supersedes")
 
 
 def _format_learning_content(content: str, frontmatter: dict | None = None) -> str:
@@ -83,10 +90,10 @@ def _format_learning_content(content: str, frontmatter: dict | None = None) -> s
     meta = {}
     for key in _LEARNING_FRONTMATTER_FIELDS:
         value = frontmatter.get(key)
-        if value is None or value == [] or value == '':
+        if value is None or value == [] or value == "":
             continue
         meta[key] = list(value) if isinstance(value, tuple) else value
-    return fm_lib.dump(meta, content, list_style='inline')
+    return fm_lib.dump(meta, content, list_style="inline")
 
 
 def _parse_learning_content(text: str) -> tuple[dict, str]:
@@ -114,41 +121,41 @@ def derive_brief_summary(content: str) -> str:
        "header: details" notes where the header is a clean brief.
     5. Last word boundary within the cap, with an ellipsis suffix.
     """
-    s = (content or '').strip()
+    s = (content or "").strip()
     if not s:
-        return ''
-    first_nl = s.find('\n')
-    if re.match(r'^#{1,6}\s', s):
+        return ""
+    first_nl = s.find("\n")
+    if re.match(r"^#{1,6}\s", s):
         head_line = s if first_nl == -1 else s[:first_nl]
-        head = head_line.lstrip('#').strip()
+        head = head_line.lstrip("#").strip()
         return head[:BRIEF_SUMMARY_MAX].rstrip()
-    flat = re.sub(r'\s+', ' ', s).strip()
+    flat = re.sub(r"\s+", " ", s).strip()
     window = flat[:BRIEF_SUMMARY_MAX]
-    sent = re.search(r'[.!?](?=\s|$)', window)
+    sent = re.search(r"[.!?](?=\s|$)", window)
     if sent:
-        return window[:sent.end()].rstrip()
-    paren_close = window.find(')')
+        return window[: sent.end()].rstrip()
+    paren_close = window.find(")")
     if paren_close >= 30:
-        return window[:paren_close + 1].rstrip()
-    colon = re.search(r':(?=\s)', window)
+        return window[: paren_close + 1].rstrip()
+    colon = re.search(r":(?=\s)", window)
     if colon and colon.start() >= 10:
-        return window[:colon.end()].rstrip()
+        return window[: colon.end()].rstrip()
     # Em-dash (U+2014) or double-hyphen often separates a clause from its
     # elaboration ("X foo — does Y"); cut just before it.
-    dash = re.search(r'\s[—–]\s|\s--\s', window)
+    dash = re.search(r"\s[—–]\s|\s--\s", window)
     if dash and dash.start() >= 30:
-        return window[:dash.start()].rstrip()
+        return window[: dash.start()].rstrip()
     if len(flat) <= BRIEF_SUMMARY_MAX:
         return flat
     # Last-resort deep comma cut — only if well into the brief so we don't
     # chop trivially short. Drops the trailing fragment cleanly.
-    comma = window.rfind(',')
+    comma = window.rfind(",")
     if comma >= 60:
         return window[:comma].rstrip()
-    last_space = window.rfind(' ')
+    last_space = window.rfind(" ")
     if last_space > 40:
-        return window[:last_space].rstrip() + '…'
-    return window.rstrip() + '…'
+        return window[:last_space].rstrip() + "…"
+    return window.rstrip() + "…"
 
 
 def derive_summary(content: str) -> str:
@@ -158,11 +165,11 @@ def derive_summary(content: str) -> str:
     ``derive_brief_summary`` (the GUI sidebar's <=120-char heuristic), which is
     intentionally left unchanged.
     """
-    for line in (content or '').splitlines():
+    for line in (content or "").splitlines():
         stripped = line.strip()
         if stripped:
             return stripped[:300]
-    return ''
+    return ""
 
 
 #: State dirs whose layout this process has already confirmed, keyed by
@@ -187,7 +194,7 @@ class _IndexTxn:
     what a lookup that found no matching row wants.
     """
 
-    __slots__ = ('folder', 'entries', 'committed')
+    __slots__ = ("folder", "entries", "committed")
 
     def __init__(self, folder: Path, entries: list) -> None:
         self.folder = folder
@@ -200,7 +207,7 @@ class _IndexTxn:
     def index_of(self, seq: int) -> "int | None":
         """Position of the row with *seq*, or None."""
         for i, entry in enumerate(self.entries):
-            if entry.get('seq') == seq:
+            if entry.get("seq") == seq:
                 return i
         return None
 
@@ -234,8 +241,9 @@ class ScribeStore:
         builds a store on every Edit, Write and Bash (review §3 bug 11).
         """
         year = str(datetime.now(timezone.utc).year)
-        return all((self.state_dir / name / year / ARCHIVE_DIRNAME).is_dir()
-                   for name in _ALL_FOLDERS)
+        return all(
+            (self.state_dir / name / year / ARCHIVE_DIRNAME).is_dir() for name in _ALL_FOLDERS
+        )
 
     def _ensure_layout_lazily(self) -> None:
         """Build the layout only when something is actually missing, once."""
@@ -258,15 +266,15 @@ class ScribeStore:
             year_dir.mkdir(parents=True, exist_ok=True)
             year_idx = year_dir / INDEX_FILENAME
             if not year_idx.exists():
-                year_idx.write_text('', encoding='utf-8')
+                year_idx.write_text("", encoding="utf-8")
             seq_path = year_dir / NEXT_SEQ_FILENAME
             if not seq_path.exists():
-                seq_path.write_text('1', encoding='utf-8')
+                seq_path.write_text("1", encoding="utf-8")
             year_archive = year_dir / ARCHIVE_DIRNAME
             year_archive.mkdir(parents=True, exist_ok=True)
             year_archive_idx = year_archive / INDEX_FILENAME
             if not year_archive_idx.exists():
-                year_archive_idx.write_text('', encoding='utf-8')
+                year_archive_idx.write_text("", encoding="utf-8")
 
     # --- Index I/O helpers ---
 
@@ -284,7 +292,7 @@ class ScribeStore:
         if not idx_path.exists():
             return []
         entries = []
-        for lineno, line in enumerate(idx_path.read_text(encoding='utf-8').splitlines(), 1):
+        for lineno, line in enumerate(idx_path.read_text(encoding="utf-8").splitlines(), 1):
             line = line.strip()
             if not line:
                 continue
@@ -298,7 +306,10 @@ class ScribeStore:
                         f"would undercount seq and cause ID collisions. "
                         f"Inspect and repair {idx_path} before retrying."
                     ) from e
-                print(f"Warning: skipping malformed index entry at {idx_path}:{lineno}", file=sys.stderr)
+                print(
+                    f"Warning: skipping malformed index entry at {idx_path}:{lineno}",
+                    file=sys.stderr,
+                )
         return entries
 
     @staticmethod
@@ -340,9 +351,8 @@ class ScribeStore:
     @staticmethod
     def _write_index_unlocked(type_dir: Path, entries: list[dict]) -> None:
         """Atomically overwrite a folder's index.jsonl. **Caller holds the lock.**"""
-        lines = [json.dumps(e, separators=(',', ':')) for e in entries]
-        write_text_atomic(type_dir / INDEX_FILENAME,
-                          '\n'.join(lines) + ('\n' if lines else ''))
+        lines = [json.dumps(e, separators=(",", ":")) for e in entries]
+        write_text_atomic(type_dir / INDEX_FILENAME, "\n".join(lines) + ("\n" if lines else ""))
 
     @staticmethod
     def _write_index(type_dir: Path, entries: list[dict]) -> None:
@@ -364,10 +374,10 @@ class ScribeStore:
         instead of being dropped by the rewrite.
         """
         idx_path = type_dir / INDEX_FILENAME
-        existing = idx_path.read_text(encoding='utf-8') if idx_path.exists() else ''
-        if existing and not existing.endswith('\n'):
-            existing += '\n'
-        write_text_atomic(idx_path, existing + json.dumps(entry, separators=(',', ':')) + '\n')
+        existing = idx_path.read_text(encoding="utf-8") if idx_path.exists() else ""
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        write_text_atomic(idx_path, existing + json.dumps(entry, separators=(",", ":")) + "\n")
 
     @staticmethod
     def _append_index(type_dir: Path, entry: dict) -> None:
@@ -391,7 +401,7 @@ class ScribeStore:
         year_dir.mkdir(parents=True, exist_ok=True)
         idx = year_dir / INDEX_FILENAME
         if not idx.exists():
-            idx.write_text('', encoding='utf-8')
+            idx.write_text("", encoding="utf-8")
         seq_path = year_dir / NEXT_SEQ_FILENAME
         if not seq_path.exists():
             self._rebuild_next_seq(year_dir)
@@ -399,7 +409,7 @@ class ScribeStore:
         archive.mkdir(parents=True, exist_ok=True)
         archive_idx = archive / INDEX_FILENAME
         if not archive_idx.exists():
-            archive_idx.write_text('', encoding='utf-8')
+            archive_idx.write_text("", encoding="utf-8")
         return year_dir
 
     def _rebuild_next_seq(self, year_dir: Path) -> int:
@@ -411,17 +421,17 @@ class ScribeStore:
         """
         max_seq = 0
         for entry in self._read_index(year_dir, strict=True):
-            s = entry.get('seq', 0)
+            s = entry.get("seq", 0)
             if isinstance(s, int) and s > max_seq:
                 max_seq = s
         archive_dir = year_dir / ARCHIVE_DIRNAME
         for entry in self._read_index(archive_dir, strict=True):
-            s = entry.get('seq', 0)
+            s = entry.get("seq", 0)
             if isinstance(s, int) and s > max_seq:
                 max_seq = s
         next_seq = max_seq + 1
         seq_path = year_dir / NEXT_SEQ_FILENAME
-        seq_path.write_text(str(next_seq), encoding='utf-8')
+        seq_path.write_text(str(next_seq), encoding="utf-8")
         return next_seq
 
     def _increment_seq(self, year_dir: Path) -> int:
@@ -435,12 +445,12 @@ class ScribeStore:
             if not seq_path.exists():
                 current = self._rebuild_next_seq(year_dir)
             else:
-                text = seq_path.read_text(encoding='utf-8').strip()
+                text = seq_path.read_text(encoding="utf-8").strip()
                 try:
                     current = int(text)
                 except ValueError:
                     current = self._rebuild_next_seq(year_dir)
-            seq_path.write_text(str(current + 1), encoding='utf-8')
+            seq_path.write_text(str(current + 1), encoding="utf-8")
         return current
 
     # --- Note file helpers ---
@@ -449,7 +459,9 @@ class ScribeStore:
         """Return the folder Path for a given note type."""
         folder_name = TYPE_FOLDERS.get(note_type)
         if folder_name is None:
-            raise ValueError(f"Unknown note type: {note_type!r}. Valid types: {list(TYPE_FOLDERS.keys())}")
+            raise ValueError(
+                f"Unknown note type: {note_type!r}. Valid types: {list(TYPE_FOLDERS.keys())}"
+            )
         return self.state_dir / folder_name
 
     def _learning_dir(self) -> Path:
@@ -460,7 +472,7 @@ class ScribeStore:
     def _write_note_file(type_dir: Path, note_id: int, content: str) -> None:
         """Write note content to type_dir/<id>.md. Pure content, no frontmatter."""
         md_path = type_dir / f"{note_id}.md"
-        md_path.write_text(content, encoding='utf-8')
+        md_path.write_text(content, encoding="utf-8")
 
     @staticmethod
     def _read_note_file(type_dir: Path, note_id: int) -> str | None:
@@ -468,7 +480,7 @@ class ScribeStore:
         md_path = type_dir / f"{note_id}.md"
         if not md_path.exists():
             return None
-        return md_path.read_text(encoding='utf-8')
+        return md_path.read_text(encoding="utf-8")
 
     def _read_body_any(self, note_type: str, year: int, seq: int) -> str | None:
         """Read a note body from the active dir, falling back to archive. None if absent.
@@ -496,9 +508,15 @@ class ScribeStore:
 
     # --- CRUD operations: Notes ---
 
-    def add_note(self, note_type: str, content: str, session_id: str,
-                 summary: str = '', brief_summary: str = '',
-                 **metadata) -> dict:
+    def add_note(
+        self,
+        note_type: str,
+        content: str,
+        session_id: str,
+        summary: str = "",
+        brief_summary: str = "",
+        **metadata,
+    ) -> dict:
         """Add a new note. Returns the created index entry dict.
 
         ``brief_summary`` is a sidebar-friendly one-liner (<= 120 chars).
@@ -516,26 +534,26 @@ class ScribeStore:
         brief = brief_summary.strip() if brief_summary else derive_brief_summary(content)
         if len(brief) > BRIEF_SUMMARY_MAX:
             brief = brief[:BRIEF_SUMMARY_MAX].rstrip()
-        prefix = TYPE_PREFIXES.get(note_type, 'G')
+        prefix = TYPE_PREFIXES.get(note_type, "G")
         display_id = f"{prefix}-{year}-{seq}"
         # Tags are stored only when non-empty (spec §5.3) — popped here so an
         # empty list passed by a caller doesn't write a bare `tags: []`.
-        tags = metadata.pop('tags', None)
+        tags = metadata.pop("tags", None)
         entry = {
-            'display_id': display_id,
-            'type': note_type,
-            'year': year,
-            'seq': seq,
-            'status': 'active',
-            'session': session_id,
-            'timestamp': timestamp,
-            'summary': summary,
-            'brief_summary': brief,
-            'has_body': bool(content),
+            "display_id": display_id,
+            "type": note_type,
+            "year": year,
+            "seq": seq,
+            "status": "active",
+            "session": session_id,
+            "timestamp": timestamp,
+            "summary": summary,
+            "brief_summary": brief,
+            "has_body": bool(content),
             **metadata,
         }
         if tags:
-            entry['tags'] = list(tags)
+            entry["tags"] = list(tags)
         # Body first, then the row. A crash in between leaves a <seq>.md with
         # no index entry, which `repair` rebuilds; the old order left a row
         # with no body, which `repair` deletes (review §3 bug 6).
@@ -554,29 +572,29 @@ class ScribeStore:
             return None
         # Search active index
         for entry in self._read_index(year_dir):
-            if entry.get('seq') == seq:
+            if entry.get("seq") == seq:
                 content = self._read_note_file(year_dir, seq)
-                result = {**entry, 'content': content}
-                if content is None and entry.get('has_body'):
-                    result['_warning'] = 'body_file_missing'
+                result = {**entry, "content": content}
+                if content is None and entry.get("has_body"):
+                    result["_warning"] = "body_file_missing"
                 return result
         # Check archive
         archive_dir = year_dir / ARCHIVE_DIRNAME
         for entry in self._read_index(archive_dir):
-            if entry.get('seq') == seq:
+            if entry.get("seq") == seq:
                 content = self._read_note_file(archive_dir, seq)
                 # Preserve entry's own status (active/done); archived-ness
                 # is indicated by '_from_archive' so callers that care can
                 # distinguish without losing the completion state.
-                result = {**entry, 'content': content, '_from_archive': True}
-                if content is None and entry.get('has_body'):
-                    result['_warning'] = 'body_file_missing'
+                result = {**entry, "content": content, "_from_archive": True}
+                if content is None and entry.get("has_body"):
+                    result["_warning"] = "body_file_missing"
                 return result
         return None
 
-    def list_notes(self, note_type: str | None = None,
-                   status: str = 'active',
-                   search: str | None = None) -> list[dict]:
+    def list_notes(
+        self, note_type: str | None = None, status: str = "active", search: str | None = None
+    ) -> list[dict]:
         """List notes, optionally filtered by type, status, and search term.
 
         Returns list of index entry dicts sorted by timestamp descending.
@@ -598,9 +616,9 @@ class ScribeStore:
                 if not child.is_dir() or not child.name.isdigit():
                     continue
                 year_dir = child
-                if status == 'active' or status == 'all':
+                if status == "active" or status == "all":
                     results.extend(self._read_index(year_dir))
-                if status == 'archived' or status == 'all':
+                if status == "archived" or status == "all":
                     archive_dir = year_dir / ARCHIVE_DIRNAME
                     for entry in self._read_index(archive_dir):
                         # Preserve entry's own status (active/done) so
@@ -617,22 +635,24 @@ class ScribeStore:
             search_lower = search.lower()
 
             def _matches(e: dict) -> bool:
-                hay = ' '.join([
-                    str(e.get('display_id', '')),
-                    str(e.get('summary', '')),
-                    str(e.get('brief_summary', '')),
-                    str(e.get('session', '') or ''),
-                    ' '.join(str(t) for t in (e.get('tags') or [])),
-                ]).lower()
+                hay = " ".join(
+                    [
+                        str(e.get("display_id", "")),
+                        str(e.get("summary", "")),
+                        str(e.get("brief_summary", "")),
+                        str(e.get("session", "") or ""),
+                        " ".join(str(t) for t in (e.get("tags") or [])),
+                    ]
+                ).lower()
                 if search_lower in hay:
                     return True
-                body = self._read_body_any(e.get('type'), e.get('year'), e.get('seq'))
+                body = self._read_body_any(e.get("type"), e.get("year"), e.get("seq"))
                 return body is not None and search_lower in body.lower()
 
             results = [e for e in results if _matches(e)]
 
         # Sort by timestamp descending
-        results.sort(key=lambda e: e.get('timestamp', ''), reverse=True)
+        results.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
         return results
 
     def find_active_with_tag(self, tag: str) -> dict | None:
@@ -642,8 +662,8 @@ class ScribeStore:
         done/dropped/deferred notes are ignored. Backs ``--unique-tag`` and the
         Asana tool's mirror-dedup (spec §5.14). Returns None when no match.
         """
-        for entry in self.list_notes(status='active'):
-            if entry.get('status') == 'active' and tag in (entry.get('tags') or []):
+        for entry in self.list_notes(status="active"):
+            if entry.get("status") == "active" and tag in (entry.get("tags") or []):
                 return entry
         return None
 
@@ -663,30 +683,37 @@ class ScribeStore:
         every ``done``/``drop``/``defer``/``resume``/``update`` on an
         auto-archived note reported success and changed nothing.
         """
-        content_update = kwargs.pop('content', None)
-        add_tags = kwargs.pop('add_tags', None)
-        remove_tags = kwargs.pop('remove_tags', None)
+        content_update = kwargs.pop("content", None)
+        add_tags = kwargs.pop("add_tags", None)
+        remove_tags = kwargs.pop("remove_tags", None)
         type_dir = self._type_dir(note_type)
         year_dir = type_dir / str(year)
         if not year_dir.exists():
             return None
         updated = self._update_index_entry(
-            year_dir, seq, kwargs, content_update, add_tags, remove_tags)
+            year_dir, seq, kwargs, content_update, add_tags, remove_tags
+        )
         if updated is not None:
             return updated
         archive_dir = year_dir / ARCHIVE_DIRNAME
         if not archive_dir.exists():
             return None
         updated = self._update_index_entry(
-            archive_dir, seq, kwargs, content_update, add_tags, remove_tags)
+            archive_dir, seq, kwargs, content_update, add_tags, remove_tags
+        )
         if updated is None:
             return None
-        return {**updated, '_from_archive': True}
+        return {**updated, "_from_archive": True}
 
-    def _update_index_entry(self, folder: Path, seq: int, kwargs: dict,
-                            content_update: str | None,
-                            add_tags: list | None,
-                            remove_tags: list | None) -> dict | None:
+    def _update_index_entry(
+        self,
+        folder: Path,
+        seq: int,
+        kwargs: dict,
+        content_update: str | None,
+        add_tags: list | None,
+        remove_tags: list | None,
+    ) -> dict | None:
         """Apply an update to the entry with *seq* in *folder*'s index.
 
         *folder* is either a year dir or that year's ``archive/`` dir — the
@@ -704,26 +731,29 @@ class ScribeStore:
             # Stamp status_changed_at on any status transition (done/drop/
             # defer/resume), but never on a content-only edit. Mirrors the
             # source scribe oracle (spec §5.6).
-            if 'status' in kwargs:
-                entry['status_changed_at'] = datetime.now(timezone.utc).isoformat()
+            if "status" in kwargs:
+                entry["status_changed_at"] = datetime.now(timezone.utc).isoformat()
             # Tag mutation: remove-all-occurrences then add-if-absent, so
             # the result is a dedup'd, order-preserving list (spec §5.14).
             if add_tags or remove_tags:
-                tags = list(entry.get('tags') or [])
+                tags = list(entry.get("tags") or [])
                 if remove_tags:
                     rm = set(remove_tags)
                     tags = [t for t in tags if t not in rm]
-                for t in (add_tags or []):
+                for t in add_tags or []:
                     if t not in tags:
                         tags.append(t)
-                entry['tags'] = tags
+                entry["tags"] = tags
             if content_update is not None:
                 self._write_note_file(folder, seq, content_update)
-                entry['has_body'] = bool(content_update)
-                if 'brief_summary' not in kwargs:
-                    entry['brief_summary'] = derive_brief_summary(content_update)
-            if 'brief_summary' in kwargs and len(entry.get('brief_summary', '')) > BRIEF_SUMMARY_MAX:
-                entry['brief_summary'] = entry['brief_summary'][:BRIEF_SUMMARY_MAX].rstrip()
+                entry["has_body"] = bool(content_update)
+                if "brief_summary" not in kwargs:
+                    entry["brief_summary"] = derive_brief_summary(content_update)
+            if (
+                "brief_summary" in kwargs
+                and len(entry.get("brief_summary", "")) > BRIEF_SUMMARY_MAX
+            ):
+                entry["brief_summary"] = entry["brief_summary"][:BRIEF_SUMMARY_MAX].rstrip()
             txn.entries[i] = entry
             txn.commit()
             return entry
@@ -751,12 +781,15 @@ class ScribeStore:
             return None
         archive_dir = year_dir / ARCHIVE_DIRNAME
         return self._move_between_indexes(
-            year_dir, archive_dir, seq,
-            stamp={'archived_at': datetime.now(timezone.utc).isoformat()})
+            year_dir,
+            archive_dir,
+            seq,
+            stamp={"archived_at": datetime.now(timezone.utc).isoformat()},
+        )
 
-    def _move_between_indexes(self, src_dir: Path, dst_dir: Path, seq: int, *,
-                              stamp: dict | None = None,
-                              drop: tuple = ()) -> dict | None:
+    def _move_between_indexes(
+        self, src_dir: Path, dst_dir: Path, seq: int, *, stamp: dict | None = None, drop: tuple = ()
+    ) -> dict | None:
         """Move one note's row and body from *src_dir* to *dst_dir*.
 
         Shared by archive/unarchive for notes and learnings — four copies of
@@ -766,7 +799,7 @@ class ScribeStore:
         """
         with self._index_locks(src_dir, dst_dir):
             entries = self._read_index(src_dir)
-            target = next((e for e in entries if e.get('seq') == seq), None)
+            target = next((e for e in entries if e.get("seq") == seq), None)
             if target is None:
                 return None
             for key in drop:
@@ -774,11 +807,10 @@ class ScribeStore:
             target.update(stamp or {})
             # Destination row, then body, then remove the source row.
             self._append_index_unlocked(dst_dir, target)
-            src_md = src_dir / f'{seq}.md'
+            src_md = src_dir / f"{seq}.md"
             if src_md.exists():
-                replace_atomic(src_md, dst_dir / f'{seq}.md')
-            self._write_index_unlocked(
-                src_dir, [e for e in entries if e.get('seq') != seq])
+                replace_atomic(src_md, dst_dir / f"{seq}.md")
+            self._write_index_unlocked(src_dir, [e for e in entries if e.get("seq") != seq])
             return target
 
     def unarchive_note(self, note_type: str, year: int, seq: int) -> dict | None:
@@ -794,17 +826,21 @@ class ScribeStore:
         archive_dir = year_dir / ARCHIVE_DIRNAME
         if not archive_dir.exists():
             return None
-        return self._move_between_indexes(archive_dir, year_dir, seq,
-                                          drop=('archived_at',))
+        return self._move_between_indexes(archive_dir, year_dir, seq, drop=("archived_at",))
 
     # --- CRUD operations: Learnings ---
 
-    def add_learning(self, content: str, session_id: str,
-                     summary: str = '', brief_summary: str = '',
-                     tags: list[str] | None = None,
-                     areas: list[str] | None = None,
-                     supersedes: str | None = None,
-                     **metadata) -> dict:
+    def add_learning(
+        self,
+        content: str,
+        session_id: str,
+        summary: str = "",
+        brief_summary: str = "",
+        tags: list[str] | None = None,
+        areas: list[str] | None = None,
+        supersedes: str | None = None,
+        **metadata,
+    ) -> dict:
         """Add a new learning. Returns the created index entry dict.
 
         ``tags`` and ``areas`` are optional lists that also get mirrored
@@ -827,35 +863,39 @@ class ScribeStore:
         tags_list = list(tags) if tags else []
         areas_list = list(areas) if areas else []
         entry = {
-            'display_id': display_id,
-            'type': 'learning',
-            'year': year,
-            'seq': seq,
-            'status': 'active',
-            'session': session_id,
-            'timestamp': timestamp,
-            'summary': summary,
-            'brief_summary': brief,
-            'has_body': bool(content),
-            'tags': tags_list,
-            'areas': areas_list,
-            **({'supersedes': supersedes} if supersedes else {}),
+            "display_id": display_id,
+            "type": "learning",
+            "year": year,
+            "seq": seq,
+            "status": "active",
+            "session": session_id,
+            "timestamp": timestamp,
+            "summary": summary,
+            "brief_summary": brief,
+            "has_body": bool(content),
+            "tags": tags_list,
+            "areas": areas_list,
+            **({"supersedes": supersedes} if supersedes else {}),
             **metadata,
         }
         frontmatter = {
-            'tags': tags_list,
-            'areas': areas_list,
-            'supersedes': supersedes,
+            "tags": tags_list,
+            "areas": areas_list,
+            "supersedes": supersedes,
         }
         # Body before row, as in add_note.
         self._write_note_file(year_dir, seq, _format_learning_content(content, frontmatter))
         self._append_index(year_dir, entry)
         return entry
 
-    def list_learnings(self, search: str | None = None, *,
-                       tag: str | None = None,
-                       area: str | None = None,
-                       status: str = 'active') -> list[dict]:
+    def list_learnings(
+        self,
+        search: str | None = None,
+        *,
+        tag: str | None = None,
+        area: str | None = None,
+        status: str = "active",
+    ) -> list[dict]:
         """List all learnings, optionally filtered by search term, tag, area,
         and status. Scans all year subfolders under the learnings dir.
 
@@ -869,33 +909,38 @@ class ScribeStore:
             for child in learn_dir.iterdir():
                 if not (child.is_dir() and child.name.isdigit()):
                     continue
-                if status in ('active', 'all'):
+                if status in ("active", "all"):
                     entries.extend(self._read_index(child))
-                if status in ('archived', 'all'):
+                if status in ("archived", "all"):
                     archive_dir = child / ARCHIVE_DIRNAME
                     for entry in self._read_index(archive_dir):
-                        entries.append({**entry, '_from_archive': True})
+                        entries.append({**entry, "_from_archive": True})
         if search:
             search_lower = search.lower()
 
             def _lmatches(e: dict) -> bool:
-                hay = ' '.join([
-                    str(e.get('summary', '')),
-                    ' '.join(str(t) for t in (e.get('tags') or [])),
-                ]).lower()
+                hay = " ".join(
+                    [
+                        str(e.get("summary", "")),
+                        " ".join(str(t) for t in (e.get("tags") or [])),
+                    ]
+                ).lower()
                 if search_lower in hay:
                     return True
-                body = self._read_learning_body_any(e.get('year'), e.get('seq'))
+                body = self._read_learning_body_any(e.get("year"), e.get("seq"))
                 return body is not None and search_lower in body.lower()
 
             entries = [e for e in entries if _lmatches(e)]
         if tag:
             tag_lower = tag.lower()
-            entries = [e for e in entries
-                       if any(tag_lower in str(t).lower() for t in e.get('tags', []) or [])]
+            entries = [
+                e
+                for e in entries
+                if any(tag_lower in str(t).lower() for t in e.get("tags", []) or [])
+            ]
         if area:
-            entries = [e for e in entries if area in (e.get('areas', []) or [])]
-        entries.sort(key=lambda e: e.get('timestamp', ''), reverse=True)
+            entries = [e for e in entries if area in (e.get("areas", []) or [])]
+        entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
         return entries
 
     def get_learning(self, year: int, seq: int) -> dict | None:
@@ -913,31 +958,32 @@ class ScribeStore:
         if not year_dir.exists():
             return None
         for entry in self._read_index(year_dir):
-            if entry.get('seq') == seq:
+            if entry.get("seq") == seq:
                 return self._build_learning_result(entry, year_dir, seq, from_archive=False)
         archive_dir = year_dir / ARCHIVE_DIRNAME
         for entry in self._read_index(archive_dir):
-            if entry.get('seq') == seq:
+            if entry.get("seq") == seq:
                 return self._build_learning_result(entry, archive_dir, seq, from_archive=True)
         return None
 
-    def _build_learning_result(self, entry: dict, dir_path: Path, seq: int,
-                               *, from_archive: bool) -> dict:
+    def _build_learning_result(
+        self, entry: dict, dir_path: Path, seq: int, *, from_archive: bool
+    ) -> dict:
         raw = self._read_note_file(dir_path, seq)
         fm, body = _parse_learning_content(raw) if raw is not None else ({}, None)
-        result = {**entry, 'content': body}
+        result = {**entry, "content": body}
         for key in _LEARNING_FRONTMATTER_FIELDS:
             if key in fm:
                 result[key] = fm[key]
         if from_archive:
-            result['_from_archive'] = True
-        if body is None and entry.get('has_body'):
-            result['_warning'] = 'body_file_missing'
+            result["_from_archive"] = True
+        if body is None and entry.get("has_body"):
+            result["_warning"] = "body_file_missing"
         return result
 
-    def update_learning(self, year: int, seq: int, *,
-                        tags: list | None = None,
-                        areas: list | None = None) -> dict | None:
+    def update_learning(
+        self, year: int, seq: int, *, tags: list | None = None, areas: list | None = None
+    ) -> dict | None:
         """Replace a learning's tags/areas in the index row *and* the .md.
 
         Both, because ``get_learning`` treats the .md's frontmatter as the
@@ -955,16 +1001,23 @@ class ScribeStore:
                 return None
             updated = {**txn.entries[i]}
             if tags is not None:
-                updated['tags'] = list(tags)
+                updated["tags"] = list(tags)
             if areas is not None:
-                updated['areas'] = list(areas)
+                updated["areas"] = list(areas)
             raw = self._read_note_file(year_dir, seq)
-            fm, body = _parse_learning_content(raw) if raw is not None else ({}, '')
-            self._write_note_file(year_dir, seq, _format_learning_content(body or '', {
-                'tags': updated.get('tags') or [],
-                'areas': updated.get('areas') or [],
-                'supersedes': updated.get('supersedes') or fm.get('supersedes'),
-            }))
+            fm, body = _parse_learning_content(raw) if raw is not None else ({}, "")
+            self._write_note_file(
+                year_dir,
+                seq,
+                _format_learning_content(
+                    body or "",
+                    {
+                        "tags": updated.get("tags") or [],
+                        "areas": updated.get("areas") or [],
+                        "supersedes": updated.get("supersedes") or fm.get("supersedes"),
+                    },
+                ),
+            )
             txn.entries[i] = updated
             txn.commit()
             return updated
@@ -981,8 +1034,11 @@ class ScribeStore:
         if not year_dir.exists():
             return None
         return self._move_between_indexes(
-            year_dir, year_dir / ARCHIVE_DIRNAME, seq,
-            stamp={'archived_at': datetime.now(timezone.utc).isoformat()})
+            year_dir,
+            year_dir / ARCHIVE_DIRNAME,
+            seq,
+            stamp={"archived_at": datetime.now(timezone.utc).isoformat()},
+        )
 
     def remove_learning(self, year: int, seq: int) -> dict | None:
         """Remove a learning by year and seq. Returns the removed entry or None.

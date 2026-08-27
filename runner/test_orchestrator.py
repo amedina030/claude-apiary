@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for runner/run.py orchestrator."""
+
 import io
 import json
 import os
@@ -18,6 +19,7 @@ from runner.run import REPO_ROOT
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def make_completed_process(returncode=0, stdout="ok", stderr=""):
     proc = MagicMock(spec=subprocess.CompletedProcess)
     proc.returncode = returncode
@@ -35,11 +37,13 @@ def make_popen(returncode=0, stdout="ok", stderr="", timeout_after_calls=0):
     proc = MagicMock()
     proc.returncode = returncode
     state = {"calls": 0}
+
     def _comm(timeout=None):
         state["calls"] += 1
         if timeout_after_calls and state["calls"] <= timeout_after_calls:
             raise subprocess.TimeoutExpired(cmd="test", timeout=timeout or 0)
         return (stdout, stderr)
+
     proc.communicate.side_effect = _comm
     proc.poll.return_value = returncode
     return proc
@@ -50,6 +54,7 @@ class _RunnerTestCase(unittest.TestCase):
 
     def setUp(self):
         import os
+
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.tmp_path = Path(self._tmp.name)
@@ -60,6 +65,7 @@ class _RunnerTestCase(unittest.TestCase):
 
     def _restore_active_target(self):
         import os
+
         if self._prior_active_target is None:
             os.environ.pop("APIARY_TARGET_REPO", None)
         else:
@@ -92,9 +98,11 @@ class _RunnerTestCase(unittest.TestCase):
         out_buf = io.StringIO()
         err_buf = io.StringIO()
         exit_code = None
-        with patch.object(sys, "argv", argv), \
-             patch.object(sys, "stdout", out_buf), \
-             patch.object(sys, "stderr", err_buf):
+        with (
+            patch.object(sys, "argv", argv),
+            patch.object(sys, "stdout", out_buf),
+            patch.object(sys, "stderr", err_buf),
+        ):
             try:
                 orchestrator.main()
             except SystemExit as exc:
@@ -108,7 +116,6 @@ class _RunnerTestCase(unittest.TestCase):
 
 
 class TestRunStage(_RunnerTestCase):
-
     def test_module_not_found(self):
         input_f = self.tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
@@ -203,7 +210,6 @@ class TestRunStage(_RunnerTestCase):
 
 
 class TestMainCLIValidation(_RunnerTestCase):
-
     def _write_intake_with(self, name, payload):
         f = self.tmp_path / name
         f.write_text(json.dumps(payload), encoding="utf-8")
@@ -317,7 +323,6 @@ class TestMainCLIValidation(_RunnerTestCase):
 
 
 class TestMainHappyPath(_RunnerTestCase):
-
     @patch("runner.run.run_stage")
     def test_all_stages_succeed(self, mock_run_stage):
         intake_file, _ = self.make_intake_file()
@@ -368,9 +373,11 @@ class TestMainHappyPath(_RunnerTestCase):
             plans_dir,
             specs_dir,
         )
+
         default_intake = intake_dir() / f"{uid}.json"
         self.assertNotEqual(
-            intake_file.resolve(), default_intake.resolve(),
+            intake_file.resolve(),
+            default_intake.resolve(),
             "Test setup error: intake_file must not be in the default intake dir or the override path is never taken",
         )
         code, _, _ = self._run_main_capture(["run.py", str(intake_file)])
@@ -402,6 +409,7 @@ class TestMainHappyPath(_RunnerTestCase):
         """Phase 3: --target-repo on interactive runs must become the cwd
         argument for every stage subprocess."""
         import subprocess as _sp  # avoid shadowing
+
         intake_file, _ = self.make_intake_file()
         mock_run_stage.return_value = (True, "ok", "", 0.5)
         scratch = self.tmp_path / "scratch"
@@ -413,7 +421,8 @@ class TestMainHappyPath(_RunnerTestCase):
         self.assertIn(code, (None, 0))
         for call in mock_run_stage.call_args_list:
             self.assertEqual(
-                Path(call.kwargs["cwd"]).resolve(), scratch.resolve(),
+                Path(call.kwargs["cwd"]).resolve(),
+                scratch.resolve(),
                 f"stage call {call} did not receive target_repo as cwd",
             )
 
@@ -428,7 +437,8 @@ class TestMainHappyPath(_RunnerTestCase):
         # Every stage gets cwd=<apiary REPO_ROOT>
         for call in mock_run_stage.call_args_list:
             self.assertEqual(
-                Path(call.kwargs["cwd"]).resolve(), REPO_ROOT.resolve(),
+                Path(call.kwargs["cwd"]).resolve(),
+                REPO_ROOT.resolve(),
             )
 
     @patch("runner.run.run_stage")
@@ -455,7 +465,6 @@ class TestMainHappyPath(_RunnerTestCase):
 
 
 class TestMainFailurePropagation(_RunnerTestCase):
-
     @patch("runner.run.run_stage")
     def test_stage3_failure_stops_runner(self, mock_run_stage):
         intake_file, _ = self.make_intake_file()
@@ -499,7 +508,6 @@ class TestMainFailurePropagation(_RunnerTestCase):
 
 
 class TestMainKeyboardInterrupt(_RunnerTestCase):
-
     @patch("runner.run.run_stage")
     def test_interrupt_during_stage4(self, mock_run_stage):
         intake_file, _ = self.make_intake_file()
@@ -522,7 +530,6 @@ class TestMainKeyboardInterrupt(_RunnerTestCase):
 
 
 class TestIntakePathOverride(_RunnerTestCase):
-
     @patch("runner.run.run_stage")
     def test_intake_outside_runner_dir(self, mock_run_stage):
         intake_data = self.make_intake_data()

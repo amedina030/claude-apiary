@@ -9,6 +9,7 @@ temp directory and the env var set, and asserts no side effects:
 These tests complement test_save_transcript.py, which covers the
 save_transcript hook's own subprocess guard from #223.
 """
+
 import json
 import subprocess
 import sys
@@ -27,14 +28,18 @@ PYTHON = sys.executable
 SAMPLE_SID = "abcd1234-1111-2222-3333-444444444444"
 
 
-def _run_hook(hook_name: str, payload: dict, home: Path, *, runner_subprocess: bool) -> subprocess.CompletedProcess:
+def _run_hook(
+    hook_name: str, payload: dict, home: Path, *, runner_subprocess: bool
+) -> subprocess.CompletedProcess:
     # Per-repo session state (review S1): flags under <repo>/.claude/apiary/
     # session-tmp, identity/history under <state-dir>/sessions. Point both at
     # temp dirs so the hook never touches this checkout's own state.
     repo = home / "repo"
     (repo / ".claude" / "apiary" / "session-tmp").mkdir(parents=True, exist_ok=True)
     (repo / ".claude" / "apiary" / "self-pointer.json").write_text(
-        json.dumps({"schema_version": 1, "name": "repo", "uid": 1, "real_path": str(repo)}), encoding="utf-8")
+        json.dumps({"schema_version": 1, "name": "repo", "uid": 1, "real_path": str(repo)}),
+        encoding="utf-8",
+    )
     # hermetic_env drops every inherited APIARY_* / CLAUDE_PROJECT_DIR before
     # the overrides go on, so a live session cannot point the hook at the real
     # checkout.

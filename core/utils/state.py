@@ -16,6 +16,7 @@ auto-registers it. Apiary's own checkout self-registers as
 
 Spec: scribe note C-2026-46.
 """
+
 from __future__ import annotations
 
 import os
@@ -101,8 +102,11 @@ def _load_registry(apiary_repo: Path) -> dict:
 def _save_registry(apiary_repo: Path, data: dict) -> None:
     """Atomic write so concurrent readers never see a half-written file."""
     write_json_atomic(
-        registry_path(apiary_repo), data,
-        indent=2, sort_keys=True, trailing_newline=True,
+        registry_path(apiary_repo),
+        data,
+        indent=2,
+        sort_keys=True,
+        trailing_newline=True,
     )
 
 
@@ -310,10 +314,7 @@ def resolve_target_state_dir(
             return repos_root / folder_name
 
         if not auto_register:
-            raise RuntimeError(
-                f"Target not registered: {target_root}. "
-                f"Auto-registration disabled."
-            )
+            raise RuntimeError(f"Target not registered: {target_root}. Auto-registration disabled.")
 
         new_id = allocate_next_id(apiary)
         name = _safe_name(target_root.name)
@@ -451,6 +452,7 @@ def resolve_state_dir(
     With the defaults, the only ``None`` is "not inside a git repo"; the
     knowledge stores pass ``cwd_fallback=True`` and so never see one.
     """
+
     def _accept(base: Path | None) -> Optional[Path]:
         if base is None:
             return None

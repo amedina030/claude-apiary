@@ -1,4 +1,5 @@
 """Tests for runner.run_tracker — cross-invocation run tracking."""
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +9,6 @@ from runner import run_tracker
 
 
 class TestRunTracker(unittest.TestCase):
-
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.runs_dir = Path(self.tmp.name) / "runs"
@@ -35,8 +35,11 @@ class TestRunTracker(unittest.TestCase):
 
     def test_record_attempt_creates_tracker(self):
         tracker = run_tracker.record_attempt(
-            "uuid1", tokens_this_run=100000, stages_completed=3,
-            exit_status="stage_failed:executor", last_stage_completed="auto_plan",
+            "uuid1",
+            tokens_this_run=100000,
+            stages_completed=3,
+            exit_status="stage_failed:executor",
+            last_stage_completed="auto_plan",
         )
         self.assertEqual(tracker["uuid"], "uuid1")
         self.assertEqual(tracker["total_tokens"], 100000)
@@ -76,6 +79,7 @@ class TestGetResumeStage(unittest.TestCase):
 
     def setUp(self):
         import os
+
         self.tmp = tempfile.TemporaryDirectory()
         self.fake_apiary = Path(self.tmp.name)
         # Artifacts live under <apiary>/.apiary/runner/<subdir>/ — mirror that here.
@@ -84,6 +88,7 @@ class TestGetResumeStage(unittest.TestCase):
             (self.fake_runner_root / d).mkdir(parents=True)
         # Point APIARY_REPO_ROOT at the fake for the duration of each test.
         from runner import target_repo
+
         self._patcher = patch.object(target_repo, "APIARY_REPO_ROOT", self.fake_apiary)
         self._patcher.start()
         # Env var check in _default_target beats APIARY_REPO_ROOT — clear it
@@ -95,6 +100,7 @@ class TestGetResumeStage(unittest.TestCase):
 
     def tearDown(self):
         import os
+
         self._patcher.stop()
         if self._prior_env is None:
             os.environ.pop("APIARY_TARGET_REPO", None)

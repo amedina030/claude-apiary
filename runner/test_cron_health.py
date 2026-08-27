@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for runner/cron_health.py."""
+
 from __future__ import annotations
 
 import json
@@ -64,7 +65,9 @@ class CommandPlaceholderTests(unittest.TestCase):
 
     def _command_of(self, command: list[str]) -> list[str]:
         raw = {
-            "id": "x", "command": command, "cwd": "<apiary_repo>",
+            "id": "x",
+            "command": command,
+            "cwd": "<apiary_repo>",
             "schedule": {"type": "daily", "time": "02:00"},
         }
         return cron_health.RegistryEntry.from_raw(raw, self.APIARY_ROOT).command
@@ -100,9 +103,7 @@ class FakeBackend(SchedulerBackend):
     name = "fake"
 
     def __init__(self, entries: list[ObservedEntry] | None = None):
-        self._entries: dict[str, ObservedEntry] = {
-            e.entry_id: e for e in (entries or [])
-        }
+        self._entries: dict[str, ObservedEntry] = {e.entry_id: e for e in (entries or [])}
         self.created: list[tuple[str, str, list[str], str, dict]] = []
         self.deleted: list[tuple[str, str]] = []
         self.fail_delete_ids: set[str] = set()
@@ -116,7 +117,10 @@ class FakeBackend(SchedulerBackend):
         if entry_id in self.fail_create_ids:
             raise SchedulerError("simulated create failure", stderr="nope")
         self._entries[entry_id] = ObservedEntry(
-            entry_id=entry_id, command=command, cwd=cwd, schedule=schedule,
+            entry_id=entry_id,
+            command=command,
+            cwd=cwd,
+            schedule=schedule,
         )
 
     def delete_entry(self, prefix, entry_id) -> None:
@@ -139,7 +143,8 @@ class LoadRegistryTests(unittest.TestCase):
     def test_missing_file_raises(self):
         with self.assertRaises(cron_health.RegistryError) as ctx:
             cron_health.load_registry(
-                self.tmp / "nope.json", apiary_root=self.apiary,
+                self.tmp / "nope.json",
+                apiary_root=self.apiary,
             )
         self.assertIn("registry not found", str(ctx.exception))
 
@@ -171,20 +176,28 @@ class LoadRegistryTests(unittest.TestCase):
         self.assertIn("non-empty 'command' list", str(ctx.exception))
 
     def test_duplicate_ids_rejected(self):
-        p = _write_registry(self.tmp, [
-            {"id": "a", "command": ["python"]},
-            {"id": "a", "command": ["python"]},
-        ])
+        p = _write_registry(
+            self.tmp,
+            [
+                {"id": "a", "command": ["python"]},
+                {"id": "a", "command": ["python"]},
+            ],
+        )
         with self.assertRaises(cron_health.RegistryError) as ctx:
             cron_health.load_registry(p, apiary_root=self.apiary)
         self.assertIn("duplicate entry id", str(ctx.exception))
 
     def test_placeholder_resolution_in_cwd(self):
-        p = _write_registry(self.tmp, [{
-            "id": "x",
-            "command": ["python", "-m", "runner.run"],
-            "cwd": "<apiary_repo>",
-        }])
+        p = _write_registry(
+            self.tmp,
+            [
+                {
+                    "id": "x",
+                    "command": ["python", "-m", "runner.run"],
+                    "cwd": "<apiary_repo>",
+                }
+            ],
+        )
         entries = cron_health.load_registry(p, apiary_root=self.apiary)
         self.assertEqual(entries[0].cwd, str(self.apiary))
 
@@ -319,10 +332,16 @@ class CheckAndRepairTests(unittest.TestCase):
 
     def test_all_ok_returns_exit_zero(self):
         e = self._entry()
-        backend = FakeBackend([ObservedEntry(
-            entry_id=e.entry_id, command=e.command,
-            cwd=e.cwd, schedule=e.schedule,
-        )])
+        backend = FakeBackend(
+            [
+                ObservedEntry(
+                    entry_id=e.entry_id,
+                    command=e.command,
+                    cwd=e.cwd,
+                    schedule=e.schedule,
+                )
+            ]
+        )
         statuses, rc = cron_health.check([e], backend)
         self.assertEqual(rc, cron_health.EXIT_OK)
         self.assertEqual([s.state for s in statuses], ["ok"])
@@ -358,11 +377,16 @@ class CheckAndRepairTests(unittest.TestCase):
     def test_repair_apply_fixes_drift_via_delete_and_recreate(self):
         e = self._entry()
         # Task scheduler has the old pipeline/run.py command
-        backend = FakeBackend([ObservedEntry(
-            entry_id=e.entry_id,
-            command=["python", "-m", "pipeline.run", "--detached"],
-            cwd=e.cwd, schedule=e.schedule,
-        )])
+        backend = FakeBackend(
+            [
+                ObservedEntry(
+                    entry_id=e.entry_id,
+                    command=["python", "-m", "pipeline.run", "--detached"],
+                    cwd=e.cwd,
+                    schedule=e.schedule,
+                )
+            ]
+        )
         post, actions, rc = cron_health.repair([e], backend, apply=True)
         self.assertEqual(rc, cron_health.EXIT_OK)
         self.assertEqual(len(backend.deleted), 1)
@@ -371,10 +395,16 @@ class CheckAndRepairTests(unittest.TestCase):
 
     def test_repair_apply_deletes_disabled_entry_without_recreate(self):
         e = self._entry(disabled=True)
-        backend = FakeBackend([ObservedEntry(
-            entry_id=e.entry_id, command=e.command,
-            cwd=e.cwd, schedule=e.schedule,
-        )])
+        backend = FakeBackend(
+            [
+                ObservedEntry(
+                    entry_id=e.entry_id,
+                    command=e.command,
+                    cwd=e.cwd,
+                    schedule=e.schedule,
+                )
+            ]
+        )
         post, actions, rc = cron_health.repair([e], backend, apply=True)
         self.assertEqual(rc, cron_health.EXIT_OK)
         self.assertEqual(len(backend.deleted), 1)
@@ -387,7 +417,8 @@ class CheckAndRepairTests(unittest.TestCase):
         foreign = ObservedEntry(
             entry_id="some-other-task",
             command=["python", "-m", "something.else"],
-            cwd=e.cwd, schedule=e.schedule,
+            cwd=e.cwd,
+            schedule=e.schedule,
         )
         backend = FakeBackend([foreign])
         statuses, rc = cron_health.check([e], backend)
@@ -422,12 +453,21 @@ class MainCLITests(unittest.TestCase):
         self.apiary = self.tmp / "apiary"
         self.apiary.mkdir()
         self.registry_path = self.tmp / "cron_registry.json"
-        self.registry_path.write_text(json.dumps({"entries": [{
-            "id": "x",
-            "command": ["python", "-m", "runner.run"],
-            "cwd": str(self.apiary),
-            "schedule": {"type": "daily", "time": "02:00"},
-        }]}), encoding="utf-8")
+        self.registry_path.write_text(
+            json.dumps(
+                {
+                    "entries": [
+                        {
+                            "id": "x",
+                            "command": ["python", "-m", "runner.run"],
+                            "cwd": str(self.apiary),
+                            "schedule": {"type": "daily", "time": "02:00"},
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
         self._patches = [
             mock.patch.object(cron_health, "REGISTRY_PATH", self.registry_path),
             mock.patch.object(cron_health, "APIARY_REPO_ROOT", self.apiary),
@@ -442,48 +482,49 @@ class MainCLITests(unittest.TestCase):
 
     def test_missing_registry_exits_two(self):
         self.registry_path.unlink()
-        with mock.patch.object(cron_health, "get_scheduler",
-                                return_value=FakeBackend([])):
+        with mock.patch.object(cron_health, "get_scheduler", return_value=FakeBackend([])):
             rc = cron_health.main(["check"])
         self.assertEqual(rc, cron_health.EXIT_CONFIG_ERROR)
 
     def test_unsupported_platform_exits_two(self):
         def raise_unsupported():
             raise UnsupportedPlatformError("no backend for linux")
+
         with mock.patch.object(cron_health, "get_scheduler", raise_unsupported):
             rc = cron_health.main(["check"])
         self.assertEqual(rc, cron_health.EXIT_CONFIG_ERROR)
 
     def test_check_clean_exits_zero(self):
-        backend = FakeBackend([ObservedEntry(
-            entry_id="x", command=["python", "-m", "runner.run"],
-            cwd=str(self.apiary),
-            schedule={"type": "daily", "time": "02:00"},
-        )])
-        with mock.patch.object(cron_health, "get_scheduler",
-                                return_value=backend):
+        backend = FakeBackend(
+            [
+                ObservedEntry(
+                    entry_id="x",
+                    command=["python", "-m", "runner.run"],
+                    cwd=str(self.apiary),
+                    schedule={"type": "daily", "time": "02:00"},
+                )
+            ]
+        )
+        with mock.patch.object(cron_health, "get_scheduler", return_value=backend):
             rc = cron_health.main(["check"])
         self.assertEqual(rc, cron_health.EXIT_OK)
 
     def test_check_drift_exits_one(self):
         backend = FakeBackend([])
-        with mock.patch.object(cron_health, "get_scheduler",
-                                return_value=backend):
+        with mock.patch.object(cron_health, "get_scheduler", return_value=backend):
             rc = cron_health.main(["check"])
         self.assertEqual(rc, cron_health.EXIT_DRIFT)
 
     def test_repair_without_apply_is_dry_run(self):
         backend = FakeBackend([])
-        with mock.patch.object(cron_health, "get_scheduler",
-                                return_value=backend):
+        with mock.patch.object(cron_health, "get_scheduler", return_value=backend):
             rc = cron_health.main(["repair"])
         self.assertEqual(rc, cron_health.EXIT_OK)
         self.assertEqual(backend.created, [])
 
     def test_repair_apply_mutates(self):
         backend = FakeBackend([])
-        with mock.patch.object(cron_health, "get_scheduler",
-                                return_value=backend):
+        with mock.patch.object(cron_health, "get_scheduler", return_value=backend):
             rc = cron_health.main(["repair", "--apply"])
         self.assertEqual(rc, cron_health.EXIT_OK)
         self.assertEqual(len(backend.created), 1)
@@ -498,8 +539,6 @@ class BootstrapHookTests(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
-
-
 
 
 class GetSchedulerTests(unittest.TestCase):

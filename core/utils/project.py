@@ -1,4 +1,5 @@
 """Project key derivation — shared by core hooks and scribe."""
+
 import re
 import sys
 from pathlib import Path

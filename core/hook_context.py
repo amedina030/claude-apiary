@@ -8,6 +8,7 @@ every hook produces identical JSON structure, and defines the
 :class:`HookResult` contract every hook module's ``run(payload)``
 returns so ``core/hooks/dispatch.py`` can run them all in one process.
 """
+
 import json
 import os
 import sys
@@ -16,6 +17,7 @@ from dataclasses import dataclass
 # ---------------------------------------------------------------------------
 # Context block formatting
 # ---------------------------------------------------------------------------
+
 
 def context_block(namespace: str, *lines: str) -> str:
     """Build a tagged context block.
@@ -115,6 +117,7 @@ def read_payload():
 # ---------------------------------------------------------------------------
 # The in-process hook contract (core/hooks/dispatch.py)
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class HookResult:

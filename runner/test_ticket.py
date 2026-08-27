@@ -6,6 +6,7 @@ slugs, hint parsing, intake/backlog writing) and adds the parts that only
 exist now: the subcommand wiring, and parity between each deprecated shim
 entry point and the subcommand it forwards to.
 """
+
 import json
 import subprocess
 import sys
@@ -128,6 +129,7 @@ class TestSlug(unittest.TestCase):
         """One slugify in the package (review X-3): the run branch uses the
         same function uncapped, with an 'item' fallback."""
         from runner.detached_lib import slugify
+
         self.assertEqual(slugify("Hello World!"), "hello-world")
         self.assertEqual(slugify(""), "item")
         self.assertEqual(slugify("", max_length=60, fallback=""), "")
@@ -172,8 +174,15 @@ _LONG = "A long enough field to clear the twenty character minimum."
 class TestDraftAndPromote(TicketDirsMixin, unittest.TestCase):
     def _draft(self, title="Add caching"):
         return self._run(
-            "draft", "--title", title, "--problem", _LONG,
-            "--description", _LONG, "--scope", "api/cache.py",
+            "draft",
+            "--title",
+            title,
+            "--problem",
+            _LONG,
+            "--description",
+            _LONG,
+            "--scope",
+            "api/cache.py",
         )
 
     def test_draft_writes_a_slugged_backlog_file(self):
@@ -186,8 +195,15 @@ class TestDraftAndPromote(TicketDirsMixin, unittest.TestCase):
 
     def test_draft_rejects_a_title_that_slugs_to_nothing(self):
         rc = self._run(
-            "draft", "--title", "???", "--problem", _LONG,
-            "--description", _LONG, "--scope", "x",
+            "draft",
+            "--title",
+            "???",
+            "--problem",
+            _LONG,
+            "--description",
+            _LONG,
+            "--scope",
+            "x",
         )
         self.assertEqual(rc, 1)
 
@@ -213,17 +229,24 @@ class TestDraftAndPromote(TicketDirsMixin, unittest.TestCase):
         data["target_repo"] = str(REPO_ROOT)
         path.write_text(json.dumps(data), encoding="utf-8")
         self.assertEqual(self._run("promote", "add-caching"), 0)
-        written = json.loads(
-            next(self.intake.glob("*.json")).read_text(encoding="utf-8"))
+        written = json.loads(next(self.intake.glob("*.json")).read_text(encoding="utf-8"))
         self.assertEqual(written["target_repo"], str(REPO_ROOT))
 
 
 class TestCreateIntake(TicketDirsMixin, unittest.TestCase):
     def test_writes_and_validates(self):
         rc = self._run(
-            "create-intake", "--title", "Add caching", "--problem", _LONG,
-            "--description", _LONG, "--scope", "api/cache.py",
-            "--explore-hints", "a.py, b.py, a.py",
+            "create-intake",
+            "--title",
+            "Add caching",
+            "--problem",
+            _LONG,
+            "--description",
+            _LONG,
+            "--scope",
+            "api/cache.py",
+            "--explore-hints",
+            "a.py, b.py, a.py",
         )
         self.assertEqual(rc, 0)
         data = json.loads(next(self.intake.glob("*.json")).read_text(encoding="utf-8"))
@@ -232,8 +255,15 @@ class TestCreateIntake(TicketDirsMixin, unittest.TestCase):
     def test_deletes_the_file_when_validation_fails(self):
         # "short" is under validate_intake's 20-character minimum.
         rc = self._run(
-            "create-intake", "--title", "Add caching", "--problem", "short",
-            "--description", _LONG, "--scope", "api/cache.py",
+            "create-intake",
+            "--title",
+            "Add caching",
+            "--problem",
+            "short",
+            "--description",
+            _LONG,
+            "--scope",
+            "api/cache.py",
         )
         self.assertEqual(rc, 1)
         self.assertEqual(list(self.intake.glob("*.json")), [])
@@ -252,8 +282,7 @@ class TestFromNote(TicketDirsMixin, unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_write_intake_file(self):
-        self.assertEqual(
-            self._run("from-note", "--note", "42", "--title", "Test Title"), 0)
+        self.assertEqual(self._run("from-note", "--note", "42", "--title", "Test Title"), 0)
         written = list(self.intake.glob("*.json"))
         self.assertEqual(len(written), 1)
         data = json.loads(written[0].read_text(encoding="utf-8"))
@@ -263,8 +292,8 @@ class TestFromNote(TicketDirsMixin, unittest.TestCase):
 
     def test_write_backlog_file(self):
         self.assertEqual(
-            self._run("from-note", "--note", "42", "--title", "Test Title",
-                      "--backlog"), 0)
+            self._run("from-note", "--note", "42", "--title", "Test Title", "--backlog"), 0
+        )
         self.assertTrue((self.backlog / "test-title.json").exists())
 
     def test_malformed_handoff_is_reported(self):
@@ -276,8 +305,19 @@ class TestFromNote(TicketDirsMixin, unittest.TestCase):
 class TestValidateSubcommand(TicketDirsMixin, unittest.TestCase):
     def test_valid_file(self):
         self.assertEqual(
-            self._run("create-intake", "--title", "Add caching", "--problem", _LONG,
-                      "--description", _LONG, "--scope", "api/cache.py"), 0)
+            self._run(
+                "create-intake",
+                "--title",
+                "Add caching",
+                "--problem",
+                _LONG,
+                "--description",
+                _LONG,
+                "--scope",
+                "api/cache.py",
+            ),
+            0,
+        )
         path = next(self.intake.glob("*.json"))
         self.assertEqual(self._run("validate", str(path)), 0)
 
@@ -301,21 +341,37 @@ class TestShimParity(unittest.TestCase):
     def _help(self, module: str) -> str:
         res = subprocess.run(
             [sys.executable, "-m", module, "--help"],
-            cwd=str(REPO_ROOT), capture_output=True, text=True, encoding="utf-8",
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         )
         self.assertEqual(res.returncode, 0, res.stderr)
         return res.stdout
 
     def test_create_intake_shim_flags(self):
         text = self._help("runner.create_intake")
-        for flag in ("--title", "--problem", "--description", "--scope",
-                     "--context", "--from-todo", "--explore-hints"):
+        for flag in (
+            "--title",
+            "--problem",
+            "--description",
+            "--scope",
+            "--context",
+            "--from-todo",
+            "--explore-hints",
+        ):
             self.assertIn(flag, text)
 
     def test_draft_ticket_shim_flags(self):
         text = self._help("runner.draft_ticket")
-        for flag in ("--title", "--problem", "--description", "--scope",
-                     "--context", "--from-todo"):
+        for flag in (
+            "--title",
+            "--problem",
+            "--description",
+            "--scope",
+            "--context",
+            "--from-todo",
+        ):
             self.assertIn(flag, text)
         self.assertNotIn("--explore-hints", text)
 
@@ -329,6 +385,7 @@ class TestShimParity(unittest.TestCase):
 
     def test_shims_forward_to_the_ticket_handlers(self):
         from runner import create_intake, draft_ticket, promote, refine_to_intake
+
         self.assertIs(create_intake.cmd_create_intake, ticket.cmd_create_intake)
         self.assertIs(draft_ticket.cmd_draft, ticket.cmd_draft)
         self.assertIs(promote.cmd_promote, ticket.cmd_promote)

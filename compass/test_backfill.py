@@ -5,6 +5,7 @@ Hermetic: every test writes its own transcript into a tempdir and points
 real ``~/.claude/projects`` transcripts or the live compass store, and the
 ``claude`` subprocess is always mocked.
 """
+
 import json
 import os
 import tempfile
@@ -20,14 +21,23 @@ def _write_transcript(path: Path, mtime: float | None = None) -> Path:
     """Write a minimal four-message transcript and optionally set its mtime."""
     lines = [
         {"message": {"role": "user", "content": "add the retry loop"}},
-        {"message": {"role": "assistant",
-                     "content": [{"type": "text", "text": "Done — three attempts."}]}},
+        {
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Done — three attempts."}],
+            }
+        },
         {"message": {"role": "user", "content": "why three and not two"}},
-        {"message": {"role": "assistant",
-                     "content": [{"type": "text", "text": "Because the validator..."}]}},
+        {
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Because the validator..."}],
+            }
+        },
     ]
     path.write_text(
-        "\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8",
+        "\n".join(json.dumps(line) for line in lines) + "\n",
+        encoding="utf-8",
     )
     if mtime is not None:
         os.utime(path, (mtime, mtime))
@@ -78,8 +88,7 @@ class CapturedAtTest(unittest.TestCase):
             t_new = datetime(2026, 8, 1, tzinfo=timezone.utc).timestamp()
             os.utime(older, (t_old, t_old))
             os.utime(newer, (t_new, t_new))
-            self.assertLess(backfill._captured_at(older),
-                            backfill._captured_at(newer))
+            self.assertLess(backfill._captured_at(older), backfill._captured_at(newer))
 
 
 class ProcessOneTest(unittest.TestCase):
@@ -90,6 +99,7 @@ class ProcessOneTest(unittest.TestCase):
         def run(prompt, model=None):
             self.prompts.append(prompt)
             return 0, json.dumps({"result": json.dumps(payload)}), ""
+
         return run
 
     def setUp(self):
@@ -97,7 +107,8 @@ class ProcessOneTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
         self._env = mock.patch.dict(
-            os.environ, {store.TARGET_STATE_DIR_ENV: str(self.root / "state")},
+            os.environ,
+            {store.TARGET_STATE_DIR_ENV: str(self.root / "state")},
         )
         self._env.start()
 
@@ -124,16 +135,16 @@ class ProcessOneTest(unittest.TestCase):
                 },
             ],
         }
-        with mock.patch.object(backfill, "run_claude",
-                               side_effect=self._fake_claude(payload)):
+        with mock.patch.object(backfill, "run_claude", side_effect=self._fake_claude(payload)):
             outcome = backfill._process_one(
-                path, store.load_dimensions(), model=None, force=False,
+                path,
+                store.load_dimensions(),
+                model=None,
+                force=False,
             )
 
         self.assertEqual(outcome, "wrote")
-        written = json.loads(
-            store.observation_path("deadbeef").read_text(encoding="utf-8")
-        )
+        written = json.loads(store.observation_path("deadbeef").read_text(encoding="utf-8"))
         self.assertEqual(written["captured_at"], "2026-04-17T20:30:15Z")
         self.assertEqual(written["session_id"], "deadbeef")
         self.assertEqual(store.validate_observation(written), [])

@@ -16,6 +16,7 @@ registered now, not here.
 Hook commands always go through the per-repo launcher
 (``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``) post-migration.
 """
+
 from __future__ import annotations
 
 import sys
@@ -47,8 +48,11 @@ EVENT_VERBS: dict[str, str] = {
 def dispatch_cmd(verb: str) -> str:
     """The launcher command that runs the dispatcher for one event verb."""
     return hook_cmd(
-        DISPATCHER, PYTHON,
-        repo_root=REPO_ROOT, per_repo_launcher=True, args=(verb,),
+        DISPATCHER,
+        PYTHON,
+        repo_root=REPO_ROOT,
+        per_repo_launcher=True,
+        args=(verb,),
     )
 
 

@@ -4,6 +4,7 @@ Everything runs against a throwaway fake main-apiary with its own registry
 and its own ``migrations/`` directory, so the real chain (currently a single
 no-op) is never what is being asserted on.
 """
+
 from __future__ import annotations
 
 import json
@@ -113,7 +114,8 @@ class MigrationDiscoveryTests(UpdateTestBase):
     def test_a_migration_without_upgrade_is_an_error(self):
         path = self.apiary / "migrations" / "v0_1_0_to_v0_2_0.py"
         path.write_text(
-            'FROM_VERSION = "0.1.0"\nTO_VERSION = "0.2.0"\n', encoding="utf-8",
+            'FROM_VERSION = "0.1.0"\nTO_VERSION = "0.2.0"\n',
+            encoding="utf-8",
         )
         with self.assertRaises(update_mod.UpdateError):
             update_mod.load_migrations(self.apiary)

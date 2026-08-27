@@ -8,6 +8,7 @@ model "would have" produced. Post-hoc reconstruction + post-condition
 verification is what we actually test here — the subprocess itself is
 uninteresting.
 """
+
 import contextlib
 import io
 import json
@@ -28,8 +29,11 @@ from runner.schema_versions import (
 
 def _git(repo: Path, *args):
     return subprocess.run(
-        ["git"] + list(args), cwd=str(repo),
-        capture_output=True, text=True, check=True,
+        ["git"] + list(args),
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        check=True,
     )
 
 
@@ -48,13 +52,18 @@ class ChainedExecutorTestBase(unittest.TestCase):
         self._executions = self.repo / "executions"
         self._executions.mkdir()
         self._executions_patch = mock.patch.object(
-            monolithic_executor, "EXECUTIONS_DIR", self._executions,
+            monolithic_executor,
+            "EXECUTIONS_DIR",
+            self._executions,
         )
         self._executions_patch.start()
         from runner import validate_plan
+
         self._validate_plan = validate_plan
         self._repo_root_patch = mock.patch.object(
-            validate_plan, "_REPO_ROOT", self.repo,
+            validate_plan,
+            "_REPO_ROOT",
+            self.repo,
         )
         self._repo_root_patch.start()
 
@@ -93,8 +102,7 @@ class ChainedExecutorTestBase(unittest.TestCase):
                     "depends_on": [1],
                     "code_spec": "add a helper function",
                     "post_conditions": [
-                        {"type": "file_contains", "file": "hello.py",
-                         "text": "def helper"},
+                        {"type": "file_contains", "file": "hello.py", "text": "def helper"},
                     ],
                 },
             ],
@@ -108,7 +116,8 @@ class ChainedExecutorTestBase(unittest.TestCase):
         with (
             mock.patch.object(sys, "argv", argv),
             mock.patch.object(
-                monolithic_executor, "_spawn_claude",
+                monolithic_executor,
+                "_spawn_claude",
                 side_effect=fake_side_effect,
             ),
         ):
@@ -136,7 +145,8 @@ class TestChainedExecutorHappyPath(ChainedExecutorTestBase):
             # Simulate the model: write hello.py with helper and make two
             # commits matching the expected subject format.
             (self.repo / "hello.py").write_text(
-                "# placeholder\n", encoding="utf-8",
+                "# placeholder\n",
+                encoding="utf-8",
             )
             _git(self.repo, "add", "hello.py")
             _git(self.repo, "commit", "-m", "runner/happy step 1: create the hello module")
@@ -150,12 +160,9 @@ class TestChainedExecutorHappyPath(ChainedExecutorTestBase):
 
         rc = self._run(plan_path, fake_claude)
         self.assertEqual(rc, 0)
-        log = json.loads(
-            (self._executions / "happy.json").read_text(encoding="utf-8")
-        )
+        log = json.loads((self._executions / "happy.json").read_text(encoding="utf-8"))
         self.assertEqual(log["status"], "completed")
-        self.assertEqual([s["status"] for s in log["steps"]],
-                         ["passed", "passed"])
+        self.assertEqual([s["status"] for s in log["steps"]], ["passed", "passed"])
         self.assertEqual(log["mode"], "monolithic")
         self.assertEqual(log["schema_version"], EXECUTION_SCHEMA_VERSION)
 
@@ -170,18 +177,16 @@ class TestChainedExecutorHappyPath(ChainedExecutorTestBase):
 
         def fake_claude(prompt, *, timeout=None, model=None):
             (self.repo / "hello.py").write_text(
-                "def helper():\n    return 1\n", encoding="utf-8",
+                "def helper():\n    return 1\n",
+                encoding="utf-8",
             )
             _git(self.repo, "add", "hello.py")
-            _git(self.repo, "commit", "-m",
-                 "runner/subsume-chain step 1: create the hello module")
+            _git(self.repo, "commit", "-m", "runner/subsume-chain step 1: create the hello module")
             return 0, '{"ok": true}', ""
 
         rc = self._run(plan_path, fake_claude)
         self.assertEqual(rc, 0)
-        log = json.loads(
-            (self._executions / "subsume-chain.json").read_text(encoding="utf-8")
-        )
+        log = json.loads((self._executions / "subsume-chain.json").read_text(encoding="utf-8"))
         self.assertEqual(log["status"], "completed")
         self.assertEqual(log["steps"][0]["status"], "passed")
         self.assertEqual(log["steps"][1]["status"], "passed")
@@ -197,9 +202,7 @@ class TestChainedExecutorFailures(ChainedExecutorTestBase):
 
         rc = self._run(plan_path, fake_claude)
         self.assertEqual(rc, 1)
-        log = json.loads(
-            (self._executions / "rc-fail.json").read_text(encoding="utf-8")
-        )
+        log = json.loads((self._executions / "rc-fail.json").read_text(encoding="utf-8"))
         self.assertEqual(log["status"], "aborted")
         self.assertIn("rc=-1", log["error"])
         # Transcript file preserved for debugging.
@@ -214,18 +217,16 @@ class TestChainedExecutorFailures(ChainedExecutorTestBase):
             # satisfied, so step 1 passes. Step 2 has no commit + unmet PC
             # → fails.
             (self.repo / "hello.py").write_text(
-                "# no helper here\n", encoding="utf-8",
+                "# no helper here\n",
+                encoding="utf-8",
             )
             _git(self.repo, "add", "hello.py")
-            _git(self.repo, "commit", "-m",
-                 "runner/pc-unmet step 1: create the hello module")
+            _git(self.repo, "commit", "-m", "runner/pc-unmet step 1: create the hello module")
             return 0, '{"ok": true}', ""
 
         rc = self._run(plan_path, fake_claude)
         self.assertEqual(rc, 1)
-        log = json.loads(
-            (self._executions / "pc-unmet.json").read_text(encoding="utf-8")
-        )
+        log = json.loads((self._executions / "pc-unmet.json").read_text(encoding="utf-8"))
         self.assertEqual(log["status"], "aborted")
         self.assertEqual(log["steps"][0]["status"], "passed")
         self.assertEqual(log["steps"][1]["status"], "failed")
@@ -240,22 +241,19 @@ class TestChainedExecutorFailures(ChainedExecutorTestBase):
             (self.repo / "hello.py").write_text("x\n", encoding="utf-8")
             (self.repo / "README.md").write_text("leaked\n", encoding="utf-8")
             _git(self.repo, "add", "hello.py", "README.md")
-            _git(self.repo, "commit", "-m",
-                 "runner/leak step 1: create the hello module")
+            _git(self.repo, "commit", "-m", "runner/leak step 1: create the hello module")
             # Step 2 commits cleanly so step-level test doesn't confound.
             (self.repo / "hello.py").write_text(
-                "def helper():\n    return 1\n", encoding="utf-8",
+                "def helper():\n    return 1\n",
+                encoding="utf-8",
             )
             _git(self.repo, "add", "hello.py")
-            _git(self.repo, "commit", "-m",
-                 "runner/leak step 2: add a helper")
+            _git(self.repo, "commit", "-m", "runner/leak step 2: add a helper")
             return 0, '{"ok": true}', ""
 
         rc = self._run(plan_path, fake_claude)
         self.assertEqual(rc, 1)
-        log = json.loads(
-            (self._executions / "leak.json").read_text(encoding="utf-8")
-        )
+        log = json.loads((self._executions / "leak.json").read_text(encoding="utf-8"))
         self.assertEqual(log["status"], "aborted")
         self.assertEqual(log["steps"][0]["status"], "failed")
         self.assertIn("outside step.files", log["steps"][0]["error"])
@@ -291,9 +289,7 @@ class TestChainedExecutorFailures(ChainedExecutorTestBase):
 
         rc = self._run(plan_path, fake_claude)
         self.assertEqual(rc, 1)
-        log = json.loads(
-            (self._executions / "noskip.json").read_text(encoding="utf-8")
-        )
+        log = json.loads((self._executions / "noskip.json").read_text(encoding="utf-8"))
         self.assertEqual(log["status"], "aborted")
         self.assertEqual(log["steps"][0]["status"], "failed")
 
@@ -314,9 +310,7 @@ class TestSchemaVersionSeam(ChainedExecutorTestBase):
 
         rc = self._run(plan_path, fake_claude)
         self.assertEqual(rc, 1)
-        log = json.loads(
-            (self._executions / "abort-schema.json").read_text(encoding="utf-8")
-        )
+        log = json.loads((self._executions / "abort-schema.json").read_text(encoding="utf-8"))
         self.assertEqual(log["status"], "aborted")
         self.assertEqual(log["schema_version"], EXECUTION_SCHEMA_VERSION)
 
@@ -363,11 +357,15 @@ class TestMonolithicArtifactFeedsAutoHarden(ChainedExecutorTestBase):
         self._hardens = self.repo / "hardens"
         self._hardens.mkdir()
         self._hardens_patch = mock.patch.object(
-            auto_harden, "HARDENS_DIR", self._hardens,
+            auto_harden,
+            "HARDENS_DIR",
+            self._hardens,
         )
         self._hardens_patch.start()
         self._plans_patch = mock.patch.object(
-            auto_harden, "plans_dir", lambda *a, **k: self._plans,
+            auto_harden,
+            "plans_dir",
+            lambda *a, **k: self._plans,
         )
         self._plans_patch.start()
 
@@ -381,22 +379,23 @@ class TestMonolithicArtifactFeedsAutoHarden(ChainedExecutorTestBase):
         plan_path, plan = self._two_step_plan(uuid)
         # auto_harden re-opens the plan for the spec, keyed by uuid.
         (self._plans / f"{uuid}.json").write_text(
-            json.dumps(plan), encoding="utf-8",
+            json.dumps(plan),
+            encoding="utf-8",
         )
 
         def fake_claude(prompt, *, timeout=None, model=None):
             (self.repo / "hello.py").write_text(
-                "def helper():\n    return 1\n", encoding="utf-8",
+                "def helper():\n    return 1\n",
+                encoding="utf-8",
             )
             _git(self.repo, "add", "hello.py")
-            _git(self.repo, "commit", "-m",
-                 f"runner/{uuid} step 1: create the hello module")
+            _git(self.repo, "commit", "-m", f"runner/{uuid} step 1: create the hello module")
             (self.repo / "hello.py").write_text(
-                "def helper():\n    return 2\n", encoding="utf-8",
+                "def helper():\n    return 2\n",
+                encoding="utf-8",
             )
             _git(self.repo, "add", "hello.py")
-            _git(self.repo, "commit", "-m",
-                 f"runner/{uuid} step 2: add a helper")
+            _git(self.repo, "commit", "-m", f"runner/{uuid} step 2: add a helper")
             return 0, '{"ok": true}', ""
 
         rc = self._run(plan_path, fake_claude)
@@ -405,6 +404,7 @@ class TestMonolithicArtifactFeedsAutoHarden(ChainedExecutorTestBase):
 
     def _run_auto_harden(self, log_path):
         """Run stage 5 with a fake attacker that finds nothing."""
+
         def fake_claude(prompt, model=None):
             return 0, json.dumps({"result": "[]"}), ""
 
@@ -432,9 +432,7 @@ class TestMonolithicArtifactFeedsAutoHarden(ChainedExecutorTestBase):
         self.assertEqual(rc, 0, f"auto_harden rejected the artifact: {err}")
         self.assertNotIn("schema_version", err)
 
-        result = json.loads(
-            (self._hardens / "seam-ok.json").read_text(encoding="utf-8")
-        )
+        result = json.loads((self._hardens / "seam-ok.json").read_text(encoding="utf-8"))
         self.assertEqual(result["verdict"], "all_resolved")
         self.assertEqual(result["branch"], "runner/seam-ok")
         # It read the real changed-file list off the monolithic artifact.
@@ -485,7 +483,8 @@ class TestReconstructionHelpers(ChainedExecutorTestBase):
         _git(self.repo, "add", "a.py", "b.py", "c.py")
         _git(self.repo, "commit", "-m", "chunky")
         unexpected = monolithic_executor.detect_global_unexpected_writes(
-            plan, "master",
+            plan,
+            "master",
         )
         self.assertEqual(unexpected, ["c.py"])
 

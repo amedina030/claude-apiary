@@ -25,6 +25,7 @@ What is faked:
 The test never spawns the real ``claude`` binary: the shim is found by name on
 ``PATH`` and ``setUp`` asserts that the resolved path is the shim.
 """
+
 from __future__ import annotations
 
 import json
@@ -171,8 +172,7 @@ def install_fake_claude(bin_dir: Path) -> Path:
     if os.name == "nt":
         shim = bin_dir / "claude.bat"
         shim.write_text(
-            "@echo off\r\n"
-            '"' + sys.executable + '" "' + str(script) + '" %*\r\n',
+            '@echo off\r\n"' + sys.executable + '" "' + str(script) + '" %*\r\n',
             encoding="utf-8",
         )
     else:
@@ -202,8 +202,7 @@ def greet(name):
 SPEC = {
     "goal": {
         "problem": (
-            "The demo app has no greeting helper, so every caller repeats its "
-            "own greeting string."
+            "The demo app has no greeting helper, so every caller repeats its own greeting string."
         ),
         "solution": "Add a greeter module exposing greet(name).",
         "value": "Callers share one greeting helper instead of duplicating strings.",
@@ -310,13 +309,13 @@ PLAN_STEPS = [
     },
 ]
 
-MAIN_SOURCE = '''from app.greeter import greet
+MAIN_SOURCE = """from app.greeter import greet
 
 
 def main():
     print(greet("Ada"))
     return 0
-'''
+"""
 
 
 def scenario() -> dict:
@@ -357,10 +356,13 @@ def scenario() -> dict:
 # Git helpers
 # --------------------------------------------------------------------------- #
 
+
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(repo), *args],
-        capture_output=True, text=True, encoding="utf-8",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
 
 
@@ -386,12 +388,14 @@ def make_target_repo(path: Path, origin: Path) -> str:
     git_ok(path, "config", "user.email", "runner-e2e@example.invalid")
     git_ok(path, "config", "commit.gpgsign", "false")
     (path / ".gitignore").write_text(
-        ".apiary/\n.runner-worktrees/\n__pycache__/\n", encoding="utf-8",
+        ".apiary/\n.runner-worktrees/\n__pycache__/\n",
+        encoding="utf-8",
     )
     (path / "README.md").write_text("# demo app\n", encoding="utf-8")
     (path / "app").mkdir()
     (path / "app" / "main.py").write_text(
-        "def main():\n    return 0\n", encoding="utf-8",
+        "def main():\n    return 0\n",
+        encoding="utf-8",
     )
     git_ok(path, "add", "-A")
     git_ok(path, "commit", "-m", "initial commit")
@@ -426,6 +430,7 @@ def commit_subjects(repo: Path, ref: str, base: str) -> list[str]:
 # Test case
 # --------------------------------------------------------------------------- #
 
+
 class E2EPipelineBase(unittest.TestCase):
     """Shared fixture: temp origin + target repo, temp state dir, fake claude."""
 
@@ -451,7 +456,8 @@ class E2EPipelineBase(unittest.TestCase):
         resolved = shutil.which("claude", path=self.env["PATH"])
         self.assertIsNotNone(resolved, "fake claude shim not resolvable on PATH")
         self.assertEqual(
-            Path(resolved).parent.resolve(), self.bin_dir.resolve(),
+            Path(resolved).parent.resolve(),
+            self.bin_dir.resolve(),
             "the fake claude shim must shadow any real claude on PATH",
         )
 
@@ -466,10 +472,7 @@ class E2EPipelineBase(unittest.TestCase):
         # Scrub inherited APIARY_*/CLAUDE_* so a sibling test module's
         # module-level env assignment (e.g. APIARY_RUNNER_TEST_ISOLATION in
         # test_run_detached.py) cannot leak into the run.
-        env = {
-            k: v for k, v in os.environ.items()
-            if not k.startswith(("APIARY_", "CLAUDE_"))
-        }
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("APIARY_", "CLAUDE_"))}
         env["PATH"] = str(self.bin_dir) + os.pathsep + os.environ.get("PATH", "")
         env["PYTHONPATH"] = str(APIARY_ROOT)
         env["PYTHONIOENCODING"] = "utf-8"
@@ -489,8 +492,12 @@ class E2EPipelineBase(unittest.TestCase):
     def run_runner(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             [sys.executable, "-m", "runner.run", *args],
-            cwd=str(APIARY_ROOT), env=self.env,
-            capture_output=True, text=True, encoding="utf-8", timeout=600,
+            cwd=str(APIARY_ROOT),
+            env=self.env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=600,
         )
 
     def intake_payload(self, uuid: str) -> dict:
@@ -498,8 +505,7 @@ class E2EPipelineBase(unittest.TestCase):
             "id": uuid,
             "title": "Add a greeter module",
             "problem": (
-                "The demo app has no greeting helper, so callers repeat their "
-                "own greeting strings."
+                "The demo app has no greeting helper, so callers repeat their own greeting strings."
             ),
             "description": (
                 "Add app/greeter.py exposing greet(name) so the demo app has a "
@@ -526,7 +532,8 @@ class E2EPipelineBase(unittest.TestCase):
     def assert_nothing_pushed(self):
         refs = origin_refs(self.origin)
         self.assertEqual(
-            refs, {"refs/heads/master": self.base_sha},
+            refs,
+            {"refs/heads/master": self.base_sha},
             "the runner must never push: origin picked up new or moved refs",
         )
 
@@ -534,8 +541,7 @@ class E2EPipelineBase(unittest.TestCase):
         for kind in ("intake", "specs", "plans", "executions", "hardens", "reports"):
             path = self.artifact(kind, uuid)
             self.assertTrue(path.exists(), f"missing {kind} artifact at {path}")
-        execution = json.loads(
-            self.artifact("executions", uuid).read_text(encoding="utf-8"))
+        execution = json.loads(self.artifact("executions", uuid).read_text(encoding="utf-8"))
         self.assertEqual(execution["status"], "completed")
         self.assertEqual(
             [step["status"] for step in execution["steps"]],
@@ -553,23 +559,23 @@ class InteractiveRunTest(E2EPipelineBase):
         uuid = "e2e-interactive-0001"
         intake_path = self.state / "runner" / "intake" / f"{uuid}.json"
         intake_path.parent.mkdir(parents=True, exist_ok=True)
-        intake_path.write_text(
-            json.dumps(self.intake_payload(uuid), indent=2), encoding="utf-8")
+        intake_path.write_text(json.dumps(self.intake_payload(uuid), indent=2), encoding="utf-8")
 
         result = self.run_runner(str(intake_path), "--target-repo", str(self.target))
         self.assertEqual(
-            result.returncode, 0,
+            result.returncode,
+            0,
             f"runner failed\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}",
         )
 
         # Every LLM stage really called the (fake) model.
         stages = self.claude_stages()
         self.assertEqual(
-            [s for s in stages if s != "unmatched"], stages,
+            [s for s in stages if s != "unmatched"],
+            stages,
             f"fake claude saw an unrecognised prompt: {stages}",
         )
-        for expected in ("refine", "plan", "execute", "verify",
-                         "attacker", "defender", "triage"):
+        for expected in ("refine", "plan", "execute", "verify", "attacker", "defender", "triage"):
             self.assertIn(expected, stages, f"stage {expected} never ran")
 
         execution, report = self.assert_pipeline_artifacts(uuid)
@@ -597,17 +603,18 @@ class DetachedRunTest(E2EPipelineBase):
         backlog = self.state / "runner" / "backlog"
         backlog.mkdir(parents=True, exist_ok=True)
         (backlog / "add-a-greeter-module.json").write_text(
-            json.dumps(self.intake_payload(uuid), indent=2), encoding="utf-8")
+            json.dumps(self.intake_payload(uuid), indent=2), encoding="utf-8"
+        )
 
         result = self.run_runner("--detached")
         self.assertEqual(
-            result.returncode, 0,
+            result.returncode,
+            0,
             f"detached runner failed\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}",
         )
 
         stages = self.claude_stages()
-        for expected in ("refine", "plan", "execute", "verify",
-                         "attacker", "defender", "triage"):
+        for expected in ("refine", "plan", "execute", "verify", "attacker", "defender", "triage"):
             self.assertIn(expected, stages, f"stage {expected} never ran")
 
         execution, report = self.assert_pipeline_artifacts(uuid)
@@ -626,7 +633,8 @@ class DetachedRunTest(E2EPipelineBase):
         branches = runner_branches(self.target)
         run_branch = f"runner/add-a-greeter-module-{uuid}"
         self.assertEqual(
-            branches, [run_branch],
+            branches,
+            [run_branch],
             "a run must leave exactly one runner/* branch behind",
         )
         self.assertEqual(execution["branch"], run_branch)
@@ -661,9 +669,10 @@ class DetachedRunTest(E2EPipelineBase):
 
         # The worktree is torn down on success.
         self.assertEqual(
-            [], [
-                line for line in
-                git_ok(self.target, "worktree", "list", "--porcelain").splitlines()
+            [],
+            [
+                line
+                for line in git_ok(self.target, "worktree", "list", "--porcelain").splitlines()
                 if "runner-worktrees" in line or ".runner-worktrees" in line
             ],
         )

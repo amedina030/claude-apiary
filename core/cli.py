@@ -24,6 +24,7 @@ bug and still surfaces as a traceback.
 A single CLI replaces the legacy collection of standalone install
 scripts; see ``docs/architecture/per-repo-install.md``.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -59,15 +60,20 @@ def _user_facing_errors() -> tuple[type[BaseException], ...]:
 
 def _add_apiary_repo_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument(
-        "--apiary-repo", type=Path, default=None,
+        "--apiary-repo",
+        type=Path,
+        default=None,
         help="Path to main-apiary (default: resolved via pointer / launcher env).",
     )
 
 
 def _cmd_install(args: argparse.Namespace) -> int:
     from core import install as install_mod
+
     result = install_mod.install(
-        args.target, profile=args.profile, apiary_repo=args.apiary_repo,
+        args.target,
+        profile=args.profile,
+        apiary_repo=args.apiary_repo,
     )
     print(
         f"{'installed' if result.is_first_install else 're-applied'}: "
@@ -80,8 +86,11 @@ def _cmd_install(args: argparse.Namespace) -> int:
 
 def _cmd_uninstall(args: argparse.Namespace) -> int:
     from core import uninstall as uninstall_mod
+
     result = uninstall_mod.uninstall(
-        args.target, apiary_repo=args.apiary_repo, remove_data=args.remove_data,
+        args.target,
+        apiary_repo=args.apiary_repo,
+        remove_data=args.remove_data,
     )
     print(
         f"uninstalled: uid={result.uid} name={result.name}\n"
@@ -97,6 +106,7 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
 
 def _cmd_self_bootstrap(args: argparse.Namespace) -> int:
     from core import self_bootstrap as sb
+
     result = sb.self_bootstrap(args.apiary_repo)
     print(
         f"main-apiary bootstrapped at uid={result.uid} "
@@ -107,6 +117,7 @@ def _cmd_self_bootstrap(args: argparse.Namespace) -> int:
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
     from core import doctor
+
     forwarded: list[str] = []
     if args.subcommand:
         forwarded.append(args.subcommand)
@@ -119,10 +130,13 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
 def _cmd_cascade(args: argparse.Namespace) -> int:
     from core import cascade as cascade_mod
+
     apiary = state.resolve_apiary_repo(args.apiary_repo).resolve()
     report = cascade_mod.cascade_fix(apiary)
-    print(f"cascade-fix at {apiary}: updated {len(report.updated)} repo(s); "
-          f"skipped {len(report.skipped)}")
+    print(
+        f"cascade-fix at {apiary}: updated {len(report.updated)} repo(s); "
+        f"skipped {len(report.skipped)}"
+    )
     for uid in report.updated:
         print(f"  updated uid={uid}")
     for uid, reason in report.skipped:
@@ -138,6 +152,7 @@ def _cmd_version(args: argparse.Namespace) -> int:
         return 0
 
     from core import update as update_mod
+
     print(f"main-apiary {main_version}  ({apiary})")
     registry = state._load_registry(apiary)
     if not registry:
@@ -155,6 +170,7 @@ def _cmd_version(args: argparse.Namespace) -> int:
 
 def _cmd_update(args: argparse.Namespace) -> int:
     from core import update as update_mod
+
     return update_mod.main(
         [
             *(["--target", str(args.target)] if args.target else []),
@@ -180,7 +196,8 @@ def main(argv: list[str] | None = None) -> int:
     p_uninstall = sub.add_parser("uninstall", help="remove apiary from a bootstrapped repo")
     p_uninstall.add_argument("--target", type=Path, required=True, help="target repo path")
     p_uninstall.add_argument(
-        "--remove-data", action="store_true",
+        "--remove-data",
+        action="store_true",
         help="also delete <main-apiary>/.repos/<slug>/ (per-target state)",
     )
     _add_apiary_repo_arg(p_uninstall)
@@ -192,15 +209,20 @@ def main(argv: list[str] | None = None) -> int:
 
     p_doctor = sub.add_parser("doctor", help="run consistency checks")
     from core import doctor as _doctor  # choices derived from the check registry
+
     p_doctor.add_argument(
-        "subcommand", nargs="?",
+        "subcommand",
+        nargs="?",
         choices=tuple(_doctor.CHECKS),
         help="single check to run; omit to run all",
     )
     p_doctor.add_argument(
-        "--fix", action="store_true",
-        help=("apply safe fixes for the named check (supported: "
-              f"{', '.join(_doctor.FIXES)}); requires a check name"),
+        "--fix",
+        action="store_true",
+        help=(
+            "apply safe fixes for the named check (supported: "
+            f"{', '.join(_doctor.FIXES)}); requires a check name"
+        ),
     )
     _add_apiary_repo_arg(p_doctor)
     p_doctor.set_defaults(func=_cmd_doctor)
@@ -214,7 +236,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p_version = sub.add_parser("version", help="print main-apiary's pinned version")
     p_version.add_argument(
-        "--all", action="store_true",
+        "--all",
+        action="store_true",
         help="also list every registered repo's pinned version (`!` marks drift)",
     )
     _add_apiary_repo_arg(p_version)
@@ -225,11 +248,14 @@ def main(argv: list[str] | None = None) -> int:
         help="run pending migrations/ in every bootstrapped repo and re-pin it",
     )
     p_update.add_argument(
-        "--target", type=Path, default=None,
+        "--target",
+        type=Path,
+        default=None,
         help="update only this repo (default: every registered repo)",
     )
     p_update.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="print the migrations that would run; write nothing",
     )
     _add_apiary_repo_arg(p_update)

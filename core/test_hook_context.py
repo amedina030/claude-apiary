@@ -7,6 +7,7 @@ The one property that matters most: a hook that merely wants to add context
 auto-approved every tool call and silently disabled default-mode prompts in
 every bootstrapped repo (review C-1).
 """
+
 import contextlib
 import io
 import json
@@ -46,20 +47,27 @@ class HookAllowTest(unittest.TestCase):
         self.assertEqual(json.loads(stdout), {})
 
     def test_never_votes_allow(self):
-        for kwargs in ({}, {"context": "[x] hi"}, {"event": "UserPromptSubmit"},
-                       {"context": "[x] hi", "event": "PostToolUse"}):
+        for kwargs in (
+            {},
+            {"context": "[x] hi"},
+            {"event": "UserPromptSubmit"},
+            {"context": "[x] hi", "event": "PostToolUse"},
+        ):
             with self.subTest(kwargs=kwargs):
                 stdout, _, _ = _capture(hook_allow, **kwargs)
                 self.assertNotIn("permissionDecision", stdout)
 
     def test_context_is_attached_under_hook_specific_output(self):
         stdout, _, _ = _capture(hook_allow, "[session] session_id: abc")
-        self.assertEqual(json.loads(stdout), {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "additionalContext": "[session] session_id: abc",
-            }
-        })
+        self.assertEqual(
+            json.loads(stdout),
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": "[session] session_id: abc",
+                }
+            },
+        )
 
     def test_event_name_is_carried(self):
         stdout, _, _ = _capture(hook_allow, "[startup] x", event="UserPromptSubmit")

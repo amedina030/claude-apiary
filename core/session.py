@@ -16,6 +16,7 @@ growing ~5 per session). When neither a repo nor a state dir can be
 resolved the fallback is a directory under the OS temp dir, never the home
 directory.
 """
+
 import json
 import re
 import sys
@@ -46,7 +47,9 @@ def load_history(path: Path) -> list:
 
 
 def dump_history(entries: list) -> str:
-    return json.dumps({"schema_version": HISTORY_SCHEMA_VERSION, "sessions": list(entries)}, indent=2)
+    return json.dumps(
+        {"schema_version": HISTORY_SCHEMA_VERSION, "sessions": list(entries)}, indent=2
+    )
 
 
 _warned_fallback = False
@@ -78,6 +81,7 @@ def session_tmp_dir(warn: bool = True) -> Path:
     tree there."""
     from core.flags import _per_repo_root
     from core.utils import state
+
     repo = _per_repo_root()
     if repo is not None and state.read_self_pointer(Path(repo)) is not None:
         return Path(repo) / ".claude" / "apiary" / SESSION_TMP_DIRNAME
@@ -93,15 +97,24 @@ def sessions_dir(warn: bool = True) -> Path:
     there. The OS temp dir is the fallback instead (see ``_fallback_root``).
     """
     from core.utils.state import resolve_state_dir, state_dir_from_env
+
     sd = state_dir_from_env()
     if sd is not None:
         return sd / SESSIONS_DIRNAME
     # No launcher env: find the repo the way flags does (CLAUDE_PROJECT_DIR /
     # APIARY_TARGET_REPO, then git), then let the shared resolver read its pins.
     from core.flags import _per_repo_root
+
     repo = _per_repo_root()
-    sd = None if repo is None else resolve_state_dir(
-        repo=repo, subdir=SESSIONS_DIRNAME, use_env=False, legacy_in_repo=False,
+    sd = (
+        None
+        if repo is None
+        else resolve_state_dir(
+            repo=repo,
+            subdir=SESSIONS_DIRNAME,
+            use_env=False,
+            legacy_in_repo=False,
+        )
     )
     return sd if sd is not None else _fallback_root(warn) / SESSIONS_DIRNAME
 
@@ -118,6 +131,7 @@ def sweep_stale_session_files(now: float | None = None, force: bool = False) -> 
     older than ``IDENTITY_MAX_AGE_DAYS``; at most once per day unless *force*.
     Returns the number of files removed. Never raises."""
     import time
+
     now = time.time() if now is None else now
     removed = 0
     try:
@@ -142,10 +156,12 @@ def sweep_stale_session_files(now: float | None = None, force: bool = False) -> 
         sessions.mkdir(parents=True, exist_ok=True)
         stamp.write_text("", encoding="utf-8")
         import os
+
         os.utime(stamp, (now, now))
     except OSError:
         pass
     return removed
+
 
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
@@ -274,7 +290,7 @@ def load_identity(session_id=None):
     try:
         data = json.loads(files[0].read_text(encoding="utf-8"))
         # Extract session_id from filename: identity-<sid>.json
-        sid = files[0].stem[len("identity-"):]
+        sid = files[0].stem[len("identity-") :]
         return {
             "role": data.get("role", "user"),
             "mission": data.get("mission", "general"),

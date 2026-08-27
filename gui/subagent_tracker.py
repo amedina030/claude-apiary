@@ -59,7 +59,7 @@ class AgentState:
     description: str
     model: str
     prompt_preview: str
-    started_at: float        # epoch seconds
+    started_at: float  # epoch seconds
     last_activity_at: float  # epoch seconds
     current_tool: str
     tokens: TokenTotals
@@ -173,7 +173,7 @@ class SubagentTracker:
 
             seen_ids: set[str] = set()
             for jsonl in subagents_dir.glob("agent-*.jsonl"):
-                agent_id = jsonl.stem[len("agent-"):]
+                agent_id = jsonl.stem[len("agent-") :]
                 if not agent_id:
                     continue
                 seen_ids.add(agent_id)

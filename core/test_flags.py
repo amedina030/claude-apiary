@@ -1,4 +1,5 @@
 """Tests for ``core/flags.py`` per-repo flag handling and its CLI."""
+
 from __future__ import annotations
 
 import contextlib
@@ -65,7 +66,9 @@ class FlagsResolutionTests(unittest.TestCase):
     def test_enable_writes_per_repo_file(self):
         os.environ["APIARY_TARGET_REPO"] = str(self.repo)
         flags.enable("test-flag")
-        self.assertTrue((self.repo / ".claude" / "apiary" / "flags" / "test-flag-enabled").is_file())
+        self.assertTrue(
+            (self.repo / ".claude" / "apiary" / "flags" / "test-flag-enabled").is_file()
+        )
 
     def test_disable_is_idempotent(self):
         os.environ["APIARY_TARGET_REPO"] = str(self.repo)
@@ -196,9 +199,7 @@ class FlagsCliTests(unittest.TestCase):
         """The whole point of B4: the CLI and the hooks must agree on the path."""
         self._run(["toggle", "budgeter-log"])
         self.assertTrue(flags.is_enabled("budgeter-log"))
-        self.assertEqual(
-            self._flag_file("budgeter-log"), flags._flag_path("budgeter-log")
-        )
+        self.assertEqual(self._flag_file("budgeter-log"), flags._flag_path("budgeter-log"))
 
     def test_malformed_name_exits_1_and_writes_nothing(self):
         # NB: nothing starting with "-" — argparse would reject that as an

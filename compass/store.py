@@ -17,6 +17,7 @@ Layout::
 
 Dimensions config ships with the compass module at ``compass/dimensions.json``.
 """
+
 from __future__ import annotations
 
 import json
@@ -47,8 +48,8 @@ CORRECTIONS_FILENAME = "corrections.md"
 DIMENSIONS_FILE = Path(__file__).resolve().parent / "dimensions.json"
 
 # Bloat thresholds (per spec C-2026-30).
-ARCHIVE_MIN_ACTIVE = 50          # never archive when active count is below this
-ARCHIVE_MAX_AGE_DAYS = 90        # files older than this become archive candidates
+ARCHIVE_MIN_ACTIVE = 50  # never archive when active count is below this
+ARCHIVE_MAX_AGE_DAYS = 90  # files older than this become archive candidates
 
 VALID_VOLATILITY = frozenset({"stable", "volatile"})
 
@@ -120,8 +121,9 @@ def count_active_observations(start: Path | None = None) -> int:
     return len(list_active_observations(start))
 
 
-def validate_observation(data: dict, *, valid_dimensions: set[str] | None = None,
-                         expected_session_id: str | None = None) -> list[str]:
+def validate_observation(
+    data: dict, *, valid_dimensions: set[str] | None = None, expected_session_id: str | None = None
+) -> list[str]:
     """Validate an observation file payload. Returns a list of error messages.
 
     When *expected_session_id* is given, the payload's session_id must also
@@ -139,9 +141,7 @@ def validate_observation(data: dict, *, valid_dimensions: set[str] | None = None
         expected_short = expected_session_id.split("-", 1)[0][:8].lower()
         actual_short = sid.split("-", 1)[0][:8].lower()
         if expected_short != actual_short:
-            errors.append(
-                f"session_id {sid!r} does not match expected {expected_session_id!r}"
-            )
+            errors.append(f"session_id {sid!r} does not match expected {expected_session_id!r}")
 
     captured = data.get("captured_at")
     if not isinstance(captured, str):
@@ -189,8 +189,9 @@ def load_observation(path: Path) -> dict | None:
     return data
 
 
-def archive_target_path(file_path: Path, *, now: datetime | None = None,
-                        start: Path | None = None) -> Path:
+def archive_target_path(
+    file_path: Path, *, now: datetime | None = None, start: Path | None = None
+) -> Path:
     """Compute the archive destination for a file, organized by ISO year-week."""
     now = now or datetime.now(timezone.utc)
     iso_year, iso_week, _ = now.isocalendar()

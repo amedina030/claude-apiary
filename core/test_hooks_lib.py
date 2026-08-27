@@ -8,6 +8,7 @@ command with ``shlex`` (posix mode) — an unquoted apostrophe would either
 raise (unterminated quote) or split the path into multiple tokens, so a clean
 single-token parse proves the quoting holds.
 """
+
 from __future__ import annotations
 
 import json
@@ -74,8 +75,9 @@ class HookCmdQuotingTests(unittest.TestCase):
         script = apiary / "budgeter" / "hooks" / "pre.py"
         exe = HOSTILE_HOME / "py" / "python.exe"
 
-        cmd = hook_cmd(Path(script), python_exe=Path(exe),
-                       repo_root=Path(apiary), per_repo_launcher=True)
+        cmd = hook_cmd(
+            Path(script), python_exe=Path(exe), repo_root=Path(apiary), per_repo_launcher=True
+        )
         tokens = shlex.split(cmd, comments=True)
 
         self.assertEqual(tokens[0], to_bash_path(Path(exe)))
@@ -134,17 +136,20 @@ class MarkerIsShellSafeTests(unittest.TestCase):
     """
 
     def test_marker_is_the_tail_of_every_generated_command(self) -> None:
-        cmd = hook_cmd(Path(APIARY_DIR / "core" / "hooks" / "x.py"),
-                       python_exe=Path("py"), repo_root=Path(APIARY_DIR),
-                       per_repo_launcher=True)
+        cmd = hook_cmd(
+            Path(APIARY_DIR / "core" / "hooks" / "x.py"),
+            python_exe=Path("py"),
+            repo_root=Path(APIARY_DIR),
+            per_repo_launcher=True,
+        )
         self.assertTrue(cmd.endswith(APIARY_HOOK_MARKER), cmd)
-        self.assertTrue(APIARY_HOOK_MARKER.startswith(" #"),
-                        "the marker must open a shell comment")
+        self.assertTrue(APIARY_HOOK_MARKER.startswith(" #"), "the marker must open a shell comment")
 
     def test_marker_parses_away_as_a_comment(self) -> None:
         cmd = hook_cmd(Path("x.py"), python_exe=Path("py"))
         self.assertNotIn(
-            "claude-apiary", " ".join(shlex.split(cmd, comments=True)),
+            "claude-apiary",
+            " ".join(shlex.split(cmd, comments=True)),
             "the marker must not survive as an argument to the hook script",
         )
 
@@ -153,9 +158,12 @@ class IsApiaryEntryTests(unittest.TestCase):
     """Bug 8 — ownership must be an explicit mark, never a path coincidence."""
 
     def test_a_generated_entry_is_ours(self) -> None:
-        cmd = hook_cmd(Path(APIARY_DIR / "core" / "hooks" / "x.py"),
-                       python_exe=Path("py"), repo_root=Path(APIARY_DIR),
-                       per_repo_launcher=True)
+        cmd = hook_cmd(
+            Path(APIARY_DIR / "core" / "hooks" / "x.py"),
+            python_exe=Path("py"),
+            repo_root=Path(APIARY_DIR),
+            per_repo_launcher=True,
+        )
         self.assertTrue(is_apiary_entry(_entry(cmd)))
 
     def test_a_user_hook_naming_a_runner_dir_is_not_ours(self) -> None:
@@ -164,24 +172,32 @@ class IsApiaryEntryTests(unittest.TestCase):
         self.assertFalse(is_apiary_entry(_entry("python scripts/runner/lint.py")))
 
     def test_other_shipped_dir_names_are_not_ours_either(self) -> None:
-        for path in ("tools/scribe/note.py", "hooks/harden/pre.sh",
-                     "src/refiner/run.py", "docs/hooks/build.py",
-                     "core/hooks/mine.py", "budgeter/hooks/mine.py"):
+        for path in (
+            "tools/scribe/note.py",
+            "hooks/harden/pre.sh",
+            "src/refiner/run.py",
+            "docs/hooks/build.py",
+            "core/hooks/mine.py",
+            "budgeter/hooks/mine.py",
+        ):
             with self.subTest(path=path):
                 self.assertFalse(is_apiary_entry(_entry(f"python {path}")))
 
     def test_legacy_global_launcher_entries_are_still_ours(self) -> None:
         # Pre-migration repos must still be cleanable by install/uninstall.
-        self.assertTrue(is_apiary_entry(
-            _entry('python "$HOME/.claude/apiary_launch.py" core/hooks/x.py')))
+        self.assertTrue(
+            is_apiary_entry(_entry('python "$HOME/.claude/apiary_launch.py" core/hooks/x.py'))
+        )
 
     def test_legacy_per_repo_launcher_entries_are_still_ours(self) -> None:
-        self.assertTrue(is_apiary_entry(
-            _entry('python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" core/hooks/x.py')))
+        self.assertTrue(
+            is_apiary_entry(
+                _entry('python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" core/hooks/x.py')
+            )
+        )
 
     def test_legacy_absolute_path_entries_are_still_ours(self) -> None:
-        self.assertTrue(is_apiary_entry(
-            _entry('"/d/repos/claude-apiary/core/hooks/x.py"')))
+        self.assertTrue(is_apiary_entry(_entry('"/d/repos/claude-apiary/core/hooks/x.py"')))
 
 
 class UserHookSurvivalTests(unittest.TestCase):
@@ -193,12 +209,17 @@ class UserHookSurvivalTests(unittest.TestCase):
         self.settings = Path(self._tmp.name) / "settings.json"
         self.user_entry = _entry("python scripts/runner/lint.py")
         self.settings.write_text(
-            json.dumps({"hooks": {"PreToolUse": [self.user_entry]}}), encoding="utf-8",
+            json.dumps({"hooks": {"PreToolUse": [self.user_entry]}}),
+            encoding="utf-8",
         )
-        self.ours = _entry(hook_cmd(
-            Path(APIARY_DIR / "core" / "hooks" / "x.py"), python_exe=Path("py"),
-            repo_root=Path(APIARY_DIR), per_repo_launcher=True,
-        ))
+        self.ours = _entry(
+            hook_cmd(
+                Path(APIARY_DIR / "core" / "hooks" / "x.py"),
+                python_exe=Path("py"),
+                repo_root=Path(APIARY_DIR),
+                per_repo_launcher=True,
+            )
+        )
 
     def _hooks(self) -> dict:
         return json.loads(self.settings.read_text(encoding="utf-8"))["hooks"]

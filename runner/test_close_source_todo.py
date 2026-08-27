@@ -6,6 +6,7 @@ branch, merge it into master with --no-ff (so there's a real merge
 commit), populate a temp run_history.jsonl with a source field, and
 exercise the module's functions against that state.
 """
+
 import json
 import os
 import subprocess
@@ -19,7 +20,10 @@ from runner import close_source_todo
 
 def _git(repo: Path, *args, check=True):
     return subprocess.run(
-        ["git", *args], cwd=str(repo), capture_output=True, text=True,
+        ["git", *args],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
         check=check,
     )
 
@@ -39,13 +43,17 @@ class TestUuidsFromMerge(unittest.TestCase):
 
         # Point the module at this repo.
         self._module_script_dir_patch = mock.patch.object(
-            close_source_todo, "SCRIPT_DIR", self.repo / "runner",
+            close_source_todo,
+            "SCRIPT_DIR",
+            self.repo / "runner",
         )
         self._module_script_dir_patch.start()
         (self.repo / "runner").mkdir()
         self._history_path = self.repo / "runner" / "run_history.jsonl"
         self._history_patch = mock.patch.object(
-            close_source_todo, "RUN_HISTORY_FILE", self._history_path,
+            close_source_todo,
+            "RUN_HISTORY_FILE",
+            self._history_path,
         )
         self._history_patch.start()
 
@@ -70,8 +78,7 @@ class TestUuidsFromMerge(unittest.TestCase):
     def test_uuid_extracted_from_merge_commit(self):
         uuid = "abc12345-dead-beef-cafe-0123456789ab"
         self._make_runner_branch(uuid)
-        _git(self.repo, "merge", "--no-ff", f"runner/{uuid}",
-             "-m", f"Merge branch 'runner/{uuid}'")
+        _git(self.repo, "merge", "--no-ff", f"runner/{uuid}", "-m", f"Merge branch 'runner/{uuid}'")
         merge_sha = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
         uuids = close_source_todo.uuids_from_merge(merge_sha)
         self.assertEqual(uuids, [uuid])
@@ -82,8 +89,7 @@ class TestUuidsFromMerge(unittest.TestCase):
         _git(self.repo, "add", "a.txt")
         _git(self.repo, "commit", "-m", "unrelated feature work")
         _git(self.repo, "checkout", "master")
-        _git(self.repo, "merge", "--no-ff", "feature/plain",
-             "-m", "Merge branch 'feature/plain'")
+        _git(self.repo, "merge", "--no-ff", "feature/plain", "-m", "Merge branch 'feature/plain'")
         merge_sha = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
         self.assertEqual(close_source_todo.uuids_from_merge(merge_sha), [])
 
@@ -93,7 +99,9 @@ class TestSourceForUuid(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.history_path = Path(self._tmp.name) / "run_history.jsonl"
         self._patch = mock.patch.object(
-            close_source_todo, "RUN_HISTORY_FILE", self.history_path,
+            close_source_todo,
+            "RUN_HISTORY_FILE",
+            self.history_path,
         )
         self._patch.start()
 
@@ -111,38 +119,46 @@ class TestSourceForUuid(unittest.TestCase):
         self.assertEqual(close_source_todo.source_for_uuid("xyz"), "")
 
     def test_matching_entry_returns_source(self):
-        self._write([
-            {"uuid": "abc", "source": "T-2026-121"},
-        ])
+        self._write(
+            [
+                {"uuid": "abc", "source": "T-2026-121"},
+            ]
+        )
         self.assertEqual(
-            close_source_todo.source_for_uuid("abc"), "T-2026-121",
+            close_source_todo.source_for_uuid("abc"),
+            "T-2026-121",
         )
 
     def test_no_matching_entry_returns_empty(self):
-        self._write([
-            {"uuid": "other", "source": "T-2026-1"},
-        ])
+        self._write(
+            [
+                {"uuid": "other", "source": "T-2026-1"},
+            ]
+        )
         self.assertEqual(close_source_todo.source_for_uuid("abc"), "")
 
     def test_last_matching_entry_wins(self):
         # Same uuid appears twice (e.g. a resume) — take the most recent
         # source (newest last in JSONL).
-        self._write([
-            {"uuid": "abc", "source": "T-2026-1"},
-            {"uuid": "abc", "source": "T-2026-121"},
-        ])
+        self._write(
+            [
+                {"uuid": "abc", "source": "T-2026-1"},
+                {"uuid": "abc", "source": "T-2026-121"},
+            ]
+        )
         self.assertEqual(
-            close_source_todo.source_for_uuid("abc"), "T-2026-121",
+            close_source_todo.source_for_uuid("abc"),
+            "T-2026-121",
         )
 
     def test_malformed_line_skipped(self):
         self.history_path.write_text(
-            'not-json\n'
-            '{"uuid": "abc", "source": "T-2026-121"}\n',
+            'not-json\n{"uuid": "abc", "source": "T-2026-121"}\n',
             encoding="utf-8",
         )
         self.assertEqual(
-            close_source_todo.source_for_uuid("abc"), "T-2026-121",
+            close_source_todo.source_for_uuid("abc"),
+            "T-2026-121",
         )
 
 
@@ -157,7 +173,8 @@ class TestTodoIdFilter(unittest.TestCase):
     def test_non_todo_ids_rejected(self):
         for s in ("H-2026-145", "C-2026-27", "W-2026-10", "", "garbage"):
             self.assertIsNone(
-                close_source_todo._TODO_ID_RE.match(s), s,
+                close_source_todo._TODO_ID_RE.match(s),
+                s,
             )
 
 

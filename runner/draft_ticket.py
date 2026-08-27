@@ -11,6 +11,7 @@ Usage:
     draft_ticket.py --title '...' --problem '...' --description '...' --scope '...'
     draft_ticket.py --from-todo <id> --title '...' --problem '...' --scope '...'
 """
+
 import argparse
 import sys
 
@@ -18,11 +19,11 @@ from .ticket import add_ticket_content_args, cmd_draft
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Create a backlog draft ticket')
+    parser = argparse.ArgumentParser(description="Create a backlog draft ticket")
     add_ticket_content_args(parser, explore_hints=False)
     args = parser.parse_args()
     sys.exit(cmd_draft(args, parser))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

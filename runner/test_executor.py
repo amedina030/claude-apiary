@@ -5,6 +5,7 @@ Stdlib unittest only (no pytest), per docs/standards/code-style.md.
 Focused on pure helpers; full main() integration is exercised by live
 runner runs.
 """
+
 import json
 import os
 import subprocess
@@ -61,42 +62,48 @@ class TestLoadPreviousLog(unittest.TestCase):
         self.assertEqual(load_previous_log(log_path), {})
 
     def test_keyed_by_step_number(self):
-        log_path = self._write_log({
-            "uuid": "x",
-            "steps": [
-                {"step_number": 1, "status": "passed"},
-                {"step_number": 2, "status": "failed", "error": "boom"},
-            ],
-        })
+        log_path = self._write_log(
+            {
+                "uuid": "x",
+                "steps": [
+                    {"step_number": 1, "status": "passed"},
+                    {"step_number": 2, "status": "failed", "error": "boom"},
+                ],
+            }
+        )
         result = load_previous_log(log_path)
         self.assertEqual(set(result.keys()), {1, 2})
         self.assertEqual(result[2]["error"], "boom")
 
     def test_skips_entries_without_int_step_number(self):
-        log_path = self._write_log({
-            "steps": [
-                {"step_number": 1, "status": "passed"},
-                {"step_number": "two", "status": "passed"},  # bad type
-                "not-a-dict",  # not a dict
-                {"status": "passed"},  # missing step_number
-            ],
-        })
+        log_path = self._write_log(
+            {
+                "steps": [
+                    {"step_number": 1, "status": "passed"},
+                    {"step_number": "two", "status": "passed"},  # bad type
+                    "not-a-dict",  # not a dict
+                    {"status": "passed"},  # missing step_number
+                ],
+            }
+        )
         self.assertEqual(set(load_previous_log(log_path).keys()), {1})
 
     def test_preserves_full_entry(self):
         # Carried-forward entries should retain rich fields the bland
         # stub doesn't have (e.g. tool_uses, duration, custom keys)
-        log_path = self._write_log({
-            "steps": [
-                {
-                    "step_number": 5,
-                    "status": "passed",
-                    "files_changed": ["runner/x.py"],
-                    "duration_ms": 12345,
-                    "custom": "value",
-                },
-            ],
-        })
+        log_path = self._write_log(
+            {
+                "steps": [
+                    {
+                        "step_number": 5,
+                        "status": "passed",
+                        "files_changed": ["runner/x.py"],
+                        "duration_ms": 12345,
+                        "custom": "value",
+                    },
+                ],
+            }
+        )
         entry = load_previous_log(log_path)[5]
         self.assertEqual(entry["duration_ms"], 12345)
         self.assertEqual(entry["custom"], "value")
@@ -145,17 +152,19 @@ class TestRunTestCommand(unittest.TestCase):
     def test_cd_prefix_extracts_cwd(self):
         # Use a real command that works cross-platform
         with tempfile.TemporaryDirectory() as td:
-            passed, output = run_test_command(f'cd {td} && python -c "import os; print(os.getcwd())"')
+            passed, output = run_test_command(
+                f'cd {td} && python -c "import os; print(os.getcwd())"'
+            )
             self.assertTrue(passed, output)
             self.assertIn(Path(td).name, output)
 
     def test_plain_command_no_cd(self):
         passed, output = run_test_command('python -c "print(42)"')
         self.assertTrue(passed, output)
-        self.assertIn('42', output)
+        self.assertIn("42", output)
 
     def test_empty_command(self):
-        passed, output = run_test_command('')
+        passed, output = run_test_command("")
         self.assertFalse(passed)
 
     def test_bad_cwd_returns_error(self):
@@ -186,35 +195,37 @@ class TestParseVerifyOutput(unittest.TestCase):
         self.assertTrue(out["passed"])
 
     def test_envelope_with_inner_fenced_json(self):
-        inner = "```json\n{\"passed\": true, \"explanation\": \"fenced\"}\n```"
+        inner = '```json\n{"passed": true, "explanation": "fenced"}\n```'
         raw = json.dumps({"result": inner})
         out = parse_verify_output(raw)
         self.assertTrue(out["passed"])
         self.assertEqual(out["explanation"], "fenced")
 
     def test_envelope_with_inner_prose_plus_json(self):
-        inner = "Here's the verdict: {\"passed\": false, \"explanation\": \"nope\"}"
+        inner = 'Here\'s the verdict: {"passed": false, "explanation": "nope"}'
         raw = json.dumps({"result": inner})
         out = parse_verify_output(raw)
         self.assertFalse(out["passed"])
         self.assertEqual(out["explanation"], "nope")
 
     def test_fenced_json_no_envelope(self):
-        raw = "```\n{\"passed\": true, \"explanation\": \"plain fence\"}\n```"
+        raw = '```\n{"passed": true, "explanation": "plain fence"}\n```'
         out = parse_verify_output(raw)
         self.assertTrue(out["passed"])
 
     def test_fenced_json_missing_trailing_fence(self):
         # The parser's fence-stripper handles the case where the model
         # opened a fence but forgot to close it.
-        raw = "```json\n{\"passed\": true, \"explanation\": \"open fence\"}"
+        raw = '```json\n{"passed": true, "explanation": "open fence"}'
         out = parse_verify_output(raw)
         self.assertTrue(out["passed"])
 
     def test_prose_with_embedded_json(self):
-        raw = ("The acceptance criterion is satisfied because "
-               "the function returns the expected value. "
-               '{"passed": true, "explanation": "returns hi"}')
+        raw = (
+            "The acceptance criterion is satisfied because "
+            "the function returns the expected value. "
+            '{"passed": true, "explanation": "returns hi"}'
+        )
         out = parse_verify_output(raw)
         self.assertTrue(out["passed"])
 
@@ -229,7 +240,7 @@ class TestParseVerifyOutput(unittest.TestCase):
 
     def test_json_list_returns_failed(self):
         # A top-level JSON list is valid JSON but not the expected shape.
-        out = parse_verify_output('[1, 2, 3]')
+        out = parse_verify_output("[1, 2, 3]")
         self.assertFalse(out["passed"])
 
     def test_envelope_without_result_or_passed(self):
@@ -303,8 +314,7 @@ class TestBuildPrompts(unittest.TestCase):
     def test_delete_step_instruction_line(self):
         prompt = build_step_prompt(self._base_step("delete"), spec={})
         self.assertIn(
-            "Delete the file(s) listed above as described in the code "
-            "specification.",
+            "Delete the file(s) listed above as described in the code specification.",
             prompt,
         )
 
@@ -371,15 +381,20 @@ class TestExecutorEndToEnd(unittest.TestCase):
         self._executions = self.repo / "executions"
         self._executions.mkdir()
         self._executions_patch = mock.patch.object(
-            executor, "EXECUTIONS_DIR", self._executions,
+            executor,
+            "EXECUTIONS_DIR",
+            self._executions,
         )
         self._executions_patch.start()
         # Also patch _REPO_ROOT used by validate_plan's allowlist so the
         # plan's files= resolve under this temp repo, not the real one.
         from runner import validate_plan
+
         self._validate_plan = validate_plan
         self._repo_root_patch = mock.patch.object(
-            validate_plan, "_REPO_ROOT", self.repo,
+            validate_plan,
+            "_REPO_ROOT",
+            self.repo,
         )
         self._repo_root_patch.start()
 
@@ -392,7 +407,10 @@ class TestExecutorEndToEnd(unittest.TestCase):
     def _git(self, *args):
         return subprocess.run(
             ["git"] + list(args),
-            cwd=str(self.repo), capture_output=True, text=True, check=True,
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
+            check=True,
         )
 
     def _write_plan(self, uuid="e2e-test"):
@@ -434,8 +452,7 @@ class TestExecutorEndToEnd(unittest.TestCase):
         # every other part of main() runs for real.
         def fake_execute(step, spec, model, retry_hint=""):
             for f in step.get("files", []):
-                (self.repo / f).write_text("print('hello world')\n",
-                                           encoding="utf-8")
+                (self.repo / f).write_text("print('hello world')\n", encoding="utf-8")
             return {
                 "step_number": step["step_number"],
                 "status": "passed",
@@ -457,14 +474,18 @@ class TestExecutorEndToEnd(unittest.TestCase):
         # Branch exists and is checked out.
         head = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=str(self.repo), capture_output=True, text=True,
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
         )
         self.assertEqual(head.stdout.strip(), "runner/e2e-test")
 
         # Commit exists with the expected subject.
         log = subprocess.run(
             ["git", "log", "--format=%s", "-n", "1"],
-            cwd=str(self.repo), capture_output=True, text=True,
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
         )
         self.assertIn("runner/e2e-test step 1", log.stdout)
 
@@ -504,8 +525,7 @@ class TestRetryOnNoChanges(TestExecutorEndToEnd):
             # the target file.
             if calls["n"] >= 2:
                 for f in step.get("files", []):
-                    (self.repo / f).write_text("print('hello world')\n",
-                                               encoding="utf-8")
+                    (self.repo / f).write_text("print('hello world')\n", encoding="utf-8")
             return {
                 "step_number": step["step_number"],
                 "status": "passed",
@@ -621,8 +641,7 @@ class TestSubsumedStep(TestExecutorEndToEnd):
             if step["step_number"] == 1:
                 # Step 1 writes the file.
                 for f in step.get("files", []):
-                    (self.repo / f).write_text("print('x')\n",
-                                               encoding="utf-8")
+                    (self.repo / f).write_text("print('x')\n", encoding="utf-8")
             # Step 2: no file write — the content is already there from step 1.
             return {
                 "step_number": step["step_number"],
@@ -654,13 +673,13 @@ class TestSubsumedStep(TestExecutorEndToEnd):
         # Only step 1 produced a commit; step 2 is a subsumed no-op.
         log = subprocess.run(
             ["git", "log", "--format=%s"],
-            cwd=str(self.repo), capture_output=True, text=True,
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
         )
         subjects = log.stdout.splitlines()
-        self.assertIn("runner/subsumed-by-prior step 1: create the hello module",
-                      subjects)
-        self.assertNotIn("runner/subsumed-by-prior step 2: wire the hello module",
-                         subjects)
+        self.assertIn("runner/subsumed-by-prior step 1: create the hello module", subjects)
+        self.assertNotIn("runner/subsumed-by-prior step 2: wire the hello module", subjects)
 
     def test_untouched_file_still_triggers_retry_and_abort(self):
         # Regression: a step whose files were NOT touched by any prior
@@ -771,48 +790,60 @@ class TestVerifyPostConditions(unittest.TestCase):
 
     def test_file_contains_passes(self):
         self._write("a.py", "def foo(): pass\n")
-        step = {"post_conditions": [
-            {"type": "file_contains", "file": "a.py", "text": "def foo"},
-        ]}
+        step = {
+            "post_conditions": [
+                {"type": "file_contains", "file": "a.py", "text": "def foo"},
+            ]
+        }
         self.assertEqual(executor.verify_post_conditions(step, self.root), [])
 
     def test_file_contains_fails(self):
         self._write("a.py", "def bar(): pass\n")
-        step = {"post_conditions": [
-            {"type": "file_contains", "file": "a.py", "text": "def foo"},
-        ]}
+        step = {
+            "post_conditions": [
+                {"type": "file_contains", "file": "a.py", "text": "def foo"},
+            ]
+        }
         failures = executor.verify_post_conditions(step, self.root)
         self.assertEqual(len(failures), 1)
         self.assertIn("missing expected text", failures[0])
 
     def test_file_lacks_rejects_forbidden_text(self):
         self._write("a.py", "old_symbol = 1\n")
-        step = {"post_conditions": [
-            {"type": "file_lacks", "file": "a.py", "text": "old_symbol"},
-        ]}
+        step = {
+            "post_conditions": [
+                {"type": "file_lacks", "file": "a.py", "text": "old_symbol"},
+            ]
+        }
         failures = executor.verify_post_conditions(step, self.root)
         self.assertEqual(len(failures), 1)
         self.assertIn("still contains", failures[0])
 
     def test_file_exists_absent(self):
-        step = {"post_conditions": [
-            {"type": "file_exists", "file": "missing.py"},
-        ]}
+        step = {
+            "post_conditions": [
+                {"type": "file_exists", "file": "missing.py"},
+            ]
+        }
         failures = executor.verify_post_conditions(step, self.root)
         self.assertEqual(len(failures), 1)
         self.assertIn("does not exist", failures[0])
 
     def test_file_absent_passes_when_missing(self):
-        step = {"post_conditions": [
-            {"type": "file_absent", "file": "nope.py"},
-        ]}
+        step = {
+            "post_conditions": [
+                {"type": "file_absent", "file": "nope.py"},
+            ]
+        }
         self.assertEqual(executor.verify_post_conditions(step, self.root), [])
 
     def test_file_absent_fails_when_present(self):
         self._write("there.py", "x\n")
-        step = {"post_conditions": [
-            {"type": "file_absent", "file": "there.py"},
-        ]}
+        step = {
+            "post_conditions": [
+                {"type": "file_absent", "file": "there.py"},
+            ]
+        }
         failures = executor.verify_post_conditions(step, self.root)
         self.assertEqual(len(failures), 1)
         self.assertIn("still exists", failures[0])
@@ -840,8 +871,7 @@ class TestPostConditionsInExecutorLoop(TestExecutorEndToEnd):
                     "depends_on": [],
                     "code_spec": "write the module and wire the marker",
                     "post_conditions": [
-                        {"type": "file_contains", "file": "hello.py",
-                         "text": "WIRED_MARKER"},
+                        {"type": "file_contains", "file": "hello.py", "text": "WIRED_MARKER"},
                     ],
                 },
                 {
@@ -853,8 +883,7 @@ class TestPostConditionsInExecutorLoop(TestExecutorEndToEnd):
                     "depends_on": [1],
                     "code_spec": "ensure WIRED_MARKER is present",
                     "post_conditions": [
-                        {"type": "file_contains", "file": "hello.py",
-                         "text": "WIRED_MARKER"},
+                        {"type": "file_contains", "file": "hello.py", "text": "WIRED_MARKER"},
                     ],
                 },
             ],
@@ -871,7 +900,8 @@ class TestPostConditionsInExecutorLoop(TestExecutorEndToEnd):
         def fake_execute(step, spec, model, retry_hint=""):
             if step["step_number"] == 1:
                 (self.repo / "hello.py").write_text(
-                    "# WIRED_MARKER\nprint('x')\n", encoding="utf-8",
+                    "# WIRED_MARKER\nprint('x')\n",
+                    encoding="utf-8",
                 )
             # Step 2: no write — file already has WIRED_MARKER from step 1.
             return {
@@ -909,8 +939,7 @@ class TestPostConditionsInExecutorLoop(TestExecutorEndToEnd):
             if step["step_number"] == 1:
                 # Step 1 writes the file but WITHOUT the marker — post_condition
                 # will be unmet.
-                (self.repo / "hello.py").write_text("print('no marker')\n",
-                                                    encoding="utf-8")
+                (self.repo / "hello.py").write_text("print('no marker')\n", encoding="utf-8")
             return {
                 "step_number": step["step_number"],
                 "status": "passed",
@@ -945,25 +974,29 @@ class TestAssertFilesClean(unittest.TestCase):
     def _fake_git(self, stdout="", returncode=0):
         def _run(*args):
             return subprocess.CompletedProcess(
-                args=("git",) + args, returncode=returncode,
-                stdout=stdout, stderr="",
+                args=("git",) + args,
+                returncode=returncode,
+                stdout=stdout,
+                stderr="",
             )
+
         return _run
 
     def test_empty_files_is_noop(self):
-        with mock.patch.object(executor, "git", side_effect=AssertionError(
-                "git should not be called for empty file list")):
+        with mock.patch.object(
+            executor,
+            "git",
+            side_effect=AssertionError("git should not be called for empty file list"),
+        ):
             assert_files_clean([])  # must not raise
 
     def test_clean_files_pass(self):
-        with mock.patch.object(executor, "git",
-                               side_effect=self._fake_git(stdout="")):
+        with mock.patch.object(executor, "git", side_effect=self._fake_git(stdout="")):
             assert_files_clean(["runner/foo.py"])  # no raise
 
     def test_dirty_files_raise(self):
         dirty = "diff --git a/runner/foo.py b/runner/foo.py\n...\n"
-        with mock.patch.object(executor, "git",
-                               side_effect=self._fake_git(stdout=dirty)):
+        with mock.patch.object(executor, "git", side_effect=self._fake_git(stdout=dirty)):
             with self.assertRaises(RuntimeError) as ctx:
                 assert_files_clean(["runner/foo.py"])
         self.assertIn("uncommitted changes", str(ctx.exception))
@@ -973,8 +1006,7 @@ class TestAssertFilesClean(unittest.TestCase):
         # git diff returns an empty diff as literally empty output, but
         # guard against ever seeing just whitespace (trailing newline)
         # and treating it as dirty.
-        with mock.patch.object(executor, "git",
-                               side_effect=self._fake_git(stdout="\n")):
+        with mock.patch.object(executor, "git", side_effect=self._fake_git(stdout="\n")):
             assert_files_clean(["runner/foo.py"])  # no raise
 
     def test_diff_failure_does_not_block(self):
@@ -982,8 +1014,9 @@ class TestAssertFilesClean(unittest.TestCase):
         # we fall through silently rather than blocking the runner — the
         # existing "subprocess made no changes" check will catch genuine
         # problems later. Don't let this guard become a new failure mode.
-        with mock.patch.object(executor, "git",
-                               side_effect=self._fake_git(stdout="", returncode=128)):
+        with mock.patch.object(
+            executor, "git", side_effect=self._fake_git(stdout="", returncode=128)
+        ):
             assert_files_clean(["runner/foo.py"])  # no raise
 
 
@@ -1064,19 +1097,20 @@ class TestAssertActionMatchesStaged(unittest.TestCase):
     def _fake_git(self, stdout, returncode=0):
         def _run(*args):
             return subprocess.CompletedProcess(
-                args=("git",) + args, returncode=returncode,
-                stdout=stdout, stderr="",
+                args=("git",) + args,
+                returncode=returncode,
+                stdout=stdout,
+                stderr="",
             )
+
         return _run
 
     def test_modify_with_modified_passes(self):
-        with mock.patch.object(executor, "git",
-                               side_effect=self._fake_git("M\trunner/foo.py\n")):
+        with mock.patch.object(executor, "git", side_effect=self._fake_git("M\trunner/foo.py\n")):
             _assert_action_matches_staged("modify", ["runner/foo.py"])
 
     def test_modify_with_deletion_raises(self):
-        with mock.patch.object(executor, "git",
-                               side_effect=self._fake_git("D\trunner/foo.py\n")):
+        with mock.patch.object(executor, "git", side_effect=self._fake_git("D\trunner/foo.py\n")):
             with self.assertRaises(RuntimeError) as ctx:
                 _assert_action_matches_staged("modify", ["runner/foo.py"])
         msg = str(ctx.exception)
@@ -1085,55 +1119,54 @@ class TestAssertActionMatchesStaged(unittest.TestCase):
         self.assertIn("'D'", msg)
 
     def test_create_with_addition_passes(self):
-        with mock.patch.object(executor, "git",
-                               side_effect=self._fake_git("A\trunner/new.py\n")):
+        with mock.patch.object(executor, "git", side_effect=self._fake_git("A\trunner/new.py\n")):
             _assert_action_matches_staged("create", ["runner/new.py"])
 
     def test_create_with_modification_raises(self):
-        with mock.patch.object(executor, "git",
-                               side_effect=self._fake_git("M\trunner/existing.py\n")):
+        with mock.patch.object(
+            executor, "git", side_effect=self._fake_git("M\trunner/existing.py\n")
+        ):
             with self.assertRaises(RuntimeError):
                 _assert_action_matches_staged("create", ["runner/existing.py"])
 
     def test_delete_with_deletion_passes(self):
-        with mock.patch.object(executor, "git",
-                               side_effect=self._fake_git("D\trunner/gone.py\n")):
+        with mock.patch.object(executor, "git", side_effect=self._fake_git("D\trunner/gone.py\n")):
             _assert_action_matches_staged("delete", ["runner/gone.py"])
 
     def test_delete_with_modification_raises(self):
-        with mock.patch.object(executor, "git",
-                               side_effect=self._fake_git("M\trunner/oops.py\n")):
+        with mock.patch.object(executor, "git", side_effect=self._fake_git("M\trunner/oops.py\n")):
             with self.assertRaises(RuntimeError):
                 _assert_action_matches_staged("delete", ["runner/oops.py"])
 
     def test_mixed_mismatches_all_reported(self):
         stdout = "M\trunner/a.py\nD\trunner/b.py\n"
-        with mock.patch.object(executor, "git",
-                               side_effect=self._fake_git(stdout)):
+        with mock.patch.object(executor, "git", side_effect=self._fake_git(stdout)):
             with self.assertRaises(RuntimeError) as ctx:
-                _assert_action_matches_staged("modify",
-                                              ["runner/a.py", "runner/b.py"])
+                _assert_action_matches_staged("modify", ["runner/a.py", "runner/b.py"])
         msg = str(ctx.exception)
         self.assertIn("runner/b.py", msg)
         self.assertNotIn("a.py: staged as 'M'", msg)  # a.py is fine
 
     def test_non_modifying_action_noop(self):
         # test/verify/empty action strings should skip the check entirely.
-        with mock.patch.object(executor, "git", side_effect=AssertionError(
-                "git should not be called for non-modifying actions")):
+        with mock.patch.object(
+            executor,
+            "git",
+            side_effect=AssertionError("git should not be called for non-modifying actions"),
+        ):
             _assert_action_matches_staged("test", ["runner/foo.py"])
             _assert_action_matches_staged("", ["runner/foo.py"])
 
     def test_empty_files_noop(self):
-        with mock.patch.object(executor, "git", side_effect=AssertionError(
-                "git should not be called for empty files")):
+        with mock.patch.object(
+            executor, "git", side_effect=AssertionError("git should not be called for empty files")
+        ):
             _assert_action_matches_staged("modify", [])
 
     def test_git_failure_falls_through(self):
         # If git diff itself fails, skip the check rather than blocking
         # the runner on a flaky git call.
-        with mock.patch.object(executor, "git",
-                               side_effect=self._fake_git("", returncode=128)):
+        with mock.patch.object(executor, "git", side_effect=self._fake_git("", returncode=128)):
             _assert_action_matches_staged("modify", ["runner/foo.py"])
 
 
@@ -1243,9 +1276,9 @@ class TestValidateResumeState(unittest.TestCase):
     def test_multiple_disagreements_all_reported(self):
         plan = self._plan((1, "modify"), (2, "modify"), (3, "modify"))
         prior = {
-            1: {"status": "passed"},     # missing commit
-            2: {"status": "failed"},     # commit exists
-            3: {"status": "passed"},     # consistent
+            1: {"status": "passed"},  # missing commit
+            2: {"status": "failed"},  # commit exists
+            3: {"status": "passed"},  # consistent
         }
         errors = validate_resume_state({2, 3}, prior, plan)
         self.assertEqual(len(errors), 2)
@@ -1308,22 +1341,32 @@ class TestEnsureOnBranch(unittest.TestCase):
             ["config", "user.email", "t@e.com"],
             ["config", "user.name", "T"],
         ):
-            subprocess.run(["git", "-C", str(self.repo), *args],
-                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True)
         (self.repo / "README.md").write_text("seed\n", encoding="utf-8")
-        subprocess.run(["git", "-C", str(self.repo), "add", "README.md"],
-                       check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(self.repo), "commit", "-m", "init"],
-                       check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "add", "README.md"], check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "-C", str(self.repo), "commit", "-m", "init"], check=True, capture_output=True
+        )
         self._cwd = os.getcwd()
         os.chdir(self.repo)
         self.addCleanup(os.chdir, self._cwd)
 
     def _branches(self):
         out = subprocess.run(
-            ["git", "-C", str(self.repo), "for-each-ref",
-             "--format=%(refname:short)", "refs/heads/"],
-            capture_output=True, text=True, encoding="utf-8", check=True,
+            [
+                "git",
+                "-C",
+                str(self.repo),
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/heads/",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
         ).stdout
         return sorted(line.strip() for line in out.splitlines() if line.strip())
 
@@ -1334,8 +1377,11 @@ class TestEnsureOnBranch(unittest.TestCase):
         self.assertEqual(self._branches(), ["master", "runner/abc"])
 
     def test_already_on_the_branch_is_a_no_op(self):
-        subprocess.run(["git", "-C", str(self.repo), "checkout", "-b", "runner/slug-abc"],
-                       check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "checkout", "-b", "runner/slug-abc"],
+            check=True,
+            capture_output=True,
+        )
         prev, switched = executor._ensure_on_branch("runner/slug-abc")
         self.assertEqual(prev, "runner/slug-abc")
         self.assertFalse(switched)
@@ -1343,8 +1389,9 @@ class TestEnsureOnBranch(unittest.TestCase):
         self.assertEqual(self._branches(), ["master", "runner/slug-abc"])
 
     def test_existing_branch_is_checked_out_not_recreated(self):
-        subprocess.run(["git", "-C", str(self.repo), "branch", "runner/abc"],
-                       check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "branch", "runner/abc"], check=True, capture_output=True
+        )
         prev, switched = executor._ensure_on_branch("runner/abc")
         self.assertEqual(prev, "master")
         self.assertTrue(switched)
@@ -1352,6 +1399,7 @@ class TestEnsureOnBranch(unittest.TestCase):
 
     def test_branch_name_comes_from_the_orchestrator(self):
         from runner.git_lib import RUNNER_BRANCH_ENV, run_branch_from_env
+
         with mock.patch.dict(os.environ, {RUNNER_BRANCH_ENV: "runner/slug-abc"}):
             self.assertEqual(run_branch_from_env("abc"), "runner/slug-abc")
 

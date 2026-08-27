@@ -1,4 +1,5 @@
 """Tests for ``core/uninstall.py`` — reverse of ``apiary install``."""
+
 from __future__ import annotations
 
 import json
@@ -89,7 +90,9 @@ class UninstallTests(unittest.TestCase):
 
     def test_state_dir_removed_when_remove_data_true(self):
         result = uninstall_mod.uninstall(
-            self.target, apiary_repo=self.apiary, remove_data=True,
+            self.target,
+            apiary_repo=self.apiary,
+            remove_data=True,
         )
         self.assertTrue(result.state_dir_removed)
         self.assertFalse(self.install_result.state_dir.is_dir())

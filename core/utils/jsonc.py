@@ -7,6 +7,7 @@ tracked so ``"//not a comment"`` parses correctly. Stripped characters
 are replaced with spaces (or the original newline) so line/column numbers
 in :class:`JsoncParseError` match the source file.
 """
+
 from __future__ import annotations
 
 import json

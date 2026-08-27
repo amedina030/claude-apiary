@@ -29,6 +29,7 @@ safe to persist (sessions don't come back), so no Stop-hook cleanup is needed
 Fail-open: every error path degrades to a plain allow — a buggy reminder must
 never wedge a tool call.
 """
+
 from __future__ import annotations
 
 # Tools whose invocation signals that durable research may be happening.

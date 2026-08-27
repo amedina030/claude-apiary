@@ -40,6 +40,7 @@ and either self-corrects or continues — the orchestrator can no longer
 guarantee early abort. Operators reading the post-hoc execution log
 must treat it as an after-the-fact reconstruction, not a live trace.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -107,7 +108,7 @@ def build_monolithic_prompt(plan: dict) -> str:
         "",
         "After each create/modify/delete step, run:",
         "    git add <exact files from step.files>",
-        f"    git commit -m \"runner/{uuid} step <N>: <step description>\"",
+        f'    git commit -m "runner/{uuid} step <N>: <step description>"',
         "",
         "The subject line MUST start with "
         f"'runner/{uuid} step <N>: '. Any deviation and the orchestrator "
@@ -149,19 +150,20 @@ def build_monolithic_prompt(plan: dict) -> str:
         pcs = step.get("post_conditions") or []
         if pcs:
             parts.append("")
-            parts.append("**Post-conditions (orchestrator verifies these "
-                         "after the run):**")
+            parts.append("**Post-conditions (orchestrator verifies these after the run):**")
             for pc in pcs:
                 parts.append(f"- {json.dumps(pc)}")
         parts.append("")
 
-    parts.extend([
-        "## After all steps",
-        "",
-        "When every step is committed (or intentionally skipped as "
-        "subsumed), return a brief summary of what you did. Do not ask "
-        "questions; this is an unattended run.",
-    ])
+    parts.extend(
+        [
+            "## After all steps",
+            "",
+            "When every step is committed (or intentionally skipped as "
+            "subsumed), return a brief summary of what you did. Do not ask "
+            "questions; this is an unattended run.",
+        ]
+    )
 
     return "\n".join(parts)
 
@@ -210,7 +212,7 @@ def reconstruct_step_results(plan: dict, base_ref: str) -> list[dict]:
     for sha, subject in commits:
         if not subject.startswith(prefix):
             continue
-        rest = subject[len(prefix):]
+        rest = subject[len(prefix) :]
         num_str = rest.split(":", 1)[0].strip()
         try:
             n = int(num_str)
@@ -262,13 +264,8 @@ def reconstruct_step_results(plan: dict, base_ref: str) -> list[dict]:
                 entry["status"] = "passed"
                 entry["subsumed_by"] = "no_commit"
             else:
-                entry["error"] = (
-                    "No matching commit found and post-conditions "
-                    + (
-                        f"unmet ({'; '.join(pc_failures)})"
-                        if pc_failures
-                        else "not declared"
-                    )
+                entry["error"] = "No matching commit found and post-conditions " + (
+                    f"unmet ({'; '.join(pc_failures)})" if pc_failures else "not declared"
                 )
 
         # Always evaluate declared post_conditions once more on the
@@ -277,10 +274,7 @@ def reconstruct_step_results(plan: dict, base_ref: str) -> list[dict]:
         pc_failures = verify_post_conditions(step, Path.cwd())
         if pc_failures and entry["status"] == "passed":
             entry["status"] = "failed"
-            entry["error"] = (
-                "Post-condition(s) not satisfied after run: "
-                + "; ".join(pc_failures)
-            )
+            entry["error"] = "Post-condition(s) not satisfied after run: " + "; ".join(pc_failures)
 
         results.append(entry)
 
@@ -288,7 +282,8 @@ def reconstruct_step_results(plan: dict, base_ref: str) -> list[dict]:
 
 
 def detect_global_unexpected_writes(
-    plan: dict, base_ref: str,
+    plan: dict,
+    base_ref: str,
 ) -> list[str]:
     """Return paths touched on the branch that no step declared in its
     files list. Post-hoc equivalent of assert_no_unexpected_writes.
@@ -302,9 +297,7 @@ def detect_global_unexpected_writes(
     result = git("diff", "--name-only", f"{base_ref}..HEAD")
     if result.returncode != 0:
         return []
-    touched = [
-        _norm_rel(ln) for ln in result.stdout.splitlines() if ln.strip()
-    ]
+    touched = [_norm_rel(ln) for ln in result.stdout.splitlines() if ln.strip()]
     return sorted({p for p in touched if p not in allowed})
 
 
@@ -373,9 +366,11 @@ def main():
     }
     persist_execution_log(log_path, execution_log)
 
-    print(f"Monolithic executor: running plan with {len(plan.get('steps', []))} "
-          f"steps in one subprocess (timeout {MONOLITHIC_TIMEOUT}s)",
-          file=sys.stderr)
+    print(
+        f"Monolithic executor: running plan with {len(plan.get('steps', []))} "
+        f"steps in one subprocess (timeout {MONOLITHIC_TIMEOUT}s)",
+        file=sys.stderr,
+    )
 
     rc, stdout, stderr = _spawn_claude(prompt, timeout=MONOLITHIC_TIMEOUT, model=model)
 
@@ -395,8 +390,7 @@ def main():
     if rc != 0:
         execution_log["status"] = "aborted"
         execution_log["error"] = (
-            f"Monolithic subprocess exited rc={rc}. "
-            f"stderr: {stderr.strip()[:500]}"
+            f"Monolithic subprocess exited rc={rc}. stderr: {stderr.strip()[:500]}"
         )
         persist_execution_log(log_path, execution_log)
         print(f"Runner aborted. Log: {log_path}", file=sys.stderr)
@@ -417,8 +411,7 @@ def main():
     persist_execution_log(log_path, execution_log)
 
     if aborted:
-        print(f"Runner aborted (post-hoc verification failed). "
-              f"Log: {log_path}", file=sys.stderr)
+        print(f"Runner aborted (post-hoc verification failed). Log: {log_path}", file=sys.stderr)
         if unexpected:
             print(f"Unexpected writes: {unexpected}", file=sys.stderr)
         if switched:

@@ -5,6 +5,7 @@ sibling then os.replace'd — by ``core.utils.atomic.write_text_atomic``, the on
 copy of that pattern — so an interrupted write leaves the prior file intact and
 no torn line.
 """
+
 import sys
 import tempfile
 import unittest

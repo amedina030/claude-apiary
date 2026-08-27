@@ -32,6 +32,7 @@ Usage::
 Exit codes: ``0`` success, ``1`` abort/hard error (message on stderr),
 ``3`` ``validate`` rejected the agent output (decision JSON on stdout).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -79,8 +80,15 @@ MAX_VALIDATION_ATTEMPTS = 2
 
 CODE_SUFFIXES = (".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".rb", ".sh")
 EXCLUDED_DIR_NAMES = frozenset({"__pycache__", "node_modules", ".git"})
-TEST_FILE_GLOBS = ("test_*.py", "*_test.py", "*_test.go",
-                   "*.test.ts", "*.test.js", "*.spec.ts", "*.spec.js")
+TEST_FILE_GLOBS = (
+    "test_*.py",
+    "*_test.py",
+    "*_test.go",
+    "*.test.ts",
+    "*.test.js",
+    "*.spec.ts",
+    "*.spec.js",
+)
 
 RETURN_JSON_ARRAY_RULE = (
     "Return ONLY a raw JSON array. No markdown fences, no explanation. Just the JSON."
@@ -113,6 +121,7 @@ class Abort(Exception):
 # --------------------------------------------------------------------------- #
 # Small shared helpers
 # --------------------------------------------------------------------------- #
+
 
 def _safe_name(session_id: str) -> str:
     return session_id.replace("/", "-").replace("\\", "-")
@@ -149,7 +158,11 @@ def strip_fences(text: str) -> str:
 def _run_git(args: list[str], repo: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(repo), *args],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
     )
 
 
@@ -158,7 +171,11 @@ def _repo_root(explicit: str | None = None) -> Path:
         return Path(explicit).resolve()
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
     )
     if result.returncode != 0 or not result.stdout.strip():
         raise Abort("not inside a git repository — /harden needs a git worktree")
@@ -173,6 +190,7 @@ def _default_launcher(repo: Path) -> Path:
 # `plan` — path selection, target resolution, size check, cost estimate
 # --------------------------------------------------------------------------- #
 
+
 def _is_excluded_dir(path: Path, root: Path) -> bool:
     try:
         parts = path.relative_to(root).parts
@@ -183,6 +201,7 @@ def _is_excluded_dir(path: Path, root: Path) -> bool:
 
 def _is_test_file(path: Path) -> bool:
     from fnmatch import fnmatch
+
     return any(fnmatch(path.name, pattern) for pattern in TEST_FILE_GLOBS)
 
 
@@ -243,15 +262,14 @@ def resolve_lenses(lenses_arg: str | None) -> list[str]:
             out.append(name)
     if not out:
         raise Abort(
-            "`--lenses` was empty. Valid lenses: "
-            + ", ".join(lens_taxonomy.all_lenses())
-            + "."
+            "`--lenses` was empty. Valid lenses: " + ", ".join(lens_taxonomy.all_lenses()) + "."
         )
     return out
 
 
-def select_path(mode: str, focus_explicit: bool, lenses_given: bool,
-                resolved_lenses: list[str]) -> str:
+def select_path(
+    mode: str, focus_explicit: bool, lenses_given: bool, resolved_lenses: list[str]
+) -> str:
     """Decide which Step 2 loop runs: legacy, single-lens, or multi-lens."""
     if mode == "plan":
         return "legacy"
@@ -308,8 +326,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
     notes: list[str] = []
 
     if mode == "code" and not args.targets:
-        raise Abort("No target given. Pass one or more file paths, a directory, "
-                    "or `--plan <note-id>`.")
+        raise Abort(
+            "No target given. Pass one or more file paths, a directory, or `--plan <note-id>`."
+        )
     if mode == "plan" and args.targets:
         notes.append("plan mode: positional targets ignored (the note is the target)")
 
@@ -333,13 +352,17 @@ def cmd_plan(args: argparse.Namespace) -> int:
         targets, empty_dirs = expand_targets(args.targets, cwd)
         if not targets:
             if empty_dirs:
-                raise Abort(f"No code files found in `{empty_dirs[0]}`. "
-                            "Check the path or add files explicitly.")
+                raise Abort(
+                    f"No code files found in `{empty_dirs[0]}`. "
+                    "Check the path or add files explicitly."
+                )
             raise Abort("No target files after expansion. Pass specific files.")
         if len(targets) > args.max_files:
-            raise Abort(f"Too many files ({len(targets)} > {args.max_files}). "
-                        "Narrow scope, use `--max-files N`, or pass specific files "
-                        "instead of a directory.")
+            raise Abort(
+                f"Too many files ({len(targets)} > {args.max_files}). "
+                "Narrow scope, use `--max-files N`, or pass specific files "
+                "instead of a directory."
+            )
         missing = [str(p) for p in targets if not p.is_file()]
         if missing:
             raise Abort("Target file(s) not found:\n" + "\n".join(f"  - {m}" for m in missing))
@@ -350,8 +373,10 @@ def cmd_plan(args: argparse.Namespace) -> int:
             raise Abort(f"Pre-flight size check failed: {exc}")
         total_kb = math.ceil(total_bytes / 1024)
         if total_kb > args.max_target_kb:
-            raise Abort(f"Target size {total_kb} KB exceeds --max-target-kb "
-                        f"{args.max_target_kb}. Narrow scope or raise the cap.")
+            raise Abort(
+                f"Target size {total_kb} KB exceeds --max-target-kb "
+                f"{args.max_target_kb}. Narrow scope or raise the cap."
+            )
 
         for p in targets:
             try:
@@ -367,16 +392,19 @@ def cmd_plan(args: argparse.Namespace) -> int:
         # mode; this is the reading that keeps the estimate honest.
         total_bytes = len(note_content.encode("utf-8"))
         total_kb = math.ceil(total_bytes / 1024)
-        notes.append("plan mode: pre-flight size check skipped; cost estimated "
-                     "from the note's own size")
+        notes.append(
+            "plan mode: pre-flight size check skipped; cost estimated from the note's own size"
+        )
         target_label = f"note #{args.plan_note}"
 
     estimate = estimate_tokens(total_kb, args.rounds, path, len(resolved_lenses))
     budget_warning = None
     if estimate["estimated_tokens"] > args.budget_tokens:
-        budget_warning = (f"WARNING: Estimated cost ({estimate['estimated_tokens']}) exceeds "
-                          f"budget ({args.budget_tokens}). Forcing through will hard-abort "
-                          "mid-run on overrun.")
+        budget_warning = (
+            f"WARNING: Estimated cost ({estimate['estimated_tokens']}) exceeds "
+            f"budget ({args.budget_tokens}). Forcing through will hard-abort "
+            "mid-run on overrun."
+        )
 
     safe = _safe_name(args.session_id)
     plan = {
@@ -426,8 +454,10 @@ def cmd_plan(args: argparse.Namespace) -> int:
         for note in notes:
             print(f"note: {note}")
         print(f"\nPlan written to {out_path}")
-        print("Nothing has been created yet — ask the user to confirm in plain prose, "
-              "then run `worktree check`, `round start`, `worktree create`.")
+        print(
+            "Nothing has been created yet — ask the user to confirm in plain prose, "
+            "then run `worktree check`, `round start`, `worktree create`."
+        )
     return 0
 
 
@@ -437,7 +467,11 @@ def _fetch_note(note_id: str, repo: Path, launcher: str | None) -> str:
         raise Abort(f"apiary launcher not found at {launch} — re-run `apiary install`.")
     result = subprocess.run(
         [sys.executable, str(launch), "scribe/notes.py", "get", str(note_id)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
     )
     if result.returncode != 0 or not result.stdout.strip():
         raise Abort(f"Note {note_id} not found. Use `/notes` to find the correct ID.")
@@ -451,14 +485,16 @@ def load_plan(session_id: str | None, plan_file: str | None) -> dict:
         raise Abort("pass --session-id (or --plan-file) so the run's plan can be loaded")
     path = _plan_path(session_id)
     if not path.is_file():
-        raise Abort(f"no plan for session {session_id} at {path} — run "
-                    "`orchestrate.py plan ...` first")
+        raise Abort(
+            f"no plan for session {session_id} at {path} — run `orchestrate.py plan ...` first"
+        )
     return _read_json_file(path, "plan file")
 
 
 # --------------------------------------------------------------------------- #
 # `worktree` — readiness check, create, remove, diff
 # --------------------------------------------------------------------------- #
+
 
 def _dirty_targets(plan: dict, repo: Path) -> list[str]:
     dirty = []
@@ -492,8 +528,9 @@ def cmd_worktree(args: argparse.Namespace) -> int:
                 "from HEAD."
             )
         if args.action == "check":
-            print(f"{len(plan['targets_rel'])} target(s) clean at HEAD — safe to create "
-                  "the worktree.")
+            print(
+                f"{len(plan['targets_rel'])} target(s) clean at HEAD — safe to create the worktree."
+            )
             return 0
 
     if args.action == "create":
@@ -512,8 +549,10 @@ def cmd_worktree(args: argparse.Namespace) -> int:
         if args.delete_branch:
             branch_result = _run_git(["branch", "-D", branch], repo)
             if branch_result.returncode != 0:
-                print(f"warning: could not delete branch {branch}: "
-                      f"{branch_result.stderr.strip()}", file=sys.stderr)
+                print(
+                    f"warning: could not delete branch {branch}: {branch_result.stderr.strip()}",
+                    file=sys.stderr,
+                )
             else:
                 print(f"deleted branch {branch}")
         else:
@@ -537,6 +576,7 @@ def cmd_worktree(args: argparse.Namespace) -> int:
 # `round` — thin wrapper over round_counter
 # --------------------------------------------------------------------------- #
 
+
 def cmd_round(args: argparse.Namespace) -> int:
     if args.action == "defender":
         if not args.set_id and not args.get:
@@ -555,6 +595,7 @@ def cmd_round(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 # `prompt` — assemble agent prompts from the templates
 # --------------------------------------------------------------------------- #
+
 
 def _template(name: str) -> str:
     path = AGENTS_DIR / name
@@ -639,17 +680,24 @@ def cmd_prompt(args: argparse.Namespace) -> int:
 
     if args.role == "attacker":
         if plan["path"] == "legacy":
-            prev = (json.dumps(prev_response, indent=2) if prev_response
-                    else "None (first round)")
-            prompt = _fill(_template("attacker.md"), {
-                "MODE": plan["mode"],
-                "FOCUS": plan["focus"],
-                "DEEP": "true" if plan["deep"] else "false",
-                "PREV_DEFENDER": prev,
-                "TARGET_CONTENT": _target_block(plan, round_no, for_defender=False),
-            }) + "\n\n" + RETURN_JSON_ARRAY_RULE
-            _emit_agent(f"Harden Attacker round {round_no} [rid:{rid}]",
-                        plan["models"]["attacker"], prompt)
+            prev = json.dumps(prev_response, indent=2) if prev_response else "None (first round)"
+            prompt = (
+                _fill(
+                    _template("attacker.md"),
+                    {
+                        "MODE": plan["mode"],
+                        "FOCUS": plan["focus"],
+                        "DEEP": "true" if plan["deep"] else "false",
+                        "PREV_DEFENDER": prev,
+                        "TARGET_CONTENT": _target_block(plan, round_no, for_defender=False),
+                    },
+                )
+                + "\n\n"
+                + RETURN_JSON_ARRAY_RULE
+            )
+            _emit_agent(
+                f"Harden Attacker round {round_no} [rid:{rid}]", plan["models"]["attacker"], prompt
+            )
             return 0
 
         taxonomy = {
@@ -659,27 +707,42 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         wanted = args.lens or plan["resolved_lenses"]
         unknown = [name for name in wanted if not lens_taxonomy.is_valid_lens(name)]
         if unknown:
-            raise Abort(f"Unknown lens `{unknown[0]}`. Valid lenses: "
-                        + ", ".join(lens_taxonomy.all_lenses()) + ".")
+            raise Abort(
+                f"Unknown lens `{unknown[0]}`. Valid lenses: "
+                + ", ".join(lens_taxonomy.all_lenses())
+                + "."
+            )
         prior = build_prior_record(prev_findings, prev_response, rejections, round_no)
         template = _template("attacker_lens.md")
         for index, name in enumerate(wanted):
-            prompt = _fill(template, {
-                "MODE": "code",
-                "LENS": name,
-                "LENS_BRIEF": taxonomy["briefs"][name],
-                "SEAM_RULES": taxonomy["seam_rules"],
-                "DEEP": "true" if plan["deep"] else "false",
-                "PREV_ROUND": prior,
-                "TARGET_CONTENT": _target_block(plan, round_no, for_defender=False),
-            }) + "\n\n" + RETURN_JSON_ARRAY_RULE
+            prompt = (
+                _fill(
+                    template,
+                    {
+                        "MODE": "code",
+                        "LENS": name,
+                        "LENS_BRIEF": taxonomy["briefs"][name],
+                        "SEAM_RULES": taxonomy["seam_rules"],
+                        "DEEP": "true" if plan["deep"] else "false",
+                        "PREV_ROUND": prior,
+                        "TARGET_CONTENT": _target_block(plan, round_no, for_defender=False),
+                    },
+                )
+                + "\n\n"
+                + RETURN_JSON_ARRAY_RULE
+            )
             if index:
                 print()
-            _emit_agent(f"Harden Attacker {name} round {round_no} [rid:{rid}]",
-                        plan["models"]["attacker"], prompt)
+            _emit_agent(
+                f"Harden Attacker {name} round {round_no} [rid:{rid}]",
+                plan["models"]["attacker"],
+                prompt,
+            )
         print()
-        print(f"Spawn all {len(wanted)} agent(s) in ONE message so they run in parallel. "
-              "Do not pass `isolation` — attackers only Read.")
+        print(
+            f"Spawn all {len(wanted)} agent(s) in ONE message so they run in parallel. "
+            "Do not pass `isolation` — attackers only Read."
+        )
         return 0
 
     if not args.findings:
@@ -687,33 +750,46 @@ def cmd_prompt(args: argparse.Namespace) -> int:
 
     if args.role == "consolidator":
         findings = _read_json_file(Path(args.findings), "combined findings")
-        prompt = _fill(_template("consolidator.md"), {
-            "MODE": plan["mode"],
-            "PRIOR_RECORD": build_prior_record(prev_findings, prev_response,
-                                               rejections, round_no),
-            "FINDINGS_JSON": json.dumps(findings, indent=2),
-        })
-        _emit_agent(f"Harden Consolidator round {round_no} [rid:{rid}]",
-                    plan["models"]["consolidator"], prompt)
+        prompt = _fill(
+            _template("consolidator.md"),
+            {
+                "MODE": plan["mode"],
+                "PRIOR_RECORD": build_prior_record(
+                    prev_findings, prev_response, rejections, round_no
+                ),
+                "FINDINGS_JSON": json.dumps(findings, indent=2),
+            },
+        )
+        _emit_agent(
+            f"Harden Consolidator round {round_no} [rid:{rid}]",
+            plan["models"]["consolidator"],
+            prompt,
+        )
         return 0
 
     findings = _read_json_file(Path(args.findings), "validated findings")
 
     if args.role == "defender":
-        prompt = _fill(_template("defender.md"), {
-            "MODE": plan["mode"],
-            "FINDINGS_JSON": json.dumps(findings, indent=2),
-            "TARGET_CONTENT": _target_block(plan, round_no, for_defender=True),
-        })
+        prompt = _fill(
+            _template("defender.md"),
+            {
+                "MODE": plan["mode"],
+                "FINDINGS_JSON": json.dumps(findings, indent=2),
+                "TARGET_CONTENT": _target_block(plan, round_no, for_defender=True),
+            },
+        )
         if plan["mode"] == "code":
             prompt += "\n\n" + DEFENDER_WORKFLOW_RULE
-        _emit_agent(f"Harden Defender round {round_no} [rid:{rid}]",
-                    plan["models"]["defender"], prompt)
+        _emit_agent(
+            f"Harden Defender round {round_no} [rid:{rid}]", plan["models"]["defender"], prompt
+        )
         print()
         print("Do NOT pass `isolation` — the Defender edits the shared worktree directly.")
-        print("After it responds, store its agent id: "
-              f"`orchestrate.py round defender --session-id {plan['session_id']} "
-              "--set <agent_id>`")
+        print(
+            "After it responds, store its agent id: "
+            f"`orchestrate.py round defender --session-id {plan['session_id']} "
+            "--set <agent_id>`"
+        )
         return 0
 
     # defender-continue: a SendMessage body, not an Agent spawn.
@@ -725,8 +801,10 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         else:
             fixed.append(ref)
     expected = [f.get("id", "?") for f in findings] if isinstance(findings, list) else []
-    print("SENDMESSAGE to the stored Defender agent id "
-          f"(`orchestrate.py round defender --session-id {plan['session_id']} --get`)")
+    print(
+        "SENDMESSAGE to the stored Defender agent id "
+        f"(`orchestrate.py round defender --session-id {plan['session_id']} --get`)"
+    )
     print("--- MESSAGE BEGIN ---")
     print(f"## Round {round_no} Findings\n")
     print(f"The reviewers re-examined your fixes and found {len(expected)} new issues.\n")
@@ -735,8 +813,10 @@ def cmd_prompt(args: argparse.Namespace) -> int:
     print("\n### Previous round summary")
     print(f"- Fixed: {len(fixed)} ({', '.join(fixed) or 'none'})")
     print(f"- Deferred: {len(deferred)} ({', '.join(deferred) or 'none'})")
-    print("\nApply the same process: fix what you can in the worktree, defer what you "
-          "can't, then return your JSON summary.")
+    print(
+        "\nApply the same process: fix what you can in the worktree, defer what you "
+        "can't, then return your JSON summary."
+    )
     print("--- MESSAGE END ---")
     return 0
 
@@ -751,18 +831,26 @@ RETRY_FEEDBACK = (
 )
 
 NEXT_ACTIONS = {
-    "retry": ("Re-spawn the SAME agent once with the `feedback` text appended to its "
-              "prompt, then run this command again with --attempt {next}."),
-    "drop": ("Drop lens `{lens}` for this round: record "
-             "\"lens {lens}: dropped (unparseable output)\" in the round summary and "
-             "continue with the remaining lenses. Do not abort the round."),
-    "ask": ("Show the errors and ask the user, in plain prose, whether to skip this "
-            "round and continue, or stop now with partial results (Step 3). Do not "
-            "use a multiple-choice picker."),
-    "degrade": ("Run `orchestrate.py validate consolidation --degrade --file "
-                "<combined-findings.json>` to build the consolidated set "
-                "deterministically, and record \"consolidator: degraded (adjudication "
-                "skipped)\" in the round summary."),
+    "retry": (
+        "Re-spawn the SAME agent once with the `feedback` text appended to its "
+        "prompt, then run this command again with --attempt {next}."
+    ),
+    "drop": (
+        "Drop lens `{lens}` for this round: record "
+        '"lens {lens}: dropped (unparseable output)" in the round summary and '
+        "continue with the remaining lenses. Do not abort the round."
+    ),
+    "ask": (
+        "Show the errors and ask the user, in plain prose, whether to skip this "
+        "round and continue, or stop now with partial results (Step 3). Do not "
+        "use a multiple-choice picker."
+    ),
+    "degrade": (
+        "Run `orchestrate.py validate consolidation --degrade --file "
+        "<combined-findings.json>` to build the consolidated set "
+        'deterministically, and record "consolidator: degraded (adjudication '
+        'skipped)" in the round summary.'
+    ),
 }
 
 
@@ -802,8 +890,9 @@ def _fallback_action(kind: str, lens: str | None) -> str:
     return "ask"
 
 
-def _validator_argv(kind: str, temp: Path, args: argparse.Namespace,
-                    check_files: bool, deep: bool) -> list[str]:
+def _validator_argv(
+    kind: str, temp: Path, args: argparse.Namespace, check_files: bool, deep: bool
+) -> list[str]:
     argv = [sys.executable, str(VALIDATE_AND_ASSIGN), kind, "--file", str(temp)]
     if check_files:
         argv.append("--check-files")
@@ -848,25 +937,36 @@ def cmd_validate(args: argparse.Namespace) -> int:
     staged.write_text(cleaned + "\n", encoding="utf-8")
 
     argv = _validator_argv(kind, staged, args, check_files, deep)
-    result = subprocess.run(argv, capture_output=True, text=True,
-                            encoding="utf-8", errors="replace", check=False,
-                            cwd=str(plan["repo_root"]) if plan else None)
+    result = subprocess.run(
+        argv,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        cwd=str(plan["repo_root"]) if plan else None,
+    )
 
     if result.returncode == 0:
         out_path = Path(args.out) if args.out else tmp_dir / f"{stem}.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(result.stdout, encoding="utf-8")
         validated = json.loads(result.stdout)
-        print(json.dumps({
-            "status": "ok",
-            "kind": kind,
-            "lens": args.lens,
-            "attempt": args.attempt,
-            "degraded": bool(args.degrade),
-            "out_file": str(out_path),
-            "counts": tally(kind, validated),
-            "result": validated,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "status": "ok",
+                    "kind": kind,
+                    "lens": args.lens,
+                    "attempt": args.attempt,
+                    "degraded": bool(args.degrade),
+                    "out_file": str(out_path),
+                    "counts": tally(kind, validated),
+                    "result": validated,
+                },
+                indent=2,
+            )
+        )
         return 0
 
     errors = (result.stderr or result.stdout).strip()
@@ -882,8 +982,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         "max_attempts": MAX_VALIDATION_ATTEMPTS,
         "errors": errors,
         "feedback": RETRY_FEEDBACK.format(errors=errors) if action == "retry" else None,
-        "instruction": NEXT_ACTIONS[action].format(next=args.attempt + 1,
-                                                   lens=args.lens or "?"),
+        "instruction": NEXT_ACTIONS[action].format(next=args.attempt + 1, lens=args.lens or "?"),
     }
     print(json.dumps(decision, indent=2))
     return 3
@@ -892,6 +991,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 # `budget` — spend query, summary suffix, abort threshold
 # --------------------------------------------------------------------------- #
+
 
 def cmd_budget(args: argparse.Namespace) -> int:
     """Report spend for this run and decide whether it must abort.
@@ -905,8 +1005,11 @@ def cmd_budget(args: argparse.Namespace) -> int:
     plan = None
     if args.session_id or args.plan_file:
         plan = load_plan(args.session_id, args.plan_file)
-    budget = args.budget if args.budget is not None else (
-        plan["budget_tokens"] if plan else DEFAULT_BUDGET_TOKENS)
+    budget = (
+        args.budget
+        if args.budget is not None
+        else (plan["budget_tokens"] if plan else DEFAULT_BUDGET_TOKENS)
+    )
     request_id = args.request_id or (plan["request_id"] if plan else None)
     cwd = args.cwd or (plan["session_cwd"] if plan else None)
 
@@ -920,8 +1023,9 @@ def cmd_budget(args: argparse.Namespace) -> int:
         argv = [sys.executable, str(script), "--request-id", request_id]
         if cwd:
             argv += ["--cwd", cwd]
-        result = subprocess.run(argv, capture_output=True, text=True,
-                                encoding="utf-8", errors="replace", check=False)
+        result = subprocess.run(
+            argv, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+        )
         raw = (result.stdout or "").strip()
         if result.returncode == 0 and INTEGER_RE.match(raw):
             spent = int(raw)
@@ -936,8 +1040,11 @@ def cmd_budget(args: argparse.Namespace) -> int:
         exceeded = False
     else:
         pct = round(100 * spent / budget) if budget > 0 else None
-        suffix = (f"| spent {spent} of {budget} ({pct}%)" if pct is not None
-                  else f"| spent {spent} of {budget} (n/a)")
+        suffix = (
+            f"| spent {spent} of {budget} ({pct}%)"
+            if pct is not None
+            else f"| spent {spent} of {budget} (n/a)"
+        )
         # The empty-findings exit means the run completed cleanly: never stamp
         # BUDGET EXCEEDED on that path even if spend went over.
         exceeded = bool(spent > budget and not args.empty_findings)
@@ -951,13 +1058,17 @@ def cmd_budget(args: argparse.Namespace) -> int:
         "suffix": suffix,
         "abort_message": (
             f"BUDGET EXCEEDED: spent {spent} > budget {budget}. Aborting after round "
-            f"{args.round} with partial results." if exceeded else None),
+            f"{args.round} with partial results."
+            if exceeded
+            else None
+        ),
         "instruction": (
             "Print abort_message, set budget_exceeded for the Step 4 summary, skip the "
             "remaining rounds and jump to Step 3. Do NOT remove the worktree."
-            if exceeded else
-            "Append `suffix` to the round summary line and continue. A null `spent` is "
-            "not an abort."),
+            if exceeded
+            else "Append `suffix` to the round summary line and continue. A null `spent` is "
+            "not an abort."
+        ),
     }
     print(json.dumps(payload, indent=2))
     return 0
@@ -967,8 +1078,16 @@ def cmd_budget(args: argparse.Namespace) -> int:
 # `file-todos` / `save-summary` — scribe writes through the launcher
 # --------------------------------------------------------------------------- #
 
-def _scribe_add(launcher: Path, note_type: str, content: str, session_id: str,
-                auto: bool, tmp_dir: Path, tag: str) -> tuple[bool, str]:
+
+def _scribe_add(
+    launcher: Path,
+    note_type: str,
+    content: str,
+    session_id: str,
+    auto: bool,
+    tmp_dir: Path,
+    tag: str,
+) -> tuple[bool, str]:
     """Write ``content`` to a temp file and add it as a scribe note.
 
     ``--content-file`` (not ``--content``) keeps long bodies off argv, which
@@ -976,13 +1095,23 @@ def _scribe_add(launcher: Path, note_type: str, content: str, session_id: str,
     """
     payload = tmp_dir / f"note_{tag}.md"
     payload.write_text(content, encoding="utf-8")
-    argv = [sys.executable, str(launcher), "scribe/notes.py", "add",
-            "--type", note_type, "--content-file", str(payload),
-            "--session-id", session_id]
+    argv = [
+        sys.executable,
+        str(launcher),
+        "scribe/notes.py",
+        "add",
+        "--type",
+        note_type,
+        "--content-file",
+        str(payload),
+        "--session-id",
+        session_id,
+    ]
     if auto:
         argv.append("--auto")
-    result = subprocess.run(argv, capture_output=True, text=True,
-                            encoding="utf-8", errors="replace", check=False)
+    result = subprocess.run(
+        argv, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+    )
     if result.returncode != 0:
         return False, (result.stderr or result.stdout).strip()[:200]
     return True, result.stdout.strip()
@@ -1001,8 +1130,7 @@ def _deferred_todos(response: dict, findings, round_no: int) -> list[str]:
         ref = item.get("finding_ref", "?")
         desc = described.get(ref, "")
         reason = item.get("description", "")
-        out.append(f"Deferred {ref}: {desc} — Reason: {reason} "
-                   f"(from /harden round {round_no})")
+        out.append(f"Deferred {ref}: {desc} — Reason: {reason} (from /harden round {round_no})")
     return out
 
 
@@ -1017,16 +1145,22 @@ def cmd_file_todos(args: argparse.Namespace) -> int:
     response = _read_json_file(Path(args.response), "defender response")
     findings = _load_optional(args.findings, "round findings")
 
-    contents = [f"{t} (from /harden round {args.round})"
-                for t in response.get("todos", []) if isinstance(t, str) and t.strip()]
+    contents = [
+        f"{t} (from /harden round {args.round})"
+        for t in response.get("todos", [])
+        if isinstance(t, str) and t.strip()
+    ]
     contents += _deferred_todos(response, findings, args.round)
 
     if args.dry_run:
         print(json.dumps({"filed": 0, "dry_run": True, "todos": contents}, indent=2))
         return 0
 
-    repo = Path(args.repo).resolve() if args.repo else (
-        Path(plan["repo_root"]) if plan else _repo_root(None))
+    repo = (
+        Path(args.repo).resolve()
+        if args.repo
+        else (Path(plan["repo_root"]) if plan else _repo_root(None))
+    )
     launcher = Path(args.launcher) if args.launcher else _default_launcher(repo)
     if not launcher.is_file():
         raise Abort(f"apiary launcher not found at {launcher} — re-run `apiary install`.")
@@ -1036,8 +1170,15 @@ def cmd_file_todos(args: argparse.Namespace) -> int:
     failed: list[str] = []
     filed = 0
     for index, content in enumerate(contents):
-        ok, message = _scribe_add(launcher, "todo", content, session_id, True,
-                                  tmp_dir, f"{_safe_name(session_id)}_r{args.round}_{index}")
+        ok, message = _scribe_add(
+            launcher,
+            "todo",
+            content,
+            session_id,
+            True,
+            tmp_dir,
+            f"{_safe_name(session_id)}_r{args.round}_{index}",
+        )
         if ok:
             filed += 1
         else:
@@ -1064,16 +1205,26 @@ def cmd_save_summary(args: argparse.Namespace) -> int:
         print(json.dumps({"saved": False, "dry_run": True, "chars": len(content)}, indent=2))
         return 0
 
-    repo = Path(args.repo).resolve() if args.repo else (
-        Path(plan["repo_root"]) if plan else _repo_root(None))
+    repo = (
+        Path(args.repo).resolve()
+        if args.repo
+        else (Path(plan["repo_root"]) if plan else _repo_root(None))
+    )
     launcher = Path(args.launcher) if args.launcher else _default_launcher(repo)
     if not launcher.is_file():
         raise Abort(f"apiary launcher not found at {launcher} — re-run `apiary install`.")
 
     tmp_dir = _tmp_dir()
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    ok, message = _scribe_add(launcher, args.type, content, session_id, False,
-                              tmp_dir, f"summary_{_safe_name(session_id)}")
+    ok, message = _scribe_add(
+        launcher,
+        args.type,
+        content,
+        session_id,
+        False,
+        tmp_dir,
+        f"summary_{_safe_name(session_id)}",
+    )
     print(json.dumps({"saved": ok, "detail": message}, indent=2))
     return 0 if ok else 1
 
@@ -1082,24 +1233,32 @@ def cmd_save_summary(args: argparse.Namespace) -> int:
 # argparse
 # --------------------------------------------------------------------------- #
 
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Harden orchestrator: plan, prompts, worktree, validation policy, "
-                    "budget and TODO filing for /harden")
+        "budget and TODO filing for /harden"
+    )
     sub = parser.add_subparsers(dest="command")
 
-    p_plan = sub.add_parser("plan", help="Resolve targets, pick the path, size-check "
-                                         "and estimate cost; writes the run plan")
+    p_plan = sub.add_parser(
+        "plan",
+        help="Resolve targets, pick the path, size-check and estimate cost; writes the run plan",
+    )
     p_plan.add_argument("--session-id", required=True)
-    p_plan.add_argument("--targets", nargs="*", default=[],
-                        help="Code files and/or directories to harden")
+    p_plan.add_argument(
+        "--targets", nargs="*", default=[], help="Code files and/or directories to harden"
+    )
     p_plan.add_argument("--plan-note", help="Scribe note id — plan mode instead of code mode")
     p_plan.add_argument("--lenses", help="Comma-separated lens subset (code mode)")
-    p_plan.add_argument("--focus", choices=VALID_FOCUS,
-                        help="Legacy single-attacker focus; providing it without "
-                             "--lenses selects the legacy path")
-    p_plan.add_argument("--deep", action="store_true",
-                        help="Require Given/When/Then attack scenarios")
+    p_plan.add_argument(
+        "--focus",
+        choices=VALID_FOCUS,
+        help="Legacy single-attacker focus; providing it without --lenses selects the legacy path",
+    )
+    p_plan.add_argument(
+        "--deep", action="store_true", help="Require Given/When/Then attack scenarios"
+    )
     p_plan.add_argument("--rounds", type=int, default=DEFAULT_ROUNDS)
     p_plan.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES)
     p_plan.add_argument("--max-target-kb", type=int, default=DEFAULT_MAX_TARGET_KB)
@@ -1112,32 +1271,37 @@ def build_parser() -> argparse.ArgumentParser:
     p_plan.add_argument("--repo", help="Repo root override (default: git rev-parse)")
     p_plan.add_argument("--launcher", help="Path to .claude/apiary/launch.py (plan mode)")
     p_plan.add_argument("--out", help="Write the plan JSON here instead of harden/tmp/")
-    p_plan.add_argument("--json", action="store_true",
-                        help="Print the plan JSON instead of the human summary")
+    p_plan.add_argument(
+        "--json", action="store_true", help="Print the plan JSON instead of the human summary"
+    )
     p_plan.set_defaults(func=cmd_plan)
 
     p_prompt = sub.add_parser("prompt", help="Print a ready-to-spawn agent prompt")
-    p_prompt.add_argument("role", choices=("attacker", "consolidator", "defender",
-                                           "defender-continue"))
+    p_prompt.add_argument(
+        "role", choices=("attacker", "consolidator", "defender", "defender-continue")
+    )
     p_prompt.add_argument("--session-id")
     p_prompt.add_argument("--plan-file")
     p_prompt.add_argument("--round", type=int, default=1)
-    p_prompt.add_argument("--lens", action="append",
-                          help="Limit to these lenses (repeatable); default: all resolved")
+    p_prompt.add_argument(
+        "--lens", action="append", help="Limit to these lenses (repeatable); default: all resolved"
+    )
     p_prompt.add_argument("--findings", help="Validated findings JSON for this round")
     p_prompt.add_argument("--prev-findings", help="Previous round's validated findings")
     p_prompt.add_argument("--prev-response", help="Previous round's validated Defender JSON")
     p_prompt.add_argument("--rejections", help="Previous round's consolidation output")
     p_prompt.set_defaults(func=cmd_prompt)
 
-    p_wt = sub.add_parser("worktree", help="Readiness check, create, remove or diff "
-                                           "the run's worktree")
+    p_wt = sub.add_parser(
+        "worktree", help="Readiness check, create, remove or diff the run's worktree"
+    )
     p_wt.add_argument("action", choices=("check", "create", "remove", "diff"))
     p_wt.add_argument("--session-id")
     p_wt.add_argument("--plan-file")
     p_wt.add_argument("--repo", help="Repo root override")
-    p_wt.add_argument("--delete-branch", action="store_true",
-                      help="remove: also delete the harden branch")
+    p_wt.add_argument(
+        "--delete-branch", action="store_true", help="remove: also delete the harden branch"
+    )
     p_wt.set_defaults(func=cmd_worktree)
 
     p_round = sub.add_parser("round", help="Round counter and Defender agent id")
@@ -1147,24 +1311,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_round.add_argument("--get", action="store_true", help="defender: print the agent id")
     p_round.set_defaults(func=cmd_round)
 
-    p_val = sub.add_parser("validate", help="Validate agent output and decide "
-                                            "retry / drop / ask / degrade")
+    p_val = sub.add_parser(
+        "validate", help="Validate agent output and decide retry / drop / ask / degrade"
+    )
     p_val.add_argument("kind", choices=("findings", "response", "consolidation"))
     p_val.add_argument("--file", required=True, help="Raw agent output (fences ok)")
     p_val.add_argument("--session-id")
     p_val.add_argument("--plan-file")
     p_val.add_argument("--round", type=int, default=1)
-    p_val.add_argument("--attempt", type=int, default=1,
-                       help="1 = first try, 2 = the one retry")
+    p_val.add_argument("--attempt", type=int, default=1, help="1 = first try, 2 = the one retry")
     p_val.add_argument("--lens", help="findings: per-lens mode")
     p_val.add_argument("--expected-ids", help="response: comma-separated finding ids")
     p_val.add_argument("--source-ids", help="consolidation: dispatched ATK ids")
-    p_val.add_argument("--degrade", action="store_true",
-                       help="consolidation: deterministic dedup fallback")
-    p_val.add_argument("--check-files", action="store_true",
-                       help="Force file-existence checks (implied in code mode)")
-    p_val.add_argument("--deep", action="store_true",
-                       help="Force deep-mode checks (implied by the plan)")
+    p_val.add_argument(
+        "--degrade", action="store_true", help="consolidation: deterministic dedup fallback"
+    )
+    p_val.add_argument(
+        "--check-files",
+        action="store_true",
+        help="Force file-existence checks (implied in code mode)",
+    )
+    p_val.add_argument(
+        "--deep", action="store_true", help="Force deep-mode checks (implied by the plan)"
+    )
     p_val.add_argument("--out", help="Write the validated JSON here")
     p_val.set_defaults(func=cmd_validate)
 
@@ -1177,14 +1346,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_budget.add_argument("--request-id")
     p_budget.add_argument("--cwd", help="Session cwd, so the right project log is read")
     p_budget.add_argument("--round", type=int, default=1)
-    p_budget.add_argument("--empty-findings", action="store_true",
-                          help="Clean empty-findings exit: never mark BUDGET EXCEEDED")
-    p_budget.add_argument("--query-script",
-                          help="Override budgeter/query_request.py (tests)")
+    p_budget.add_argument(
+        "--empty-findings",
+        action="store_true",
+        help="Clean empty-findings exit: never mark BUDGET EXCEEDED",
+    )
+    p_budget.add_argument("--query-script", help="Override budgeter/query_request.py (tests)")
     p_budget.set_defaults(func=cmd_budget)
 
-    p_todos = sub.add_parser("file-todos", help="File Defender todos and deferred "
-                                                "findings as scribe todos")
+    p_todos = sub.add_parser(
+        "file-todos", help="File Defender todos and deferred findings as scribe todos"
+    )
     p_todos.add_argument("--response", required=True, help="Validated Defender JSON")
     p_todos.add_argument("--findings", help="This round's validated findings (for descriptions)")
     p_todos.add_argument("--session-id")
@@ -1192,8 +1364,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_todos.add_argument("--round", type=int, default=1)
     p_todos.add_argument("--repo", help="Repo root override")
     p_todos.add_argument("--launcher", help="Path to .claude/apiary/launch.py")
-    p_todos.add_argument("--dry-run", action="store_true",
-                         help="Print what would be filed, write nothing")
+    p_todos.add_argument(
+        "--dry-run", action="store_true", help="Print what would be filed, write nothing"
+    )
     p_todos.set_defaults(func=cmd_file_todos)
 
     p_save = sub.add_parser("save-summary", help="Save the run summary as a scribe note")

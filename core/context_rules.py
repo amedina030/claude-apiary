@@ -30,6 +30,7 @@ Managed zone format inside `<repo>/CLAUDE.md`:
 Stdlib only — no PyYAML. Frontmatter is read by ``core.frontmatter``, the one
 dialect the whole toolkit speaks (Phase 3.3).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -53,9 +54,7 @@ _INNER_START_RE = re.compile(
     r"<!--\s*apiary-context-rule:(?P<id>[a-zA-Z0-9_\-]+)\s+hash=(?P<hash>[0-9a-f]{64})\s*-->"
 )
 _INNER_END_TEMPLATE = "<!-- /apiary-context-rule:{id} -->"
-_INNER_END_RE = re.compile(
-    r"<!--\s*/apiary-context-rule:(?P<id>[a-zA-Z0-9_\-]+)\s*-->"
-)
+_INNER_END_RE = re.compile(r"<!--\s*/apiary-context-rule:(?P<id>[a-zA-Z0-9_\-]+)\s*-->")
 
 REQUIRED_FRONTMATTER_FIELDS = ("id", "title", "category", "requires")
 
@@ -146,14 +145,10 @@ def load_rule(path: Path) -> Rule:
 
     missing = [f for f in REQUIRED_FRONTMATTER_FIELDS if f not in fm]
     if missing:
-        raise RuleParseError(
-            f"{path}: missing required frontmatter field(s): {', '.join(missing)}"
-        )
+        raise RuleParseError(f"{path}: missing required frontmatter field(s): {', '.join(missing)}")
 
     if fm["id"] != path.stem:
-        raise RuleParseError(
-            f"{path}: id '{fm['id']}' does not match filename stem '{path.stem}'"
-        )
+        raise RuleParseError(f"{path}: id '{fm['id']}' does not match filename stem '{path.stem}'")
 
     parent = path.parent.name
     if fm["category"] != parent:
@@ -262,9 +257,7 @@ def find_managed_zone(text: str) -> Optional[ManagedZone]:
         # Find matching end
         end_match = _INNER_END_RE.search(inner, body_start)
         if end_match is None:
-            raise ZoneTamperError(
-                f"rule '{rid}' is missing its closing sentinel"
-            )
+            raise ZoneTamperError(f"rule '{rid}' is missing its closing sentinel")
         if end_match.group("id") != rid:
             raise ZoneTamperError(
                 f"rule '{rid}' end sentinel id mismatch: got '{end_match.group('id')}'"
@@ -319,9 +312,7 @@ class DriftReport:
         return self.total == 0
 
 
-def compute_drift(
-    claude_md_text: str, source_rules: list[Rule] | None = None
-) -> DriftReport:
+def compute_drift(claude_md_text: str, source_rules: list[Rule] | None = None) -> DriftReport:
     """Compare claude_md_text's managed zone against source_rules.
 
     `not_installed` is reported relative to the *currently installed* set —

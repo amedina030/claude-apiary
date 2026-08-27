@@ -14,6 +14,7 @@ Output: runner/hardens/<uuid>.json
 Usage:
     auto_harden.py <path_to_execution_log.json>
 """
+
 import argparse
 import json
 import subprocess
@@ -98,11 +99,13 @@ def commit_all(message: str, paths=(), new_since=None):
 
 # -- Claude Code helpers --
 
+
 def run_claude(prompt: str, model: str | None = None) -> tuple[int, str, str]:
     return _spawn(prompt, timeout=cfg("harden", "timeout", 300), model=model)
 
 
 # -- Harden script wrappers --
+
 
 def _run_harden_script(payload: str, argv: list) -> tuple[bool, str]:
     """Feed *payload* to a harden validator via a temp file. (ok, output).
@@ -113,13 +116,18 @@ def _run_harden_script(payload: str, argv: list) -> tuple[bool, str]:
     (review runner Bug 7).
     """
     with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, encoding="utf-8",
+        mode="w",
+        suffix=".json",
+        delete=False,
+        encoding="utf-8",
     ) as f:
         f.write(payload)
         f.flush()
         result = subprocess.run(
             [sys.executable, *argv, "--file", f.name],
-            capture_output=True, text=True, encoding="utf-8",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         )
     Path(f.name).unlink(missing_ok=True)
     if result.returncode == 0:
@@ -130,14 +138,16 @@ def _run_harden_script(payload: str, argv: list) -> tuple[bool, str]:
 def validate_findings(findings_json: str, check_files: bool = False) -> tuple[bool, str]:
     """Run validate_findings.py. Returns (valid, output_or_errors)."""
     return _run_harden_script(
-        findings_json, [str(VALIDATE_FINDINGS), "--sanitize"],
+        findings_json,
+        [str(VALIDATE_FINDINGS), "--sanitize"],
     )
 
 
 def assign_ids(findings_json: str) -> tuple[bool, str]:
     """Run assign_ids.py --prefix ATK. Returns (success, output)."""
     return _run_harden_script(
-        findings_json, [str(ASSIGN_IDS), "--prefix", "ATK"],
+        findings_json,
+        [str(ASSIGN_IDS), "--prefix", "ATK"],
     )
 
 
@@ -151,65 +161,71 @@ def validate_response(response_json: str, expected_ids: list[str]) -> tuple[bool
 
 # -- Prompt builders --
 
+
 def build_attacker_prompt(files: list[str], spec: dict) -> str:
     file_list = "\n".join(f"- {f}" for f in files)
     spec_text = json.dumps(spec, indent=2) if spec else "No spec available"
 
-    return "\n".join([
-        "You are an adversarial code reviewer (Attacker). Your job is to find bugs, "
-        "security issues, edge cases, and spec violations in the recently changed files.",
-        "",
-        "## Target files",
-        file_list,
-        "",
-        "## Spec for context",
-        f"```json\n{spec_text}\n```",
-        "",
-        "## Instructions",
-        "",
-        "1. Read each target file carefully.",
-        "2. Look for: bugs, security vulnerabilities, unhandled edge cases, "
-        "logic errors, spec violations, input validation gaps.",
-        "3. Output ONLY a JSON array of findings. Each finding:",
-        '   {"category": "security|logic|input|resilience|complexity|general", '
-        '"description": "what is wrong", "severity": "critical|high|medium|low", '
-        '"location": "file.py:line_range"}',
-        "",
-        "If the code is clean and you find no issues, output an empty array: []",
-        "",
-        "Output ONLY the JSON array — no markdown, no explanation.",
-    ])
+    return "\n".join(
+        [
+            "You are an adversarial code reviewer (Attacker). Your job is to find bugs, "
+            "security issues, edge cases, and spec violations in the recently changed files.",
+            "",
+            "## Target files",
+            file_list,
+            "",
+            "## Spec for context",
+            f"```json\n{spec_text}\n```",
+            "",
+            "## Instructions",
+            "",
+            "1. Read each target file carefully.",
+            "2. Look for: bugs, security vulnerabilities, unhandled edge cases, "
+            "logic errors, spec violations, input validation gaps.",
+            "3. Output ONLY a JSON array of findings. Each finding:",
+            '   {"category": "security|logic|input|resilience|complexity|general", '
+            '"description": "what is wrong", "severity": "critical|high|medium|low", '
+            '"location": "file.py:line_range"}',
+            "",
+            "If the code is clean and you find no issues, output an empty array: []",
+            "",
+            "Output ONLY the JSON array — no markdown, no explanation.",
+        ]
+    )
 
 
 def build_defender_prompt(findings: list[dict], files: list[str]) -> str:
     findings_text = json.dumps(findings, indent=2)
     file_list = "\n".join(f"- {f}" for f in files)
 
-    return "\n".join([
-        "You are a code defender. Your job is to fix the findings identified by "
-        "the attacker. For each finding, either fix it in the code or explain why "
-        "it should be deferred/rejected.",
-        "",
-        "## Findings to address",
-        f"```json\n{findings_text}\n```",
-        "",
-        "## Target files",
-        file_list,
-        "",
-        "## Instructions",
-        "",
-        "1. Read each target file.",
-        "2. Fix each finding by editing the relevant code.",
-        "3. After making fixes, output a JSON object with a 'responses' array. Each response:",
-        '   {"finding_ref": "ATK-001", "action": "fixed|refactored|deferred", '
-        '"description": "what you did or why you deferred"}',
-        "",
-        "You MUST address every finding ID. Output ONLY the JSON object:",
-        '{"responses": [...]}',
-    ])
+    return "\n".join(
+        [
+            "You are a code defender. Your job is to fix the findings identified by "
+            "the attacker. For each finding, either fix it in the code or explain why "
+            "it should be deferred/rejected.",
+            "",
+            "## Findings to address",
+            f"```json\n{findings_text}\n```",
+            "",
+            "## Target files",
+            file_list,
+            "",
+            "## Instructions",
+            "",
+            "1. Read each target file.",
+            "2. Fix each finding by editing the relevant code.",
+            "3. After making fixes, output a JSON object with a 'responses' array. Each response:",
+            '   {"finding_ref": "ATK-001", "action": "fixed|refactored|deferred", '
+            '"description": "what you did or why you deferred"}',
+            "",
+            "You MUST address every finding ID. Output ONLY the JSON object:",
+            '{"responses": [...]}',
+        ]
+    )
 
 
 # -- Main logic --
+
 
 def run_attacker(files: list[str], spec: dict) -> list[dict] | None:
     """Run attacker. Returns findings list or None on failure."""
@@ -226,7 +242,10 @@ def run_attacker(files: list[str], spec: dict) -> list[dict] | None:
             return None
 
         if rc != 0:
-            print(f"  Attacker failed (attempt {attempt + 1}): {stderr.strip()[:200]}", file=sys.stderr)
+            print(
+                f"  Attacker failed (attempt {attempt + 1}): {stderr.strip()[:200]}",
+                file=sys.stderr,
+            )
             continue
 
         text = extract_text(stdout)
@@ -241,7 +260,10 @@ def run_attacker(files: list[str], spec: dict) -> list[dict] | None:
                 return json.loads(id_output)
             print(f"  ID assignment failed: {id_output[:200]}", file=sys.stderr)
         else:
-            print(f"  Findings validation failed (attempt {attempt + 1}): {output[:200]}", file=sys.stderr)
+            print(
+                f"  Findings validation failed (attempt {attempt + 1}): {output[:200]}",
+                file=sys.stderr,
+            )
 
     return None
 
@@ -261,7 +283,10 @@ def run_defender(findings: list[dict], files: list[str]) -> list[dict] | None:
             return None
 
         if rc != 0:
-            print(f"  Defender failed (attempt {attempt + 1}): {stderr.strip()[:200]}", file=sys.stderr)
+            print(
+                f"  Defender failed (attempt {attempt + 1}): {stderr.strip()[:200]}",
+                file=sys.stderr,
+            )
             continue
 
         text = extract_text(stdout)
@@ -273,7 +298,10 @@ def run_defender(findings: list[dict], files: list[str]) -> list[dict] | None:
             parsed = json.loads(output)
             return parsed.get("responses", []) if isinstance(parsed, dict) else parsed
         else:
-            print(f"  Response validation failed (attempt {attempt + 1}): {output[:200]}", file=sys.stderr)
+            print(
+                f"  Response validation failed (attempt {attempt + 1}): {output[:200]}",
+                file=sys.stderr,
+            )
 
     return None
 
@@ -289,8 +317,7 @@ def compute_verdict(rounds: list[dict]) -> tuple[str, list[str]]:
       - all_resolved: every finding was fixed or refactored, or no findings.
     """
     defender_failed = any(
-        len(rnd.get("findings", [])) > 0 and len(rnd.get("responses", [])) == 0
-        for rnd in rounds
+        len(rnd.get("findings", [])) > 0 and len(rnd.get("responses", [])) == 0 for rnd in rounds
     )
 
     unresolved = []
@@ -338,8 +365,7 @@ def main():
 
     # Collect changed files (skip steps with no files)
     changed_files = iter_unique(
-        f for step in execution.get("steps", [])
-        for f in step.get("files_changed", [])
+        f for step in execution.get("steps", []) for f in step.get("files_changed", [])
     )
 
     if not changed_files:
@@ -348,8 +374,13 @@ def main():
         HARDENS_DIR.mkdir(parents=True, exist_ok=True)
         result = {
             "schema_version": HARDEN_SCHEMA_VERSION,
-            "uuid": uuid, "branch": branch, "verdict": "all_resolved",
-            "rounds": [], "unresolved": [], "total_findings": 0, "total_resolved": 0,
+            "uuid": uuid,
+            "branch": branch,
+            "verdict": "all_resolved",
+            "rounds": [],
+            "unresolved": [],
+            "total_findings": 0,
+            "total_resolved": 0,
         }
         result_path = HARDENS_DIR / f"{uuid}.json"
         result_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -401,12 +432,14 @@ def main():
 
             if len(findings) == 0:
                 # Clean — no issues found
-                rounds.append({
-                    "round": round_num,
-                    "findings": [],
-                    "responses": [],
-                    "resolutions": {},
-                })
+                rounds.append(
+                    {
+                        "round": round_num,
+                        "findings": [],
+                        "responses": [],
+                        "resolutions": {},
+                    }
+                )
                 print(f"  Round {round_num}: attacker found 0 issues — clean", file=sys.stderr)
                 break
 
@@ -427,20 +460,30 @@ def main():
                 # Defender produced no responses despite findings — mark all unresolved.
                 # Covers two failure modes: run_defender returned None (subprocess/validation
                 # error) and run_defender returned [] (validation passed on empty array).
-                resolutions = {f.get("id", f"unknown-{i}"): "unresolved" for i, f in enumerate(findings)}
-                rounds.append({
-                    "round": round_num,
-                    "findings": findings,
-                    "responses": [],
-                    "resolutions": resolutions,
-                })
-                print(f"  Defender produced no responses in round {round_num}, findings marked unresolved", file=sys.stderr)
+                resolutions = {
+                    f.get("id", f"unknown-{i}"): "unresolved" for i, f in enumerate(findings)
+                }
+                rounds.append(
+                    {
+                        "round": round_num,
+                        "findings": findings,
+                        "responses": [],
+                        "resolutions": resolutions,
+                    }
+                )
+                print(
+                    f"  Defender produced no responses in round {round_num}, findings marked unresolved",
+                    file=sys.stderr,
+                )
                 break
 
             # Commit defender fixes
             try:
-                commit_all(f"runner/{uuid} harden round {round_num} fixes", changed_files,
-                           new_since=untracked_before)
+                commit_all(
+                    f"runner/{uuid} harden round {round_num} fixes",
+                    changed_files,
+                    new_since=untracked_before,
+                )
             except RuntimeError as e:
                 print(f"  Git warning: {e}", file=sys.stderr)
 
@@ -453,15 +496,19 @@ def main():
                 if action in ("fixed", "refactored"):
                     total_resolved += 1
 
-            rounds.append({
-                "round": round_num,
-                "findings": findings,
-                "responses": responses,
-                "resolutions": resolutions,
-            })
+            rounds.append(
+                {
+                    "round": round_num,
+                    "findings": findings,
+                    "responses": responses,
+                    "resolutions": resolutions,
+                }
+            )
 
             # Check if all resolved
-            unresolved_this_round = [rid for rid, act in resolutions.items() if act not in ("fixed", "refactored")]
+            unresolved_this_round = [
+                rid for rid, act in resolutions.items() if act not in ("fixed", "refactored")
+            ]
             if not unresolved_this_round:
                 print(f"  Round {round_num}: all findings resolved", file=sys.stderr)
                 # Continue to next round to verify the fixes are clean

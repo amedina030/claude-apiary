@@ -34,6 +34,7 @@ Usage::
 Exit code is 0 when all checks pass and 1 when any check reports a problem,
 so the doctor can be wired into CI or a pre-commit hook later.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -99,9 +100,7 @@ def check_registry(apiary: Path) -> CheckResult:
         if "uid" not in entry:
             issues.append(f"registry[{id_str}] missing `uid` field")
         elif entry["uid"] != uid_int:
-            issues.append(
-                f"registry[{id_str}].uid={entry['uid']} disagrees with key ({uid_int})"
-            )
+            issues.append(f"registry[{id_str}].uid={entry['uid']} disagrees with key ({uid_int})")
         if "version" not in entry:
             issues.append(f"registry[{id_str}] missing `version` field")
         real_path = entry.get("real_path", "")
@@ -148,8 +147,7 @@ def check_versions(apiary: Path) -> CheckResult:
 
         if repo_version != main_version:
             remediation = (
-                f"run `apiary update --target \"{real}\"`"
-                if real else "run `apiary update`"
+                f'run `apiary update --target "{real}"`' if real else "run `apiary update`"
             )
             issues.append(
                 f"registry[{id_str}] ({name}) "
@@ -196,7 +194,7 @@ def check_stale(apiary: Path) -> CheckResult:
         if not bs_path.is_file():
             notes.append(
                 f"{name} (uid={id_str}): no bootstrap_state.json — pre-v2 install; "
-                f"run `apiary install --target \"{real}\"` to enable drift detection."
+                f'run `apiary install --target "{real}"` to enable drift detection.'
             )
             continue
         try:
@@ -207,7 +205,7 @@ def check_stale(apiary: Path) -> CheckResult:
         if not isinstance(recorded, dict):
             notes.append(
                 f"{name} (uid={id_str}): bootstrap_state has no commands_dir_hashes — "
-                f"run `apiary install --target \"{real}\"` to enable drift detection."
+                f'run `apiary install --target "{real}"` to enable drift detection.'
             )
             continue
 
@@ -219,7 +217,7 @@ def check_stale(apiary: Path) -> CheckResult:
             more = f" (+{len(drift) - 5} more)" if len(drift) > 5 else ""
             issues.append(
                 f"{name} (uid={id_str}) has {len(drift)} stale slash-command file(s): "
-                f"{shown}{more} — run `apiary install --target \"{real}\"` to update."
+                f'{shown}{more} — run `apiary install --target "{real}"` to update.'
             )
     return notes, issues
 
@@ -254,7 +252,7 @@ def _pin_findings(apiary: Path, uid_str: str, entry: dict) -> CheckResult:
     if self_p is None:
         notes.append(
             f"{label}: no self-pointer at {state.self_pointer_path(repo)} — "
-            f"registered but not bootstrapped; run `apiary install --target \"{repo}\"`."
+            f'registered but not bootstrapped; run `apiary install --target "{repo}"`.'
         )
     else:
         pinned_uid = self_p.get("uid")
@@ -278,7 +276,7 @@ def _pin_findings(apiary: Path, uid_str: str, entry: dict) -> CheckResult:
             issues.append(
                 f"{label}: no main-apiary-pointer at "
                 f"{state.main_apiary_pointer_path(repo)} — the repo cannot find "
-                f"main-apiary. Run `apiary install --target \"{repo}\"`."
+                f'main-apiary. Run `apiary install --target "{repo}"`.'
             )
     else:
         recorded = main_p.get("main_apiary_path", "")
@@ -329,8 +327,7 @@ def _main_apiary_uid_findings(apiary: Path, registry: dict) -> CheckResult:
     match = state._find_entry_by_path(registry, apiary)
     if match is None:
         notes.append(
-            f"main-apiary ({apiary}) is not in its own registry — "
-            "run `apiary self-bootstrap`."
+            f"main-apiary ({apiary}) is not in its own registry — run `apiary self-bootstrap`."
         )
     elif match[0] != str(MAIN_APIARY_UID):
         issues.append(
@@ -404,8 +401,7 @@ def check_unreachable(apiary: Path) -> CheckResult:
         real = entry.get("real_path", "")
         if real and not Path(real).is_dir():
             issues.append(
-                f"unreachable: registry[{id_str}] ({entry.get('name', '?')}) "
-                f"real_path={real}"
+                f"unreachable: registry[{id_str}] ({entry.get('name', '?')}) real_path={real}"
             )
     return notes, issues
 
@@ -421,6 +417,7 @@ def check_compass(apiary: Path) -> CheckResult:
     notes: list[str] = []
     try:
         from compass import health
+
         state_dir = state.find_state_dir(apiary)
         if state_dir is None:
             return ["compass: no state dir registered for main-apiary"], []
@@ -471,10 +468,12 @@ def _run_all(apiary: Path) -> int:
 # fix. Subcommands not in this dict don't have a fix yet — callers that
 # pass --fix to one of them get a clear "not implemented" message.
 
+
 def _fix_pointers(apiary: Path) -> int:
     """Cascade-fix all bootstrapped repos' main-apiary-pointer to the
     current main-apiary location. Idempotent."""
     from core import cascade
+
     report = cascade.cascade_fix(apiary)
     print(f"[pointers --fix] cascade-fix at {report.new_main_apiary_path}")
     print(f"  updated {len(report.updated)} repo(s); skipped {len(report.skipped)}")
@@ -510,8 +509,7 @@ def _fix_pins(apiary: Path) -> int:
         repo = Path(real)
         name = entry.get("name", "")
         self_p = state.read_self_pointer(repo)
-        if self_p is not None and (str(self_p.get("uid")) != uid_str
-                                   or self_p.get("name") != name):
+        if self_p is not None and (str(self_p.get("uid")) != uid_str or self_p.get("name") != name):
             state.write_self_pointer(repo, {**self_p, "uid": int(uid_str), "name": name})
             print(f"  rewrote self-pointer for {name} (uid={uid_str}) at {repo}")
             fixed += 1
@@ -542,16 +540,23 @@ def main(argv: list[str] | None = None) -> int:
         description="Read-only consistency checks for the per-repo install model.",
     )
     parser.add_argument(
-        "subcommand", nargs="?", choices=list(CHECKS.keys()),
+        "subcommand",
+        nargs="?",
+        choices=list(CHECKS.keys()),
         help="check to run; omit to run all",
     )
     parser.add_argument(
-        "--fix", action="store_true",
-        help=("apply safe fixes for the named subcommand. Currently supported: "
-              f"{', '.join(FIXES.keys())}. Other subcommands report only."),
+        "--fix",
+        action="store_true",
+        help=(
+            "apply safe fixes for the named subcommand. Currently supported: "
+            f"{', '.join(FIXES.keys())}. Other subcommands report only."
+        ),
     )
     parser.add_argument(
-        "--apiary-repo", type=Path, default=None,
+        "--apiary-repo",
+        type=Path,
+        default=None,
         help="path to main-apiary checkout (default: resolved via launcher / pointer)",
     )
     args = parser.parse_args(argv)
@@ -559,12 +564,17 @@ def main(argv: list[str] | None = None) -> int:
     apiary = state.resolve_apiary_repo(args.apiary_repo)
     if args.fix:
         if not args.subcommand:
-            print("--fix requires a subcommand; pick one of: "
-                  f"{', '.join(FIXES.keys())}", file=sys.stderr)
+            print(
+                f"--fix requires a subcommand; pick one of: {', '.join(FIXES.keys())}",
+                file=sys.stderr,
+            )
             return 2
         if args.subcommand not in FIXES:
-            print(f"--fix is not implemented for `{args.subcommand}` "
-                  f"(supported: {', '.join(FIXES.keys())})", file=sys.stderr)
+            print(
+                f"--fix is not implemented for `{args.subcommand}` "
+                f"(supported: {', '.join(FIXES.keys())})",
+                file=sys.stderr,
+            )
             return 2
         return FIXES[args.subcommand](apiary)
 

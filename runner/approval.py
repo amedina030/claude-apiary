@@ -14,6 +14,7 @@ Output: runner/reports/<uuid>.json + scribe note
 Usage:
     approval.py <path_to_harden_result.json>
 """
+
 import argparse
 import json
 import subprocess
@@ -107,17 +108,21 @@ MERGED_LOCALLY_NOTE = (
 
 # -- Scribe helper --
 
+
 def write_scribe_note(note_type: str, content: str):
     """Write a scribe note. Warn on failure but don't abort."""
     result = subprocess.run(
         [sys.executable, str(NOTES_SCRIPT), "add", "--type", note_type, "--content", content],
-        capture_output=True, text=True, encoding="utf-8",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
     if result.returncode != 0:
         print(f"Warning: failed to write scribe note: {result.stderr.strip()}", file=sys.stderr)
 
 
 # -- Deferral review --
+
 
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
@@ -143,39 +148,43 @@ def collect_deferrals(harden: dict) -> list[dict]:
                     if r.get("finding_ref") == rid:
                         reason = r.get("description", "")
                         break
-                deferrals.append({
-                    "id": rid,
-                    "finding": finding_desc,
-                    "reason": reason,
-                })
+                deferrals.append(
+                    {
+                        "id": rid,
+                        "finding": finding_desc,
+                        "reason": reason,
+                    }
+                )
     return deferrals
 
 
 def review_deferrals(deferrals: list[dict], title: str) -> tuple[bool, list[dict]]:
     """Review deferred findings via Claude. Returns (all_accepted, reviews)."""
     deferral_text = json.dumps(deferrals, indent=2)
-    prompt = "\n".join([
-        "You are a code review triage agent. Your job is to decide whether "
-        "deferred findings from an adversarial code review are acceptable "
-        "deferrals or need human escalation.",
-        "",
-        f"## Runner: {title}",
-        "",
-        "## Deferred findings to review",
-        f"```json\n{deferral_text}\n```",
-        "",
-        "## Instructions",
-        "",
-        "For each deferral, decide:",
-        "- **accept**: The deferral reason is sound — the finding is a style nit, "
-        "out of scope, or the existing code is correct. Safe to auto-merge.",
-        "- **escalate**: The finding points to a real risk (bug, security issue, "
-        "data loss) that the defender dismissed without adequate justification.",
-        "",
-        "Output ONLY a JSON object:",
-        '{"reviews": [{"id": "ATK-001", "decision": "accept|escalate", '
-        '"rationale": "brief reason"}]}',
-    ])
+    prompt = "\n".join(
+        [
+            "You are a code review triage agent. Your job is to decide whether "
+            "deferred findings from an adversarial code review are acceptable "
+            "deferrals or need human escalation.",
+            "",
+            f"## Runner: {title}",
+            "",
+            "## Deferred findings to review",
+            f"```json\n{deferral_text}\n```",
+            "",
+            "## Instructions",
+            "",
+            "For each deferral, decide:",
+            "- **accept**: The deferral reason is sound — the finding is a style nit, "
+            "out of scope, or the existing code is correct. Safe to auto-merge.",
+            "- **escalate**: The finding points to a real risk (bug, security issue, "
+            "data loss) that the defender dismissed without adequate justification.",
+            "",
+            "Output ONLY a JSON object:",
+            '{"reviews": [{"id": "ATK-001", "decision": "accept|escalate", '
+            '"rationale": "brief reason"}]}',
+        ]
+    )
 
     try:
         rc, stdout, stderr = run_claude(prompt)
@@ -199,6 +208,7 @@ def review_deferrals(deferrals: list[dict], title: str) -> tuple[bool, list[dict
 
 
 # -- Artifact loading --
+
 
 def load_artifact(path: Path, name: str, schema_version: int | None = None) -> dict:
     """Load a JSON artifact or exit with error.
@@ -248,8 +258,7 @@ def load_run_artifacts(harden_path: Path) -> dict:
         "intake": load_artifact(paths["intake"], "Intake"),
         "spec": load_artifact(paths["spec"], "Spec", SPEC_SCHEMA_VERSION),
         "plan": load_artifact(paths["plan"], "Plan", PLAN_SCHEMA_VERSION),
-        "execution": load_artifact(
-            paths["execution"], "Execution log", EXECUTION_SCHEMA_VERSION),
+        "execution": load_artifact(paths["execution"], "Execution log", EXECUTION_SCHEMA_VERSION),
         "paths": paths,
     }
 
@@ -263,17 +272,16 @@ def summarize_run(artifacts: dict) -> dict:
         "title": artifacts["intake"].get("title", "Untitled"),
         "total_steps": len(steps),
         "steps_passed": sum(1 for s in steps if s.get("status") == "passed"),
-        "files_changed": iter_unique(
-            f for s in steps for f in s.get("files_changed", [])
-        ),
+        "files_changed": iter_unique(f for s in steps for f in s.get("files_changed", [])),
         "total_findings": harden.get("total_findings", 0),
         "total_resolved": harden.get("total_resolved", 0),
         "harden_rounds": len(harden.get("rounds", [])),
     }
 
 
-def merge_or_defer(branch: str, uuid: str, stats: dict,
-                   deferrals_accepted: int | None = None) -> tuple:
+def merge_or_defer(
+    branch: str, uuid: str, stats: dict, deferrals_accepted: int | None = None
+) -> tuple:
     """Land a clean run on master, or explain why it wasn't landed.
 
     Returns ``(path_taken, exit_code)``. This body existed twice, ~55 lines
@@ -289,8 +297,10 @@ def merge_or_defer(branch: str, uuid: str, stats: dict,
     if is_worktree():
         # Running inside a secondary worktree — cannot check out master.
         # Defer the merge to manual review or the next cycle on the main tree.
-        print(f"Worktree mode: deferring merge of {branch} to master "
-              f"(manual merge required)", file=sys.stderr)
+        print(
+            f"Worktree mode: deferring merge of {branch} to master (manual merge required)",
+            file=sys.stderr,
+        )
         return "worktree-deferred", 0
 
     try:
@@ -312,12 +322,11 @@ def merge_or_defer(branch: str, uuid: str, stats: dict,
     ok, err = squash_merge(branch, commit_msg)
     if not ok:
         if err == "merge-conflict":
-            print(f"Merge conflict on {branch} -- manual resolution required",
-                  file=sys.stderr)
+            print(f"Merge conflict on {branch} -- manual resolution required", file=sys.stderr)
             write_scribe_note(
                 "todo",
                 f"RUNNER MERGE CONFLICT: {title}. Branch {branch} has merge "
-                f"conflicts. Resolve manually and merge."
+                f"conflicts. Resolve manually and merge.",
             )
             return "merge-conflict", 1
         print(f"Merge failed: {err}", file=sys.stderr)
@@ -355,7 +364,8 @@ def triage_unresolved(harden: dict, branch: str, uuid: str, stats: dict) -> tupl
             harden["unresolved"] = unresolved
             harden["deferral_reviews"] = reviews
             path_taken, exit_code = merge_or_defer(
-                branch, uuid, stats, deferrals_accepted=len(deferrals))
+                branch, uuid, stats, deferrals_accepted=len(deferrals)
+            )
             return "all_resolved", unresolved, path_taken, exit_code
 
     unresolved_list = ", ".join(unresolved) if unresolved else "unknown"
@@ -363,13 +373,14 @@ def triage_unresolved(harden: dict, branch: str, uuid: str, stats: dict) -> tupl
         "todo",
         f"RUNNER PENDING REVIEW: {stats['title']}. Branch {branch} has "
         f"{len(unresolved)} unresolved findings: {unresolved_list}. "
-        f"Review and resolve before merging."
+        f"Review and resolve before merging.",
     )
     return "has_unresolved", unresolved, "pending-review", 0
 
 
-def build_report(artifacts: dict, stats: dict, verdict: str, path_taken,
-                 unresolved: list, report_path: Path) -> dict:
+def build_report(
+    artifacts: dict, stats: dict, verdict: str, path_taken, unresolved: list, report_path: Path
+) -> dict:
     """Assemble the final run report."""
     paths = artifacts["paths"]
     return {
@@ -391,7 +402,8 @@ def build_report(artifacts: dict, stats: dict, verdict: str, path_taken,
             "harden_rounds": stats["harden_rounds"],
         },
         "files_changed": stats["files_changed"],
-        "artifacts": {name: str(path) for name, path in paths.items()} | {
+        "artifacts": {name: str(path) for name, path in paths.items()}
+        | {
             "report": str(report_path),
         },
     }
@@ -422,13 +434,11 @@ def main():
         # in the runner queue via the HARDEN column and run_history.jsonl.
         path_taken, exit_code = "defender-failed", 1
     elif verdict == "has_unresolved":
-        verdict, unresolved, path_taken, exit_code = triage_unresolved(
-            harden, branch, uuid, stats)
+        verdict, unresolved, path_taken, exit_code = triage_unresolved(harden, branch, uuid, stats)
     else:
         path_taken, exit_code = None, 0
 
-    report = build_report(
-        artifacts, stats, verdict, path_taken, unresolved, report_path)
+    report = build_report(artifacts, stats, verdict, path_taken, unresolved, report_path)
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     print(f"{verdict} ({path_taken})")

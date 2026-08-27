@@ -9,6 +9,7 @@ the one copy.
 Writing lives next door in ``core.utils.atomic``
 (``write_json_atomic`` / ``write_text_atomic``).
 """
+
 from __future__ import annotations
 
 import json

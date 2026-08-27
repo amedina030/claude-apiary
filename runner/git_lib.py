@@ -9,6 +9,7 @@ and ``format_git_error()`` ever moved, so ``branch_exists`` / ``checkout`` /
 ``executor.branch_exists`` got for ATK-006, so a remote tracking ref could
 satisfy it. The consolidation is finished here.
 """
+
 from __future__ import annotations
 
 import os
@@ -36,7 +37,9 @@ def git(*args: str, cwd: Path | str | None = None) -> subprocess.CompletedProces
     """
     return subprocess.run(
         ["git"] + list(args),
-        capture_output=True, text=True, encoding="utf-8",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
         cwd=str(cwd) if cwd is not None else None,
     )
 

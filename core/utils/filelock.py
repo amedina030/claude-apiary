@@ -1,4 +1,5 @@
 """Cross-platform file lock using OS-level locking."""
+
 import os
 import time
 from pathlib import Path
@@ -23,9 +24,11 @@ class FileLock:
             try:
                 if os.name == "nt":
                     import msvcrt
+
                     msvcrt.locking(self._fh.fileno(), msvcrt.LK_NBLCK, 1)
                 else:
                     import fcntl
+
                     fcntl.flock(self._fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return self
             except (OSError, IOError):
@@ -38,9 +41,11 @@ class FileLock:
         try:
             if os.name == "nt":
                 import msvcrt
+
                 msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 import fcntl
+
                 fcntl.flock(self._fh, fcntl.LOCK_UN)
         finally:
             self._fh.close()

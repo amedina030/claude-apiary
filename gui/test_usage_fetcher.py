@@ -63,8 +63,10 @@ class FetchUsageTests(unittest.TestCase):
         class FakeResp:
             def read(self_inner):
                 return json.dumps(payload).encode("utf-8")
+
             def __enter__(self_inner):
                 return self_inner
+
             def __exit__(self_inner, *a):
                 return False
 
@@ -95,8 +97,10 @@ class FetchUsageTests(unittest.TestCase):
         class FakeResp:
             def read(self_inner):
                 return b"not json"
+
             def __enter__(self_inner):
                 return self_inner
+
             def __exit__(self_inner, *a):
                 return False
 

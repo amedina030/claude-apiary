@@ -4,6 +4,7 @@ Adapted from the source oracles ``test_unique_tag`` and ``test_tag_mutation``
 to apiary's ScribeStore API. The assertions are the oracle; the plumbing is
 apiary's.
 """
+
 import sys
 import tempfile
 import unittest
@@ -82,8 +83,13 @@ class TestTagMutation(_Base):
 
     def test_remove_then_add_swaps_value(self):
         a = self._mk(["asana:1", "asana-status:active"])
-        u = self.store.update_note("todo", a["year"], a["seq"],
-                                   remove_tags=["asana-status:active"], add_tags=["asana-status:done"])
+        u = self.store.update_note(
+            "todo",
+            a["year"],
+            a["seq"],
+            remove_tags=["asana-status:active"],
+            add_tags=["asana-status:done"],
+        )
         self.assertNotIn("asana-status:active", u["tags"])
         self.assertIn("asana-status:done", u["tags"])
         self.assertIn("asana:1", u["tags"])

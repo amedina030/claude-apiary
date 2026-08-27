@@ -449,28 +449,22 @@ class App:
         )
 
     def _push_pty_chunk(self, chunk: str, session_id: str = "") -> None:
-        self._eval(
-            f"window.apiary.onPtyChunk({json.dumps(chunk)}, {json.dumps(session_id)});"
-        )
+        self._eval(f"window.apiary.onPtyChunk({json.dumps(chunk)}, {json.dumps(session_id)});")
 
     def _push_pty_exit(self, code: int, session_id: str = "") -> None:
-        self._eval(
-            f"window.apiary.onPtyExit({json.dumps(code)}, {json.dumps(session_id)});"
-        )
+        self._eval(f"window.apiary.onPtyExit({json.dumps(code)}, {json.dumps(session_id)});")
 
-    def _push_notes(self, notes: list[NoteEntry], warnings: list[str], session_id: str = "") -> None:
+    def _push_notes(
+        self, notes: list[NoteEntry], warnings: list[str], session_id: str = ""
+    ) -> None:
         payload = json.dumps([n.to_dict() for n in notes])
-        self._eval(
-            f"window.apiary.onNotes({payload}, {json.dumps(session_id)});"
-        )
+        self._eval(f"window.apiary.onNotes({payload}, {json.dumps(session_id)});")
         for w in warnings:
             print(f"[scribe] {w}", file=sys.stderr)
 
     def _push_agents(self, agents: list, session_id: str = "") -> None:
         payload = json.dumps([a.to_dict() for a in agents])
-        self._eval(
-            f"window.apiary.onAgents({payload}, {json.dumps(session_id)});"
-        )
+        self._eval(f"window.apiary.onAgents({payload}, {json.dumps(session_id)});")
 
     def _push_theme(self, vars_: dict, err: Optional[str]) -> None:
         if err:
@@ -497,9 +491,7 @@ class App:
             # pending-permission badge. (No-op on the banner itself.)
             self._push_sessions()
         self._eval(
-            "window.apiary.onPermissionPrompt("
-            f"{json.dumps(pending_id)}, {json.dumps(payload)}"
-            ");"
+            f"window.apiary.onPermissionPrompt({json.dumps(pending_id)}, {json.dumps(payload)});"
         )
 
     def _push_ask_prompt(self, payload: dict, session_id: str = "") -> None:
@@ -510,11 +502,7 @@ class App:
         the pty viewport height. The JS side routes by session_id and ignores
         prompts for non-active tabs.
         """
-        self._eval(
-            "window.apiary.onAskPrompt("
-            f"{json.dumps(payload)}, {json.dumps(session_id)}"
-            ");"
-        )
+        self._eval(f"window.apiary.onAskPrompt({json.dumps(payload)}, {json.dumps(session_id)});")
 
     def _push_ask_prompt_resolved(self, tool_use_id: str, session_id: str = "") -> None:
         """Tell the frontend a pending AskUserQuestion was answered/cancelled so
@@ -617,9 +605,7 @@ class App:
             # prevent_default stops the webview from navigating to the dropped
             # file. pywebview stamps each file with pywebviewFullPath before our
             # handler runs (webview/util.py), giving us the real path for free.
-            win.dom.document.on(
-                "drop", DOMEventHandler(self._on_file_drop, prevent_default=True)
-            )
+            win.dom.document.on("drop", DOMEventHandler(self._on_file_drop, prevent_default=True))
         except Exception as e:
             print(f"[gui] file-drop registration failed: {e}", file=sys.stderr)
 
@@ -735,10 +721,7 @@ class App:
 
     def _persist_tabs(self) -> None:
         with self._state_lock:
-            entries = [
-                TabEntry(cwd=s.cwd, accept_edits=s.accept_edits)
-                for s in self._sessions
-            ]
+            entries = [TabEntry(cwd=s.cwd, accept_edits=s.accept_edits) for s in self._sessions]
             # tabs.json is index-based (it predates ids and survives a restart,
             # where ids do not); derive the index from the active id at write
             # time so the id stays the single in-memory source of truth.
@@ -808,9 +791,7 @@ class App:
                 # Promote the tab that slid into the closed one's slot, or the
                 # new last tab when the closed one was rightmost.
                 if self._sessions:
-                    self._active_id = self._sessions[
-                        min(idx, len(self._sessions) - 1)
-                    ].session_id
+                    self._active_id = self._sessions[min(idx, len(self._sessions) - 1)].session_id
                 else:
                     self._active_id = ""
             # Closing a NON-active tab leaves _active_id alone — that is the
@@ -967,12 +948,8 @@ class App:
         # enough (GH issue #31021 / L-2026-114) that we don't want to hammer
         # it. One-shot fetch first so the sidebar populates before the first
         # timer tick.
-        self._usage_poller = usage_fetcher.UsagePoller(
-            on_update=self._push_usage, interval=60.0
-        )
-        threading.Thread(
-            target=self._usage_poller.fetch_now, daemon=True
-        ).start()
+        self._usage_poller = usage_fetcher.UsagePoller(on_update=self._push_usage, interval=60.0)
+        threading.Thread(target=self._usage_poller.fetch_now, daemon=True).start()
         self._usage_poller.start()
 
     def _resync_frontend_state(self) -> None:
@@ -1034,7 +1011,10 @@ def _webview2_installed() -> bool:
         return True
     client = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
     locations = [
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\\" + client),
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\\" + client,
+        ),
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\EdgeUpdate\Clients\\" + client),
         (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\EdgeUpdate\Clients\\" + client),
     ]
@@ -1061,6 +1041,7 @@ def _environment_warnings() -> list[str]:
         )
     try:
         from gui.pty_wrapper import _resolve_claude_command
+
         if _resolve_claude_command("claude") is None:
             warnings.append(
                 "the `claude` CLI was not found on PATH — sessions can't start "

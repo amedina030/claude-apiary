@@ -21,6 +21,7 @@ Exit codes:
   1 — no active observations to synthesize from (no-op)
   2 — claude subprocess failed; previous personality.md untouched
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,8 +36,8 @@ from core.utils.atomic import write_text_atomic
 from runner.claude_subprocess import run_claude
 
 VOLATILE_RECENT_WINDOW = 5  # last N sessions count toward volatile dimensions
-CRON_MIN_AGE_DAYS = 7        # --cron mode no-ops if personality.md is younger than this
-DEFAULT_MODEL = "opus"       # synthesis benefits from Opus's integration of subtle signals
+CRON_MIN_AGE_DAYS = 7  # --cron mode no-ops if personality.md is younger than this
+DEFAULT_MODEL = "opus"  # synthesis benefits from Opus's integration of subtle signals
 
 # Upper bound on how many sessions' observations go into one prompt. The
 # active set is unbounded on disk (nothing schedules the archive sweep, and
@@ -72,8 +73,9 @@ def _cap_sessions(observations: list[dict], max_sessions: int | None) -> list[di
     return observations
 
 
-def _build_prompt(observations: list[dict], previous_personality: str,
-                  corrections: str, dimensions: dict) -> str:
+def _build_prompt(
+    observations: list[dict], previous_personality: str, corrections: str, dimensions: dict
+) -> str:
     """Compose the synthesis prompt for headless Claude."""
     volatile_names = [d["name"] for d in dimensions["dimensions"] if d.get("volatile")]
     dim_block = "\n".join(
@@ -92,7 +94,7 @@ Compass captures **personality and behavior** — *how* the user engages, not *w
 
 {dim_block}
 
-Volatile dimensions ({', '.join(volatile_names) or '(none)'}) reflect *current* state, not stable personality. For volatile dimensions, only consider the most recent {VOLATILE_RECENT_WINDOW} sessions' observations. For stable dimensions, integrate across the full active window.
+Volatile dimensions ({", ".join(volatile_names) or "(none)"}) reflect *current* state, not stable personality. For volatile dimensions, only consider the most recent {VOLATILE_RECENT_WINDOW} sessions' observations. For stable dimensions, integrate across the full active window.
 
 ## Conflict handling
 
@@ -130,13 +132,13 @@ Aim for 400-800 words total. Concise prose beats exhaustive lists.
 
 ## Previous personality.md
 
-{previous_personality or '(none — first synthesis)'}
+{previous_personality or "(none — first synthesis)"}
 
 ---
 
 ## Corrections
 
-{corrections or '(none)'}
+{corrections or "(none)"}
 
 ---
 
@@ -154,8 +156,10 @@ def cmd_synthesize(args: argparse.Namespace) -> int:
         if p.exists():
             age_days = (datetime.now(timezone.utc).timestamp() - p.stat().st_mtime) / 86400
             if age_days < CRON_MIN_AGE_DAYS:
-                print(f"--cron: personality.md is {age_days:.1f} days old "
-                      f"(< {CRON_MIN_AGE_DAYS}), skipping")
+                print(
+                    f"--cron: personality.md is {age_days:.1f} days old "
+                    f"(< {CRON_MIN_AGE_DAYS}), skipping"
+                )
                 return 0
 
     active_paths = store.list_active_observations()
@@ -165,14 +169,15 @@ def cmd_synthesize(args: argparse.Namespace) -> int:
 
     loaded = _load_active(active_paths)
     if not loaded:
-        print("active observation files exist but all failed validation; aborting",
-              file=sys.stderr)
+        print("active observation files exist but all failed validation; aborting", file=sys.stderr)
         return 1
 
     observations = _cap_sessions(loaded, args.max_sessions)
     if len(observations) < len(loaded):
-        print(f"capping synthesis at the {len(observations)} most recent "
-              f"session(s) of {len(loaded)}", file=sys.stderr)
+        print(
+            f"capping synthesis at the {len(observations)} most recent session(s) of {len(loaded)}",
+            file=sys.stderr,
+        )
 
     previous = ""
     if store.personality_path().exists():
@@ -196,8 +201,7 @@ def cmd_synthesize(args: argparse.Namespace) -> int:
 
     text = _extract_markdown(stdout)
     if not text.strip():
-        print("claude returned empty output; previous personality.md untouched",
-              file=sys.stderr)
+        print("claude returned empty output; previous personality.md untouched", file=sys.stderr)
         return 2
 
     # Atomic: personality.md is read at every session start by the startup
@@ -207,8 +211,9 @@ def cmd_synthesize(args: argparse.Namespace) -> int:
     # copy, synthesis is not idempotent, and the input observations may
     # have been archived since.
     write_text_atomic(store.personality_path(), text)
-    print(f"wrote {store.personality_path()} ({len(text)} chars from "
-          f"{len(observations)} session(s))")
+    print(
+        f"wrote {store.personality_path()} ({len(text)} chars from {len(observations)} session(s))"
+    )
     return 0
 
 
@@ -234,16 +239,25 @@ def _extract_markdown(stdout: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Synthesize personality.md from observations")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="print the prompt instead of calling claude")
-    parser.add_argument("--model", default=DEFAULT_MODEL,
-                        help=f"claude model alias (default: {DEFAULT_MODEL!r})")
-    parser.add_argument("--cron", action="store_true",
-                        help=f"weekly-throttle mode: no-op if personality.md is "
-                             f"younger than {CRON_MIN_AGE_DAYS} days")
-    parser.add_argument("--max-sessions", type=int, default=DEFAULT_MAX_SESSIONS,
-                        help=f"synthesize from at most N most recent sessions "
-                             f"(default: {DEFAULT_MAX_SESSIONS}; 0 = no cap)")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="print the prompt instead of calling claude"
+    )
+    parser.add_argument(
+        "--model", default=DEFAULT_MODEL, help=f"claude model alias (default: {DEFAULT_MODEL!r})"
+    )
+    parser.add_argument(
+        "--cron",
+        action="store_true",
+        help=f"weekly-throttle mode: no-op if personality.md is "
+        f"younger than {CRON_MIN_AGE_DAYS} days",
+    )
+    parser.add_argument(
+        "--max-sessions",
+        type=int,
+        default=DEFAULT_MAX_SESSIONS,
+        help=f"synthesize from at most N most recent sessions "
+        f"(default: {DEFAULT_MAX_SESSIONS}; 0 = no cap)",
+    )
     args = parser.parse_args()
     return cmd_synthesize(args)
 

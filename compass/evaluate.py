@@ -72,6 +72,7 @@ Exit codes:
   1 — not enough data (fewer than two labelled sessions / no log rows)
   2 — usage error, or the model run was declined
 """
+
 from __future__ import annotations
 
 import argparse
@@ -103,7 +104,7 @@ STUB_VOLATILE_WINDOW = synth.VOLATILE_RECENT_WINDOW
 # rather than high, which is the wrong direction for a spend warning —
 # hence the explicit "estimate, not a quote" wording when it prints.
 CHARS_PER_TOKEN = 4
-EST_OUTPUT_TOKENS = 1200          # the prompt asks for 400-800 words
+EST_OUTPUT_TOKENS = 1200  # the prompt asks for 400-800 words
 
 # Per-MTok list prices (USD, Anthropic first-party API, 2026-08). Only used
 # to turn a token estimate into a number a human can react to. Sessions
@@ -124,17 +125,40 @@ MODEL_PRICES = {
 # because it is the only signal in the log that points at *quality* rather
 # than volume — treat the number as directional, never as a measurement.
 CORRECTION_CUES = (
-    "no, ", "no i ", "nope", "not what", "not right", "that's wrong",
-    "thats wrong", "incorrect", "actually,", "actually i", "revert",
-    "undo", "roll back", "rollback", "stop,", "stop.", "wait,", "wait ",
-    "why did you", "you were supposed", "i said", "i asked for",
-    "that's not", "thats not", "don't ", "dont ", "instead of",
+    "no, ",
+    "no i ",
+    "nope",
+    "not what",
+    "not right",
+    "that's wrong",
+    "thats wrong",
+    "incorrect",
+    "actually,",
+    "actually i",
+    "revert",
+    "undo",
+    "roll back",
+    "rollback",
+    "stop,",
+    "stop.",
+    "wait,",
+    "wait ",
+    "why did you",
+    "you were supposed",
+    "i said",
+    "i asked for",
+    "that's not",
+    "thats not",
+    "don't ",
+    "dont ",
+    "instead of",
 )
 
 
 # --------------------------------------------------------------------------
 # Label reduction — the target definition
 # --------------------------------------------------------------------------
+
 
 def load_vocabulary(path: Path | None = None) -> dict[str, dict[str, list[str]]]:
     """Return ``{dimension: {label: [cue, ...]}}`` from the vocabulary file."""
@@ -145,8 +169,9 @@ def load_vocabulary(path: Path | None = None) -> dict[str, dict[str, list[str]]]
     return labels
 
 
-def reduce_label(text: str, dimension: str,
-                 vocabulary: dict[str, dict[str, list[str]]]) -> str | None:
+def reduce_label(
+    text: str, dimension: str, vocabulary: dict[str, dict[str, list[str]]]
+) -> str | None:
     """Reduce free text to one label for *dimension*, or None.
 
     Counts case-insensitive substring occurrences of every cue and returns
@@ -173,6 +198,7 @@ def reduce_label(text: str, dimension: str,
 # --------------------------------------------------------------------------
 # Observation loading
 # --------------------------------------------------------------------------
+
 
 def load_sessions(paths: list[Path] | None = None) -> list[dict]:
     """Load active observation files, newest ``captured_at`` first.
@@ -211,6 +237,7 @@ def session_labels(session: dict, vocabulary: dict) -> dict[str, str]:
 # Synthesisers
 # --------------------------------------------------------------------------
 
+
 def stub_synthesize(training: list[dict], dimensions: dict) -> str:
     """Deterministic, model-free stand-in for ``compass/synthesize.py``.
 
@@ -235,8 +262,12 @@ def stub_synthesize(training: list[dict], dimensions: dict) -> str:
                 continue
             per_dim[dim].append(text)
 
-    lines = ["# Personality profile (stub synthesis)", "",
-             f"_Stub-synthesized from {len(training)} session(s)._", ""]
+    lines = [
+        "# Personality profile (stub synthesis)",
+        "",
+        f"_Stub-synthesized from {len(training)} session(s)._",
+        "",
+    ]
     for dim in order:
         if not per_dim.get(dim):
             continue
@@ -280,7 +311,7 @@ def profile_sections(profile: str) -> dict[str, str]:
         name = match.group(1).strip().lower()
         name = re.sub(r"[\s\-]+", "_", name)
         end = matches[i + 1].start() if i + 1 < len(matches) else len(profile)
-        out[name] = profile[match.end():end].strip()
+        out[name] = profile[match.end() : end].strip()
     return out
 
 
@@ -288,9 +319,16 @@ def profile_sections(profile: str) -> dict[str, str]:
 # The fold loop
 # --------------------------------------------------------------------------
 
-def evaluate_folds(sessions: list[dict], vocabulary: dict, dimensions: dict,
-                   *, synthesizer, max_folds: int | None = None,
-                   progress=None) -> dict:
+
+def evaluate_folds(
+    sessions: list[dict],
+    vocabulary: dict,
+    dimensions: dict,
+    *,
+    synthesizer,
+    max_folds: int | None = None,
+    progress=None,
+) -> dict:
     """Leave-one-out evaluation. Returns the full result record.
 
     *synthesizer* is called as ``synthesizer(training_sessions)`` and must
@@ -355,11 +393,15 @@ def evaluate_folds(sessions: list[dict], vocabulary: dict, dimensions: dict,
             pairs[dim].append((truth, predicted))
 
             # majority baseline over the same training split
-            train_labels = [truths[i].get(dim) for i in range(len(sessions))
-                            if i != held_out and truths[i].get(dim)]
+            train_labels = [
+                truths[i].get(dim)
+                for i in range(len(sessions))
+                if i != held_out and truths[i].get(dim)
+            ]
             if train_labels:
-                majority = sorted(Counter(train_labels).items(),
-                                  key=lambda kv: (-kv[1], kv[0]))[0][0]
+                majority = sorted(Counter(train_labels).items(), key=lambda kv: (-kv[1], kv[0]))[0][
+                    0
+                ]
                 majority_seen[dim] += 1
                 if majority == truth:
                     majority_hits[dim] += 1
@@ -380,8 +422,7 @@ def evaluate_folds(sessions: list[dict], vocabulary: dict, dimensions: dict,
         precision: dict[str, dict] = {}
         for label in sorted({pred for _, pred in dim_pairs}):
             predicted_n = sum(1 for _, pred in dim_pairs if pred == label)
-            true_positive = sum(1 for truth, pred in dim_pairs
-                                if pred == label and truth == label)
+            true_positive = sum(1 for truth, pred in dim_pairs if pred == label and truth == label)
             precision[label] = {
                 "predicted": predicted_n,
                 "correct": true_positive,
@@ -404,15 +445,17 @@ def evaluate_folds(sessions: list[dict], vocabulary: dict, dimensions: dict,
         if seen:
             result["majority"] = sum(majority_hits.values()) / seen
             result["lift_over_majority"] = result["headline"] - result["majority"]
-        result["random"] = sum(
-            1.0 / max(1, len(vocabulary.get(dim, {}))) * len(pairs[dim]) for dim in pairs
-        ) / total_pairs
+        result["random"] = (
+            sum(1.0 / max(1, len(vocabulary.get(dim, {}))) * len(pairs[dim]) for dim in pairs)
+            / total_pairs
+        )
     return result
 
 
 # --------------------------------------------------------------------------
 # Result cache (read by `apiary doctor compass`)
 # --------------------------------------------------------------------------
+
 
 def evaluate_dir() -> Path:
     return store.compass_dir() / EVALUATE_DIRNAME
@@ -454,8 +497,8 @@ def load_cached_result() -> dict | None:
 # Cost estimate for the model path
 # --------------------------------------------------------------------------
 
-def estimate_cost(sessions: list[dict], dimensions: dict, folds: int,
-                  model: str) -> dict:
+
+def estimate_cost(sessions: list[dict], dimensions: dict, folds: int, model: str) -> dict:
     """Estimated tokens and USD for a model-backed run of *folds* folds."""
     if not sessions:
         return {"folds": 0, "input_tokens": 0, "output_tokens": 0, "usd": None}
@@ -480,20 +523,27 @@ def estimate_cost(sessions: list[dict], dimensions: dict, folds: int,
 # `offline` command
 # --------------------------------------------------------------------------
 
+
 def _fmt_pct(value: float | None) -> str:
     return "n/a" if value is None else f"{value * 100:.1f}%"
 
 
 def _print_offline(result: dict) -> None:
     print(f"compass offline predictive validity — {result['mode']} synthesiser")
-    print(f"  sessions: {result['sessions_total']} active, "
-          f"{result['sessions_labelled']} with at least one labelled dimension")
+    print(
+        f"  sessions: {result['sessions_total']} active, "
+        f"{result['sessions_labelled']} with at least one labelled dimension"
+    )
     print(f"  folds:    {result['folds']} (leave-one-out)")
-    print(f"  pairs:    {result['pairs_evaluated']} scored, "
-          f"{result['abstentions']} abstained (profile had no resolvable label)")
-    print(f"  coverage: {result['pairs_labelled']}/{result['pairs_present']} "
-          f"(session, dimension) pairs reduced to a label "
-          f"({_fmt_pct(result['label_coverage'])})")
+    print(
+        f"  pairs:    {result['pairs_evaluated']} scored, "
+        f"{result['abstentions']} abstained (profile had no resolvable label)"
+    )
+    print(
+        f"  coverage: {result['pairs_labelled']}/{result['pairs_present']} "
+        f"(session, dimension) pairs reduced to a label "
+        f"({_fmt_pct(result['label_coverage'])})"
+    )
     print()
     if not result["pairs_evaluated"]:
         print("  no scored pairs — nothing to report")
@@ -510,21 +560,26 @@ def _print_offline(result: dict) -> None:
     print(f"  {'dimension':<22} {'n':>4} {'acc':>7} {'majority':>9}  per-label precision")
     for dim, stats in sorted(result["per_dimension"].items()):
         precision = ", ".join(
-            f"{label} {info['correct']}/{info['predicted']}"
-            f" ({info['precision'] * 100:.0f}%)"
+            f"{label} {info['correct']}/{info['predicted']} ({info['precision'] * 100:.0f}%)"
             for label, info in sorted(stats["precision"].items())
         )
-        print(f"  {dim:<22} {stats['n']:>4} {_fmt_pct(stats['accuracy']):>7} "
-              f"{_fmt_pct(stats['majority_accuracy']):>9}  {precision}")
+        print(
+            f"  {dim:<22} {stats['n']:>4} {_fmt_pct(stats['accuracy']):>7} "
+            f"{_fmt_pct(stats['majority_accuracy']):>9}  {precision}"
+        )
     print()
-    print("  Reading this: lift over majority is the number that matters. "
-          "A headline that\n  matches the majority baseline means the profile "
-          "adds nothing a one-line rule\n  could not. This measures the "
-          "profile's INTERNAL consistency, not whether\n  injecting it changes "
-          "Claude's behaviour — that is `evaluate.py ab`.")
+    print(
+        "  Reading this: lift over majority is the number that matters. "
+        "A headline that\n  matches the majority baseline means the profile "
+        "adds nothing a one-line rule\n  could not. This measures the "
+        "profile's INTERNAL consistency, not whether\n  injecting it changes "
+        "Claude's behaviour — that is `evaluate.py ab`."
+    )
     if result["mode"] == "stub":
-        print("  The stub synthesiser is a no-model floor: these numbers test the "
-              "pipeline,\n  they are not evidence about compass.")
+        print(
+            "  The stub synthesiser is a no-model floor: these numbers test the "
+            "pipeline,\n  they are not evidence about compass."
+        )
 
 
 def cmd_offline(args: argparse.Namespace) -> int:
@@ -532,8 +587,7 @@ def cmd_offline(args: argparse.Namespace) -> int:
     dimensions = store.load_dimensions()
     sessions = load_sessions()
     if len(sessions) < 2:
-        print(f"need at least 2 valid observation files, found {len(sessions)}",
-              file=sys.stderr)
+        print(f"need at least 2 valid observation files, found {len(sessions)}", file=sys.stderr)
         return 1
 
     use_model = bool(args.model) and not args.dry_run
@@ -544,13 +598,17 @@ def cmd_offline(args: argparse.Namespace) -> int:
         # The estimate goes to stderr so `--json` stdout stays parseable.
         say = lambda line: print(line, file=sys.stderr)  # noqa: E731
         say(f"model run: {folds} fold(s) × 1 `claude -p` call each, model={args.model!r}")
-        say(f"  estimated input  ~{estimate['input_tokens']:,} tokens "
-            f"(~{estimate['per_fold_input_tokens']:,}/fold)")
+        say(
+            f"  estimated input  ~{estimate['input_tokens']:,} tokens "
+            f"(~{estimate['per_fold_input_tokens']:,}/fold)"
+        )
         say(f"  estimated output ~{estimate['output_tokens']:,} tokens")
         if estimate["usd"] is not None:
-            say(f"  ≈ ${estimate['usd']:.2f} at {args.model} API list price "
+            say(
+                f"  ≈ ${estimate['usd']:.2f} at {args.model} API list price "
                 f"— an estimate, not a quote; a subscription-plan CLI is billed "
-                f"differently")
+                f"differently"
+            )
         else:
             say(f"  (no list price known for model {args.model!r})")
         if not args.yes:
@@ -569,7 +627,9 @@ def cmd_offline(args: argparse.Namespace) -> int:
             return stub_synthesize(training, dimensions)
 
     result = evaluate_folds(
-        sessions, vocabulary, dimensions,
+        sessions,
+        vocabulary,
+        dimensions,
         synthesizer=synthesizer,
         max_folds=args.max_folds,
         progress=progress,
@@ -596,6 +656,7 @@ def cmd_offline(args: argparse.Namespace) -> int:
 # `ab` command
 # --------------------------------------------------------------------------
 
+
 def read_budgeter_log(path: Path | None = None) -> list[dict]:
     """Read the budgeter usage log through budgeter's own reader.
 
@@ -604,6 +665,7 @@ def read_budgeter_log(path: Path | None = None) -> list[dict]:
     this is not going to be the third.
     """
     from budgeter.lib import logger as budget_logger
+
     if path is None:
         return budget_logger.read_log()
     original = budget_logger.LOG_PATH
@@ -622,8 +684,7 @@ def is_correction(message: str) -> bool:
     return any(cue in text for cue in CORRECTION_CUES)
 
 
-def summarise_arms(rows: list[dict], *, since: str | None = None,
-                   arm_lookup=None) -> dict:
+def summarise_arms(rows: list[dict], *, since: str | None = None, arm_lookup=None) -> dict:
     """Group budgeter log rows by A/B arm and compute the outcome proxies.
 
     Proxies, and how far to trust each:
@@ -670,8 +731,7 @@ def summarise_arms(rows: list[dict], *, since: str | None = None,
             bucket["turns"][turn] = message
 
     arms: dict[str, dict] = {
-        arm: {"sessions": 0, "rows": 0, "tasks": 0, "tokens": 0,
-              "user_turns": 0, "corrections": 0}
+        arm: {"sessions": 0, "rows": 0, "tasks": 0, "tokens": 0, "user_turns": 0, "corrections": 0}
         for arm in ab.ARMS
     }
     for sid, bucket in by_session.items():
@@ -708,14 +768,18 @@ def _print_ab(summary: dict, config: dict) -> None:
         print("          always. The 'off' row will stay empty until you enable it —")
         print("          see docs/compass-measurement.md.")
     else:
-        print(f"  STATUS: running (seed={config.get('ab_seed')!r}, "
-              f"on_fraction={config.get('ab_on_fraction')})")
+        print(
+            f"  STATUS: running (seed={config.get('ab_seed')!r}, "
+            f"on_fraction={config.get('ab_on_fraction')})"
+        )
     if summary["since"]:
         print(f"  window: rows on/after {summary['since']}")
     print(f"  sessions in log: {summary['sessions_seen']}")
     print()
-    header = (f"  {'arm':<5} {'sessions':>8} {'tasks':>6} {'tool calls/task':>16} "
-              f"{'corrections/task':>17} {'net tokens/task':>16}")
+    header = (
+        f"  {'arm':<5} {'sessions':>8} {'tasks':>6} {'tool calls/task':>16} "
+        f"{'corrections/task':>17} {'net tokens/task':>16}"
+    )
     print(header)
     for arm in ab.ARMS:
         slot = summary["arms"][arm]
@@ -723,21 +787,28 @@ def _print_ab(summary: dict, config: dict) -> None:
         def fmt(value, spec=".2f"):
             return "—" if value is None else format(value, spec)
 
-        print(f"  {arm:<5} {slot['sessions']:>8} {slot['tasks']:>6} "
-              f"{fmt(slot['tool_calls_per_task']):>16} "
-              f"{fmt(slot['corrections_per_task']):>17} "
-              f"{fmt(slot['net_tokens_per_task'], ',.0f'):>16}")
+        print(
+            f"  {arm:<5} {slot['sessions']:>8} {slot['tasks']:>6} "
+            f"{fmt(slot['tool_calls_per_task']):>16} "
+            f"{fmt(slot['corrections_per_task']):>17} "
+            f"{fmt(slot['net_tokens_per_task'], ',.0f'):>16}"
+        )
     print()
-    short = [arm for arm in ab.ARMS
-             if summary["arms"][arm]["sessions"] < AB_MIN_SESSIONS_PER_ARM]
+    short = [arm for arm in ab.ARMS if summary["arms"][arm]["sessions"] < AB_MIN_SESSIONS_PER_ARM]
     if short:
-        print(f"  n is too small to read: arm(s) {', '.join(short)} have fewer than "
-              f"{AB_MIN_SESSIONS_PER_ARM} sessions.")
+        print(
+            f"  n is too small to read: arm(s) {', '.join(short)} have fewer than "
+            f"{AB_MIN_SESSIONS_PER_ARM} sessions."
+        )
     print("  Honesty: tool calls/task is honest but confounded by task difficulty.")
-    print("           corrections/task is the most direct proxy and the noisiest "
-          "(keyword\n           heuristic over user turns) — directional only.")
-    print("           net tokens/task is NOT an outcome measure: the injected profile "
-          "is\n           itself prompt tokens, so arm 'on' pays for it by construction.")
+    print(
+        "           corrections/task is the most direct proxy and the noisiest "
+        "(keyword\n           heuristic over user turns) — directional only."
+    )
+    print(
+        "           net tokens/task is NOT an outcome measure: the injected profile "
+        "is\n           itself prompt tokens, so arm 'on' pays for it by construction."
+    )
 
 
 def cmd_ab(args: argparse.Namespace) -> int:
@@ -748,8 +819,13 @@ def cmd_ab(args: argparse.Namespace) -> int:
         return 1
     summary = summarise_arms(rows, since=args.since)
     if args.json:
-        print(json.dumps({"config": {k: config[k] for k in ab.DEFAULT_CONFIG},
-                          **summary}, indent=2, default=str))
+        print(
+            json.dumps(
+                {"config": {k: config[k] for k in ab.DEFAULT_CONFIG}, **summary},
+                indent=2,
+                default=str,
+            )
+        )
     else:
         _print_ab(summary, config)
     return 0
@@ -758,6 +834,7 @@ def cmd_ab(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------
 # `labels` command
 # --------------------------------------------------------------------------
+
 
 def cmd_labels(args: argparse.Namespace) -> int:
     vocabulary = load_vocabulary()
@@ -779,34 +856,52 @@ def cmd_labels(args: argparse.Namespace) -> int:
 # CLI
 # --------------------------------------------------------------------------
 
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Measure whether the compass personality profile carries signal")
-    parser.add_argument("--state-dir", dest="state_dir",
-                        help="evaluate another target's compass state "
-                             f"(sets ${store.TARGET_STATE_DIR_ENV})")
+        description="Measure whether the compass personality profile carries signal"
+    )
+    parser.add_argument(
+        "--state-dir",
+        dest="state_dir",
+        help=f"evaluate another target's compass state (sets ${store.TARGET_STATE_DIR_ENV})",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_off = sub.add_parser(
-        "offline", help="leave-one-out predictive validity over observation files")
-    p_off.add_argument("--dry-run", action="store_true",
-                       help="force the deterministic stub synthesiser (the default "
-                            "when --model is absent); never calls a model")
-    p_off.add_argument("--model", default=None,
-                       help="run the real synthesiser once per fold with this model "
-                            "alias (costs money; prints an estimate first)")
-    p_off.add_argument("--max-folds", type=int, default=None,
-                       help="stop after N folds (use with --model to bound spend)")
-    p_off.add_argument("--yes", action="store_true",
-                       help="confirm the estimated spend and actually run --model")
+        "offline", help="leave-one-out predictive validity over observation files"
+    )
+    p_off.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="force the deterministic stub synthesiser (the default "
+        "when --model is absent); never calls a model",
+    )
+    p_off.add_argument(
+        "--model",
+        default=None,
+        help="run the real synthesiser once per fold with this model "
+        "alias (costs money; prints an estimate first)",
+    )
+    p_off.add_argument(
+        "--max-folds",
+        type=int,
+        default=None,
+        help="stop after N folds (use with --model to bound spend)",
+    )
+    p_off.add_argument(
+        "--yes", action="store_true", help="confirm the estimated spend and actually run --model"
+    )
     p_off.add_argument("--json", action="store_true", help="emit the full result as JSON")
-    p_off.add_argument("--no-cache", action="store_true",
-                       help="do not write the headline to the state dir")
+    p_off.add_argument(
+        "--no-cache", action="store_true", help="do not write the headline to the state dir"
+    )
     p_off.set_defaults(func=cmd_offline)
 
     p_ab = sub.add_parser("ab", help="compare the A/B arms against budgeter outcomes")
-    p_ab.add_argument("--since", metavar="YYYY-MM-DD",
-                      help="only count budgeter rows on/after this date")
+    p_ab.add_argument(
+        "--since", metavar="YYYY-MM-DD", help="only count budgeter rows on/after this date"
+    )
     p_ab.add_argument("--log", help="budgeter usage log path (default: budgeter's own)")
     p_ab.add_argument("--json", action="store_true", help="emit the summary as JSON")
     p_ab.set_defaults(func=cmd_ab)

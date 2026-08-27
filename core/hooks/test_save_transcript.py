@@ -8,6 +8,7 @@ state dir (APIARY_TARGET_STATE_DIR) and asserts that:
     end up in history.json or last-session.json (#223)
   - Nothing is written under ~/.claude (review S1)
 """
+
 import json
 import subprocess
 import sys
@@ -25,7 +26,9 @@ HOOK = Path(__file__).resolve().parent / "save_transcript.py"
 PYTHON = sys.executable
 
 
-def _run_hook(payload: dict, home: Path, *, runner_subprocess: bool = False) -> subprocess.CompletedProcess:
+def _run_hook(
+    payload: dict, home: Path, *, runner_subprocess: bool = False
+) -> subprocess.CompletedProcess:
     # hermetic_env, not os.environ.copy(): a live session exports
     # CLAUDE_PROJECT_DIR and APIARY_* pointing at the real checkout, and the
     # hook under test would resolve those instead of this tmpdir.
@@ -56,7 +59,11 @@ class TestSaveTranscript(unittest.TestCase):
 
     def _home_claude_files(self):
         root = self.home / ".claude"
-        return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()) if root.exists() else []
+        return (
+            sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+            if root.exists()
+            else []
+        )
 
     def _payload(self, sid: str = "abcd1234-1111-2222-3333-444444444444") -> dict:
         return {
@@ -72,7 +79,7 @@ class TestSaveTranscript(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertTrue(self.history.exists(), msg=result.stderr)
         raw = json.loads(self.history.read_text(encoding="utf-8"))
-        self.assertEqual(raw["schema_version"], 1)         # the documented v1 shape
+        self.assertEqual(raw["schema_version"], 1)  # the documented v1 shape
         history = raw["sessions"]
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["session_id"], "abcd1234-1111-2222-3333-444444444444")
@@ -84,10 +91,21 @@ class TestSaveTranscript(unittest.TestCase):
         # files in .repos/<slug>/sessions/; the hook must append to them, and
         # a malformed entry must not break the ring buffer.
         self.history.parent.mkdir(parents=True)
-        self.history.write_text(json.dumps({"schema_version": 1, "sessions": [
-            {"session_id": "11111111-1111-2222-3333-444444444444", "ended_at": "2026-05-05T00:00:00Z"},
-            "garbage",
-        ]}), encoding="utf-8")
+        self.history.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "sessions": [
+                        {
+                            "session_id": "11111111-1111-2222-3333-444444444444",
+                            "ended_at": "2026-05-05T00:00:00Z",
+                        },
+                        "garbage",
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
         result = _run_hook(self._payload(), self.home)
         self.assertEqual(result.returncode, 0, result.stderr)
         sessions = json.loads(self.history.read_text(encoding="utf-8"))["sessions"]

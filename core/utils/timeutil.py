@@ -10,6 +10,7 @@ wrong. Three copies of this ``strftime`` call existed before this module
 Timestamps that are *not* "now" (a file mtime, a parsed value) should use
 :data:`ISO_FORMAT` rather than re-spelling the format string.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

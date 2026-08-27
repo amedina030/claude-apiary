@@ -14,6 +14,7 @@ approval) set ``APIARY_RUNNER_SUBPROCESS=1`` to skip injection — they
 are one-shot workers that don't use any of this context, and the
 injection is tens of KB of input tokens per spawn.
 """
+
 import datetime
 import json
 import os
@@ -47,7 +48,8 @@ def _strip_frontmatter(md: str) -> str:
     body_start = md.find("\n", close + 1)
     if body_start == -1:
         return ""
-    return md[body_start + 1:].lstrip("\n")
+    return md[body_start + 1 :].lstrip("\n")
+
 
 # Sanitizer hit log lives in the umbrella state directory. With the
 # centralized .repos/ layout, this resolves to
@@ -68,6 +70,7 @@ def _compass_arm_on(sid: SessionId) -> bool:
     """
     try:
         from compass.ab import ARM_OFF, arm_for_session
+
         return arm_for_session(sid.short) != ARM_OFF
     except Exception:
         return True
@@ -193,9 +196,10 @@ def run(payload: dict):
             learnings_env = os.environ.copy()
             learnings_cwd = str(session_repo_root)
             result = subprocess.run(
-                [sys.executable, str(PROJECT_ROOT / "scribe" / "notes.py"),
-                 "learnings", "--index"],
-                capture_output=True, text=True, timeout=5,
+                [sys.executable, str(PROJECT_ROOT / "scribe" / "notes.py"), "learnings", "--index"],
+                capture_output=True,
+                text=True,
+                timeout=5,
                 cwd=learnings_cwd,
                 env=learnings_env,
             )
@@ -203,18 +207,24 @@ def run(payload: dict):
                 scrubbed, hits = sanitize_and_report(result.stdout.strip())
                 _log_sanitizer_hits("learnings", hits, sid.full)
                 parts.append("")
-                parts.append("--- learnings index (run `python scribe/notes.py get L-X` for full body) ---")
+                parts.append(
+                    "--- learnings index (run `python scribe/notes.py get L-X` for full body) ---"
+                )
                 parts.append(scrubbed)
         except Exception:
             pass
 
     # --- 4. CLI index (compact; use cli_lookup.py for full details) ---
     try:
-        cli_index = (PROJECT_ROOT / "docs" / "reference" / "cli-index.md").read_text(encoding="utf-8")
+        cli_index = (PROJECT_ROOT / "docs" / "reference" / "cli-index.md").read_text(
+            encoding="utf-8"
+        )
         scrubbed, hits = sanitize_and_report(cli_index.strip())
         _log_sanitizer_hits("cli_index", hits, sid.full)
         parts.append("")
-        parts.append("--- cli-tools index (run `python docs/reference/cli_lookup.py <tool>` for full flags) ---")
+        parts.append(
+            "--- cli-tools index (run `python docs/reference/cli_lookup.py <tool>` for full flags) ---"
+        )
         parts.append(scrubbed)
     except Exception:
         pass
@@ -226,13 +236,17 @@ def run(payload: dict):
     # depending on the model remembering to invoke the skill. The skill remains
     # for on-demand reload (e.g. after /clear).
     try:
-        ctx_md = (PROJECT_ROOT / "core" / "commands" / "apiary-context.md").read_text(encoding="utf-8")
+        ctx_md = (PROJECT_ROOT / "core" / "commands" / "apiary-context.md").read_text(
+            encoding="utf-8"
+        )
         ctx_body = _strip_frontmatter(ctx_md.strip())
         if ctx_body:
             scrubbed, hits = sanitize_and_report(ctx_body)
             _log_sanitizer_hits("apiary_context", hits, sid.full)
             parts.append("")
-            parts.append("--- apiary toolkit rules (also available on demand via /apiary-context) ---")
+            parts.append(
+                "--- apiary toolkit rules (also available on demand via /apiary-context) ---"
+            )
             parts.append(scrubbed)
     except Exception:
         pass

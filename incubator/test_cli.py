@@ -3,6 +3,7 @@
 Validation and helper logic are exercised directly with TemporaryDirectory.
 The scribe interaction is monkey-patched so tests don't touch real apiary state.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -77,10 +78,14 @@ def _fake_install(apiary: Path):
 
 def _fake_install_result(target: Path) -> install_mod.InstallResult:
     return install_mod.InstallResult(
-        uid=42, name=target.name, slug=f"{target.name}-42",
-        target_repo=target, apiary_repo=Path("/apiary"),
+        uid=42,
+        name=target.name,
+        slug=f"{target.name}-42",
+        target_repo=target,
+        apiary_repo=Path("/apiary"),
         state_dir=Path("/apiary/.repos") / f"{target.name}-42",
-        apiary_version="0.1.0", is_first_install=True,
+        apiary_version="0.1.0",
+        is_first_install=True,
     )
 
 
@@ -201,11 +206,12 @@ class SkeletonLayoutTests(unittest.TestCase):
             )
 
             apiary = _minimal_apiary(Path(td))
-            with mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)), \
-                 mock.patch.object(cli, "_run_scribe", side_effect=[fake_add, fake_done]), \
-                 mock.patch.object(cli, "APIARY_REPO", apiary), \
-                 mock.patch.object(cli.core_install, "install",
-                                   side_effect=_fake_install(apiary)):
+            with (
+                mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)),
+                mock.patch.object(cli, "_run_scribe", side_effect=[fake_add, fake_done]),
+                mock.patch.object(cli, "APIARY_REPO", apiary),
+                mock.patch.object(cli.core_install, "install", side_effect=_fake_install(apiary)),
+            ):
                 rc = cli.cmd_spawn(args)
 
             self.assertEqual(rc, cli.EXIT_OK, msg="spawn should succeed")
@@ -236,9 +242,11 @@ class SkeletonLayoutTests(unittest.TestCase):
                 author="x",
                 session_id=None,
             )
-            with mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)), \
-                 mock.patch.object(cli, "_run_git_init", return_value=(False, "boom")), \
-                 mock.patch.object(sys, "stderr", new_callable=io.StringIO):
+            with (
+                mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)),
+                mock.patch.object(cli, "_run_git_init", return_value=(False, "boom")),
+                mock.patch.object(sys, "stderr", new_callable=io.StringIO),
+            ):
                 rc = cli.cmd_spawn(args)
             self.assertEqual(rc, cli.EXIT_SPAWN_FAILED)
             self.assertFalse(target.exists(), "partial directory should be removed")
@@ -256,12 +264,13 @@ class SkeletonLayoutTests(unittest.TestCase):
                 args=[], returncode=1, stdout="", stderr="scribe blew up"
             )
             apiary = _minimal_apiary(Path(td))
-            with mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)), \
-                 mock.patch.object(cli, "APIARY_REPO", apiary), \
-                 mock.patch.object(cli.core_install, "install",
-                                   side_effect=_fake_install(apiary)), \
-                 mock.patch.object(cli, "_run_scribe", return_value=fake_add_fail), \
-                 mock.patch.object(sys, "stderr", new_callable=io.StringIO):
+            with (
+                mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)),
+                mock.patch.object(cli, "APIARY_REPO", apiary),
+                mock.patch.object(cli.core_install, "install", side_effect=_fake_install(apiary)),
+                mock.patch.object(cli, "_run_scribe", return_value=fake_add_fail),
+                mock.patch.object(sys, "stderr", new_callable=io.StringIO),
+            ):
                 rc = cli.cmd_spawn(args)
             self.assertEqual(rc, cli.EXIT_MIGRATION_FAILED)
             self.assertTrue(target.exists(), "repo should be left intact for manual recovery")
@@ -279,11 +288,14 @@ class SkeletonLayoutTests(unittest.TestCase):
                 session_id=None,
             )
             migrate = mock.Mock()
-            with mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)), \
-                 mock.patch.object(cli.core_install, "install",
-                                   side_effect=install_mod.InstallError("no go")), \
-                 mock.patch.object(cli, "_migrate_spec", migrate), \
-                 mock.patch.object(sys, "stderr", new_callable=io.StringIO):
+            with (
+                mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)),
+                mock.patch.object(
+                    cli.core_install, "install", side_effect=install_mod.InstallError("no go")
+                ),
+                mock.patch.object(cli, "_migrate_spec", migrate),
+                mock.patch.object(sys, "stderr", new_callable=io.StringIO),
+            ):
                 rc = cli.cmd_spawn(args)
             self.assertEqual(rc, cli.EXIT_MIGRATION_FAILED)
             migrate.assert_not_called()
@@ -314,23 +326,21 @@ class MigrateSpecTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(cli, "_run_scribe", side_effect=fake_run_scribe):
-                ok, _msg, added = cli._migrate_spec(
-                    Path(td) / "t", self.SPEC, "C-2026-999", "sess"
-                )
+                ok, _msg, added = cli._migrate_spec(Path(td) / "t", self.SPEC, "C-2026-999", "sess")
 
         self.assertTrue(ok)
         self.assertTrue(added)
         self.assertIn("--content-file", seen["args"])
-        self.assertNotIn("--content", seen["args"],
-                         "the spec body must never be an argv element")
+        self.assertNotIn("--content", seen["args"], "the spec body must never be an argv element")
         self.assertEqual(seen["body"], self.SPEC)
         self.assertFalse(seen["path"].exists(), "the staged spec file is temporary")
 
     def test_oserror_from_the_scribe_spawn_is_reported_not_raised(self):
         """subprocess.run can raise (missing interpreter, argv too long). The
         CLI must return its documented failure, not a traceback."""
-        with mock.patch.object(cli.subprocess, "run",
-                               side_effect=OSError("[WinError 206] filename too long")):
+        with mock.patch.object(
+            cli.subprocess, "run", side_effect=OSError("[WinError 206] filename too long")
+        ):
             result = cli._run_scribe(["add"], cwd=Path.cwd())
         self.assertEqual(result.returncode, 1)
         self.assertIn("filename too long", result.stderr)
@@ -338,9 +348,7 @@ class MigrateSpecTests(unittest.TestCase):
     def test_migrate_survives_an_oserror(self):
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(cli.subprocess, "run", side_effect=OSError("boom")):
-                ok, msg, added = cli._migrate_spec(
-                    Path(td) / "t", "spec", "C-2026-999", None
-                )
+                ok, msg, added = cli._migrate_spec(Path(td) / "t", "spec", "C-2026-999", None)
         self.assertFalse(ok)
         self.assertFalse(added)
         self.assertIn("boom", msg)
@@ -351,9 +359,7 @@ class MigrateSpecTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(cli, "_run_scribe", return_value=fail_add):
-                ok, msg, added = cli._migrate_spec(
-                    Path(td) / "t", "spec", "C-2026-999", None
-                )
+                ok, msg, added = cli._migrate_spec(Path(td) / "t", "spec", "C-2026-999", None)
         self.assertFalse(ok)
         self.assertFalse(added, "add failed, so nothing landed in the new repo")
         self.assertIn("scribe blew up", msg)
@@ -367,9 +373,7 @@ class MigrateSpecTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(cli, "_run_scribe", side_effect=[ok_add, fail_done]):
-                ok, msg, added = cli._migrate_spec(
-                    Path(td) / "t", "spec", "C-2026-999", None
-                )
+                ok, msg, added = cli._migrate_spec(Path(td) / "t", "spec", "C-2026-999", None)
         self.assertFalse(ok)
         self.assertTrue(added, "the spec did land — only the close failed")
         self.assertIn("no such note", msg)
@@ -384,17 +388,20 @@ class RecoveryHintTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "hint-target"
             args = argparse.Namespace(
-                path=str(target), spec_note_id="C-2026-999",
-                author="x", session_id=None,
+                path=str(target),
+                spec_note_id="C-2026-999",
+                author="x",
+                session_id=None,
             )
             apiary = _minimal_apiary(Path(td))
             err = io.StringIO()
-            with mock.patch.object(cli, "_fetch_spec", return_value=(self.SPEC, None)), \
-                 mock.patch.object(cli, "APIARY_REPO", apiary), \
-                 mock.patch.object(cli.core_install, "install",
-                                   side_effect=_fake_install(apiary)), \
-                 mock.patch.object(cli, "_run_scribe", side_effect=scribe_results), \
-                 mock.patch.object(sys, "stderr", err):
+            with (
+                mock.patch.object(cli, "_fetch_spec", return_value=(self.SPEC, None)),
+                mock.patch.object(cli, "APIARY_REPO", apiary),
+                mock.patch.object(cli.core_install, "install", side_effect=_fake_install(apiary)),
+                mock.patch.object(cli, "_run_scribe", side_effect=scribe_results),
+                mock.patch.object(sys, "stderr", err),
+            ):
                 rc = cli.cmd_spawn(args)
             self.assertEqual(rc, cli.EXIT_MIGRATION_FAILED)
             return err.getvalue()
@@ -419,8 +426,9 @@ class RecoveryHintTests(unittest.TestCase):
         )
         err = self._spawn_with([fail_add])
         self.assertIn("--content-file", err)
-        self.assertNotIn("--content <spec-body>", err,
-                         "the recovery command must not put the spec on argv")
+        self.assertNotIn(
+            "--content <spec-body>", err, "the recovery command must not put the spec on argv"
+        )
         self.assertIn("done C-2026-999", err)
 
 
@@ -443,7 +451,9 @@ class TemplateTests(unittest.TestCase):
         flags = set(re.findall(r"budgeter/report\.py\s+(--[a-z-]+)", text))
         help_text = subprocess.run(
             [sys.executable, str(cli.APIARY_REPO / "budgeter" / "report.py"), "--help"],
-            capture_output=True, text=True, encoding="utf-8",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         ).stdout
         for flag in flags:
             with self.subTest(flag=flag):
@@ -454,11 +464,13 @@ class TemplateTests(unittest.TestCase):
         are noise that implies state lives somewhere it does not."""
         text = (cli.TEMPLATES_DIR / "gitignore.tmpl").read_text(encoding="utf-8")
         entries = [
-            line.strip() for line in text.splitlines()
+            line.strip()
+            for line in text.splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         ]
         self.assertEqual(
-            [e for e in entries if ".apiary" in e], [],
+            [e for e in entries if ".apiary" in e],
+            [],
             "gitignore.tmpl still carries dead .apiary/ rules",
         )
 
@@ -467,12 +479,11 @@ class TemplateTests(unittest.TestCase):
         has no `.claude` rule yet — the template must not pre-empt it."""
         text = (cli.TEMPLATES_DIR / "gitignore.tmpl").read_text(encoding="utf-8")
         entries = [
-            line.strip() for line in text.splitlines()
+            line.strip()
+            for line in text.splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         ]
-        self.assertEqual(
-            [e for e in entries if e in install_mod._GITIGNORE_PRESENT], []
-        )
+        self.assertEqual([e for e in entries if e in install_mod._GITIGNORE_PRESENT], [])
 
 
 class SpecFetchErrorTests(unittest.TestCase):
@@ -485,8 +496,10 @@ class SpecFetchErrorTests(unittest.TestCase):
                 author="x",
                 session_id=None,
             )
-            with mock.patch.object(cli, "_fetch_spec", return_value=(None, "not found")), \
-                 mock.patch.object(sys, "stderr", new_callable=io.StringIO):
+            with (
+                mock.patch.object(cli, "_fetch_spec", return_value=(None, "not found")),
+                mock.patch.object(sys, "stderr", new_callable=io.StringIO),
+            ):
                 rc = cli.cmd_spawn(args)
             self.assertEqual(rc, cli.EXIT_SPEC_NOT_FOUND)
             self.assertFalse(target.exists())
@@ -530,7 +543,9 @@ class SpawnEndToEndTests(unittest.TestCase):
         # apiary, so it needs the actual core/ and scribe/ trees there —
         # the default fake carries only what install *reads*.
         self.apiary = testing.make_fake_apiary(
-            self.root, git=True, extra_trees=("core", "scribe"),
+            self.root,
+            git=True,
+            extra_trees=("core", "scribe"),
         )
         # Self-install so apiary has its own launcher + scribe state dir.
         install_mod.install(self.apiary, apiary_repo=self.apiary)
@@ -556,8 +571,10 @@ class SpawnEndToEndTests(unittest.TestCase):
 
         target = self.root / "spawned-proj"
         args = argparse.Namespace(
-            path=str(target), spec_note_id=note_id,
-            author="x <x@example.com>", session_id="sess",
+            path=str(target),
+            spec_note_id=note_id,
+            author="x <x@example.com>",
+            session_id="sess",
         )
         with mock.patch.object(sys, "stdout", new_callable=io.StringIO):
             rc = cli.cmd_spawn(args)
@@ -568,17 +585,17 @@ class SpawnEndToEndTests(unittest.TestCase):
         self.assertTrue(new_launcher.is_file(), "per-repo install should create launcher")
 
         # Spec present in the NEW repo's store.
-        new_list = self._scribe(
-            ["list", "--type", "context"], cwd=target, launcher=new_launcher
-        )
+        new_list = self._scribe(["list", "--type", "context"], cwd=target, launcher=new_launcher)
         self.assertEqual(new_list.returncode, 0, new_list.stderr or new_list.stdout)
-        self.assertRegex(new_list.stdout, r"C-\d{4}-\d+",
-                         "migrated spec should be active in the new repo")
+        self.assertRegex(
+            new_list.stdout, r"C-\d{4}-\d+", "migrated spec should be active in the new repo"
+        )
 
         # Spec ABSENT from apiary's active store (original was closed).
         apiary_list = self._scribe(["list", "--type", "context"], cwd=self.apiary)
-        self.assertNotIn(note_id, apiary_list.stdout,
-                         "migrated spec must not remain active in apiary")
+        self.assertNotIn(
+            note_id, apiary_list.stdout, "migrated spec must not remain active in apiary"
+        )
 
         # Original is marked done in apiary.
         got = self._scribe(["get", note_id], cwd=self.apiary)
@@ -600,8 +617,7 @@ class SpawnEndToEndTests(unittest.TestCase):
         seed_file = self.root / "seed-spec.md"
         seed_file.write_text(big, encoding="utf-8")
         seeded = self._scribe(
-            ["add", "--type", "context", "--content-file", str(seed_file),
-             "--session-id", "seed"],
+            ["add", "--type", "context", "--content-file", str(seed_file), "--session-id", "seed"],
             cwd=self.apiary,
         )
         self.assertEqual(seeded.returncode, 0, seeded.stderr or seeded.stdout)
@@ -609,16 +625,17 @@ class SpawnEndToEndTests(unittest.TestCase):
 
         target = self.root / "big-spec-proj"
         args = argparse.Namespace(
-            path=str(target), spec_note_id=note_id,
-            author="x <x@example.com>", session_id="sess",
+            path=str(target),
+            spec_note_id=note_id,
+            author="x <x@example.com>",
+            session_id="sess",
         )
         with mock.patch.object(sys, "stdout", new_callable=io.StringIO):
             rc = cli.cmd_spawn(args)
         self.assertEqual(rc, cli.EXIT_OK)
 
         new_launcher = target / ".claude" / "apiary" / "launch.py"
-        listed = self._scribe(["list", "--type", "context"], cwd=target,
-                              launcher=new_launcher)
+        listed = self._scribe(["list", "--type", "context"], cwd=target, launcher=new_launcher)
         new_id = re.search(r"C-\d{4}-\d+", listed.stdout).group(0)
         got = self._scribe(["get", new_id], cwd=target, launcher=new_launcher)
         self.assertEqual(got.returncode, 0, got.stderr or got.stdout)
@@ -729,4 +746,3 @@ class VerifyCommandTests(unittest.TestCase):
     def test_verify_is_a_registered_subcommand(self):
         # Guards the skill's Step 5 invocation from silently 404-ing.
         self.assertIn("verify", cli.COMMANDS)
-

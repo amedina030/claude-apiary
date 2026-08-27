@@ -1,5 +1,6 @@
 """`apiary install` prunes commands apiary no longer ships — but only copies the
 user never edited (hash still equals the one recorded at the previous install)."""
+
 import hashlib
 import tempfile
 import unittest
@@ -19,7 +20,9 @@ class PruneRemovedCommandsTest(unittest.TestCase):
         root = Path(self._tmp.name)
         self.apiary = root / "apiary"
         (self.apiary / "budgeter" / "commands").mkdir(parents=True)
-        (self.apiary / "budgeter" / "commands" / "budgeter.md").write_text("# new\n", encoding="utf-8")
+        (self.apiary / "budgeter" / "commands" / "budgeter.md").write_text(
+            "# new\n", encoding="utf-8"
+        )
         self.target = root / "target"
         self.dest = self.target / ".claude" / "commands"
         self.dest.mkdir(parents=True)
@@ -30,7 +33,7 @@ class PruneRemovedCommandsTest(unittest.TestCase):
         (self.dest / "mine.md").write_text("# mine\n", encoding="utf-8")
         self.previous = {
             "budgeter-log.md": _sha(self.dest / "budgeter-log.md"),
-            "budgeter-warn.md": "0" * 64,               # recorded hash != current -> edited
+            "budgeter-warn.md": "0" * 64,  # recorded hash != current -> edited
         }
 
     def test_unmodified_stale_removed_edited_and_unrecorded_kept(self):

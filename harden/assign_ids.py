@@ -9,6 +9,7 @@ Usage:
     echo '[{"category": "security", ...}]' | assign_ids.py --prefix ATK
     assign_ids.py --prefix ATK --file findings.json
 """
+
 import argparse
 import json
 import re
@@ -40,10 +41,13 @@ def assign_ids(items: list, prefix: str) -> list:
 
 def main():
     parser = argparse.ArgumentParser(description="Assign sequential IDs to harden output")
-    parser.add_argument("--prefix", required=True, type=_prefix,
-                        help="ID prefix: ATK, ATK-<CODE> (per-lens), CON, or DEF")
-    parser.add_argument("--file", dest="file_path",
-                        help="Read JSON from file instead of stdin")
+    parser.add_argument(
+        "--prefix",
+        required=True,
+        type=_prefix,
+        help="ID prefix: ATK, ATK-<CODE> (per-lens), CON, or DEF",
+    )
+    parser.add_argument("--file", dest="file_path", help="Read JSON from file instead of stdin")
     args = parser.parse_args()
 
     _raw, items = read_json_input(file_path=args.file_path, empty_ok=True)

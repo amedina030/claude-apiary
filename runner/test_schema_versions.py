@@ -1,4 +1,5 @@
 """T-2026-131: tests for runner/schema_versions.py."""
+
 import unittest
 
 from runner.schema_versions import (
@@ -13,7 +14,6 @@ from runner.schema_versions import (
 
 
 class TestAssertSchemaVersion(unittest.TestCase):
-
     def test_matching_version_passes(self):
         assert_schema_version({"schema_version": 1}, "plan", 1)
 
@@ -51,12 +51,15 @@ class TestAssertSchemaVersion(unittest.TestCase):
 
 
 class TestVersionConstants(unittest.TestCase):
-
     def test_all_constants_are_positive_ints(self):
         # Sanity: schemas start at 1 and increment by integers.
-        for v in (SPEC_SCHEMA_VERSION, PLAN_SCHEMA_VERSION,
-                  EXECUTION_SCHEMA_VERSION, HARDEN_SCHEMA_VERSION,
-                  REPORT_SCHEMA_VERSION):
+        for v in (
+            SPEC_SCHEMA_VERSION,
+            PLAN_SCHEMA_VERSION,
+            EXECUTION_SCHEMA_VERSION,
+            HARDEN_SCHEMA_VERSION,
+            REPORT_SCHEMA_VERSION,
+        ):
             self.assertIsInstance(v, int)
             self.assertGreaterEqual(v, 1)
 

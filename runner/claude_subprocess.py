@@ -31,6 +31,7 @@ ALLOW_ALL_ENV_VAR : str
     Name of the escape-hatch env var. If set to "1" in the parent env,
     the full parent environment is forwarded (legacy behavior).
 """
+
 import json
 import os
 import shutil
@@ -66,28 +67,63 @@ def resolve_claude_bin(env: dict[str, str] | None = None) -> str:
     found = shutil.which("claude", path=lookup.get("PATH"))
     return found or "claude"
 
+
 # System-essential vars, named explicitly per platform. Missing any of
 # these from a claude subprocess would typically break basic operation
 # (PATH lookup, HOME-relative config, locale, temp dirs).
-_POSIX_SYSTEM_VARS = frozenset({
-    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR",
-    "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
-})
-_WINDOWS_SYSTEM_VARS = frozenset({
-    "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC",
-    "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
-    "PROGRAMFILES", "PROGRAMFILES(X86)", "COMMONPROGRAMFILES",
-    "TEMP", "TMP",
-    "USERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
-})
+_POSIX_SYSTEM_VARS = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TERM",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "LC_MESSAGES",
+    }
+)
+_WINDOWS_SYSTEM_VARS = frozenset(
+    {
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "WINDIR",
+        "COMSPEC",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "COMMONPROGRAMFILES",
+        "TEMP",
+        "TMP",
+        "USERNAME",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+    }
+)
 
 # HTTP(S) proxy vars — claude CLI's network stack reads these. Listed
 # in both cases because Windows env var names are case-insensitive but
 # subprocess inherits them with their original casing.
-_PROXY_VARS = frozenset({
-    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
-    "http_proxy", "https_proxy", "no_proxy", "all_proxy",
-})
+_PROXY_VARS = frozenset(
+    {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "all_proxy",
+    }
+)
 
 # Any var starting with one of these prefixes is forwarded. Covers
 # claude CLI config (ANTHROPIC_API_KEY, CLAUDE_*), apiary's own runtime
@@ -95,8 +131,9 @@ _PROXY_VARS = frozenset({
 _ALLOWED_PREFIXES = ("ANTHROPIC_", "CLAUDE_", "APIARY_")
 
 
-def _build_subprocess_env(parent_env: dict[str, str] | None = None,
-                          *, is_windows: bool | None = None) -> dict[str, str]:
+def _build_subprocess_env(
+    parent_env: dict[str, str] | None = None, *, is_windows: bool | None = None
+) -> dict[str, str]:
     """Build the env dict for a runner-spawned claude subprocess.
 
     Forwards only allowlisted vars from ``parent_env`` (defaults to
@@ -125,6 +162,7 @@ def _build_subprocess_env(parent_env: dict[str, str] | None = None,
             env[name] = value
     env[RUNNER_SUBPROCESS_ENV_VAR] = "1"
     return env
+
 
 # Maximum bytes buffered from stdout/stderr before we truncate.  Prevents
 # unbounded memory growth for unexpectedly large subprocess outputs.
@@ -156,8 +194,15 @@ DEFAULT_DISALLOWED_TOOLS = (
 #   {"subprocess": {"allowed_tools": [...], "permission_mode": "...",
 #                   "max_turns": N}}
 DEFAULT_ALLOWED_TOOLS = (
-    "Read", "Edit", "Write", "Glob", "Grep",
-    "Bash(git *)", "Bash(python *)", "Bash(poetry *)", "Bash(pytest *)",
+    "Read",
+    "Edit",
+    "Write",
+    "Glob",
+    "Grep",
+    "Bash(git *)",
+    "Bash(python *)",
+    "Bash(poetry *)",
+    "Bash(pytest *)",
 )
 DEFAULT_PERMISSION_MODE = "acceptEdits"
 # Hard ceiling on agentic turns per stage call so a looping subprocess

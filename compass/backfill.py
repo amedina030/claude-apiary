@@ -25,6 +25,7 @@ Exit codes:
     1 — no selectors / no matching sessions / nothing written
     2 — claude subprocess failed for every selected session
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,7 +45,7 @@ CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 # Hard cap on prompt size we send to claude. Long sessions get tail-truncated.
 MAX_PROMPT_CHARS = 200_000
-MAX_MSG_CHARS = 4_000           # truncate any single message above this length
+MAX_MSG_CHARS = 4_000  # truncate any single message above this length
 
 
 def _candidate_transcripts_dirs() -> list[Path]:
@@ -73,8 +74,7 @@ def _list_transcripts() -> list[Path]:
     for root in _candidate_transcripts_dirs():
         if not root.is_dir():
             continue
-        files = sorted(root.glob("*.jsonl"),
-                       key=lambda p: p.stat().st_mtime, reverse=True)
+        files = sorted(root.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
         if files:
             return files
     return []
@@ -146,8 +146,9 @@ def _truncate_messages(conversation: list[dict]) -> list[dict]:
     return out
 
 
-def _build_prompt(transcript_messages: list[dict], dimensions: dict,
-                  session_id: str, captured_at: str) -> str:
+def _build_prompt(
+    transcript_messages: list[dict], dimensions: dict, session_id: str, captured_at: str
+) -> str:
     dim_block = "\n".join(
         f"- **{d['name']}** ({'volatile' if d.get('volatile') else 'stable'}): {d['description']}"
         for d in dimensions["dimensions"]
@@ -184,7 +185,7 @@ Return a single JSON object. No preamble, no commentary, no code fences. Schema:
   "captured_at": "{captured_at}",
   "observations": [
     {{
-      "dimension": "<one of: {', '.join(valid_dim_names)}>",
+      "dimension": "<one of: {", ".join(valid_dim_names)}>",
       "observation": "<1-2 sentences describing the trait/pattern>",
       "evidence": "<short quote or paraphrase from the transcript>",
       "volatility": "stable" | "volatile"
@@ -219,13 +220,12 @@ def _extract_json(stdout: str) -> dict | None:
     if start == -1 or end <= start:
         return None
     try:
-        return json.loads(text[start:end + 1])
+        return json.loads(text[start : end + 1])
     except json.JSONDecodeError:
         return None
 
 
-def _process_one(transcript_path: Path, dimensions: dict, *, model: str | None,
-                 force: bool) -> str:
+def _process_one(transcript_path: Path, dimensions: dict, *, model: str | None, force: bool) -> str:
     """Process a single transcript. Returns 'wrote' | 'skipped' | 'failed'."""
     sid_full = transcript_path.stem
     sid_short = sid_full[:8].lower()
@@ -258,8 +258,7 @@ def _process_one(transcript_path: Path, dimensions: dict, *, model: str | None,
 
     payload = _extract_json(stdout)
     if payload is None:
-        print(f"  fail {sid_short}: could not parse JSON from claude output",
-              file=sys.stderr)
+        print(f"  fail {sid_short}: could not parse JSON from claude output", file=sys.stderr)
         return "failed"
 
     # Don't trust claude to echo back the session_id correctly — it can
@@ -270,8 +269,7 @@ def _process_one(transcript_path: Path, dimensions: dict, *, model: str | None,
 
     errors = store.validate_observation(payload)
     if errors:
-        print(f"  fail {sid_short}: validation: {'; '.join(errors[:3])}",
-              file=sys.stderr)
+        print(f"  fail {sid_short}: validation: {'; '.join(errors[:3])}", file=sys.stderr)
         return "failed"
 
     store.ensure_layout()
@@ -285,22 +283,24 @@ def _process_one(transcript_path: Path, dimensions: dict, *, model: str | None,
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Backfill compass observations from session transcripts")
-    parser.add_argument("--last", type=int, default=None,
-                        help="N most recent transcripts (by mtime)")
-    parser.add_argument("--session-ids", default=None,
-                        help="Comma-separated session prefixes or UUIDs")
-    parser.add_argument("--since", default=None,
-                        help="Only transcripts modified on/after YYYY-MM-DD")
-    parser.add_argument("--force", action="store_true",
-                        help="Overwrite existing observation files")
-    parser.add_argument("--model", default=None,
-                        help="Override claude model")
+    parser = argparse.ArgumentParser(
+        description="Backfill compass observations from session transcripts"
+    )
+    parser.add_argument(
+        "--last", type=int, default=None, help="N most recent transcripts (by mtime)"
+    )
+    parser.add_argument(
+        "--session-ids", default=None, help="Comma-separated session prefixes or UUIDs"
+    )
+    parser.add_argument(
+        "--since", default=None, help="Only transcripts modified on/after YYYY-MM-DD"
+    )
+    parser.add_argument("--force", action="store_true", help="Overwrite existing observation files")
+    parser.add_argument("--model", default=None, help="Override claude model")
     args = parser.parse_args()
 
     if args.last is None and not args.session_ids and not args.since:
-        print("at least one selector is required: --last, --session-ids, --since",
-              file=sys.stderr)
+        print("at least one selector is required: --last, --session-ids, --since", file=sys.stderr)
         return 1
 
     selected = _select_transcripts(args)

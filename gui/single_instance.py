@@ -59,6 +59,7 @@ class SingleInstance:
             return
         try:
             import ctypes
+
             ctypes.windll.kernel32.CloseHandle(self._handle)
         except Exception:
             pass

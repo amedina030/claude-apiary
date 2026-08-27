@@ -1,4 +1,5 @@
 """Tests for ``core/drift.py`` — per-repo drift detection."""
+
 from __future__ import annotations
 
 import shutil
@@ -21,7 +22,10 @@ def _make_main_apiary(root: Path) -> Path:
     self-pointer, so both are on (see core/drift.py::_verify_main_apiary).
     """
     return testing.make_fake_apiary(
-        root, name="main-apiary", git=True, self_bootstrap=True,
+        root,
+        name="main-apiary",
+        git=True,
+        self_bootstrap=True,
     )
 
 
@@ -29,6 +33,7 @@ def _bootstrap_target(target: Path, apiary: Path) -> int:
     """Install apiary into *target* and return its uid."""
     testing.init_git_repo(target)
     from core import install as install_mod
+
     return install_mod.install(target, apiary_repo=apiary).uid
 
 
@@ -61,11 +66,14 @@ class CheckAndHandleTests(unittest.TestCase):
 
     def test_missing_main_apiary_returns_skip(self):
         # Point the repo's main-apiary-pointer at a nonexistent dir.
-        state.write_main_apiary_pointer(self.target, {
-            "main_apiary_path": str(self.root / "nope"),
-            "main_apiary_uid": 1,
-            "registered_at": "2026-05-05T00:00:00Z",
-        })
+        state.write_main_apiary_pointer(
+            self.target,
+            {
+                "main_apiary_path": str(self.root / "nope"),
+                "main_apiary_uid": 1,
+                "registered_at": "2026-05-05T00:00:00Z",
+            },
+        )
         report = drift.check_and_handle(self.target)
         self.assertEqual(report.action, "skip")
         self.assertIn("main checkout not found", report.message)

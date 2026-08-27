@@ -1,4 +1,5 @@
 """Tests for ``core/self_bootstrap.py`` — main-apiary's first-machine setup."""
+
 from __future__ import annotations
 
 import json
@@ -34,9 +35,7 @@ class SelfBootstrapTests(unittest.TestCase):
         self.assertFalse(state.registry_path(self.apiary).is_file())
         result = sb.self_bootstrap(self.apiary)
         # Registry now exists with main-apiary as uid 1
-        registry = json.loads(
-            state.registry_path(self.apiary).read_text(encoding="utf-8")
-        )
+        registry = json.loads(state.registry_path(self.apiary).read_text(encoding="utf-8"))
         self.assertIn("1", registry)
         self.assertEqual(Path(registry["1"]["real_path"]), self.apiary.resolve())
         self.assertEqual(result.uid, 1)

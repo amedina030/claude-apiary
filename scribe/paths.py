@@ -4,6 +4,7 @@ Two questions the CLI, the installer, the startup banner and the backup tool
 all ask, kept out of ``notes.py`` so none of them has to import a CLI module
 to get an answer.
 """
+
 from __future__ import annotations
 
 import re
@@ -16,20 +17,20 @@ from core.utils.state import resolve_state_dir
 
 #: Pre-migration state root. Nothing writes here any more; the backup CLI and
 #: the startup banner still fall back to it for a target that never migrated.
-CLAUDE_DIR = Path.home() / '.claude'
-PROJECTS_DIR = CLAUDE_DIR / 'projects'
+CLAUDE_DIR = Path.home() / ".claude"
+PROJECTS_DIR = CLAUDE_DIR / "projects"
 
 #: The per-target state layout (C-2026-46): scribe reads and writes under
 #: ``<state-dir>/scribe/``, where ``<state-dir>`` is the registry-allocated
 #: folder at ``<apiary>/.repos/<name>-<id>/``. The launcher exports
 #: APIARY_TARGET_STATE_DIR once the registry resolver has run; without it,
 #: :func:`scribe_state_dir` falls back to ``<git-root>/.apiary/scribe/``.
-APIARY_STATE_DIRNAME = '.apiary'
-SCRIBE_SUBDIR = 'scribe'
+APIARY_STATE_DIRNAME = ".apiary"
+SCRIBE_SUBDIR = "scribe"
 
 #: A project key is a directory name under PROJECTS_DIR; anything with a path
 #: separator or a traversal component is rejected before it is joined.
-_PROJECT_KEY_RE = re.compile(r'^[A-Za-z0-9_.\-]{1,200}$')
+_PROJECT_KEY_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,200}$")
 
 
 class ProjectKeyError(ValueError):
@@ -60,17 +61,14 @@ def project_key(override: "str | None" = None) -> str:
     if not override:
         return get_project_key(Path.cwd())
     if not _PROJECT_KEY_RE.match(override):
-        raise ProjectKeyError(
-            f'--project value contains invalid characters: {override!r}')
+        raise ProjectKeyError(f"--project value contains invalid characters: {override!r}")
     resolved = (PROJECTS_DIR / override).resolve()
     if not str(resolved).startswith(str(PROJECTS_DIR.resolve())):
-        raise ProjectKeyError(
-            f'--project value escapes projects directory: {override!r}')
+        raise ProjectKeyError(f"--project value escapes projects directory: {override!r}")
     return override
 
 
-def resolve_store_dir(override: "str | None" = None,
-                      start: "Path | None" = None) -> Path:
+def resolve_store_dir(override: "str | None" = None, start: "Path | None" = None) -> Path:
     """The scribe dir to bind a store to, falling back to the legacy path.
 
     The override is validated even when the registry resolves a state dir and
@@ -90,8 +88,12 @@ def session_identity() -> tuple:
     """
     try:
         from core.session import load_identity
+
         identity = load_identity()
-        return (identity.get('role', ''), identity.get('mission', ''),
-                identity.get('session_id', ''))
+        return (
+            identity.get("role", ""),
+            identity.get("mission", ""),
+            identity.get("session_id", ""),
+        )
     except Exception:
-        return ('', '', '')
+        return ("", "", "")

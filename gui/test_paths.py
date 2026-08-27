@@ -25,9 +25,7 @@ class StateDirSourceTests(unittest.TestCase):
         # gui/paths.py lives at <checkout>/gui/paths.py, so main-apiary is its
         # grandparent and state hangs off <checkout>/.apiary/gui/.
         expected = Path(paths.__file__).resolve().parent.parent
-        self.assertEqual(
-            paths.state_dir(), expected / ".apiary" / "gui" / "apiary_gui"
-        )
+        self.assertEqual(paths.state_dir(), expected / ".apiary" / "gui" / "apiary_gui")
 
     def test_profile_reroots_state(self):
         with mock.patch.dict("os.environ", {"APIARY_GUI_PROFILE": "dev"}):
@@ -45,8 +43,10 @@ class StateDirFrozenTests(unittest.TestCase):
             exe = checkout / "dist" / "apiary-gui" / "apiary-gui.exe"
             exe.parent.mkdir(parents=True)
             exe.touch()
-            with mock.patch.object(sys, "frozen", True, create=True), \
-                    mock.patch.object(sys, "executable", str(exe)):
+            with (
+                mock.patch.object(sys, "frozen", True, create=True),
+                mock.patch.object(sys, "executable", str(exe)),
+            ):
                 self.assertEqual(
                     paths.state_dir(),
                     checkout / ".apiary" / "gui" / "apiary_gui",
@@ -59,9 +59,11 @@ class StateDirFrozenTests(unittest.TestCase):
             exe.parent.mkdir(parents=True)
             exe.touch()
             data_base = Path(data)
-            with mock.patch.object(sys, "frozen", True, create=True), \
-                    mock.patch.object(sys, "executable", str(exe)), \
-                    mock.patch.object(paths, "_user_data_base", return_value=data_base):
+            with (
+                mock.patch.object(sys, "frozen", True, create=True),
+                mock.patch.object(sys, "executable", str(exe)),
+                mock.patch.object(paths, "_user_data_base", return_value=data_base),
+            ):
                 self.assertEqual(
                     paths.state_dir(),
                     data_base / ".apiary" / "gui" / "apiary_gui",

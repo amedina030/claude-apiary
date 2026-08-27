@@ -11,6 +11,7 @@ Layout::
 Entries are markdown files with a YAML-subset frontmatter block followed
 by standard sections (Summary / Context / Findings / Code / Caveats).
 """
+
 from __future__ import annotations
 
 import re

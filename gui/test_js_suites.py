@@ -102,8 +102,10 @@ class NodeMissingPolicyTest(unittest.TestCase):
 
     def _run_case(self, *, ci: bool) -> unittest.TestResult:
         result = unittest.TestResult()
-        with mock.patch(f"{__name__}._node", return_value=None), \
-                mock.patch.dict(os.environ, {}, clear=False):
+        with (
+            mock.patch(f"{__name__}._node", return_value=None),
+            mock.patch.dict(os.environ, {}, clear=False),
+        ):
             if ci:
                 os.environ[CI_ENV] = "1"
             else:

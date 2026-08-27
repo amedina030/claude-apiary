@@ -5,6 +5,7 @@ Shared utilities for harden validators and the validate-and-assign script.
 Provides JSON input reading (stdin or file), path safety checks,
 and error reporting.
 """
+
 import json
 import sys
 from pathlib import Path
@@ -31,7 +32,10 @@ def read_json_input(file_path: str = None, empty_ok: bool = False) -> tuple[str,
     else:
         raw_unstripped = sys.stdin.read(MAX_STDIN_BYTES + 1)
         if len(raw_unstripped) > MAX_STDIN_BYTES:
-            print(f"ERROR: Input exceeds maximum allowed size ({MAX_STDIN_BYTES} bytes)", file=sys.stderr)
+            print(
+                f"ERROR: Input exceeds maximum allowed size ({MAX_STDIN_BYTES} bytes)",
+                file=sys.stderr,
+            )
             sys.exit(1)
         raw = raw_unstripped.strip()
 

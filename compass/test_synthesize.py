@@ -4,6 +4,7 @@ Hermetic: ``APIARY_TARGET_STATE_DIR`` points at a tempdir for every test,
 so the live compass store and the operator's real personality.md are never
 read or written, and the ``claude`` subprocess is always mocked.
 """
+
 import contextlib
 import io
 import json
@@ -33,17 +34,16 @@ def _observation(sid: str, captured_at: str) -> dict:
 
 
 class CapSessionsTest(unittest.TestCase):
-
     def _obs(self, n):
-        return [_observation(f"{i:08x}", f"2026-0{i}-01T00:00:00Z")
-                for i in range(1, n + 1)]
+        return [_observation(f"{i:08x}", f"2026-0{i}-01T00:00:00Z") for i in range(1, n + 1)]
 
     def test_keeps_the_head_of_a_newest_first_list(self):
         observations = self._obs(5)
         capped = synthesize._cap_sessions(observations, 2)
-        self.assertEqual([o["session_id"] for o in capped],
-                         [observations[0]["session_id"],
-                          observations[1]["session_id"]])
+        self.assertEqual(
+            [o["session_id"] for o in capped],
+            [observations[0]["session_id"], observations[1]["session_id"]],
+        )
 
     def test_no_cap_when_under_the_limit(self):
         observations = self._obs(3)
@@ -63,12 +63,12 @@ class CapSessionsTest(unittest.TestCase):
 
 
 class SynthesizeTestBase(unittest.TestCase):
-
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.state = Path(self._tmp.name) / "state"
         self._env = mock.patch.dict(
-            os.environ, {store.TARGET_STATE_DIR_ENV: str(self.state)},
+            os.environ,
+            {store.TARGET_STATE_DIR_ENV: str(self.state)},
         )
         self._env.start()
         store.ensure_layout()
@@ -83,7 +83,8 @@ class SynthesizeTestBase(unittest.TestCase):
             sid = f"{i:08x}"
             payload = _observation(sid, f"2026-{i:02d}-01T00:00:00Z")
             store.observation_path(sid).write_text(
-                json.dumps(payload), encoding="utf-8",
+                json.dumps(payload),
+                encoding="utf-8",
             )
 
     def run_main(self, argv, claude=None):
@@ -95,9 +96,7 @@ class SynthesizeTestBase(unittest.TestCase):
             contextlib.redirect_stderr(err),
         ]
         if claude is not None:
-            patches.append(
-                mock.patch.object(synthesize, "run_claude", side_effect=claude)
-            )
+            patches.append(mock.patch.object(synthesize, "run_claude", side_effect=claude))
         with contextlib.ExitStack() as stack:
             for p in patches:
                 stack.enter_context(p)
@@ -106,7 +105,6 @@ class SynthesizeTestBase(unittest.TestCase):
 
 
 class ObservationCapTest(SynthesizeTestBase):
-
     def test_prompt_carries_only_the_most_recent_sessions(self):
         self.write_observations(4)
         rc, out, err = self.run_main(["--dry-run", "--max-sessions", "2"])
@@ -137,17 +135,17 @@ class ObservationCapTest(SynthesizeTestBase):
         # The cap slices the head, so the sort is load-bearing.
         self.write_observations(3)
         loaded = synthesize._load_active(store.list_active_observations())
-        self.assertEqual([o["captured_at"] for o in loaded],
-                         ["2026-03-01T00:00:00Z",
-                          "2026-02-01T00:00:00Z",
-                          "2026-01-01T00:00:00Z"])
+        self.assertEqual(
+            [o["captured_at"] for o in loaded],
+            ["2026-03-01T00:00:00Z", "2026-02-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        )
 
 
 class AtomicWriteTest(SynthesizeTestBase):
-
     def _claude(self, text):
         def run(prompt, model=None):
             return 0, json.dumps({"result": text}), ""
+
         return run
 
     def test_writes_the_profile(self):
@@ -163,12 +161,12 @@ class AtomicWriteTest(SynthesizeTestBase):
     def test_failed_write_leaves_the_previous_profile_intact(self):
         self.write_observations(1)
         store.personality_path().write_text("# previous profile\n", encoding="utf-8")
-        with mock.patch("core.utils.atomic.os.replace",
-                        side_effect=OSError("disk full")):
+        with mock.patch("core.utils.atomic.os.replace", side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
                 self.run_main([], claude=self._claude("# replacement"))
-        self.assertEqual(store.personality_path().read_text(encoding="utf-8"),
-                         "# previous profile\n")
+        self.assertEqual(
+            store.personality_path().read_text(encoding="utf-8"), "# previous profile\n"
+        )
         orphans = list(store.compass_dir().glob("personality.md.*"))
         self.assertEqual(orphans, [], f"temp file left behind: {orphans}")
 
@@ -177,8 +175,9 @@ class AtomicWriteTest(SynthesizeTestBase):
         store.personality_path().write_text("# previous profile\n", encoding="utf-8")
         rc, _, err = self.run_main([], claude=self._claude("   "))
         self.assertEqual(rc, 2)
-        self.assertEqual(store.personality_path().read_text(encoding="utf-8"),
-                         "# previous profile\n")
+        self.assertEqual(
+            store.personality_path().read_text(encoding="utf-8"), "# previous profile\n"
+        )
         self.assertIn("untouched", err)
 
     def test_claude_failure_leaves_the_previous_profile_intact(self):
@@ -190,8 +189,9 @@ class AtomicWriteTest(SynthesizeTestBase):
 
         rc, _, err = self.run_main([], claude=failing)
         self.assertEqual(rc, 2)
-        self.assertEqual(store.personality_path().read_text(encoding="utf-8"),
-                         "# previous profile\n")
+        self.assertEqual(
+            store.personality_path().read_text(encoding="utf-8"), "# previous profile\n"
+        )
 
     def test_no_active_observations_is_a_no_op(self):
         rc, _, err = self.run_main([])

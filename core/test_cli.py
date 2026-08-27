@@ -13,6 +13,7 @@ argument parsers (``apiary``'s and ``doctor``'s), and it silently did not:
 while three docs told users to run it. Mocking ``doctor.main`` alone would not
 have caught that, so the seam itself is covered end to end.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -54,13 +55,22 @@ class InstallVerbTests(unittest.TestCase):
 
     def test_profile_and_apiary_repo_are_forwarded(self):
         with mock.patch("core.install.install") as m:
-            rc, _ = _main([
-                "install", "--target", "some/repo",
-                "--profile", "python", "--apiary-repo", "main/apiary",
-            ])
+            rc, _ = _main(
+                [
+                    "install",
+                    "--target",
+                    "some/repo",
+                    "--profile",
+                    "python",
+                    "--apiary-repo",
+                    "main/apiary",
+                ]
+            )
         self.assertEqual(rc, 0)
         m.assert_called_once_with(
-            Path("some/repo"), profile="python", apiary_repo=Path("main/apiary"),
+            Path("some/repo"),
+            profile="python",
+            apiary_repo=Path("main/apiary"),
         )
 
     def test_target_is_required(self):
@@ -76,13 +86,21 @@ class UninstallVerbTests(unittest.TestCase):
 
     def test_remove_data_is_forwarded(self):
         with mock.patch("core.uninstall.uninstall") as m:
-            rc, _ = _main([
-                "uninstall", "--target", "some/repo",
-                "--remove-data", "--apiary-repo", "main/apiary",
-            ])
+            rc, _ = _main(
+                [
+                    "uninstall",
+                    "--target",
+                    "some/repo",
+                    "--remove-data",
+                    "--apiary-repo",
+                    "main/apiary",
+                ]
+            )
         self.assertEqual(rc, 0)
         m.assert_called_once_with(
-            Path("some/repo"), apiary_repo=Path("main/apiary"), remove_data=True,
+            Path("some/repo"),
+            apiary_repo=Path("main/apiary"),
+            remove_data=True,
         )
 
     def test_target_is_required(self):
@@ -139,10 +157,18 @@ class DoctorVerbTests(unittest.TestCase):
         self.assertEqual(forwarded, ["--fix"])
 
     def test_check_fix_and_apiary_repo_are_forwarded_in_order(self):
-        _, forwarded = self._forwarded([
-            "doctor", "pointers", "--fix", "--apiary-repo", "main/apiary",
-        ])
-        self.assertEqual(forwarded, ["pointers", "--fix", "--apiary-repo", str(Path("main/apiary"))])
+        _, forwarded = self._forwarded(
+            [
+                "doctor",
+                "pointers",
+                "--fix",
+                "--apiary-repo",
+                "main/apiary",
+            ]
+        )
+        self.assertEqual(
+            forwarded, ["pointers", "--fix", "--apiary-repo", str(Path("main/apiary"))]
+        )
 
     def test_doctor_exit_code_is_propagated(self):
         rc, _ = self._forwarded(["doctor", "registry"], rc_from_doctor=1)
@@ -159,20 +185,34 @@ class DoctorFixSeamTests(unittest.TestCase):
 
     def test_pointers_fix_reaches_the_cascade_writer(self):
         report = cascade.CascadeReport(
-            new_main_apiary_path=self.apiary, updated=[], skipped=[],
+            new_main_apiary_path=self.apiary,
+            updated=[],
+            skipped=[],
         )
         with mock.patch("core.cascade.cascade_fix", return_value=report) as m:
-            rc, out = _main([
-                "doctor", "pointers", "--fix", "--apiary-repo", str(self.apiary),
-            ])
+            rc, out = _main(
+                [
+                    "doctor",
+                    "pointers",
+                    "--fix",
+                    "--apiary-repo",
+                    str(self.apiary),
+                ]
+            )
         self.assertEqual(rc, 0)
         m.assert_called_once_with(self.apiary)
         self.assertIn("[pointers --fix]", out)
 
     def test_fix_on_a_check_without_a_writer_exits_2(self):
-        rc, _ = _main([
-            "doctor", "registry", "--fix", "--apiary-repo", str(self.apiary),
-        ])
+        rc, _ = _main(
+            [
+                "doctor",
+                "registry",
+                "--fix",
+                "--apiary-repo",
+                str(self.apiary),
+            ]
+        )
         self.assertEqual(rc, 2)
 
     def test_fix_without_a_check_exits_2(self):
@@ -185,11 +225,14 @@ class CascadeFixVerbTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             apiary = Path(tmp)
             report = cascade.CascadeReport(
-                new_main_apiary_path=apiary.resolve(), updated=[3], skipped=[(4, "gone")],
+                new_main_apiary_path=apiary.resolve(),
+                updated=[3],
+                skipped=[(4, "gone")],
             )
-            with mock.patch("core.utils.state.resolve_apiary_repo",
-                            return_value=apiary) as resolve, \
-                 mock.patch("core.cascade.cascade_fix", return_value=report) as m:
+            with (
+                mock.patch("core.utils.state.resolve_apiary_repo", return_value=apiary) as resolve,
+                mock.patch("core.cascade.cascade_fix", return_value=report) as m,
+            ):
                 rc, out = _main(["cascade-fix", "--apiary-repo", str(apiary)])
             resolve.assert_called_once_with(apiary)
             m.assert_called_once_with(apiary.resolve())
@@ -200,9 +243,12 @@ class CascadeFixVerbTests(unittest.TestCase):
 
 class VersionVerbTests(unittest.TestCase):
     def test_version_prints_the_pinned_version(self):
-        with mock.patch("core.utils.state.resolve_apiary_repo",
-                        return_value=Path("main/apiary")) as resolve, \
-             mock.patch("core.utils.state.read_apiary_version", return_value="0.9.1") as read:
+        with (
+            mock.patch(
+                "core.utils.state.resolve_apiary_repo", return_value=Path("main/apiary")
+            ) as resolve,
+            mock.patch("core.utils.state.read_apiary_version", return_value="0.9.1") as read,
+        ):
             rc, out = _main(["version", "--apiary-repo", "main/apiary"])
         self.assertEqual(rc, 0)
         self.assertEqual(out.strip(), "0.9.1")
@@ -214,12 +260,14 @@ class VersionVerbTests(unittest.TestCase):
             "1": {"name": "apiary", "uid": 1, "version": "0.9.1", "real_path": "/a"},
             "2": {"name": "stale", "uid": 2, "version": "0.8.0", "real_path": "/b"},
         }
-        with mock.patch("core.utils.state.resolve_apiary_repo",
-                        return_value=Path("main/apiary")), \
-             mock.patch("core.utils.state.read_apiary_version", return_value="0.9.1"), \
-             mock.patch("core.utils.state._load_registry", return_value=registry), \
-             mock.patch("core.update.repo_version",
-                        side_effect=lambda repo, entry=None: entry["version"]):
+        with (
+            mock.patch("core.utils.state.resolve_apiary_repo", return_value=Path("main/apiary")),
+            mock.patch("core.utils.state.read_apiary_version", return_value="0.9.1"),
+            mock.patch("core.utils.state._load_registry", return_value=registry),
+            mock.patch(
+                "core.update.repo_version", side_effect=lambda repo, entry=None: entry["version"]
+            ),
+        ):
             rc, out = _main(["version", "--all"])
         self.assertEqual(rc, 0)
         self.assertIn("main-apiary 0.9.1", out)
@@ -237,14 +285,25 @@ class UpdateVerbTests(unittest.TestCase):
 
     def test_target_dry_run_and_apiary_repo_are_forwarded(self):
         with mock.patch("core.update.main", return_value=0) as m:
-            rc, _ = _main([
-                "update", "--target", "some/repo", "--dry-run",
-                "--apiary-repo", "main/apiary",
-            ])
+            rc, _ = _main(
+                [
+                    "update",
+                    "--target",
+                    "some/repo",
+                    "--dry-run",
+                    "--apiary-repo",
+                    "main/apiary",
+                ]
+            )
         self.assertEqual(rc, 0)
         m.assert_called_once_with(
-            ["--target", str(Path("some/repo")), "--dry-run",
-             "--apiary-repo", str(Path("main/apiary"))],
+            [
+                "--target",
+                str(Path("some/repo")),
+                "--dry-run",
+                "--apiary-repo",
+                str(Path("main/apiary")),
+            ],
         )
 
     def test_update_exit_code_is_propagated(self):
@@ -294,11 +353,15 @@ class UserFacingErrorTests(unittest.TestCase):
     def test_profile_errors_exit_1_with_the_message(self):
         from core.apiary_profiles import ProfileCycleError, ProfileSchemaError
 
-        for exc in (ProfileCycleError(["base", "python", "base"]),
-                    ProfileSchemaError("profiles/base.jsonc: missing '$schema_version'")):
+        for exc in (
+            ProfileCycleError(["base", "python", "base"]),
+            ProfileSchemaError("profiles/base.jsonc: missing '$schema_version'"),
+        ):
             with self.subTest(exc=type(exc).__name__):
                 rc, err = self._run(
-                    ["install", "--target", "some/repo"], exc, "core.install.install",
+                    ["install", "--target", "some/repo"],
+                    exc,
+                    "core.install.install",
                 )
                 self.assertEqual(rc, 1)
                 self.assertNotIn("Traceback", err)
@@ -330,8 +393,15 @@ class ParserContractTests(unittest.TestCase):
         self.assertIsNotNone(match, "no subcommand metavar in `apiary --help`")
         self.assertEqual(
             {s.strip() for s in match.group(1).split(",")},
-            {"install", "uninstall", "self-bootstrap", "doctor",
-             "cascade-fix", "version", "update"},
+            {
+                "install",
+                "uninstall",
+                "self-bootstrap",
+                "doctor",
+                "cascade-fix",
+                "version",
+                "update",
+            },
         )
 
 

@@ -27,6 +27,7 @@ leaves the repo re-uninstallable.
 
 Returns :class:`UninstallResult` summarizing what was touched.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -52,6 +53,7 @@ class UninstallError(Exception):
 @dataclasses.dataclass
 class UninstallResult:
     """Summary of an uninstall run."""
+
     uid: int | None
     name: str | None
     target_repo: Path
@@ -154,8 +156,10 @@ def uninstall(
         state_dir_removed = True
 
     return UninstallResult(
-        uid=uid, name=name,
-        target_repo=target_root, apiary_repo=apiary,
+        uid=uid,
+        name=name,
+        target_repo=target_root,
+        apiary_repo=apiary,
         pin_dir_removed=pin_removed,
         commands_removed=commands_removed,
         hook_entries_removed=hook_entries_removed,
@@ -187,6 +191,7 @@ def _remove_apiary_commands(target_root: Path, state_dir: Path | None) -> list[s
         # Fallback: match against the canonical install set. Slower but
         # works when bootstrap_state is missing (partial install).
         from core import install as install_mod
+
         # Resolve apiary via env or pointer — fall back to the parent of
         # state_dir if we can find it.
         apiary = state_dir.parent.parent if state_dir is not None else None

@@ -14,6 +14,7 @@ Usage::
 
     python scripts/install_repo_hooks.py
 """
+
 from __future__ import annotations
 
 import shutil

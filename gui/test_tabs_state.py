@@ -55,13 +55,15 @@ class TabsStateTests(unittest.TestCase):
             real.mkdir()
             fake = Path(tmp) / "ghost-that-never-existed"
             state_file.write_text(
-                json.dumps({
-                    "tabs": [
-                        {"cwd": str(real)},
-                        {"cwd": str(fake)},
-                    ],
-                    "active_idx": 1,
-                }),
+                json.dumps(
+                    {
+                        "tabs": [
+                            {"cwd": str(real)},
+                            {"cwd": str(fake)},
+                        ],
+                        "active_idx": 1,
+                    }
+                ),
                 encoding="utf-8",
             )
             entries, idx = tabs_state.load(state_file)

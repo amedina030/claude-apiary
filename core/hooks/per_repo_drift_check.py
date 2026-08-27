@@ -21,6 +21,7 @@ payload with no usable session id runs the check (correctness over frequency).
 Runs first in the PreToolUse dispatcher chain so the rest of the chain sees an
 up-to-date self-pointer and registry entry.
 """
+
 from __future__ import annotations
 
 import os

@@ -1,4 +1,5 @@
 """Tests for ``core/install.py`` — per-repo apiary install."""
+
 from __future__ import annotations
 
 import json
@@ -105,9 +106,7 @@ class InstallTests(unittest.TestCase):
 
     def test_bootstrap_state_schema_v2_written(self):
         result = install_mod.install(self.target, apiary_repo=self.apiary)
-        bs = json.loads(
-            (result.state_dir / "bootstrap_state.json").read_text(encoding="utf-8")
-        )
+        bs = json.loads((result.state_dir / "bootstrap_state.json").read_text(encoding="utf-8"))
         self.assertEqual(bs["schema_version"], 2)
         self.assertEqual(bs["profile"], "base")
         self.assertEqual(bs["apiary_version"], "0.1.0")
@@ -207,7 +206,10 @@ class GeneratedLauncherTests(unittest.TestCase):
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             [sys.executable, str(self.launcher), *args],
-            capture_output=True, text=True, encoding="utf-8", timeout=60,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
         )
 
     def test_print_repo_path_reports_main_apiary(self):
@@ -248,11 +250,14 @@ class GeneratedLauncherTests(unittest.TestCase):
         self.assertEqual(len(result.stderr.strip().splitlines()), 1)
 
     def test_unreachable_main_apiary_never_blocks(self):
-        state.write_main_apiary_pointer(self.target, {
-            "main_apiary_path": str(self.root / "gone"),
-            "main_apiary_uid": 1,
-            "registered_at": "2026-08-26T00:00:00Z",
-        })
+        state.write_main_apiary_pointer(
+            self.target,
+            {
+                "main_apiary_path": str(self.root / "gone"),
+                "main_apiary_uid": 1,
+                "registered_at": "2026-08-26T00:00:00Z",
+            },
+        )
         result = self._run("core/hooks/inject_session.py")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("running as vanilla Claude session", result.stderr)
@@ -434,8 +439,11 @@ class ProfileMergeTests(_InstalledRepoCase):
         # ships, which used to be enough to get it deleted.
         s = self.settings()
         s["hooks"].setdefault("PreToolUse", []).insert(
-            0, {"matcher": "Bash",
-                "hooks": [{"type": "command", "command": "python scripts/runner/lint.py"}]},
+            0,
+            {
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": "python scripts/runner/lint.py"}],
+            },
         )
         self.write_settings(s)
         self.reinstall()
@@ -495,26 +503,36 @@ class SelfPointerReconciliationTests(_InstalledRepoCase):
     def test_a_pin_uid_owned_by_another_repo_is_rewritten(self):
         other = self.root / "other"
         other.mkdir()
-        state.write_self_pointer(self.target, {
-            "uid": 7, "name": "demo", "real_path": str(self.target),
-            "registered_at": "2026-01-01T00:00:00Z",
-        })
-        state.registry_path(self.apiary).write_text(json.dumps({
-            "7": {"name": "other", "real_path": str(other), "uid": 7, "version": "0.1.0"},
-        }), encoding="utf-8")
+        state.write_self_pointer(
+            self.target,
+            {
+                "uid": 7,
+                "name": "demo",
+                "real_path": str(self.target),
+                "registered_at": "2026-01-01T00:00:00Z",
+            },
+        )
+        state.registry_path(self.apiary).write_text(
+            json.dumps(
+                {
+                    "7": {"name": "other", "real_path": str(other), "uid": 7, "version": "0.1.0"},
+                }
+            ),
+            encoding="utf-8",
+        )
         second = self.reinstall()
         self.assertNotEqual(second.uid, 7)
         self.assertEqual(state.read_self_pointer(self.target)["uid"], second.uid)
-        self.assertEqual(self._registry()[str(second.uid)]["real_path"],
-                         str(self.target.resolve()))
+        self.assertEqual(self._registry()[str(second.uid)]["real_path"], str(self.target.resolve()))
 
     def test_last_drift_check_is_preserved(self):
         sp = state.read_self_pointer(self.target)
         sp["last_drift_check"] = "2020-01-01T00:00:00Z"
         state.write_self_pointer(self.target, sp)
         self.reinstall()
-        self.assertEqual(state.read_self_pointer(self.target)["last_drift_check"],
-                         "2020-01-01T00:00:00Z")
+        self.assertEqual(
+            state.read_self_pointer(self.target)["last_drift_check"], "2020-01-01T00:00:00Z"
+        )
 
 
 class InstallErrorWrappingTests(_InstalledRepoCase):
@@ -532,8 +550,7 @@ class InstallErrorWrappingTests(_InstalledRepoCase):
         self.assertIn("CLAUDE.md", str(ctx.exception))
 
     def test_an_unreadable_bootstrap_state_raises_install_error(self):
-        (self.first.state_dir / "bootstrap_state.json").write_text(
-            "{not json", encoding="utf-8")
+        (self.first.state_dir / "bootstrap_state.json").write_text("{not json", encoding="utf-8")
         with self.assertRaises(install_mod.InstallError) as ctx:
             self.reinstall()
         self.assertIn("bootstrap_state.json", str(ctx.exception))
@@ -558,7 +575,9 @@ class GitignoreSemanticsTests(unittest.TestCase):
     def _ignored(self, rel: str) -> bool:
         proc = subprocess.run(
             ["git", "check-ignore", "-q", rel],
-            cwd=str(self.repo), capture_output=True, check=False,
+            cwd=str(self.repo),
+            capture_output=True,
+            check=False,
         )
         return proc.returncode == 0
 
@@ -595,4 +614,3 @@ class GitignoreSemanticsTests(unittest.TestCase):
             "a blanket .claude/ should defeat the re-include — if this fails, "
             "git's semantics changed and the stepwise block may be unnecessary",
         )
-

@@ -1,4 +1,5 @@
 """Age renderer (B.10), FORCE_COLOR gating (§5.13), summary rule (§5.6)."""
+
 import os
 import sys
 import unittest
@@ -21,9 +22,9 @@ class TestAgeRenderer(unittest.TestCase):
         self.assertEqual(fmt.format_age(_ago(minutes=5)), "5m ago")
         self.assertEqual(fmt.format_age(_ago(hours=3)), "3h ago")
         self.assertEqual(fmt.format_age(_ago(days=3)), "3d ago")
-        self.assertEqual(fmt.format_age(_ago(days=14)), "2w ago")     # <30d -> weeks
-        self.assertEqual(fmt.format_age(_ago(days=60)), "2mo ago")    # <365d -> months
-        self.assertEqual(fmt.format_age(_ago(days=800)), "2y ago")    # else -> years
+        self.assertEqual(fmt.format_age(_ago(days=14)), "2w ago")  # <30d -> weeks
+        self.assertEqual(fmt.format_age(_ago(days=60)), "2mo ago")  # <365d -> months
+        self.assertEqual(fmt.format_age(_ago(days=800)), "2y ago")  # else -> years
 
 
 class TestColorGating(unittest.TestCase):

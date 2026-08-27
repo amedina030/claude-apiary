@@ -212,7 +212,7 @@ class TestNoSecondDialect(unittest.TestCase):
     #: Every module that reads frontmatter must get it from ``core``.
     DELEGATORS = (
         "scribe/store.py",
-        "scribe/templates.py",   # the template gate; was in scribe/notes.py
+        "scribe/templates.py",  # the template gate; was in scribe/notes.py
         "researcher/store.py",
         "researcher/cli.py",
         "captures/store.py",

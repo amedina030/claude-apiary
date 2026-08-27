@@ -1,4 +1,5 @@
 """Tests for the frozen public API surface (scribe/api.py, parity spec §6)."""
+
 import json
 import sys
 import tempfile
@@ -84,10 +85,13 @@ class TestResolver(unittest.TestCase):
     def test_resolve_ambiguous_name_raises_valueerror(self):
         with tempfile.TemporaryDirectory() as td:
             apiary = Path(td)
-            _make_apiary(apiary, {
-                "3": {"name": "dup", "real_path": str(apiary / "a")},
-                "4": {"name": "dup", "real_path": str(apiary / "b")},
-            })
+            _make_apiary(
+                apiary,
+                {
+                    "3": {"name": "dup", "real_path": str(apiary / "a")},
+                    "4": {"name": "dup", "real_path": str(apiary / "b")},
+                },
+            )
             with self.assertRaises(ValueError):
                 api.resolve_scribe_dir("dup", apiary_repo=apiary)
 
@@ -117,10 +121,16 @@ class TestResolver(unittest.TestCase):
 
 class TestNormalizeEntry(unittest.TestCase):
     def test_synthesizes_stable_shape(self):
-        norm = api.normalize_entry({
-            "display_id": "T-2026-1", "type": "todo", "year": 2026, "seq": 1,
-            "status": "active", "timestamp": "2026-06-12T00:00:00+00:00",
-        })
+        norm = api.normalize_entry(
+            {
+                "display_id": "T-2026-1",
+                "type": "todo",
+                "year": 2026,
+                "seq": 1,
+                "status": "active",
+                "timestamp": "2026-06-12T00:00:00+00:00",
+            }
+        )
         self.assertEqual(norm["tags"], [])
         self.assertEqual(norm["areas"], [])
         self.assertIs(norm["auto_generated"], False)
@@ -128,13 +138,17 @@ class TestNormalizeEntry(unittest.TestCase):
         self.assertIsNone(norm["status_changed_at"])
 
     def test_archived_from_archived_at(self):
-        self.assertTrue(api.normalize_entry({"archived_at": "2026-06-12T00:00:00+00:00"})["archived"])
+        self.assertTrue(
+            api.normalize_entry({"archived_at": "2026-06-12T00:00:00+00:00"})["archived"]
+        )
 
     def test_archived_from_flag(self):
         self.assertTrue(api.normalize_entry({"_from_archive": True})["archived"])
 
     def test_preserves_tags(self):
-        self.assertEqual(api.normalize_entry({"tags": ["ticket:K-2026-9"]})["tags"], ["ticket:K-2026-9"])
+        self.assertEqual(
+            api.normalize_entry({"tags": ["ticket:K-2026-9"]})["tags"], ["ticket:K-2026-9"]
+        )
 
 
 if __name__ == "__main__":

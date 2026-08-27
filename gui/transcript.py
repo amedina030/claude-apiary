@@ -137,7 +137,9 @@ def filter_record(rec: dict) -> Optional[Message]:
             return None
         tokens = _extract_usage(msg.get("usage", {}))
         model = msg.get("model", "") if isinstance(msg.get("model", ""), str) else ""
-        stop_reason = msg.get("stop_reason", "") if isinstance(msg.get("stop_reason", ""), str) else ""
+        stop_reason = (
+            msg.get("stop_reason", "") if isinstance(msg.get("stop_reason", ""), str) else ""
+        )
         return Message(
             role="assistant",
             text=text,

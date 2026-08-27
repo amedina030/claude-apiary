@@ -1,4 +1,5 @@
 """Tests for compass.store — paths, dimensions, validation, archive policy."""
+
 import json
 import os
 import tempfile
@@ -30,15 +31,15 @@ class ValidateObservationTest(unittest.TestCase):
         self.assertEqual(store.validate_observation(self._payload()), [])
 
     def test_empty_observations_list_is_valid(self):
-        self.assertEqual(
-            store.validate_observation(self._payload(observations=[])), []
-        )
+        self.assertEqual(store.validate_observation(self._payload(observations=[])), [])
 
     def test_missing_session_id(self):
         payload = self._payload()
         del payload["session_id"]
-        self.assertIn("session_id missing or not a valid 8-char hex / UUID",
-                      store.validate_observation(payload))
+        self.assertIn(
+            "session_id missing or not a valid 8-char hex / UUID",
+            store.validate_observation(payload),
+        )
 
     def test_session_id_uppercase_hex_rejected(self):
         # Regex requires lowercase hex.
@@ -46,9 +47,7 @@ class ValidateObservationTest(unittest.TestCase):
         self.assertTrue(any("session_id" in e for e in errors))
 
     def test_filename_match_check_passes(self):
-        errors = store.validate_observation(
-            self._payload(), expected_session_id="deadbeef"
-        )
+        errors = store.validate_observation(self._payload(), expected_session_id="deadbeef")
         self.assertEqual(errors, [])
 
     def test_filename_match_check_fails(self):
@@ -117,8 +116,7 @@ class PathsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             short = store.observation_path("deadbeef", start=tmp_path)
-            full = store.observation_path("deadbeef-1234-5678-9abc-def012345678",
-                                          start=tmp_path)
+            full = store.observation_path("deadbeef-1234-5678-9abc-def012345678", start=tmp_path)
             self.assertEqual(short.name, "deadbeef.json")
             self.assertEqual(full.name, "deadbeef.json")
 

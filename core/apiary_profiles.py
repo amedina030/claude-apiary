@@ -11,6 +11,7 @@ A value wrapped as ``{"$replace": <value>}`` replaces rather than merges.
 Cycles in the extends graph raise :class:`ProfileCycleError`. Unknown
 ``$schema_version`` raises :class:`ProfileSchemaError`.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -37,9 +38,7 @@ class ProfileNotFoundError(ProfileError):
         self.profiles_dir = profiles_dir
         self.available = available
         listing = ", ".join(available) if available else "(none)"
-        super().__init__(
-            f"profile '{name}' not found in {profiles_dir}. Available: {listing}"
-        )
+        super().__init__(f"profile '{name}' not found in {profiles_dir}. Available: {listing}")
 
 
 class ProfileCycleError(ProfileError):

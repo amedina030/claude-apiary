@@ -9,6 +9,7 @@ against ``--target-repo X`` still listed *apiary's* branches, pruned
 forgets the target fails loudly at import/call time instead of silently
 inspecting the wrong repository.
 """
+
 from __future__ import annotations
 
 import json
@@ -30,11 +31,10 @@ BACKLOG_DIR = backlog_dir()
 INTAKE_DIR = intake_dir()
 WORKTREES_DIR = worktrees_dir()
 
-_SLUG_RE = re.compile(r'[^a-z0-9]+')
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
-def slugify(title: str, *, max_length: int | None = None,
-            fallback: str = 'item') -> str:
+def slugify(title: str, *, max_length: int | None = None, fallback: str = "item") -> str:
     """Lowercase, replace runs of non-alnum with '-', strip leading/trailing '-'.
 
     The one slugifier in the package: the run branch uses it uncapped with an
@@ -42,9 +42,9 @@ def slugify(title: str, *, max_length: int | None = None,
     fallback so a title that slugs to nothing is reported rather than silently
     written as `item.json`. There were three near-identical copies (review X-3).
     """
-    s = _SLUG_RE.sub('-', (title or '').lower()).strip('-')
+    s = _SLUG_RE.sub("-", (title or "").lower()).strip("-")
     if max_length is not None:
-        s = s[:max_length].strip('-')
+        s = s[:max_length].strip("-")
     return s or fallback
 
 
@@ -55,38 +55,42 @@ def _git(args: list, *, cwd: Path) -> subprocess.CompletedProcess:
     runs against is the whole question in multi-repo mode, and a default
     made every caller silently correct-looking and wrong.
     """
-    cmd = ['git'] + list(args)
+    cmd = ["git"] + list(args)
     return subprocess.run(
-        cmd, cwd=str(cwd), capture_output=True, text=True, encoding='utf-8',
+        cmd,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
 
 
 def list_runner_branches(repo: Path) -> list:
     """Return local branch names starting with 'runner/' in *repo*. Empty on error."""
-    r = _git(['for-each-ref', '--format=%(refname:short)', 'refs/heads/runner/'], cwd=repo)
+    r = _git(["for-each-ref", "--format=%(refname:short)", "refs/heads/runner/"], cwd=repo)
     if r.returncode != 0:
         return []
     return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
 
 
-def list_unmerged_runner_branches(repo: Path, base: str = 'master') -> list:
+def list_unmerged_runner_branches(repo: Path, base: str = "master") -> list:
     """Return *repo*'s runner/* branches not merged into base."""
-    r = _git(['branch', '--no-merged', base, '--list', 'runner/*'], cwd=repo)
+    r = _git(["branch", "--no-merged", base, "--list", "runner/*"], cwd=repo)
     if r.returncode != 0:
         return []
     out = []
     for ln in r.stdout.splitlines():
-        name = ln.strip().lstrip('*').strip()
-        if name.startswith('runner/'):
+        name = ln.strip().lstrip("*").strip()
+        if name.startswith("runner/"):
             out.append(name)
     return out
 
 
-def hygiene_precheck(max_unreviewed: int, repo: Path, base: str = 'master') -> Optional[str]:
+def hygiene_precheck(max_unreviewed: int, repo: Path, base: str = "master") -> Optional[str]:
     """Return None if ok to proceed, else a skip reason like 'queue full (5/5)'."""
     branches = list_unmerged_runner_branches(repo, base)
     if len(branches) >= max_unreviewed:
-        return f'queue full ({len(branches)}/{max_unreviewed})'
+        return f"queue full ({len(branches)}/{max_unreviewed})"
     return None
 
 
@@ -104,7 +108,7 @@ def _repo_for_item(data: dict, default_repo: Path) -> Path:
     A backlog item may name its own ``target_repo``; the claimed-branch check
     has to look there, not in whichever repo this invocation defaults to.
     """
-    field = data.get('target_repo')
+    field = data.get("target_repo")
     if isinstance(field, str) and field.strip():
         return Path(field.strip())
     return default_repo
@@ -118,13 +122,13 @@ def pick_backlog_item(repo: Path) -> Optional[Path]:
     """
     if not BACKLOG_DIR.exists():
         return None
-    candidates = sorted(BACKLOG_DIR.glob('*.json'), key=lambda p: p.stat().st_mtime)
+    candidates = sorted(BACKLOG_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime)
     for p in candidates:
         try:
-            data = json.loads(p.read_text(encoding='utf-8'))
+            data = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        uid = data.get('id')
+        uid = data.get("id")
         if not isinstance(uid, str) or not uid.strip():
             continue
         if _branch_exists_for_uuid(uid.strip(), _repo_for_item(data, repo)):
@@ -137,17 +141,18 @@ def all_backlog_items_claimed(repo: Path) -> bool:
     """True if backlog dir is non-empty but all items already have open branches."""
     if not BACKLOG_DIR.exists():
         return False
-    files = list(BACKLOG_DIR.glob('*.json'))
+    files = list(BACKLOG_DIR.glob("*.json"))
     if not files:
         return False
     for p in files:
         try:
-            data = json.loads(p.read_text(encoding='utf-8'))
+            data = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        uid = data.get('id')
+        uid = data.get("id")
         if (
-            isinstance(uid, str) and uid.strip()
+            isinstance(uid, str)
+            and uid.strip()
             and not _branch_exists_for_uuid(uid.strip(), _repo_for_item(data, repo))
         ):
             return False
@@ -169,7 +174,7 @@ def worktrees_dir_for(target_repo: Path | None = None) -> Path:
 
 def git_worktree_create(
     branch: str,
-    base: str = 'master',
+    base: str = "master",
     *,
     target_repo: Path,
 ) -> tuple:
@@ -192,33 +197,33 @@ def git_worktree_create(
     try:
         wt_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        return False, None, f'could not create worktrees dir: {e}'
-    safe = branch.replace('/', '_').replace('\\', '_')
+        return False, None, f"could not create worktrees dir: {e}"
+    safe = branch.replace("/", "_").replace("\\", "_")
     wt_path = wt_dir / safe
     if wt_path.exists():
-        return False, None, f'worktree path already exists: {wt_path}'
-    r = _git(['worktree', 'add', '-b', branch, str(wt_path), base], cwd=repo)
+        return False, None, f"worktree path already exists: {wt_path}"
+    r = _git(["worktree", "add", "-b", branch, str(wt_path), base], cwd=repo)
     if r.returncode != 0:
         return False, None, r.stderr
-    return True, wt_path, ''
+    return True, wt_path, ""
 
 
 def git_commit_all_in(cwd: Path, message: str) -> tuple:
     """git add -A and git commit -m message inside `cwd` (a worktree). Allows empty."""
-    r = _git(['add', '-A'], cwd=cwd)
+    r = _git(["add", "-A"], cwd=cwd)
     if r.returncode != 0:
         return False, r.stderr
-    r = _git(['commit', '-m', message, '--allow-empty'], cwd=cwd)
+    r = _git(["commit", "-m", message, "--allow-empty"], cwd=cwd)
     if r.returncode != 0:
         return False, r.stderr
-    return True, ''
+    return True, ""
 
 
 def git_worktree_remove(path: Path, *, target_repo: Path) -> tuple:
     """git worktree remove --force <path>. Idempotent — returns ok if path is gone."""
     if not path.exists():
-        return True, ''
-    r = _git(['worktree', 'remove', '--force', str(path)], cwd=Path(target_repo))
+        return True, ""
+    r = _git(["worktree", "remove", "--force", str(path)], cwd=Path(target_repo))
     return (r.returncode == 0, r.stderr)
 
 
@@ -226,26 +231,26 @@ def _list_detached_worktrees(repo: Path) -> list:
     """Parse `git worktree list --porcelain` in *repo* and return
     [(path, branch), ...] for worktrees under that repo's worktrees dir.
     Branch is the short ref name (no refs/heads/) or '' if detached."""
-    r = _git(['worktree', 'list', '--porcelain'], cwd=repo)
+    r = _git(["worktree", "list", "--porcelain"], cwd=repo)
     if r.returncode != 0:
         return []
     out = []
     cur_path = None
-    cur_branch = ''
+    cur_branch = ""
     try:
         wt_root = worktrees_dir_for(repo).resolve()
     except OSError:
         return []
     wt_root_str = str(wt_root)
-    for line in r.stdout.splitlines() + ['']:
-        if line.startswith('worktree '):
-            cur_path = line[len('worktree '):].strip()
-        elif line.startswith('branch '):
-            br = line[len('branch '):].strip()
-            if br.startswith('refs/heads/'):
-                br = br[len('refs/heads/'):]
+    for line in r.stdout.splitlines() + [""]:
+        if line.startswith("worktree "):
+            cur_path = line[len("worktree ") :].strip()
+        elif line.startswith("branch "):
+            br = line[len("branch ") :].strip()
+            if br.startswith("refs/heads/"):
+                br = br[len("refs/heads/") :]
             cur_branch = br
-        elif line == '':
+        elif line == "":
             if cur_path:
                 try:
                     p = Path(cur_path).resolve()
@@ -254,15 +259,15 @@ def _list_detached_worktrees(repo: Path) -> list:
                 except OSError:
                     pass
             cur_path = None
-            cur_branch = ''
+            cur_branch = ""
     return out
 
 
-def _branch_has_commits_beyond(branch: str, repo: Path, base: str = 'master') -> bool:
+def _branch_has_commits_beyond(branch: str, repo: Path, base: str = "master") -> bool:
     """True if `branch` has at least one commit missing from `base` in *repo*."""
     if not branch:
         return False
-    r = _git(['rev-list', '--count', f'{base}..{branch}'], cwd=repo)
+    r = _git(["rev-list", "--count", f"{base}..{branch}"], cwd=repo)
     if r.returncode != 0:
         return False
     try:
@@ -285,15 +290,15 @@ def prune_stale_worktrees(target_repo: Path) -> list:
     results = []
     for wt, branch in _list_detached_worktrees(repo):
         if _branch_has_commits_beyond(branch, repo):
-            results.append((wt, 'preserved'))
+            results.append((wt, "preserved"))
             continue
-        r = _git(['worktree', 'remove', '--force', str(wt)], cwd=repo)
+        r = _git(["worktree", "remove", "--force", str(wt)], cwd=repo)
         if r.returncode == 0:
             if branch:
-                _git(['branch', '-D', branch], cwd=repo)
-            results.append((wt, 'removed'))
+                _git(["branch", "-D", branch], cwd=repo)
+            results.append((wt, "removed"))
         else:
-            results.append((wt, 'failed'))
+            results.append((wt, "failed"))
     # Clean up directories git no longer tracks (registration was pruned but
     # the files on disk survived, or the dir was never registered at all).
     if wt_root.exists():
@@ -305,6 +310,6 @@ def prune_stale_worktrees(target_repo: Path) -> list:
                 continue
             if entry.is_dir() and resolved not in known:
                 shutil.rmtree(entry, ignore_errors=True)
-                results.append((resolved, 'rmtree'))
-    _git(['worktree', 'prune'], cwd=repo)
+                results.append((resolved, "rmtree"))
+    _git(["worktree", "prune"], cwd=repo)
     return results

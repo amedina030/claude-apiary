@@ -5,6 +5,7 @@ Structured run history for the runner.
 The single append-only log of detached runs, one JSON object per line at
 ``<state>/runner/run_history.jsonl``. Superseded the flat overnight.jsonl.
 """
+
 from __future__ import annotations
 
 import json

@@ -26,6 +26,7 @@ a buggy gate must never wedge your ability to push. The only thing that
 blocks is a clean, intentional nonzero exit from the conformer itself —
 i.e. real, detected drift.
 """
+
 from __future__ import annotations
 
 import re
@@ -127,7 +128,11 @@ def run(payload: dict):  # pragma: no cover — pure logic lives in
     try:
         result = subprocess.run(
             [sys.executable, str(conformer)],
-            cwd=str(root), capture_output=True, text=True, timeout=60, check=False,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         # Conformer not runnable → fail open; don't wedge the push on a
@@ -138,13 +143,15 @@ def run(payload: dict):  # pragma: no cover — pure logic lives in
         return None
 
     detail = (result.stdout or "").strip() or (result.stderr or "").strip()
-    return HookResult(block_reason=(
-        "Push blocked: doc-conformer (docs/check_cli_claims.py) found drift "
-        "between docs/reference/cli-tools.md and the tools' real argparse. "
-        "Fix the drift before pushing — usually the doc is the richer source, "
-        "so prefer correcting the doc unless the code genuinely changed.\n\n"
-        f"{detail}"
-    ))
+    return HookResult(
+        block_reason=(
+            "Push blocked: doc-conformer (docs/check_cli_claims.py) found drift "
+            "between docs/reference/cli-tools.md and the tools' real argparse. "
+            "Fix the drift before pushing — usually the doc is the richer source, "
+            "so prefer correcting the doc unless the code genuinely changed.\n\n"
+            f"{detail}"
+        )
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

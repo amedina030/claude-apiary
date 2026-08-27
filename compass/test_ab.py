@@ -4,6 +4,7 @@ Hermetic: every test points ``$APIARY_COMPASS_CONFIG`` and
 ``$APIARY_TARGET_STATE_DIR`` at a temp dir, so nothing reads the shipped
 config or the user's real session identity files.
 """
+
 from __future__ import annotations
 
 import json
@@ -64,8 +65,9 @@ class EnvSandbox(unittest.TestCase):
 class LoadConfigTests(EnvSandbox):
     def test_shipped_default_is_ab_disabled(self):
         self._set_env(ab.CONFIG_ENV, None)
-        self.assertFalse(ab.load_config()["ab_enabled"],
-                         "compass/config.json must ship with the A/B off")
+        self.assertFalse(
+            ab.load_config()["ab_enabled"], "compass/config.json must ship with the A/B off"
+        )
 
     def test_reads_override_file(self):
         self.write_config(ab_enabled=True, ab_seed="seed-x", ab_on_fraction=0.25)
@@ -119,10 +121,12 @@ class AssignArmTests(EnvSandbox):
 
     def test_fraction_zero_and_one_are_absolute(self):
         ids = [f"{i:08x}" for i in range(50)]
-        self.assertTrue(all(ab.assign_arm(i, {"ab_seed": "s", "ab_on_fraction": 0}) == ab.ARM_OFF
-                            for i in ids))
-        self.assertTrue(all(ab.assign_arm(i, {"ab_seed": "s", "ab_on_fraction": 1}) == ab.ARM_ON
-                            for i in ids))
+        self.assertTrue(
+            all(ab.assign_arm(i, {"ab_seed": "s", "ab_on_fraction": 0}) == ab.ARM_OFF for i in ids)
+        )
+        self.assertTrue(
+            all(ab.assign_arm(i, {"ab_seed": "s", "ab_on_fraction": 1}) == ab.ARM_ON for i in ids)
+        )
 
     def test_nonsense_fraction_falls_back_to_half(self):
         config = {"ab_seed": "s", "ab_on_fraction": "banana"}
@@ -134,8 +138,9 @@ class ArmForSessionTests(EnvSandbox):
     def test_disabled_means_everyone_is_on(self):
         self.write_config(ab_enabled=False, ab_on_fraction=0.0)
         arms = {ab.arm_for_session(f"{i:08x}") for i in range(50)}
-        self.assertEqual(arms, {ab.ARM_ON},
-                         "with the experiment off nothing may change for the user")
+        self.assertEqual(
+            arms, {ab.ARM_ON}, "with the experiment off nothing may change for the user"
+        )
 
     def test_enabled_produces_both_arms(self):
         self.write_config(ab_enabled=True)
@@ -179,20 +184,20 @@ class RunInitRecordsArmTests(EnvSandbox):
 
         path = self.state / "sessions" / "identity-abcd1234.json"
         self.assertTrue(path.is_file())
-        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["compass_arm"],
-                         ab.ARM_OFF)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["compass_arm"], ab.ARM_OFF)
         self.assertEqual(load_identity("abcd1234")["compass_arm"], ab.ARM_OFF)
 
     def test_arm_defaults_to_on_when_disabled(self):
         from core.startup import run_init
+
         self.write_config(ab_enabled=False)
         run_init("beef0001-1111-2222-3333-444455556666", "", str(self.root))
         path = self.state / "sessions" / "identity-beef0001.json"
-        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["compass_arm"],
-                         ab.ARM_ON)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["compass_arm"], ab.ARM_ON)
 
     def test_load_identity_defaults_arm_to_none_when_absent(self):
         from core.session import load_identity
+
         self.write_identity("cafe0001")  # no compass_arm key
         self.assertIsNone(load_identity("cafe0001")["compass_arm"])
 
@@ -203,12 +208,14 @@ class HookGuardTests(EnvSandbox):
     def test_injects_while_the_experiment_is_disabled(self):
         from core.hooks import startup_prompt_hook as hook
         from core.session import SessionId
+
         self.write_config(ab_enabled=False, ab_on_fraction=0.0)
         self.assertTrue(hook._compass_arm_on(SessionId("abcd1234")))
 
     def test_skips_for_the_off_arm(self):
         from core.hooks import startup_prompt_hook as hook
         from core.session import SessionId
+
         self.write_identity("abcd1234", compass_arm=ab.ARM_OFF)
         self.assertFalse(hook._compass_arm_on(SessionId("abcd1234")))
 

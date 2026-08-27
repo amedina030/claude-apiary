@@ -1,4 +1,5 @@
 """commit_all must not sweep the operator's untracked files (review runner Bug 9)."""
+
 import os
 import subprocess
 import tempfile
@@ -9,8 +10,9 @@ from runner import auto_harden
 
 
 def _git(args, cwd):
-    return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
-                          text=True, encoding="utf-8", check=False)
+    return subprocess.run(
+        ["git", *args], cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", check=False
+    )
 
 
 class CommitAllTest(unittest.TestCase):
@@ -18,7 +20,11 @@ class CommitAllTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.repo = Path(self._tmp.name)
         _git(["init", "-q", "-b", "main", "."], self.repo)
-        for k, v in (("user.email", "t@example.com"), ("user.name", "T"), ("commit.gpgsign", "false")):
+        for k, v in (
+            ("user.email", "t@example.com"),
+            ("user.name", "T"),
+            ("commit.gpgsign", "false"),
+        ):
             _git(["config", k, v], self.repo)
         (self.repo / "tracked.py").write_text("x = 1\n", encoding="utf-8")
         _git(["add", "tracked.py"], self.repo)

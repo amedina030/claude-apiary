@@ -11,6 +11,7 @@ Usage:
     echo '<usage><total_tokens>14701</total_tokens><tool_uses>2</tool_uses><duration_ms>7559</duration_ms></usage>' \
         | python budgeter/log_agent_cost.py --session-id <session_id> --agent startup [--cwd <dir>]
 """
+
 import argparse
 import re
 import sys
@@ -26,7 +27,7 @@ from core.session import SessionId
 _MAX_STDIN_BYTES = 64 * 1024  # 64 KB — far more than any <usage> block needs
 
 # request_id may be a UUID or a short slug-style id; allow alphanumerics + hyphen + underscore
-_REQUEST_ID_RE = re.compile(r'^[0-9a-zA-Z_\-]{1,64}$')
+_REQUEST_ID_RE = re.compile(r"^[0-9a-zA-Z_\-]{1,64}$")
 
 
 def _validate_session_id(session_id: str) -> str:
@@ -72,8 +73,11 @@ def main():
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--agent", default="background-agent")
     parser.add_argument("--cwd", default="")
-    parser.add_argument("--request-id", default="",
-                        help="Optional grouping id for multi-call chains (e.g. one runner run)")
+    parser.add_argument(
+        "--request-id",
+        default="",
+        help="Optional grouping id for multi-call chains (e.g. one runner run)",
+    )
     args = parser.parse_args()
 
     if not flags.is_enabled("budgeter-log"):

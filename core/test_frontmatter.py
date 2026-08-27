@@ -153,7 +153,7 @@ class TestLists(unittest.TestCase):
 
 class TestNesting(unittest.TestCase):
     def test_one_level_of_nesting(self) -> None:
-        text = "name: Model selection\nmetadata:\n  type: feedback\n  version: \"1.0\"\n"
+        text = 'name: Model selection\nmetadata:\n  type: feedback\n  version: "1.0"\n'
         self.assertEqual(
             frontmatter.loads(text),
             {"name": "Model selection", "metadata": {"type": "feedback", "version": "1.0"}},

@@ -38,6 +38,7 @@ Exit codes:
   1 — at least one file disagrees or could not be parsed
   2 — usage error (state dir missing)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -63,6 +64,7 @@ SKIP_SEGMENTS = {"backup", "backups", ".git", "__pycache__"}
 # Frozen legacy parsers — pre-Phase-3.3 behaviour, for comparison only
 # --------------------------------------------------------------------------- #
 
+
 def _legacy_scribe(text: str) -> tuple[dict, str] | None:
     """``scribe/store.py:_parse_learning_content`` as it stood before Phase 3.3.
 
@@ -71,14 +73,14 @@ def _legacy_scribe(text: str) -> tuple[dict, str] | None:
     """
     if not text:
         return {}, text
-    if not (text.startswith('---\n') or text.startswith('---\r\n')):
+    if not (text.startswith("---\n") or text.startswith("---\r\n")):
         return {}, text
     lines = text.splitlines()
-    if not lines or lines[0] != '---':
+    if not lines or lines[0] != "---":
         return {}, text
     end_idx: int | None = None
     for i in range(1, len(lines)):
-        if lines[i] == '---':
+        if lines[i] == "---":
             end_idx = i
             break
     if end_idx is None:
@@ -86,31 +88,29 @@ def _legacy_scribe(text: str) -> tuple[dict, str] | None:
     fm: dict = {}
     for raw in lines[1:end_idx]:
         line = raw.rstrip()
-        if not line or line.startswith('#'):
+        if not line or line.startswith("#"):
             continue
-        if ':' not in line:
+        if ":" not in line:
             continue
-        key, _, value = line.partition(':')
+        key, _, value = line.partition(":")
         key = key.strip()
         value = value.strip()
-        if value == '[]':
+        if value == "[]":
             fm[key] = []
-        elif value.startswith('[') and value.endswith(']'):
+        elif value.startswith("[") and value.endswith("]"):
             inner = value[1:-1].strip()
             if not inner:
                 fm[key] = []
             else:
                 fm[key] = [
-                    item.strip().strip('"').strip("'")
-                    for item in inner.split(',')
-                    if item.strip()
+                    item.strip().strip('"').strip("'") for item in inner.split(",") if item.strip()
                 ]
         else:
             fm[key] = value.strip('"').strip("'")
-    body_lines = lines[end_idx + 1:]
-    body = '\n'.join(body_lines)
-    if text.endswith('\n') and body and not body.endswith('\n'):
-        body += '\n'
+    body_lines = lines[end_idx + 1 :]
+    body = "\n".join(body_lines)
+    if text.endswith("\n") and body and not body.endswith("\n"):
+        body += "\n"
     return fm, body
 
 
@@ -129,9 +129,7 @@ def _legacy_yaml_mini_loads(text: str) -> dict[str, Any]:
         if content.startswith("- ") or content == "-":
             if current_list is None:
                 raise ValueError(f"line {idx}: list item without a parent key")
-            current_list.append(
-                frontmatter._parse_scalar(content[2:])[0] if content != "-" else ""
-            )
+            current_list.append(frontmatter._parse_scalar(content[2:])[0] if content != "-" else "")
             continue
         if leading != 0:
             raise ValueError(f"line {idx}: unexpected indentation")
@@ -171,7 +169,7 @@ def _legacy_sidecar(text: str) -> tuple[dict, str] | None:
     if close_idx is None:
         return None
     fm_text = "".join(lines[1:close_idx])
-    body = "".join(lines[close_idx + 1:])
+    body = "".join(lines[close_idx + 1 :])
     try:
         return _legacy_yaml_mini_loads(fm_text), body
     except ValueError:
@@ -190,6 +188,7 @@ def _legacy_none(text: str) -> tuple[dict, str] | None:
 # --------------------------------------------------------------------------- #
 # Families
 # --------------------------------------------------------------------------- #
+
 
 class Family:
     """One kind of file: where it lives, who used to parse it, how it dumps."""
@@ -237,6 +236,7 @@ def iter_files(state_dir: Path, family: Family) -> Iterator[Path]:
 # --------------------------------------------------------------------------- #
 # Comparison
 # --------------------------------------------------------------------------- #
+
 
 class Result:
     """What happened to one file."""
@@ -289,9 +289,7 @@ def examine(path: Path, family: Family) -> Result:
 def rewrite(path: Path, family: Family) -> None:
     text = path.read_text(encoding="utf-8")
     meta, body = frontmatter.parse(text)
-    path.write_text(
-        frontmatter.dump(meta, body, list_style=family.list_style), encoding="utf-8"
-    )
+    path.write_text(frontmatter.dump(meta, body, list_style=family.list_style), encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- #

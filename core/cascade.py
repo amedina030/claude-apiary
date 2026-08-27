@@ -14,6 +14,7 @@ Invoked from:
   own startup).
 - ``apiary doctor pointers --fix`` (manual operator trigger).
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -31,8 +32,9 @@ from core.utils.filelock import FileLock
 @dataclasses.dataclass
 class CascadeReport:
     """Summary of a cascade-fix run."""
+
     new_main_apiary_path: Path
-    updated: list[int]    # uids whose main-apiary-pointer was rewritten
+    updated: list[int]  # uids whose main-apiary-pointer was rewritten
     skipped: list[tuple[int, str]]  # (uid, reason) — repo gone, no pin file, etc.
 
 

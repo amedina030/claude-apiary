@@ -260,10 +260,7 @@ class FileRefs:
         if changed:
             self._write(entries)
         if fresh:
-            lines = [
-                f"- {e['path']} ({e.get('type', 'application/octet-stream')})"
-                for e in fresh
-            ]
+            lines = [f"- {e['path']} ({e.get('type', 'application/octet-stream')})" for e in fresh]
             text = "[attached files — read these with the Read tool:]\n" + "\n".join(lines)
         else:
             text = ""

@@ -21,6 +21,7 @@ can apply cost weights to cache reads (0.1x) vs. fresh input (1x) vs.
 output (5x). total_tokens is retained for backward compatibility and for
 non-weighted displays.
 """
+
 import json
 import sys
 
@@ -55,9 +56,7 @@ def emit_usage_xml(envelope_stdout: str) -> None:
     # total_tokens sums every numeric field in the usage dict so any future
     # categories Anthropic adds are still counted. Per-category fields above
     # are the authoritative source for weighted reporting.
-    total_tokens = sum(
-        int(v) for v in usage.values() if isinstance(v, (int, float))
-    )
+    total_tokens = sum(int(v) for v in usage.values() if isinstance(v, (int, float)))
 
     tool_uses = envelope.get("num_turns", 0)
     if not isinstance(tool_uses, int):

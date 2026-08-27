@@ -17,4 +17,6 @@ def total_tokens_for_request(request_id: str) -> int:
     # tokens_delta is used here (not net_tokens_delta): for Agent entries both fields
     # are equal, but tokens_delta is the canonical gross-cost field that report.py
     # also sums — keeping them consistent prevents budget-check / report disagreements.
-    return sum(int(e.get("tokens_delta", 0) or 0) for e in entries if e.get("request_id") == request_id)
+    return sum(
+        int(e.get("tokens_delta", 0) or 0) for e in entries if e.get("request_id") == request_id
+    )

@@ -28,6 +28,7 @@ Default OFF
 unchanged and the user sees no difference. Turning the experiment on is a
 one-line edit, documented in ``docs/compass-measurement.md``.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -122,6 +123,7 @@ def recorded_arm(session_id: str) -> str | None:
     """
     try:
         from core.session import load_identity
+
         identity = load_identity(session_id)
     except Exception:
         return None

@@ -60,6 +60,7 @@ class FileRefsTest(unittest.TestCase):
         src = self._make("a.txt")
         self.refs.add(str(src))
         import json
+
         data = json.loads((self.tmp / "file_refs.json").read_text(encoding="utf-8"))
         self.assertIsInstance(data, list)
         self.assertEqual(data[0]["path"], str(src.resolve()))
@@ -190,7 +191,7 @@ class FileRefsTest(unittest.TestCase):
         self.refs.add(str(dropped))
         pasted = Path(self.refs.add_pasted_bytes(b"\x89PNG", "image/png")["path"])
         self.assertTrue(self.refs.clear())
-        self.assertFalse(pasted.exists())   # owned → deleted
+        self.assertFalse(pasted.exists())  # owned → deleted
         self.assertTrue(dropped.is_file())  # dropped target → untouched
 
     def test_reset_wipes_pasted_dir(self):

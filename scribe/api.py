@@ -12,6 +12,7 @@ note dicts are normalized via :func:`normalize_entry` so on-disk representation
 (compact JSON, omitted empty lists, implicit ``archived``) is irrelevant to
 consumers.
 """
+
 from __future__ import annotations
 
 import json
@@ -46,8 +47,14 @@ STATUSES = ("active", "done", "dropped", "deferred")
 
 # Prefix <-> type. No `K`/ticket — apiary holds todo-mirrors only (spec F2).
 TYPE_TO_PREFIX = {
-    "todo": "T", "handoff": "H", "decision": "D", "wishlist": "W",
-    "reference": "R", "blocker": "B", "context": "C", "general": "G",
+    "todo": "T",
+    "handoff": "H",
+    "decision": "D",
+    "wishlist": "W",
+    "reference": "R",
+    "blocker": "B",
+    "context": "C",
+    "general": "G",
     "learning": "L",
 }
 PREFIX_TO_TYPE = {v: k for k, v in TYPE_TO_PREFIX.items()}
@@ -78,11 +85,15 @@ def parse_display_id(display_id: str) -> "tuple[str, int, int]":
         raise ValueError("display id must be a string of form TYPE-YEAR-SEQ (e.g. T-2026-1)")
     m = _DISPLAY_ID_RE.match(display_id.strip())
     if not m:
-        raise ValueError(f"malformed display id {display_id!r}; expected TYPE-YEAR-SEQ (e.g. T-2026-1)")
+        raise ValueError(
+            f"malformed display id {display_id!r}; expected TYPE-YEAR-SEQ (e.g. T-2026-1)"
+        )
     prefix = m.group(1).upper()
     note_type = PREFIX_TO_TYPE.get(prefix)
     if note_type is None:
-        raise ValueError(f"unknown prefix {prefix!r} in {display_id!r}; expected one of {''.join(PREFIX_TO_TYPE)}")
+        raise ValueError(
+            f"unknown prefix {prefix!r} in {display_id!r}; expected one of {''.join(PREFIX_TO_TYPE)}"
+        )
     return note_type, int(m.group(2)), int(m.group(3))
 
 
@@ -90,7 +101,9 @@ def format_display_id(note_type: str, year: int, seq: int) -> str:
     """Format ``(type_name, year, seq)`` → ``PREFIX-YEAR-SEQ``."""
     prefix = TYPE_TO_PREFIX.get(note_type)
     if prefix is None:
-        raise ValueError(f"unknown note type {note_type!r}; expected one of {sorted(TYPE_TO_PREFIX)}")
+        raise ValueError(
+            f"unknown note type {note_type!r}; expected one of {sorted(TYPE_TO_PREFIX)}"
+        )
     return f"{prefix}-{year}-{seq}"
 
 
@@ -121,7 +134,9 @@ def _folder_by_name(apiary_repo: Path, name: str) -> str:
         raise KeyError(f"no registered target named {name!r}")
     if len(matches) > 1:
         cands = ", ".join(f"{e['name']}-{i}" for i, e in matches)
-        raise ValueError(f"ambiguous target name {name!r}; candidates: {cands} — pass the repo path instead")
+        raise ValueError(
+            f"ambiguous target name {name!r}; candidates: {cands} — pass the repo path instead"
+        )
     id_str, _ = matches[0]
     return f"{name}-{id_str}"
 

@@ -37,6 +37,7 @@ Usage (via the per-repo launcher)::
     python .claude/apiary/launch.py core/hooks/dispatch.py pre
     python .claude/apiary/launch.py core/hooks/dispatch.py post|stop|prompt|session-start
 """
+
 from __future__ import annotations
 
 import importlib
@@ -119,17 +120,16 @@ def _registry() -> dict[str, tuple[Hook, ...]]:
         "PreToolUse": (
             Hook("drift_check", "core.hooks.per_repo_drift_check"),
             Hook("inject_session", "core.hooks.inject_session"),
-            Hook("learnings_inject", "core.hooks.learnings_inject_hook",
-                 "Edit|Write|Bash"),
-            Hook("research_reminder", "core.hooks.research_capture_reminder",
-                 "WebSearch|WebFetch|Agent|Task"),
-            Hook("pre_push_doc_conformer", "core.hooks.pre_push_doc_conformer",
-                 "Bash"),
-            Hook("pre_push_secret_scan", "core.hooks.pre_push_secret_scan",
-                 "Bash"),
+            Hook("learnings_inject", "core.hooks.learnings_inject_hook", "Edit|Write|Bash"),
+            Hook(
+                "research_reminder",
+                "core.hooks.research_capture_reminder",
+                "WebSearch|WebFetch|Agent|Task",
+            ),
+            Hook("pre_push_doc_conformer", "core.hooks.pre_push_doc_conformer", "Bash"),
+            Hook("pre_push_secret_scan", "core.hooks.pre_push_secret_scan", "Bash"),
             Hook("budgeter_pre", "budgeter.hooks.pre_tool_use", budgeter),
-            Hook("remind_standards", "docs/hooks/remind_standards.py",
-                 "Write|Edit"),
+            Hook("remind_standards", "docs/hooks/remind_standards.py", "Write|Edit"),
             # duplicate-helper hook goes here — §5a-C(2). Before Write/Edit,
             # if the content defines a function whose name already exists
             # elsewhere in the repo, inject "X already exists at path:line —
@@ -138,17 +138,14 @@ def _registry() -> dict[str, tuple[Hook, ...]]:
             # — nothing else in this file needs to change.
         ),
         "PostToolUse": (
-            Hook("context_rule_error_reminder",
-                 "core.hooks.context_rule_error_reminder", "Bash"),
+            Hook("context_rule_error_reminder", "core.hooks.context_rule_error_reminder", "Bash"),
             Hook("budgeter_post", "budgeter.hooks.post_tool_use", budgeter),
         ),
         "Stop": (
             Hook("budgeter_stop", "budgeter.hooks.stop_session"),
             Hook("save_transcript", "core.hooks.save_transcript"),
         ),
-        "UserPromptSubmit": (
-            Hook("startup_prompt", "core.hooks.startup_prompt_hook"),
-        ),
+        "UserPromptSubmit": (Hook("startup_prompt", "core.hooks.startup_prompt_hook"),),
         # No SessionStart hooks yet; the verb exists so one can be registered
         # without another settings.json migration.
         "SessionStart": (),
@@ -158,6 +155,7 @@ def _registry() -> dict[str, tuple[Hook, ...]]:
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
+
 
 def log_path() -> Path:
     """``<repo>/.claude/apiary/hooks.log`` for the repo the hook fired in.
@@ -183,7 +181,7 @@ def _rotate(path: Path) -> None:
     try:
         path.replace(path.with_suffix(path.suffix + ".1"))
     except OSError:
-        try:                       # Windows: the .1 may be held open elsewhere
+        try:  # Windows: the .1 may be held open elsewhere
             path.unlink()
         except OSError:
             pass
@@ -201,9 +199,7 @@ def log_failure(event: str, hook_name: str, exc: BaseException) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         _rotate(path)
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        detail = "".join(
-            traceback.format_exception(type(exc), exc, exc.__traceback__)
-        ).rstrip()
+        detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).rstrip()
         with path.open("a", encoding="utf-8") as f:
             f.write(f"{stamp} {event} {hook_name}: {exc!r}\n{detail}\n")
     except Exception:  # noqa: BLE001 — observability must never break a session
@@ -213,6 +209,7 @@ def log_failure(event: str, hook_name: str, exc: BaseException) -> None:
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
+
 
 def matches(matcher: str | None, tool_name: str) -> bool:
     """Claude Code's matcher semantics, re-applied in-process.
@@ -251,14 +248,13 @@ def load_run(module: str) -> Callable[[dict], HookResult | None]:
         try:
             spec.loader.exec_module(mod)
         except BaseException:
-            sys.modules.pop(name, None)   # never cache a half-executed module
+            sys.modules.pop(name, None)  # never cache a half-executed module
             raise
         return mod.run
     return importlib.import_module(module).run
 
 
-def dispatch(event: str, payload: dict,
-             hooks: tuple[Hook, ...] | None = None) -> HookResult:
+def dispatch(event: str, payload: dict, hooks: tuple[Hook, ...] | None = None) -> HookResult:
     """Run every hook registered for *event* and merge what they said.
 
     Returns the merged :class:`HookResult`. A gate's ``block_reason`` short-
@@ -281,8 +277,7 @@ def dispatch(event: str, payload: dict,
                 # A hook that returns something else is a bug in that hook, not
                 # a reason to take the chain down: log it and move on.
                 raise TypeError(
-                    f"{hook.name}.run returned {type(result).__name__}, "
-                    "expected HookResult | None"
+                    f"{hook.name}.run returned {type(result).__name__}, expected HookResult | None"
                 )
             block_reason, context = result.block_reason, result.context
         except SystemExit as exc:

@@ -12,6 +12,7 @@ Covers:
   - Session-length nudge tiers, and its one-shot behaviour in the PRE hook
   - Reading log entries written before the warning feature was deleted
 """
+
 import json
 import os
 import subprocess
@@ -36,6 +37,7 @@ sys.path.insert(0, str(APIS_DIR))
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_session_id():
     """Generate a valid UUID-format session ID for testing."""
@@ -83,6 +85,7 @@ def run_hook(script, payload, project=None, env_extra=None):
 def flag_file(project, flag_name):
     """The sentinel ``core.flags`` looks for inside *project*."""
     from core import flags
+
     return Path(project) / flags.PIN_FLAGS_SUBPATH / f"{flag_name}-enabled"
 
 
@@ -105,11 +108,13 @@ def log_entry_count(log_path):
 # Unit tests: logger
 # ---------------------------------------------------------------------------
 
+
 def test_isolation_guard_blocks_default_paths(tmp_path):
     """With APIARY_BUDGETER_TEST_ISOLATION=1, writing to the default production
     LOG_PATH / TMP_DIR must raise. Protects the suite from tests that forget
     configure_for_project or direct-patching."""
     import budgeter.lib.logger as lg
+
     orig_log, orig_tmp = lg.LOG_PATH, lg.TMP_DIR
     try:
         lg.LOG_PATH = lg._DEFAULT_LOG_PATH
@@ -133,6 +138,7 @@ def test_isolation_guard_blocks_default_paths(tmp_path):
 def test_append_entry_skips_zero_delta(tmp_path):
     """append_entry must not write entries with tokens_delta == 0."""
     import budgeter.lib.logger as lg
+
     orig_log = lg.LOG_PATH
     lg.LOG_PATH = tmp_path / "log.jsonl"
     try:
@@ -149,6 +155,7 @@ def test_append_entry_skips_zero_delta(tmp_path):
 def test_count_tasks(tmp_path):
     """count_tasks must count unique (session_id, task_turn) pairs, not raw entries."""
     import budgeter.lib.logger as lg
+
     orig_log = lg.LOG_PATH
     lg.LOG_PATH = tmp_path / "count_tasks_log.jsonl"
     try:
@@ -171,6 +178,7 @@ def test_count_tasks(tmp_path):
 def test_baseline_save_load_delete(tmp_path):
     """Baseline round-trip: save -> load -> verify tokens and task_turn -> cleanup removes it."""
     import budgeter.lib.logger as lg
+
     orig_tmp = lg.TMP_DIR
     lg.TMP_DIR = tmp_path
     session_id = make_session_id()
@@ -190,6 +198,7 @@ def test_baseline_save_load_delete(tmp_path):
 # ---------------------------------------------------------------------------
 # Integration tests: hook sequence
 # ---------------------------------------------------------------------------
+
 
 def test_pre_post_stop_sequence(tmp_path):
     """PRE -> POST -> STOP with empty transcript. Verifies plumbing end-to-end."""
@@ -222,6 +231,7 @@ def test_pre_post_stop_sequence(tmp_path):
 def test_pre_to_pre_baseline(tmp_path):
     """PRE saves prev_tool_name in baseline so the next PRE can attribute costs correctly."""
     import budgeter.lib.logger as lg
+
     project_dir = make_test_project(tmp_path / "project_pre2pre")
     cwd = str(project_dir)
     session_id = make_session_id()
@@ -249,9 +259,11 @@ def test_pre_to_pre_baseline(tmp_path):
 # Agent PostToolUse tests
 # ---------------------------------------------------------------------------
 
+
 def test_post_agent_logs_total_tokens(tmp_path):
     """PostToolUse hook must log an Agent entry with tokens_delta == totalTokens."""
     import budgeter.lib.logger as lg
+
     project_dir = make_test_project(tmp_path / "project_agent")
     cwd = str(project_dir)
     log_path = project_dir / ".claude" / "budgeter-log.jsonl"
@@ -264,7 +276,8 @@ def test_post_agent_logs_total_tokens(tmp_path):
     lg.configure_for_project(cwd)
     try:
         lg.save_baseline(
-            session_id, tokens=5000,
+            session_id,
+            tokens=5000,
             prev_tool_name="Bash",
             prev_assistant_message="About to spawn agent",
             turn_number=3,
@@ -284,7 +297,11 @@ def test_post_agent_logs_total_tokens(tmp_path):
         assert log_entry_count(log_path) == before + 1, "POST must write one Agent entry"
 
         entries = lg.read_log()
-        agent_entries = [e for e in entries if e.get("session_id") == session_id and e.get("tool_name") == "Agent"]
+        agent_entries = [
+            e
+            for e in entries
+            if e.get("session_id") == session_id and e.get("tool_name") == "Agent"
+        ]
         assert len(agent_entries) == 1
         assert agent_entries[0]["tokens_delta"] == 12345
         assert agent_entries[0]["net_tokens_delta"] == 12345
@@ -317,6 +334,7 @@ def test_post_agent_zero_tokens_not_logged(tmp_path):
 def test_pre_skips_logging_after_agent(tmp_path):
     """PRE hook must not log a duplicate entry when prev_tool_name == 'Agent'."""
     import budgeter.lib.logger as lg
+
     project_dir = make_test_project(tmp_path / "project_skip_agent")
     cwd = str(project_dir)
     log_path = project_dir / ".claude" / "budgeter-log.jsonl"
@@ -329,7 +347,8 @@ def test_pre_skips_logging_after_agent(tmp_path):
     try:
         # Simulate baseline left by Agent's PRE hook
         lg.save_baseline(
-            session_id, tokens=10000,
+            session_id,
+            tokens=10000,
             prev_tool_name="Agent",
             prev_assistant_message="agent ran",
             turn_number=5,
@@ -341,7 +360,9 @@ def test_pre_skips_logging_after_agent(tmp_path):
         payload = {"tool_name": "Bash", "session_id": session_id, "transcript_path": "", "cwd": cwd}
         r = run_hook("pre_tool_use.py", payload)
         assert r.returncode == 0, f"PRE failed: {r.stderr}"
-        assert log_entry_count(log_path) == before, "PRE must not log an Agent entry (PostToolUse already did)"
+        assert log_entry_count(log_path) == before, (
+            "PRE must not log an Agent entry (PostToolUse already did)"
+        )
     finally:
         lg.TMP_DIR = orig_tmp
         lg.LOG_PATH = orig_log
@@ -351,6 +372,7 @@ def test_pre_skips_logging_after_agent(tmp_path):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main():
     # Every test builds its own throwaway project and enables the flags it
@@ -469,9 +491,11 @@ def main():
 # Unit tests: session_length_nudge
 # ---------------------------------------------------------------------------
 
+
 def test_session_length_nudge_below_threshold(tmp_path):
     """Below soft threshold returns (None, None)."""
     from budgeter.lib.estimator import session_length_nudge
+
     tier, msg = session_length_nudge(0, {})
     assert tier is None and msg is None
     tier, msg = session_length_nudge(599_999, {})
@@ -481,6 +505,7 @@ def test_session_length_nudge_below_threshold(tmp_path):
 def test_session_length_nudge_soft_tier(tmp_path):
     """At/above soft threshold returns soft tier."""
     from budgeter.lib.estimator import session_length_nudge
+
     tier, msg = session_length_nudge(600_000, {})
     assert tier == "soft"
     assert "getting long" in msg
@@ -490,6 +515,7 @@ def test_session_length_nudge_soft_tier(tmp_path):
 def test_session_length_nudge_hard_tier(tmp_path):
     """At/above hard threshold returns hard tier."""
     from budgeter.lib.estimator import session_length_nudge
+
     tier, msg = session_length_nudge(800_000, {})
     assert tier == "hard"
     assert "very long" in msg
@@ -499,6 +525,7 @@ def test_session_length_nudge_hard_tier(tmp_path):
 def test_session_length_nudge_config_override(tmp_path):
     """Custom thresholds in config are honored."""
     from budgeter.lib.estimator import session_length_nudge
+
     cfg = {"session_warn_soft_tokens": 100, "session_warn_hard_tokens": 200}
     assert session_length_nudge(50, cfg) == (None, None)
     assert session_length_nudge(150, cfg)[0] == "soft"
@@ -508,6 +535,7 @@ def test_session_length_nudge_config_override(tmp_path):
 # ---------------------------------------------------------------------------
 # Integration tests: session-length nudge in pre_tool_use hook
 # ---------------------------------------------------------------------------
+
 
 def _write_transcript(tmp_path, *, input_tokens=0, cache_read=0, output_tokens=0):
     """Write a minimal Claude Code transcript with one assistant usage record."""
@@ -553,14 +581,16 @@ def test_session_length_nudge_fires_once_per_tier(tmp_path):
     r1 = run_hook("pre_tool_use.py", payload)
     assert r1.returncode == 0, f"PRE failed: {r1.stderr}"
     ctx1 = _extract_additional_context(r1.stdout)
-    assert "Session context is getting long" in ctx1, \
+    assert "Session context is getting long" in ctx1, (
         f"Soft nudge should fire at 600k tokens; got: {ctx1!r}"
+    )
 
     r2 = run_hook("pre_tool_use.py", payload)
     assert r2.returncode == 0, f"PRE #2 failed: {r2.stderr}"
     ctx2 = _extract_additional_context(r2.stdout)
-    assert "Session context is getting long" not in ctx2, \
+    assert "Session context is getting long" not in ctx2, (
         f"Second PRE must not re-inject soft nudge; got: {ctx2!r}"
+    )
 
 
 def test_session_length_nudge_hard_tier_fires(tmp_path):
@@ -580,8 +610,9 @@ def test_session_length_nudge_hard_tier_fires(tmp_path):
     r = run_hook("pre_tool_use.py", payload)
     assert r.returncode == 0, f"PRE failed: {r.stderr}"
     ctx = _extract_additional_context(r.stdout)
-    assert "Session context is very long" in ctx, \
+    assert "Session context is very long" in ctx, (
         f"Hard nudge should fire at 800k tokens; got: {ctx!r}"
+    )
 
 
 def test_session_length_nudge_skipped_when_detached(tmp_path):
@@ -598,12 +629,10 @@ def test_session_length_nudge_skipped_when_detached(tmp_path):
     }
 
     _with_flag_enabled("budgeter-session-warn", project_dir)
-    r = run_hook("pre_tool_use.py", payload,
-                 env_extra={"APIARY_RUNNER_SUBPROCESS": "1"})
+    r = run_hook("pre_tool_use.py", payload, env_extra={"APIARY_RUNNER_SUBPROCESS": "1"})
     assert r.returncode == 0, f"PRE failed: {r.stderr}"
     ctx = _extract_additional_context(r.stdout)
-    assert "Session context" not in ctx, \
-        f"Nudge must not fire in detached runner; got: {ctx!r}"
+    assert "Session context" not in ctx, f"Nudge must not fire in detached runner; got: {ctx!r}"
 
 
 def test_session_length_nudge_skipped_when_session_warn_disabled(tmp_path):
@@ -625,9 +654,9 @@ def test_session_length_nudge_skipped_when_session_warn_disabled(tmp_path):
     r = run_hook("pre_tool_use.py", payload)
     assert r.returncode == 0, f"PRE failed: {r.stderr}"
     ctx = _extract_additional_context(r.stdout)
-    assert "Session context" not in ctx, \
+    assert "Session context" not in ctx, (
         f"Nudge must not fire when session-warn disabled; got: {ctx!r}"
-
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -635,27 +664,47 @@ def test_session_length_nudge_skipped_when_session_warn_disabled(tmp_path):
 # B5 (cache creation), B6 (stdin cap)
 # ---------------------------------------------------------------------------
 
+
 def _assistant_lines(msg_id, usage, blocks=("text",)):
     """One JSONL line per content block, all sharing message.id and usage —
     exactly how Claude Code writes a multi-block API turn."""
     lines = []
     for block in blocks:
         content = {"type": block, "text": "ok"} if block == "text" else {"type": block}
-        lines.append(json.dumps({"type": "assistant", "message": {
-            "id": msg_id, "role": "assistant", "content": [content], "usage": usage,
-        }}))
+        lines.append(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "id": msg_id,
+                        "role": "assistant",
+                        "content": [content],
+                        "usage": usage,
+                    },
+                }
+            )
+        )
     return lines
 
 
 def test_cumulative_tokens_dedupes_by_message_id_and_counts_cache_creation(tmp_path):
     import budgeter.lib.logger as lg
-    usage = {"input_tokens": 10, "cache_read_input_tokens": 900,
-             "cache_creation_input_tokens": 300, "output_tokens": 40}
-    entries = [json.loads(ln) for ln in _assistant_lines("m1", usage, ("thinking", "text", "tool_use"))]
+
+    usage = {
+        "input_tokens": 10,
+        "cache_read_input_tokens": 900,
+        "cache_creation_input_tokens": 300,
+        "output_tokens": 40,
+    }
+    entries = [
+        json.loads(ln) for ln in _assistant_lines("m1", usage, ("thinking", "text", "tool_use"))
+    ]
     # Three lines, one API call: 10 + 900 + 300 + 40, not 3x that.
     assert lg.get_cumulative_tokens(entries) == 1250
     # A record with no id is counted on its own.
-    entries.append({"message": {"role": "assistant", "usage": {"input_tokens": 5, "output_tokens": 1}}})
+    entries.append(
+        {"message": {"role": "assistant", "usage": {"input_tokens": 5, "output_tokens": 1}}}
+    )
     assert lg.get_cumulative_tokens(entries) == 1256
     assert lg.get_last_call_tokens(entries) == (5, 0, 0, 1)
     assert lg.get_last_call_tokens([]) == (0, 0, 0, 0)
@@ -663,6 +712,7 @@ def test_cumulative_tokens_dedupes_by_message_id_and_counts_cache_creation(tmp_p
 
 def test_save_baseline_is_atomic_and_load_survives_corruption(tmp_path):
     import budgeter.lib.logger as lg
+
     orig_tmp = lg.TMP_DIR
     lg.TMP_DIR = tmp_path / "tmp"
     sid = make_session_id()
@@ -698,8 +748,9 @@ def test_corrupt_baseline_does_not_wedge_the_session(tmp_path):
     assert r.returncode == 0, f"PRE crashed on corrupt baseline: {r.stderr}"
     assert json.loads(r.stdout.strip()) is not None, "PRE must still print its JSON response"
     assert "permissionDecision" not in r.stdout
-    assert json.loads(baseline_path.read_text(encoding="utf-8"))["prev_tool_name"] == "Bash", \
+    assert json.loads(baseline_path.read_text(encoding="utf-8"))["prev_tool_name"] == "Bash", (
         "PRE must rewrite the baseline"
+    )
 
     baseline_path.write_text('{"tokens": 12', encoding="utf-8")
     _with_flag_enabled("budgeter-log", project_dir)
@@ -713,6 +764,7 @@ def test_pre_skips_phantom_entry_when_no_api_call(tmp_path):
     nothing; the next real API turn is logged once, deduped across its
     content-block lines, with cache creation counted."""
     import budgeter.lib.logger as lg
+
     project_dir = make_test_project(tmp_path / "project_phantom")
     cwd = str(project_dir)
     log_path = project_dir / ".claude" / "budgeter-log.jsonl"
@@ -720,8 +772,12 @@ def test_pre_skips_phantom_entry_when_no_api_call(tmp_path):
     transcript = tmp_path / "phantom.jsonl"
     first = {"input_tokens": 1000, "cache_read_input_tokens": 0, "output_tokens": 50}
     transcript.write_text("\n".join(_assistant_lines("m1", first)) + "\n", encoding="utf-8")
-    payload = {"tool_name": "Bash", "session_id": session_id,
-               "transcript_path": str(transcript), "cwd": cwd}
+    payload = {
+        "tool_name": "Bash",
+        "session_id": session_id,
+        "transcript_path": str(transcript),
+        "cwd": cwd,
+    }
 
     _with_flag_enabled("budgeter-log", project_dir)
     try:
@@ -734,10 +790,16 @@ def test_pre_skips_phantom_entry_when_no_api_call(tmp_path):
         assert r.returncode == 0, r.stderr
         assert log_entry_count(log_path) == 0, "no API call -> no entry"
 
-        second = {"input_tokens": 10, "cache_read_input_tokens": 900,
-                  "cache_creation_input_tokens": 300, "output_tokens": 40}
+        second = {
+            "input_tokens": 10,
+            "cache_read_input_tokens": 900,
+            "cache_creation_input_tokens": 300,
+            "output_tokens": 40,
+        }
         with open(transcript, "a", encoding="utf-8") as f:
-            f.write("\n".join(_assistant_lines("m2", second, ("thinking", "text", "tool_use"))) + "\n")
+            f.write(
+                "\n".join(_assistant_lines("m2", second, ("thinking", "text", "tool_use"))) + "\n"
+            )
         r = run_hook("pre_tool_use.py", payload)
         assert r.returncode == 0, r.stderr
         assert log_entry_count(log_path) == 1
@@ -759,6 +821,7 @@ def test_old_schema_baseline_is_not_compared(tmp_path):
     first PRE after upgrade must neither log a phantom '[compaction]' marker
     nor a cost entry against it, and must rewrite it with the new schema."""
     import budgeter.lib.logger as lg
+
     project_dir = make_test_project(tmp_path / "project_oldschema")
     cwd = str(project_dir)
     log_path = project_dir / ".claude" / "budgeter-log.jsonl"
@@ -766,16 +829,33 @@ def test_old_schema_baseline_is_not_compared(tmp_path):
     session_id = make_session_id()
     transcript = tmp_path / "old.jsonl"
     usage = {"input_tokens": 1000, "cache_read_input_tokens": 0, "output_tokens": 50}
-    transcript.write_text("\n".join(_assistant_lines("m1", usage, ("text", "tool_use"))) + "\n",
-                          encoding="utf-8")
+    transcript.write_text(
+        "\n".join(_assistant_lines("m1", usage, ("text", "tool_use"))) + "\n", encoding="utf-8"
+    )
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    old = {"tokens": 2100, "context_tokens": 1050, "baseline_input": 1000, "baseline_cache": 0,
-           "baseline_output": 50, "prev_tool_name": "Bash", "prev_assistant_message": "",
-           "turn_number": 1, "task_turn": 1, "user_message": "", "scope_flags": [],
-           "predicted_cost": 0, "warning_fired": False, "agent_description": ""}
+    old = {
+        "tokens": 2100,
+        "context_tokens": 1050,
+        "baseline_input": 1000,
+        "baseline_cache": 0,
+        "baseline_output": 50,
+        "prev_tool_name": "Bash",
+        "prev_assistant_message": "",
+        "turn_number": 1,
+        "task_turn": 1,
+        "user_message": "",
+        "scope_flags": [],
+        "predicted_cost": 0,
+        "warning_fired": False,
+        "agent_description": "",
+    }
     (tmp_dir / f"{session_id}_baseline.json").write_text(json.dumps(old), encoding="utf-8")
-    payload = {"tool_name": "Bash", "session_id": session_id,
-               "transcript_path": str(transcript), "cwd": cwd}
+    payload = {
+        "tool_name": "Bash",
+        "session_id": session_id,
+        "transcript_path": str(transcript),
+        "cwd": cwd,
+    }
     _with_flag_enabled("budgeter-log", project_dir)
     r = run_hook("pre_tool_use.py", payload)
     assert r.returncode == 0, r.stderr
@@ -785,20 +865,27 @@ def test_old_schema_baseline_is_not_compared(tmp_path):
     assert new["task_turn"] == 1, "turn continuity is kept"
     # STOP against a shrunk total logs nothing (compaction is the PRE's job).
     (tmp_dir / f"{session_id}_baseline.json").write_text(
-        json.dumps({**new, "tokens": 5000}), encoding="utf-8")
-    r = run_hook("stop_session.py", {"session_id": session_id, "transcript_path": str(transcript), "cwd": cwd})
+        json.dumps({**new, "tokens": 5000}), encoding="utf-8"
+    )
+    r = run_hook(
+        "stop_session.py",
+        {"session_id": session_id, "transcript_path": str(transcript), "cwd": cwd},
+    )
     assert r.returncode == 0, r.stderr
     assert log_entry_count(log_path) == 0
 
 
 def test_post_agent_payload_over_64kb_is_logged(tmp_path):
     import budgeter.lib.logger as lg
+
     project_dir = make_test_project(tmp_path / "project_bigpost")
     cwd = str(project_dir)
     log_path = project_dir / ".claude" / "budgeter-log.jsonl"
     session_id = make_session_id()
     payload = {
-        "tool_name": "Agent", "session_id": session_id, "cwd": cwd,
+        "tool_name": "Agent",
+        "session_id": session_id,
+        "cwd": cwd,
         "tool_input": {"description": "lens attacker", "prompt": "p" * 4000},
         "tool_response": {"totalTokens": 777, "content": "x" * 200_000},
     }
@@ -814,16 +901,24 @@ def test_post_agent_payload_over_64kb_is_logged(tmp_path):
 
 def test_weighted_delta_counts_cache_creation(tmp_path):
     from budgeter import report
+
     w_input, w_cache, w_create, w_output = report._get_price_weights()
-    e = {"input_tokens_delta": 100, "cache_tokens_delta": 1000,
-         "cache_creation_tokens_delta": 200, "output_tokens_delta": 10}
-    assert report.weighted_delta(e) == int(100 * w_input + 1000 * w_cache + 200 * w_create + 10 * w_output)
+    e = {
+        "input_tokens_delta": 100,
+        "cache_tokens_delta": 1000,
+        "cache_creation_tokens_delta": 200,
+        "output_tokens_delta": 10,
+    }
+    assert report.weighted_delta(e) == int(
+        100 * w_input + 1000 * w_cache + 200 * w_create + 10 * w_output
+    )
     assert w_create > w_input, "cache writes bill above plain input"
 
 
 # ---------------------------------------------------------------------------
 # Review 2026-08 Phase 2: the warning subsystem is gone, its data is not
 # ---------------------------------------------------------------------------
+
 
 def test_report_reads_entries_written_before_the_warning_feature(tmp_path):
     """26k logged entries carry ``scope_flags`` and the feedback-era shape.
@@ -832,14 +927,22 @@ def test_report_reads_entries_written_before_the_warning_feature(tmp_path):
     from contextlib import redirect_stdout
 
     from budgeter import report
+
     old = {
-        "timestamp": "2026-04-02T10:00:00+00:00", "session_id": "s1",
-        "tool_name": "Bash", "assistant_message": "I'll refactor auth.py",
-        "user_message": "why is this slow", "tokens_delta": 9000,
-        "context_tokens": 4000, "net_tokens_delta": 5000,
-        "turn_number": 2, "task_turn": 1,
+        "timestamp": "2026-04-02T10:00:00+00:00",
+        "session_id": "s1",
+        "tool_name": "Bash",
+        "assistant_message": "I'll refactor auth.py",
+        "user_message": "why is this slow",
+        "tokens_delta": 9000,
+        "context_tokens": 4000,
+        "net_tokens_delta": 5000,
+        "turn_number": 2,
+        "task_turn": 1,
         "scope_flags": ["scope_keywords", "investigative_keywords"],
-        "predicted_cost": 80000, "warning_fired": True, "project": "",
+        "predicted_cost": 80000,
+        "warning_fired": True,
+        "project": "",
     }
     log = tmp_path / "old_log.jsonl"
     log.write_text(json.dumps(old) + "\n", encoding="utf-8")
@@ -864,16 +967,30 @@ def test_estimator_exposes_only_the_session_nudge(tmp_path):
     """The warning rules, scoring and magnitude estimate are deleted, not
     merely unreferenced."""
     from budgeter.lib import estimator
-    gone = ["detect_scope_flags", "estimate_magnitude", "score_flags",
-            "is_approval_message", "_group_tasks"]
+
+    gone = [
+        "detect_scope_flags",
+        "estimate_magnitude",
+        "score_flags",
+        "is_approval_message",
+        "_group_tasks",
+    ]
     for name in gone:
         assert not hasattr(estimator, name), f"{name} should be deleted"
     assert hasattr(estimator, "session_length_nudge")
 
     import budgeter.lib.logger as lg
-    for name in ["append_feedback", "append_feedback_if_not_present",
-                 "read_feedback", "count_entries", "save_snapshot",
-                 "load_snapshot", "delete_snapshot", "FEEDBACK_PATH"]:
+
+    for name in [
+        "append_feedback",
+        "append_feedback_if_not_present",
+        "read_feedback",
+        "count_entries",
+        "save_snapshot",
+        "load_snapshot",
+        "delete_snapshot",
+        "FEEDBACK_PATH",
+    ]:
         assert not hasattr(lg, name), f"logger.{name} should be deleted"
 
 

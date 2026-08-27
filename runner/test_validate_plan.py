@@ -3,6 +3,7 @@
 
 Stdlib unittest only (no pytest), per docs/standards/code-style.md.
 """
+
 import os
 import tempfile
 import unittest
@@ -102,13 +103,16 @@ class TestTestCodeSpecFormat(unittest.TestCase):
 
     def test_full_validate_surfaces_format_errors(self):
         # Confirm the new check is wired into validate()
-        plan = _base_plan([
-            _step(1, "create", "Make a file", files=["runner/new_file.py"]),
-            _step(2, "test", "Run the tests"),
-        ])
+        plan = _base_plan(
+            [
+                _step(1, "create", "Make a file", files=["runner/new_file.py"]),
+                _step(2, "test", "Run the tests"),
+            ]
+        )
         errors = validate(plan)
-        self.assertTrue(any("prose word" in e for e in errors),
-                        f"expected prose-word error in {errors}")
+        self.assertTrue(
+            any("prose word" in e for e in errors), f"expected prose-word error in {errors}"
+        )
 
 
 class TestTestFailureLanguage(unittest.TestCase):
@@ -118,46 +122,78 @@ class TestTestFailureLanguage(unittest.TestCase):
     Caught in T5b plan step 3 (#211)."""
 
     def test_clean_test_step_passes(self):
-        steps = [_step(1, "test", "python -m unittest runner.test_foo",
-                       description="Verify the new helper passes its unit tests")]
+        steps = [
+            _step(
+                1,
+                "test",
+                "python -m unittest runner.test_foo",
+                description="Verify the new helper passes its unit tests",
+            )
+        ]
         self.assertEqual(_check_test_failure_language(steps), [])
 
     def test_expected_to_fail_rejected(self):
-        steps = [_step(1, "test", "python audit.py",
-                       description="Run the audit (expected to fail before fix)")]
+        steps = [
+            _step(
+                1,
+                "test",
+                "python audit.py",
+                description="Run the audit (expected to fail before fix)",
+            )
+        ]
         errors = _check_test_failure_language(steps)
         self.assertEqual(len(errors), 1)
         self.assertIn("expected to fail", errors[0])
 
     def test_expected_to_report_violations_rejected(self):
-        steps = [_step(1, "test", "python audit.py",
-                       description="Run audit (this run is expected to report violations; "
-                                   "it gates subsequent fix steps)")]
+        steps = [
+            _step(
+                1,
+                "test",
+                "python audit.py",
+                description="Run audit (this run is expected to report violations; "
+                "it gates subsequent fix steps)",
+            )
+        ]
         errors = _check_test_failure_language(steps)
         self.assertEqual(len(errors), 1)
         # Both phrases match — the function returns on first match.
         self.assertTrue(
-            "expected to report violations" in errors[0]
-            or "this run is expected to" in errors[0]
+            "expected to report violations" in errors[0] or "this run is expected to" in errors[0]
         )
 
     def test_should_fail_rejected(self):
-        steps = [_step(1, "test", "python check.py",
-                       description="The pre-fix snapshot — should fail until step 4 lands")]
+        steps = [
+            _step(
+                1,
+                "test",
+                "python check.py",
+                description="The pre-fix snapshot — should fail until step 4 lands",
+            )
+        ]
         self.assertEqual(len(_check_test_failure_language(steps)), 1)
 
     def test_non_test_action_ignored(self):
-        steps = [_step(1, "create", "make file",
-                       description="this run is expected to fail before the fix")]
+        steps = [
+            _step(
+                1, "create", "make file", description="this run is expected to fail before the fix"
+            )
+        ]
         self.assertEqual(_check_test_failure_language(steps), [])
 
     def test_full_validate_surfaces_failure_language(self):
-        plan = _base_plan([
-            _step(1, "create", "Add helper", files=["runner/new_file.py"]),
-            _step(2, "test", "python audit.py",
-                  description="Run the audit script (expected to report violations; "
-                              "gates subsequent fix steps)"),
-        ])
+        plan = _base_plan(
+            [
+                _step(1, "create", "Add helper", files=["runner/new_file.py"]),
+                _step(
+                    2,
+                    "test",
+                    "python audit.py",
+                    description="Run the audit script (expected to report violations; "
+                    "gates subsequent fix steps)",
+                ),
+            ]
+        )
         errors = validate(plan)
         self.assertTrue(
             any("expected" in e and "test" in e for e in errors),
@@ -183,8 +219,14 @@ class TestBannedTokens(unittest.TestCase):
         self.assertIn("unittest", errors[0])
 
     def test_pytest_in_description_rejected(self):
-        steps = [_step(1, "create", "freeform pseudocode here",
-                       description="Add pytest tests for the new module")]
+        steps = [
+            _step(
+                1,
+                "create",
+                "freeform pseudocode here",
+                description="Add pytest tests for the new module",
+            )
+        ]
         errors = _check_banned_tokens(steps)
         self.assertEqual(len(errors), 1)
 
@@ -259,13 +301,15 @@ class TestBannedTokens(unittest.TestCase):
 
     def test_full_validate_surfaces_banned_token_errors(self):
         # Confirm the new check is wired into validate()
-        plan = _base_plan([
-            _step(1, "create", "Write a pytest test file",
-                  files=["runner/test_new.py"]),
-        ])
+        plan = _base_plan(
+            [
+                _step(1, "create", "Write a pytest test file", files=["runner/test_new.py"]),
+            ]
+        )
         errors = validate(plan)
-        self.assertTrue(any("banned token" in e for e in errors),
-                        f"expected banned-token error in {errors}")
+        self.assertTrue(
+            any("banned token" in e for e in errors), f"expected banned-token error in {errors}"
+        )
 
 
 class TestShellMetacharacters(unittest.TestCase):
@@ -323,13 +367,20 @@ class TestShellMetacharacters(unittest.TestCase):
         self.assertEqual(len(errors), 1)
 
     def test_integration_with_validate(self):
-        plan = _base_plan([
-            _step(1, "test", "python -m unittest; rm -rf /",
-                  files=["runner/test_validate_plan.py"]),
-        ])
+        plan = _base_plan(
+            [
+                _step(
+                    1,
+                    "test",
+                    "python -m unittest; rm -rf /",
+                    files=["runner/test_validate_plan.py"],
+                ),
+            ]
+        )
         errors = validate(plan)
-        self.assertTrue(any("metacharacter" in e for e in errors),
-                        f"expected metacharacter error in {errors}")
+        self.assertTrue(
+            any("metacharacter" in e for e in errors), f"expected metacharacter error in {errors}"
+        )
 
 
 class TestPathAllowlist(unittest.TestCase):
@@ -406,6 +457,7 @@ class TestPathAllowlist(unittest.TestCase):
         # path like 'runner/foo.py' must be accepted even when invoked
         # from a directory that isn't the repo root.
         import os
+
         orig_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
             try:
@@ -428,13 +480,16 @@ class TestPathAllowlist(unittest.TestCase):
         # relative paths against REPO_ROOT, not cwd, so validate_plan can
         # be invoked from anywhere.
         import os
+
         orig_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
             try:
                 os.chdir(tmp)
-                plan = _base_plan([
-                    _step(1, "modify", "noop", files=["runner/validate_plan.py"]),
-                ])
+                plan = _base_plan(
+                    [
+                        _step(1, "modify", "noop", files=["runner/validate_plan.py"]),
+                    ]
+                )
                 errors = validate(plan)
                 self.assertFalse(
                     any("file not found" in e for e in errors),
@@ -455,20 +510,25 @@ class TestPathAllowlist(unittest.TestCase):
         # that exercises the normcase path.
         flipped = repo_str.swapcase() + "\\runner\\validate_plan.py"
         steps = [_step(1, "modify", "x", files=[flipped])]
-        self.assertEqual(_check_path_allowlist(steps), [],
-                         f"case-flipped path was rejected: {flipped}")
+        self.assertEqual(
+            _check_path_allowlist(steps), [], f"case-flipped path was rejected: {flipped}"
+        )
         # And the gitignored check must still strip the prefix correctly
         # and NOT flag a tracked file.
         self.assertEqual(_check_gitignored_paths(steps), [])
 
     def test_full_validate_surfaces_allowlist_errors(self):
         bad = str(self.outside_root / "path.json")
-        plan = _base_plan([
-            _step(1, "create", "noop spec", files=[bad]),
-        ])
+        plan = _base_plan(
+            [
+                _step(1, "create", "noop spec", files=[bad]),
+            ]
+        )
         errors = validate(plan)
-        self.assertTrue(any("outside the repo working tree" in e for e in errors),
-                        f"expected allowlist error in {errors}")
+        self.assertTrue(
+            any("outside the repo working tree" in e for e in errors),
+            f"expected allowlist error in {errors}",
+        )
 
 
 class TestCriteriaCoverageBigrams(unittest.TestCase):
@@ -535,9 +595,7 @@ class TestCriteriaCoverageBigrams(unittest.TestCase):
 
     def test_empty_criteria_list_passes(self):
         self.assertEqual(_check_criteria_coverage({}, []), [])
-        self.assertEqual(
-            _check_criteria_coverage({"acceptance_criteria": []}, []), []
-        )
+        self.assertEqual(_check_criteria_coverage({"acceptance_criteria": []}, []), [])
 
     def test_criterion_bigrams_helper(self):
         # Whitebox: verify the bigram helper excludes stopword-only pairs.
@@ -634,13 +692,14 @@ class TestFileOverlap(unittest.TestCase):
         self.assertEqual(len(errors), 2)
 
     def test_full_validate_surfaces_overlap_errors(self):
-        plan = _base_plan([
-            _step(1, "create", "spec a", files=["runner/shared.py"]),
-            _step(2, "modify", "spec b", files=["runner/shared.py"]),
-        ])
+        plan = _base_plan(
+            [
+                _step(1, "create", "spec a", files=["runner/shared.py"]),
+                _step(2, "modify", "spec b", files=["runner/shared.py"]),
+            ]
+        )
         errors = validate(plan)
-        self.assertTrue(any("race" in e for e in errors),
-                        f"expected overlap error in {errors}")
+        self.assertTrue(any("race" in e for e in errors), f"expected overlap error in {errors}")
 
 
 class TestGitignoredPaths(unittest.TestCase):
@@ -673,29 +732,40 @@ class TestGitignoredPaths(unittest.TestCase):
             self.assertEqual(_check_gitignored_paths(steps), [])
 
     def test_mixed_tracked_and_ignored_in_one_step(self):
-        steps = [_step(1, "create", "x", files=[
-            "runner/validate_plan.py",
-            "runner/specs/another.json",
-        ])]
+        steps = [
+            _step(
+                1,
+                "create",
+                "x",
+                files=[
+                    "runner/validate_plan.py",
+                    "runner/specs/another.json",
+                ],
+            )
+        ]
         errors = _check_gitignored_paths(steps)
         self.assertEqual(len(errors), 1)
         self.assertIn("runner/specs/another.json", errors[0])
 
     def test_full_validate_surfaces_gitignore_errors(self):
-        plan = _base_plan([
-            _step(1, "create", "noop spec", files=["runner/specs/x.json"]),
-        ])
+        plan = _base_plan(
+            [
+                _step(1, "create", "noop spec", files=["runner/specs/x.json"]),
+            ]
+        )
         errors = validate(plan)
-        self.assertTrue(any("gitignored" in e for e in errors),
-                        f"expected gitignore error in {errors}")
+        self.assertTrue(
+            any("gitignored" in e for e in errors), f"expected gitignore error in {errors}"
+        )
 
     def test_git_unavailable_skips_silently(self):
         # If git is not on PATH (or any OSError), the check is a no-op
         # rather than a hard failure. Simulated by patching subprocess.run
         # to raise FileNotFoundError.
         steps = [_step(1, "create", "x", files=["runner/specs/x.json"])]
-        with mock.patch("runner.validate_plan.subprocess.run",
-                        side_effect=FileNotFoundError("no git")):
+        with mock.patch(
+            "runner.validate_plan.subprocess.run", side_effect=FileNotFoundError("no git")
+        ):
             self.assertEqual(_check_gitignored_paths(steps), [])
 
 
@@ -725,40 +795,43 @@ class TestPostConditionsSchema(unittest.TestCase):
         )
 
     def test_unknown_type_rejected(self):
-        plan = _base_plan([self._step_with_pcs(
-            [{"type": "garbage", "file": "new_file.py"}]
-        )])
+        plan = _base_plan([self._step_with_pcs([{"type": "garbage", "file": "new_file.py"}])])
         errors = validate(plan)
         self.assertTrue(
-            any("invalid type 'garbage'" in e for e in errors), errors,
+            any("invalid type 'garbage'" in e for e in errors),
+            errors,
         )
 
     def test_file_contains_requires_text(self):
-        plan = _base_plan([self._step_with_pcs(
-            [{"type": "file_contains", "file": "new_file.py"}]
-        )])
+        plan = _base_plan([self._step_with_pcs([{"type": "file_contains", "file": "new_file.py"}])])
         errors = validate(plan)
         self.assertTrue(
-            any("'text' is required" in e for e in errors), errors,
+            any("'text' is required" in e for e in errors),
+            errors,
         )
 
     def test_well_formed_conditions_pass(self):
-        plan = _base_plan([self._step_with_pcs([
-            {"type": "file_contains", "file": "new_file.py", "text": "def x"},
-            {"type": "file_exists",   "file": "new_file.py"},
-            {"type": "file_absent",   "file": "old_file.py"},
-            {"type": "file_lacks",    "file": "new_file.py", "text": "banned"},
-        ])])
+        plan = _base_plan(
+            [
+                self._step_with_pcs(
+                    [
+                        {"type": "file_contains", "file": "new_file.py", "text": "def x"},
+                        {"type": "file_exists", "file": "new_file.py"},
+                        {"type": "file_absent", "file": "old_file.py"},
+                        {"type": "file_lacks", "file": "new_file.py", "text": "banned"},
+                    ]
+                )
+            ]
+        )
         errors = [e for e in validate(plan) if "post_conditions" in e]
         self.assertEqual(errors, [])
 
     def test_outside_repo_path_rejected(self):
-        plan = _base_plan([self._step_with_pcs(
-            [{"type": "file_exists", "file": "/etc/passwd"}]
-        )])
+        plan = _base_plan([self._step_with_pcs([{"type": "file_exists", "file": "/etc/passwd"}])])
         errors = validate(plan)
         self.assertTrue(
-            any("outside the repo" in e for e in errors), errors,
+            any("outside the repo" in e for e in errors),
+            errors,
         )
 
 
@@ -776,28 +849,35 @@ class TestTargetRepoRoot(unittest.TestCase):
         (self.target / "src" / "only_here.py").write_text("x = 1\n", encoding="utf-8")
 
     def _plan(self, **extra):
-        plan = _base_plan([
-            _step(1, "modify", "Adjust the value.", files=["src/only_here.py"]),
-        ])
+        plan = _base_plan(
+            [
+                _step(1, "modify", "Adjust the value.", files=["src/only_here.py"]),
+            ]
+        )
         plan.update(extra)
         return plan
 
     def test_file_only_in_the_target_is_found(self):
         errors = validate(self._plan(target_repo=str(self.target)))
         self.assertEqual(
-            [e for e in errors if "file not found" in e], [], errors,
+            [e for e in errors if "file not found" in e],
+            [],
+            errors,
         )
 
     def test_without_a_target_the_same_plan_is_rejected(self):
         errors = validate(self._plan())
         self.assertTrue(
-            any("file not found" in e for e in errors), errors,
+            any("file not found" in e for e in errors),
+            errors,
         )
 
     def test_explicit_repo_root_overrides_the_field(self):
         errors = validate(self._plan(), repo_root=self.target)
         self.assertEqual(
-            [e for e in errors if "file not found" in e], [], errors,
+            [e for e in errors if "file not found" in e],
+            [],
+            errors,
         )
 
     def test_the_root_is_restored_after_the_call(self):

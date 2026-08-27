@@ -11,6 +11,7 @@ bootstrapped repo carries its own copy under ``.claude/apiary/``. The
 rendered file has no dependency on apiary being importable — it only
 needs Python's stdlib.
 """
+
 from __future__ import annotations
 
 # The literal text written to <repo>/.claude/apiary/launch.py. Edit here

@@ -1,4 +1,5 @@
 """Tests for core/utils/timeutil.py — the one on-disk timestamp format."""
+
 from __future__ import annotations
 
 import re
@@ -46,8 +47,10 @@ class ParseIsoTests(unittest.TestCase):
         self.assertEqual(parsed.strftime(ISO_FORMAT), stamp)
 
     def test_accepts_an_offset_form(self) -> None:
-        self.assertEqual(parse_iso("2026-08-26T12:00:00+00:00"),
-                         datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc))
+        self.assertEqual(
+            parse_iso("2026-08-26T12:00:00+00:00"),
+            datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc),
+        )
 
     def test_accepts_microseconds(self) -> None:
         # datetime.isoformat() — what scribe's index rows actually carry.

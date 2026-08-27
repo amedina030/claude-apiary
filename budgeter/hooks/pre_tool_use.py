@@ -8,6 +8,7 @@ the true cost of the previous tool call, attributed correctly.
 
 The final tool in a session is logged by the Stop hook.
 """
+
 import os
 import sys
 from datetime import datetime, timezone
@@ -68,7 +69,11 @@ def run(payload: dict):
         # Use "task_turn" key; fall back to "turn_number" only when the baseline
         # predates the task_turn field (old records).  Never fall back to the
         # current turn_number, which would misattribute costs to a different task.
-        task_turn = baseline["task_turn"] if "task_turn" in baseline else baseline.get("turn_number", turn_number)
+        task_turn = (
+            baseline["task_turn"]
+            if "task_turn" in baseline
+            else baseline.get("turn_number", turn_number)
+        )
 
     # Capture user prompt on the first tool call of a new task; inherit it otherwise.
     if is_new_turn:
@@ -79,38 +84,50 @@ def run(payload: dict):
     # A baseline written by an older counting scheme is kept for task/turn
     # continuity but never compared against (its numbers mean something else).
     comparable = logger.baseline_comparable(baseline)
-    compacted = (comparable
-                 and tokens_now < baseline["tokens"]
-                 and baseline.get("prev_tool_name") != "Agent")
+    compacted = (
+        comparable and tokens_now < baseline["tokens"] and baseline.get("prev_tool_name") != "Agent"
+    )
 
     if flags.is_enabled("budgeter-log"):
         # Log a compaction marker when token count drops (transcript was rewritten).
         # The cost of this tool call is lost — accept the gap.
         if compacted:
-            logger.append_entry({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "session_id": session_id,
-                "tool_name": "[compaction]",
-                "assistant_message": f"Context compacted: {baseline['tokens']:,} -> {tokens_now:,} tokens",
-                "user_message": "",
-                "tokens_delta": 0,
-                "context_tokens": 0,
-                "net_tokens_delta": 0,
-                "turn_number": turn_number,
-                "task_turn": task_turn,
-                "project": "",
-                "_marker": True,  # force-write despite zero deltas
-            })
+            logger.append_entry(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "session_id": session_id,
+                    "tool_name": "[compaction]",
+                    "assistant_message": f"Context compacted: {baseline['tokens']:,} -> {tokens_now:,} tokens",
+                    "user_message": "",
+                    "tokens_delta": 0,
+                    "context_tokens": 0,
+                    "net_tokens_delta": 0,
+                    "turn_number": turn_number,
+                    "task_turn": task_turn,
+                    "project": "",
+                    "_marker": True,  # force-write despite zero deltas
+                }
+            )
 
         # No API call happened since the last PRE (parallel tool calls in one
         # assistant turn): there is no cost to attribute, so log nothing.
         # Logging last_output here created phantom entries — 25% of the log
         # (review B3).
-        if (comparable and baseline.get("prev_tool_name") != "Agent"
-                and not compacted and tokens_now != baseline["tokens"]):
+        if (
+            comparable
+            and baseline.get("prev_tool_name") != "Agent"
+            and not compacted
+            and tokens_now != baseline["tokens"]
+        ):
             entry = logger.build_cost_entry(
-                baseline, session_id, transcript_path, tokens_now,
-                last_input, last_cache, last_create, last_output,
+                baseline,
+                session_id,
+                transcript_path,
+                tokens_now,
+                last_input,
+                last_cache,
+                last_create,
+                last_output,
             )
             logger.append_entry(entry)
 
@@ -124,7 +141,8 @@ def run(payload: dict):
 
     # Save baseline for the next PRE (or Stop hook).
     logger.save_baseline(
-        session_id, tokens_now,
+        session_id,
+        tokens_now,
         context_tokens=last_input + last_cache + last_output,
         prev_tool_name=tool_name,
         prev_assistant_message=assistant_message,
@@ -148,7 +166,9 @@ def run(payload: dict):
         # Prompt size = everything the last call read: uncached input, cache
         # reads and cache writes. Leaving cache writes out read a full
         # context as nearly empty on a cache-miss turn (review B5).
-        tier, nudge_msg = estimator.session_length_nudge(last_input + last_cache + last_create, config)
+        tier, nudge_msg = estimator.session_length_nudge(
+            last_input + last_cache + last_create, config
+        )
         if tier:
             try:
                 sid_for_flag = SessionId(session_id)

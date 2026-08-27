@@ -69,22 +69,16 @@ class TestDiscovery(MigrateTestCase):
 
 class TestExamine(MigrateTestCase):
     def test_canonical_file_needs_nothing(self) -> None:
-        path = self.write(
-            "r/scribe/learnings/2026/1.md", "---\ntags: [a, b]\n---\nbody\n"
-        )
+        path = self.write("r/scribe/learnings/2026/1.md", "---\ntags: [a, b]\n---\nbody\n")
         self.assertEqual(mig.examine(path, self.family("learnings")).status, "canonical")
 
     def test_file_without_frontmatter(self) -> None:
         path = self.write("r/scribe/learnings/2026/2.md", "just a body\n")
-        self.assertEqual(
-            mig.examine(path, self.family("learnings")).status, "no-frontmatter"
-        )
+        self.assertEqual(mig.examine(path, self.family("learnings")).status, "no-frontmatter")
 
     def test_normalizable_file_is_rewritable(self) -> None:
         """Missing space after the comma — same meaning, different bytes."""
-        path = self.write(
-            "r/scribe/learnings/2026/3.md", "---\ntags: [a,b]\n---\nbody\n"
-        )
+        path = self.write("r/scribe/learnings/2026/3.md", "---\ntags: [a,b]\n---\nbody\n")
         self.assertEqual(mig.examine(path, self.family("learnings")).status, "rewritable")
 
     def test_memory_files_are_new_coverage(self) -> None:
@@ -94,9 +88,7 @@ class TestExamine(MigrateTestCase):
 
     def test_real_disagreement_is_reported(self) -> None:
         """The legacy scribe splitter ignored quotes; the new one does not."""
-        path = self.write(
-            "r/scribe/learnings/2026/4.md", '---\ntags: [a, "b, c"]\n---\nbody\n'
-        )
+        path = self.write("r/scribe/learnings/2026/4.md", '---\ntags: [a, "b, c"]\n---\nbody\n')
         result = mig.examine(path, self.family("learnings"))
         self.assertEqual(result.status, "differs")
         self.assertIn("tags", result.detail)
@@ -125,9 +117,7 @@ class TestCheckMode(MigrateTestCase):
         self.assertEqual(path.read_bytes(), before)
 
     def test_disagreement_exits_one_without_writing(self) -> None:
-        path = self.write(
-            "r/scribe/learnings/2026/1.md", '---\ntags: [a, "b, c"]\n---\nbody\n'
-        )
+        path = self.write("r/scribe/learnings/2026/1.md", '---\ntags: [a, "b, c"]\n---\nbody\n')
         before = path.read_bytes()
         code, out = self.run_cli("--check")
         self.assertEqual(code, mig.EXIT_DIFF)
@@ -164,9 +154,7 @@ class TestApplyMode(MigrateTestCase):
             "r/research/gui/e.md", "---\ntitle: A: B\ntags:\n  - a\n  - b\n---\nx\n"
         )
         self.run_cli("--apply")
-        learning_text = (self.state / "r/scribe/learnings/2026/1.md").read_text(
-            encoding="utf-8"
-        )
+        learning_text = (self.state / "r/scribe/learnings/2026/1.md").read_text(encoding="utf-8")
         research_text = research.read_text(encoding="utf-8")
         self.assertIn("tags: [a, b]", learning_text)
         self.assertIn("tags:\n  - a\n  - b\n", research_text)
@@ -187,9 +175,7 @@ class TestApplyMode(MigrateTestCase):
         self.assertEqual(path.read_bytes(), before)
 
     def test_apply_refuses_a_file_whose_parses_disagree(self) -> None:
-        path = self.write(
-            "r/scribe/learnings/2026/1.md", '---\ntags: [a, "b, c"]\n---\nbody\n'
-        )
+        path = self.write("r/scribe/learnings/2026/1.md", '---\ntags: [a, "b, c"]\n---\nbody\n')
         before = path.read_bytes()
         code, _out = self.run_cli("--apply")
         self.assertEqual(code, mig.EXIT_DIFF)
@@ -202,9 +188,7 @@ class TestApplyMode(MigrateTestCase):
         self.assertEqual(path.read_bytes(), before)
 
     def test_apply_is_idempotent(self) -> None:
-        path = self.write(
-            "r/research/gui/e.md", "---\ntitle: A: B\ntags:\n  - a\n  - b\n---\nx\n"
-        )
+        path = self.write("r/research/gui/e.md", "---\ntitle: A: B\ntags:\n  - a\n  - b\n---\nx\n")
         self.run_cli("--apply")
         once = path.read_bytes()
         code, out = self.run_cli("--apply")

@@ -273,7 +273,9 @@ class TokenUsageTests(unittest.TestCase):
         a = TokenUsage(input=1, output=2, cache_read=3, cache_write=4)
         b = TokenUsage(input=10, output=20, cache_read=30, cache_write=40)
         a.add(b)
-        self.assertEqual(a.to_dict(), {"input": 11, "output": 22, "cache_read": 33, "cache_write": 44})
+        self.assertEqual(
+            a.to_dict(), {"input": 11, "output": 22, "cache_read": 33, "cache_write": 44}
+        )
 
 
 class TranscriptTailTests(unittest.TestCase):
@@ -336,18 +338,29 @@ class TranscriptTailTests(unittest.TestCase):
         tail start must be rendered exactly once; the replayed one never."""
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "session.jsonl"
-            first = json.dumps({"type": "user", "promptId": "p1",
-                                "message": {"role": "user", "content": "already replayed"}})
+            first = json.dumps(
+                {
+                    "type": "user",
+                    "promptId": "p1",
+                    "message": {"role": "user", "content": "already replayed"},
+                }
+            )
             p.write_text(first + "\n", encoding="utf-8")
             raw = p.read_bytes()
             # Claude appends before the tail thread starts.
-            gap = json.dumps({"type": "user", "promptId": "p2",
-                              "message": {"role": "user", "content": "in the gap"}})
+            gap = json.dumps(
+                {
+                    "type": "user",
+                    "promptId": "p2",
+                    "message": {"role": "user", "content": "in the gap"},
+                }
+            )
             with p.open("a", encoding="utf-8") as f:
                 f.write(gap + "\n")
             received: list[Message] = []
-            tail = TranscriptTail(p, on_message=received.append, poll_interval=0.05,
-                                  start_at=len(raw))
+            tail = TranscriptTail(
+                p, on_message=received.append, poll_interval=0.05, start_at=len(raw)
+            )
             tail.start()
             try:
                 deadline = time.time() + 2.0
@@ -366,9 +379,14 @@ class TranscriptTailTests(unittest.TestCase):
             tail = TranscriptTail(p, on_message=received.append, poll_interval=0.05)
             tail.start()
             try:
-                rec = json.dumps({"type": "user", "promptId": "p1",
-                                  "message": {"role": "user", "content": "héllo — ✓ 日本"}},
-                                 ensure_ascii=False)
+                rec = json.dumps(
+                    {
+                        "type": "user",
+                        "promptId": "p1",
+                        "message": {"role": "user", "content": "héllo — ✓ 日本"},
+                    },
+                    ensure_ascii=False,
+                )
                 with p.open("a", encoding="utf-8") as f:
                     f.write(rec + "\n")
                 deadline = time.time() + 2.0
@@ -381,8 +399,13 @@ class TranscriptTailTests(unittest.TestCase):
     def test_truncated_file_is_reparsed_from_the_top(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "session.jsonl"
-            long_rec = json.dumps({"type": "user", "promptId": "p1",
-                                   "message": {"role": "user", "content": "x" * 500}})
+            long_rec = json.dumps(
+                {
+                    "type": "user",
+                    "promptId": "p1",
+                    "message": {"role": "user", "content": "x" * 500},
+                }
+            )
             p.write_text(long_rec + "\n", encoding="utf-8")
             received: list[Message] = []
             tail = TranscriptTail(p, on_message=received.append, poll_interval=0.05)
@@ -393,8 +416,13 @@ class TranscriptTailTests(unittest.TestCase):
                     time.sleep(0.05)
                 self.assertEqual(len(received), 1)
                 # Rewritten shorter (/clear, compaction): the old offset is past EOF.
-                short_rec = json.dumps({"type": "user", "promptId": "p2",
-                                        "message": {"role": "user", "content": "fresh"}})
+                short_rec = json.dumps(
+                    {
+                        "type": "user",
+                        "promptId": "p2",
+                        "message": {"role": "user", "content": "fresh"},
+                    }
+                )
                 p.write_text(short_rec + "\n", encoding="utf-8")
                 deadline = time.time() + 2.0
                 while time.time() < deadline and len(received) < 2:
@@ -503,7 +531,9 @@ class SessionDiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             switches: list[Path] = []
-            disc = SessionDiscovery(on_switch=switches.append, projects_root=root, poll_interval=0.05)
+            disc = SessionDiscovery(
+                on_switch=switches.append, projects_root=root, poll_interval=0.05
+            )
             disc.start()
             try:
                 first = root / "first.jsonl"
@@ -606,7 +636,9 @@ class SessionDiscoveryTests(unittest.TestCase):
             parent.write_text("{}\n", encoding="utf-8")
 
             switches: list[Path] = []
-            disc = SessionDiscovery(on_switch=switches.append, projects_root=root, poll_interval=0.05)
+            disc = SessionDiscovery(
+                on_switch=switches.append, projects_root=root, poll_interval=0.05
+            )
             disc.start()
             try:
                 # Without pin, parent gets picked up.

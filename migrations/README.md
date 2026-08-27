@@ -23,6 +23,7 @@ from one apiary version to the next. `apiary update` chains them in order.
 What changes: <specifics>
 Idempotent: yes (safe to run twice).
 """
+
 from pathlib import Path
 
 FROM_VERSION = "0.1.0"

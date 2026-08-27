@@ -11,6 +11,7 @@ Exit 0 on pass or warn, exit 1 on fail (overridden by --warn-only).
 Usage:
     python -m runner.usher <path_to_intake.json> [--warn-only]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,7 +23,7 @@ from pathlib import PurePosixPath
 from .config_loader import get as cfg
 
 # Matches repo-relative paths like "runner/run.py", "core/utils/filelock.py"
-_FILE_PATH_RE = re.compile(r'(?:[\w.-]+/)+[\w.-]+\.[\w]+')
+_FILE_PATH_RE = re.compile(r"(?:[\w.-]+/)+[\w.-]+\.[\w]+")
 
 _DEFAULT_THRESHOLDS = {
     "max_files": {"pass": 5, "warn": 8},
@@ -120,8 +121,12 @@ def _format_verdict(verdict: str, metrics: dict) -> str:
     lines = [f"Usher: {verdict}"]
     per = metrics.get("per_metric", {})
     lines.append(f"  files:       {metrics['file_count']:>3}  ({per.get('file_count', '?')})")
-    lines.append(f"  subsystems:  {metrics['subsystem_count']:>3}  ({per.get('subsystem_count', '?')})")
-    lines.append(f"  desc chars:  {metrics['description_chars']:>3}  ({per.get('description_chars', '?')})")
+    lines.append(
+        f"  subsystems:  {metrics['subsystem_count']:>3}  ({per.get('subsystem_count', '?')})"
+    )
+    lines.append(
+        f"  desc chars:  {metrics['description_chars']:>3}  ({per.get('description_chars', '?')})"
+    )
     if metrics.get("files"):
         lines.append(f"  file list:   {', '.join(metrics['files'])}")
     if metrics.get("subsystems"):
@@ -132,8 +137,13 @@ def _format_verdict(verdict: str, metrics: dict) -> str:
 def main():
     parser = argparse.ArgumentParser(description="Usher — ticket sizing gate")
     parser.add_argument("file", help="Path to intake JSON file")
-    parser.add_argument("--warn-only", dest="warn_only", action="store_true",
-                        default=False, help="Print verdict but always exit 0")
+    parser.add_argument(
+        "--warn-only",
+        dest="warn_only",
+        action="store_true",
+        default=False,
+        help="Print verdict but always exit 0",
+    )
     args = parser.parse_args()
 
     try:

@@ -17,6 +17,7 @@ Exit codes:
     2  validation error (unknown tag, duplicate slug, not found, etc.)
     3  config/YAML parse error (invalid tags.yaml or frontmatter)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -177,8 +178,7 @@ def cmd_find(args: argparse.Namespace) -> int:
     ranked = _rank_hits(query, entries)
     if not ranked:
         print(
-            f"no matches for {query!r}; "
-            "consider WebSearch and capture findings with 'add'",
+            f"no matches for {query!r}; consider WebSearch and capture findings with 'add'",
             file=sys.stderr,
         )
         return EXIT_OK

@@ -5,6 +5,7 @@ These used to be five separate JSON salvagers, two copies of the retry loop
 and six copies of the UUID guard, none of which had tests of their own except
 through executor.parse_verify_output.
 """
+
 import json
 import subprocess
 import unittest
@@ -18,8 +19,19 @@ class TestUuidGuard(unittest.TestCase):
             self.assertTrue(stage_lib.is_uuid_safe(value), value)
 
     def test_rejects_traversal_and_junk(self):
-        for value in ("", "   ", ".", "..", "a/b", "a\\b", "a\x00b",
-                      "../etc/passwd", None, 17, ["x"]):
+        for value in (
+            "",
+            "   ",
+            ".",
+            "..",
+            "a/b",
+            "a\\b",
+            "a\x00b",
+            "../etc/passwd",
+            None,
+            17,
+            ["x"],
+        ):
             self.assertFalse(stage_lib.is_uuid_safe(value), repr(value))
 
     def test_check_returns_stripped_value(self):
@@ -54,33 +66,27 @@ class TestExtractJson(unittest.TestCase):
 
     def test_envelope_inner_json(self):
         raw = json.dumps({"result": '{"steps": [1]}'})
-        self.assertEqual(
-            stage_lib.extract_json(raw, require_keys=("steps",)), {"steps": [1]})
+        self.assertEqual(stage_lib.extract_json(raw, require_keys=("steps",)), {"steps": [1]})
 
     def test_envelope_is_already_the_artifact(self):
         raw = json.dumps({"steps": [1], "usage": {}})
-        self.assertEqual(
-            stage_lib.extract_json(raw, require_keys=("steps",))["steps"], [1])
+        self.assertEqual(stage_lib.extract_json(raw, require_keys=("steps",))["steps"], [1])
 
     def test_fenced_json(self):
-        raw = "prose\n```json\n{\"steps\": []}\n```\nmore prose"
-        self.assertEqual(
-            stage_lib.extract_json(raw, require_keys=("steps",)), {"steps": []})
+        raw = 'prose\n```json\n{"steps": []}\n```\nmore prose'
+        self.assertEqual(stage_lib.extract_json(raw, require_keys=("steps",)), {"steps": []})
 
     def test_unclosed_fence(self):
-        raw = "```json\n{\"steps\": []}"
-        self.assertEqual(
-            stage_lib.extract_json(raw, require_keys=("steps",)), {"steps": []})
+        raw = '```json\n{"steps": []}'
+        self.assertEqual(stage_lib.extract_json(raw, require_keys=("steps",)), {"steps": []})
 
     def test_json_in_prose(self):
-        raw = "Here you go: {\"steps\": [2]} — hope that helps"
-        self.assertEqual(
-            stage_lib.extract_json(raw, require_keys=("steps",)), {"steps": [2]})
+        raw = 'Here you go: {"steps": [2]} — hope that helps'
+        self.assertEqual(stage_lib.extract_json(raw, require_keys=("steps",)), {"steps": [2]})
 
     def test_prefers_the_object_with_the_required_keys(self):
         raw = '{"note": "ignore me"} then {"steps": [3]}'
-        self.assertEqual(
-            stage_lib.extract_json(raw, require_keys=("steps",)), {"steps": [3]})
+        self.assertEqual(stage_lib.extract_json(raw, require_keys=("steps",)), {"steps": [3]})
 
     def test_falls_back_to_first_object_when_none_match(self):
         raw = 'nope {"note": "only this"}'
@@ -147,7 +153,8 @@ class TestRetryUntilValid(unittest.TestCase):
 
     def test_first_attempt_valid(self):
         ok, artifact, errors, prompts, persisted = self._loop(
-            calls=[(0, '{"a": 1}', "")], validations=[[]],
+            calls=[(0, '{"a": 1}', "")],
+            validations=[[]],
         )
         self.assertTrue(ok)
         self.assertEqual(artifact, {"a": 1, "stamped": True})
@@ -217,6 +224,7 @@ class TestRetryUntilValid(unittest.TestCase):
     def test_missing_cli_raises_instead_of_burning_attempts(self):
         def _call(prompt):
             raise FileNotFoundError("claude")
+
         with self.assertRaises(stage_lib.ClaudeMissingError):
             stage_lib.retry_until_valid(
                 build_prompt=lambda prev: "p",

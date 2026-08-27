@@ -28,17 +28,17 @@ from core.utils.state import resolve_state_dir  # noqa: E402
 
 @dataclass
 class NoteEntry:
-    repo: str            # absolute path of the repo this note lives in
-    repo_label: str      # display label (basename) for grouping
-    type: str            # "todo" | "decision" | etc — derived from folder name (singularized)
-    folder: str          # raw scribe subfolder name (e.g. "todos", "decisions")
+    repo: str  # absolute path of the repo this note lives in
+    repo_label: str  # display label (basename) for grouping
+    type: str  # "todo" | "decision" | etc — derived from folder name (singularized)
+    folder: str  # raw scribe subfolder name (e.g. "todos", "decisions")
     display_id: str
     summary: str
-    brief_summary: str   # one-sentence headline for sidebar display (may be "")
+    brief_summary: str  # one-sentence headline for sidebar display (may be "")
     status: str
     timestamp: str
     has_body: bool
-    body_path: str       # absolute path to the .md body file, "" if no body
+    body_path: str  # absolute path to the .md body file, "" if no body
 
     def to_dict(self) -> dict:
         return {
@@ -90,7 +90,10 @@ def _resolve_scribe_root(repo: Path) -> Optional[Path]:
       show", not an empty directory to create.
     """
     return resolve_state_dir(
-        repo=repo, subdir="scribe", use_env=False, require_exists=True,
+        repo=repo,
+        subdir="scribe",
+        use_env=False,
+        require_exists=True,
     )
 
 

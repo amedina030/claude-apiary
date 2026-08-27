@@ -71,12 +71,14 @@ class StartPermissionBridgeTest(unittest.TestCase):
 
     def setUp(self):
         import os
+
         self._saved = {k: os.environ.get(k) for k in self.ENV_KEYS}
         for k in self.ENV_KEYS:
             os.environ.pop(k, None)
 
     def tearDown(self):
         import os
+
         for k, v in self._saved.items():
             if v is None:
                 os.environ.pop(k, None)
@@ -95,12 +97,15 @@ class StartPermissionBridgeTest(unittest.TestCase):
         class FailingBridge:
             def __init__(self, *a, **k):
                 pass
+
             def start(self):
                 raise OSError("address in use")
 
         app = self._app()
-        with mock.patch.object(gui_app, "load_launch", return_value={"permission_mcp": True}), \
-             mock.patch.object(gui_app, "PermissionBridge", FailingBridge):
+        with (
+            mock.patch.object(gui_app, "load_launch", return_value={"permission_mcp": True}),
+            mock.patch.object(gui_app, "PermissionBridge", FailingBridge),
+        ):
             app._start_permission_bridge()
         self.assertIsNone(app._permission_bridge)
         self.assertEqual(os.environ.get("APIARY_PERMISSION_MCP"), "0")
@@ -108,18 +113,22 @@ class StartPermissionBridgeTest(unittest.TestCase):
 
     def test_successful_start_sets_url_then_flag(self):
         import os
+
         order = []
 
         class OkBridge:
             def __init__(self, *a, **k):
                 pass
+
             def start(self):
                 order.append(("flag_at_start", os.environ.get("APIARY_PERMISSION_MCP")))
                 return "http://127.0.0.1:1/permission"
 
         app = self._app()
-        with mock.patch.object(gui_app, "load_launch", return_value={"permission_mcp": True}), \
-             mock.patch.object(gui_app, "PermissionBridge", OkBridge):
+        with (
+            mock.patch.object(gui_app, "load_launch", return_value={"permission_mcp": True}),
+            mock.patch.object(gui_app, "PermissionBridge", OkBridge),
+        ):
             app._start_permission_bridge()
         self.assertIsNotNone(app._permission_bridge)
         self.assertEqual(order, [("flag_at_start", None)])
@@ -131,6 +140,7 @@ class StartPermissionBridgeTest(unittest.TestCase):
 
     def test_disabled_flag_does_nothing(self):
         import os
+
         app = self._app()
         with mock.patch.object(gui_app, "load_launch", return_value={"permission_mcp": False}):
             app._start_permission_bridge()

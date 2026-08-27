@@ -6,6 +6,7 @@ Agent calls are invisible to the pre_tool_use PRE-to-PRE delta because the subag
 runs in a separate transcript. This hook captures the exact token count from
 tool_response.totalTokens and logs it directly.
 """
+
 import os
 import re
 import sys
@@ -23,17 +24,17 @@ from core.hook_context import run_standalone
 # mechanism to set APIARY_REQUEST_ID on a spawn. The hook parses it here as
 # the authoritative source; the env var is a secondary fallback for callers that
 # do control the harness environment.
-_RID_PATTERN = re.compile(r'\[rid:([^\]\n\r]{1,128})\]')
+_RID_PATTERN = re.compile(r"\[rid:([^\]\n\r]{1,128})\]")
 _REQUEST_ID_MAX_LEN = 128
 
 
 def _sanitize_request_id(value: str) -> str:
     """Cap length and reject values with newlines or non-printable characters."""
     if not value:
-        return ''
+        return ""
     value = value[:_REQUEST_ID_MAX_LEN]
-    if not all(c.isprintable() and c not in '\n\r' for c in value):
-        return ''
+    if not all(c.isprintable() and c not in "\n\r" for c in value):
+        return ""
     return value
 
 
@@ -71,7 +72,9 @@ def run(payload: dict):
     # over baseline.agent_description, which is session-level and can be stale for
     # round 2+ in /harden — causing wrong per-round attribution in report --by-agent.
     tool_input = payload.get("tool_input") or {}
-    agent_desc = tool_input.get("description", "") or (baseline.get("agent_description", "") if baseline else "")
+    agent_desc = tool_input.get("description", "") or (
+        baseline.get("agent_description", "") if baseline else ""
+    )
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "session_id": session_id,
@@ -90,15 +93,15 @@ def run(payload: dict):
     # /harden because the Agent tool has no env parameter and APIARY_REQUEST_ID
     # cannot be injected by the LLM. Fall back to the env var for callers that
     # do control the harness environment (e.g. log_agent_cost.py).
-    request_id = ''
+    request_id = ""
     if agent_desc:
         m = _RID_PATTERN.search(agent_desc)
         if m:
             request_id = m.group(1)
     if not request_id:
-        request_id = _sanitize_request_id(os.environ.get('APIARY_REQUEST_ID', ''))
+        request_id = _sanitize_request_id(os.environ.get("APIARY_REQUEST_ID", ""))
     if request_id:
-        entry['request_id'] = request_id
+        entry["request_id"] = request_id
     logger.append_entry(entry)
     return None
 

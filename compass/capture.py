@@ -22,6 +22,7 @@ one-line reason on stderr and the skill is told to warn and move on.
 Exit codes: ``0`` stored/valid, ``1`` invalid payload or write failure,
 ``2`` usage error.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -116,17 +117,24 @@ def cmd_store(args: argparse.Namespace) -> int:
     if not observations and not args.allow_empty:
         # An honest empty capture is a valid outcome, but writing an empty file
         # adds a row to every future synthesis for no signal. Skip by default.
-        print(f"no observations to store for session {_short(session_id)} — "
-              "skipped (pass --allow-empty to write the file anyway)")
+        print(
+            f"no observations to store for session {_short(session_id)} — "
+            "skipped (pass --allow-empty to write the file anyway)"
+        )
         return 0
 
     if args.dry_run:
-        print(json.dumps({
-            "stored": False,
-            "dry_run": True,
-            "path": str(store.observation_path(session_id)),
-            "observations": len(observations),
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "stored": False,
+                    "dry_run": True,
+                    "path": str(store.observation_path(session_id)),
+                    "observations": len(observations),
+                },
+                indent=2,
+            )
+        )
         return 0
 
     try:
@@ -136,13 +144,18 @@ def cmd_store(args: argparse.Namespace) -> int:
     except OSError as exc:
         return _fail(f"could not write the observation file: {exc}")
 
-    print(json.dumps({
-        "stored": True,
-        "path": str(target),
-        "session_id": _short(session_id),
-        "observations": len(observations),
-        "volatile": sum(1 for o in observations if o.get("volatility") == "volatile"),
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "stored": True,
+                "path": str(target),
+                "session_id": _short(session_id),
+                "observations": len(observations),
+                "volatile": sum(1 for o in observations if o.get("volatility") == "volatile"),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -150,22 +163,30 @@ def cmd_template(args: argparse.Namespace) -> int:
     """Print a skeleton payload so the skill never retypes the schema."""
     session_id = _short(args.session_id) if args.session_id else "<8-char prefix>"
     captured = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    print(json.dumps({
-        "session_id": session_id,
-        "captured_at": captured,
-        "observations": [{
-            "dimension": store.dimension_names()[0],
-            "observation": "<1-2 sentences describing the trait/pattern>",
-            "evidence": "<short quote or paraphrase from this session>",
-            "volatility": "stable",
-        }],
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "session_id": session_id,
+                "captured_at": captured,
+                "observations": [
+                    {
+                        "dimension": store.dimension_names()[0],
+                        "observation": "<1-2 sentences describing the trait/pattern>",
+                        "evidence": "<short quote or paraphrase from this session>",
+                        "volatility": "stable",
+                    }
+                ],
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Validate and store a /wrapup compass observation payload")
+        description="Validate and store a /wrapup compass observation payload"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_dims = sub.add_parser("dimensions", help="Print the dimensions to look for")
@@ -184,10 +205,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_store = sub.add_parser("store", help="Validate then write the observation file")
     p_store.add_argument("--content-file", dest="content_file", required=True)
     p_store.add_argument("--session-id")
-    p_store.add_argument("--allow-empty", action="store_true",
-                         help="Write the file even when observations is empty")
-    p_store.add_argument("--dry-run", action="store_true",
-                         help="Validate and report the target path, write nothing")
+    p_store.add_argument(
+        "--allow-empty", action="store_true", help="Write the file even when observations is empty"
+    )
+    p_store.add_argument(
+        "--dry-run", action="store_true", help="Validate and report the target path, write nothing"
+    )
     p_store.set_defaults(func=cmd_store)
 
     return parser

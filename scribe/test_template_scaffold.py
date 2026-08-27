@@ -1,5 +1,6 @@
 """scaffold_defaults refresh rules: bundled changes reach an unmodified
 copy; a user-edited copy and a pre-existing UNRECORDED copy are never touched."""
+
 import hashlib
 import json
 import tempfile
@@ -18,7 +19,9 @@ class ScaffoldRefreshTest(unittest.TestCase):
             tdir.mkdir()
             (tdir / "handoff.md").write_text("my old handoff template\n", encoding="utf-8")
             templates.scaffold_defaults(state)
-            self.assertEqual((tdir / "handoff.md").read_text(encoding="utf-8"), "my old handoff template\n")
+            self.assertEqual(
+                (tdir / "handoff.md").read_text(encoding="utf-8"), "my old handoff template\n"
+            )
             # Other types were scaffolded and recorded.
             self.assertTrue((tdir / "decision.md").exists())
             record = json.loads((tdir / ".bundled_hashes.json").read_text(encoding="utf-8"))

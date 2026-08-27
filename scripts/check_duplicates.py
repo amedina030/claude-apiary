@@ -36,6 +36,7 @@ Usage::
 Exit codes: ``0`` report produced; ``1`` identical bodies found *and*
 ``--fail-on-identical`` was passed; ``2`` bad arguments or unreadable path.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -51,9 +52,22 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Directories that are never ours to deduplicate: virtualenvs, build output,
 # per-target state, vendored JS, and the agent worktrees under .claude/.
 SKIP_DIRS = {
-    ".git", ".venv", "venv", "__pycache__", "node_modules", "dist", "build",
-    ".repos", ".scrap", ".claude", ".mypy_cache", ".pytest_cache", ".ruff_cache",
-    ".apiary", ".apiary.pre-migration", "site-packages",
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "node_modules",
+    "dist",
+    "build",
+    ".repos",
+    ".scrap",
+    ".claude",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".apiary",
+    ".apiary.pre-migration",
+    "site-packages",
 }
 
 DEFAULT_MIN_STATEMENTS = 8
@@ -64,6 +78,7 @@ DEFAULT_TOP = 25
 @dataclass
 class Function:
     """One normalised function body."""
+
     path: Path
     qualname: str
     lineno: int
@@ -117,7 +132,9 @@ def _bound_names(func: ast.AST) -> dict[str, str]:
     args = getattr(func, "args", None)
     if args is not None:
         ordered = [
-            *getattr(args, "posonlyargs", []), *args.args, *args.kwonlyargs,
+            *getattr(args, "posonlyargs", []),
+            *args.args,
+            *args.kwonlyargs,
         ]
         if args.vararg:
             ordered.append(args.vararg)
@@ -143,9 +160,12 @@ def _bound_names(func: ast.AST) -> dict[str, str]:
 
 
 def _strip_docstring(body: list[ast.stmt]) -> list[ast.stmt]:
-    if (body and isinstance(body[0], ast.Expr)
-            and isinstance(body[0].value, ast.Constant)
-            and isinstance(body[0].value.value, str)):
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
         return body[1:]
     return body
 
@@ -155,9 +175,7 @@ def _digest(text: str) -> str:
 
 
 def _count_statements(body: list[ast.stmt]) -> int:
-    return sum(
-        1 for stmt in body for node in ast.walk(stmt) if isinstance(node, ast.stmt)
-    )
+    return sum(1 for stmt in body for node in ast.walk(stmt) if isinstance(node, ast.stmt))
 
 
 def normalize_function(func: ast.AST, path: Path, qualname: str) -> Function | None:
@@ -252,7 +270,8 @@ def overlap(a: Function, b: Function) -> float:
 
 
 def near_duplicate_pairs(
-    functions: list[Function], threshold: float,
+    functions: list[Function],
+    threshold: float,
 ) -> list[tuple[float, Function, Function]]:
     """Pairs scoring at or above *threshold*, excluding exact duplicates.
 
@@ -271,7 +290,7 @@ def near_duplicate_pairs(
             # nothing about any particular pair.
             continue
         for i, left in enumerate(indexes):
-            for right in indexes[i + 1:]:
+            for right in indexes[i + 1 :]:
                 candidates.add((left, right))
 
     scored: list[tuple[float, Function, Function]] = []
@@ -300,11 +319,11 @@ def report(
 
     if groups:
         total = sum(len(g) for g in groups)
-        lines.append(f"Identical function bodies — {len(groups)} group(s), "
-                     f"{total} function(s):")
+        lines.append(f"Identical function bodies — {len(groups)} group(s), {total} function(s):")
         for group in groups[:top]:
-            lines.append(f"  [{group[0].statements} stmts] "
-                         f"{group[0].qualname}() and {len(group) - 1} more:")
+            lines.append(
+                f"  [{group[0].statements} stmts] {group[0].qualname}() and {len(group) - 1} more:"
+            )
             for func in group:
                 lines.append(f"    {func.where}  {func.qualname}()")
         if len(groups) > top:
@@ -335,27 +354,37 @@ def main(argv: list[str] | None = None) -> int:
         description="Report duplicate and near-duplicate Python function bodies.",
     )
     parser.add_argument(
-        "--path", type=Path, default=REPO_ROOT,
+        "--path",
+        type=Path,
+        default=REPO_ROOT,
         help="file or directory to scan (default: the repo root)",
     )
     parser.add_argument(
-        "--min-statements", type=int, default=DEFAULT_MIN_STATEMENTS,
+        "--min-statements",
+        type=int,
+        default=DEFAULT_MIN_STATEMENTS,
         help=f"ignore functions shorter than this (default: {DEFAULT_MIN_STATEMENTS})",
     )
     parser.add_argument(
-        "--threshold", type=float, default=DEFAULT_THRESHOLD,
+        "--threshold",
+        type=float,
+        default=DEFAULT_THRESHOLD,
         help=f"overlap ratio to report a pair (default: {DEFAULT_THRESHOLD})",
     )
     parser.add_argument(
-        "--top", type=int, default=DEFAULT_TOP,
+        "--top",
+        type=int,
+        default=DEFAULT_TOP,
         help=f"how many groups/pairs to print (default: {DEFAULT_TOP})",
     )
     parser.add_argument(
-        "--fail-on-identical", action="store_true",
+        "--fail-on-identical",
+        action="store_true",
         help="exit 1 when identical bodies are found (default: report only)",
     )
     parser.add_argument(
-        "--quiet", action="store_true",
+        "--quiet",
+        action="store_true",
         help="print only the summary counts",
     )
     args = parser.parse_args(argv)
@@ -376,9 +405,11 @@ def main(argv: list[str] | None = None) -> int:
     pairs = near_duplicate_pairs(functions, args.threshold)
 
     if args.quiet:
-        print(f"check_duplicates: {len(groups)} identical group(s), "
-              f"{len(pairs)} high-overlap pair(s), "
-              f"{len(functions)} function(s) considered")
+        print(
+            f"check_duplicates: {len(groups)} identical group(s), "
+            f"{len(pairs)} high-overlap pair(s), "
+            f"{len(functions)} function(s) considered"
+        )
     else:
         print(report(functions, groups, pairs, errors, top=args.top))
 

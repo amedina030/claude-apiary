@@ -9,6 +9,7 @@ env exports, argv, stdin pass-through, exit-code propagation (a gate's exit 2
 must survive), the removed-script message, and the unreachable-main-apiary
 path.
 """
+
 import json
 import os
 import subprocess
@@ -37,12 +38,13 @@ class LauncherTest(unittest.TestCase):
         (self.main_apiary / ".repos" / "target-7").mkdir(parents=True)
         self._pointer({"main_apiary_path": str(self.main_apiary)})
         (self.launcher.parent / "self-pointer.json").write_text(
-            json.dumps({"schema_version": 1, "name": "target", "uid": 7}),
-            encoding="utf-8")
+            json.dumps({"schema_version": 1, "name": "target", "uid": 7}), encoding="utf-8"
+        )
 
     def _pointer(self, data):
         (self.launcher.parent / "main-apiary-pointer.json").write_text(
-            json.dumps(data), encoding="utf-8")
+            json.dumps(data), encoding="utf-8"
+        )
 
     def _script(self, rel, body):
         path = self.main_apiary / rel
@@ -51,29 +53,34 @@ class LauncherTest(unittest.TestCase):
         return rel
 
     def _launch(self, *args, stdin=""):
-        env = {k: v for k, v in os.environ.items()
-               if not k.startswith("APIARY_")}
+        env = {k: v for k, v in os.environ.items() if not k.startswith("APIARY_")}
         return subprocess.run(
             [sys.executable, str(self.launcher), *args],
-            input=stdin, text=True, capture_output=True, env=env, timeout=60,
+            input=stdin,
+            text=True,
+            capture_output=True,
+            env=env,
+            timeout=60,
         )
 
     # --- the target actually runs -----------------------------------------
 
     def test_target_runs_and_sees_stdin_and_argv(self):
-        rel = self._script("tools/echo.py", (
-            "import sys\n"
-            "print('argv=' + repr(sys.argv[1:]))\n"
-            "print('stdin=' + sys.stdin.read())\n"
-        ))
+        rel = self._script(
+            "tools/echo.py",
+            (
+                "import sys\n"
+                "print('argv=' + repr(sys.argv[1:]))\n"
+                "print('stdin=' + sys.stdin.read())\n"
+            ),
+        )
         r = self._launch(rel, "one", "two", stdin="hello")
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         self.assertIn("argv=['one', 'two']", r.stdout)
         self.assertIn("stdin=hello", r.stdout)
 
     def test_target_runs_as_main(self):
-        rel = self._script("tools/name.py",
-                           "print('name=' + __name__)\n")
+        rel = self._script("tools/name.py", "print('name=' + __name__)\n")
         r = self._launch(rel)
         self.assertIn("name=__main__", r.stdout)
 
@@ -89,25 +96,28 @@ class LauncherTest(unittest.TestCase):
     # --- env exports -------------------------------------------------------
 
     def test_env_vars_are_exported_to_the_target(self):
-        rel = self._script("tools/env.py", (
-            "import os\n"
-            "for k in ('APIARY_MAIN_REPO', 'APIARY_TARGET_REPO',\n"
-            "          'APIARY_TARGET_STATE_DIR'):\n"
-            "    print(k + '=' + os.environ.get(k, '<unset>'))\n"
-        ))
+        rel = self._script(
+            "tools/env.py",
+            (
+                "import os\n"
+                "for k in ('APIARY_MAIN_REPO', 'APIARY_TARGET_REPO',\n"
+                "          'APIARY_TARGET_STATE_DIR'):\n"
+                "    print(k + '=' + os.environ.get(k, '<unset>'))\n"
+            ),
+        )
         r = self._launch(rel)
         self.assertIn(f"APIARY_MAIN_REPO={self.main_apiary}", r.stdout)
         self.assertIn(f"APIARY_TARGET_REPO={self.target}", r.stdout)
         self.assertIn(
-            f"APIARY_TARGET_STATE_DIR={self.main_apiary / '.repos' / 'target-7'}",
-            r.stdout)
+            f"APIARY_TARGET_STATE_DIR={self.main_apiary / '.repos' / 'target-7'}", r.stdout
+        )
 
     def test_state_dir_is_unset_when_the_pin_directory_is_missing(self):
         (self.launcher.parent / "self-pointer.json").unlink()
-        rel = self._script("tools/env2.py", (
-            "import os\n"
-            "print('state=' + os.environ.get('APIARY_TARGET_STATE_DIR', '<unset>'))\n"
-        ))
+        rel = self._script(
+            "tools/env2.py",
+            ("import os\nprint('state=' + os.environ.get('APIARY_TARGET_STATE_DIR', '<unset>'))\n"),
+        )
         self.assertIn("state=<unset>", self._launch(rel).stdout)
 
     # --- exit codes --------------------------------------------------------
@@ -115,17 +125,19 @@ class LauncherTest(unittest.TestCase):
     def test_exit_code_is_propagated(self):
         for code in (0, 1, 2, 7):
             with self.subTest(code=code):
-                rel = self._script(f"tools/exit{code}.py",
-                                   f"import sys; sys.exit({code})\n")
+                rel = self._script(f"tools/exit{code}.py", f"import sys; sys.exit({code})\n")
                 self.assertEqual(self._launch(rel).returncode, code)
 
     def test_a_gate_blocking_with_exit_2_still_blocks(self):
-        rel = self._script("tools/gate.py", (
-            "import json, sys\n"
-            "print(json.dumps({'decision': 'block'}))\n"
-            "print('nope', file=sys.stderr)\n"
-            "sys.exit(2)\n"
-        ))
+        rel = self._script(
+            "tools/gate.py",
+            (
+                "import json, sys\n"
+                "print(json.dumps({'decision': 'block'}))\n"
+                "print('nope', file=sys.stderr)\n"
+                "sys.exit(2)\n"
+            ),
+        )
         r = self._launch(rel)
         self.assertEqual(r.returncode, 2)
         self.assertEqual(json.loads(r.stdout), {"decision": "block"})
@@ -176,8 +188,7 @@ class LauncherTest(unittest.TestCase):
 
     def test_the_dispatcher_runs_through_a_launcher_pointed_at_this_checkout(self):
         self._pointer({"main_apiary_path": str(REPO)})
-        r = self._launch("core/hooks/dispatch.py", "post",
-                         stdin=json.dumps({"tool_name": "Read"}))
+        r = self._launch("core/hooks/dispatch.py", "post", stdin=json.dumps({"tool_name": "Read"}))
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         self.assertEqual(json.loads(r.stdout), {})
 

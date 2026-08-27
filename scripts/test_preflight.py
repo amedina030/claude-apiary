@@ -4,6 +4,7 @@ The check_* wrappers read the live environment (interpreter version, PATH,
 home dir), so the testable logic is factored into pure helpers; these lock in
 the version-pin and fragile-path rules without touching real user data.
 """
+
 from __future__ import annotations
 
 import sys

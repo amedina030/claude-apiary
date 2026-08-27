@@ -5,6 +5,7 @@ containing process metadata. On clean exit the lockfile is deleted.
 If the process crashes, the lockfile persists and is detected as stale
 by subsequent invocations.
 """
+
 from __future__ import annotations
 
 import json
@@ -25,8 +26,7 @@ def _lock_path(uuid: str) -> Path:
     return LOCKS_DIR / f"{uuid}.lock"
 
 
-def write(uuid: str, stage: str = "", step_number: int = 0,
-          worktree_path: str = "") -> Path:
+def write(uuid: str, stage: str = "", step_number: int = 0, worktree_path: str = "") -> Path:
     """Create or overwrite a lockfile for the given run UUID."""
     LOCKS_DIR.mkdir(parents=True, exist_ok=True)
     path = _lock_path(uuid)
@@ -42,8 +42,7 @@ def write(uuid: str, stage: str = "", step_number: int = 0,
     return path
 
 
-def update(uuid: str, *, stage: str | None = None,
-           step_number: int | None = None) -> None:
+def update(uuid: str, *, stage: str | None = None, step_number: int | None = None) -> None:
     """Advance an existing lockfile to a new stage.
 
     ``started_at`` is refreshed on every update — it is the heartbeat
@@ -120,9 +119,7 @@ def _pid_alive_windows(pid: int) -> bool:
     k32.CloseHandle.argtypes = (wintypes.HANDLE,)
     k32.CloseHandle.restype = wintypes.BOOL
 
-    handle = k32.OpenProcess(
-        PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid
-    )
+    handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid)
     if not handle:
         # A process owned by another user/session exists but cannot be
         # opened; access-denied is positive evidence that it is alive.

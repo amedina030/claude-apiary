@@ -1,4 +1,5 @@
 """Tests for the centralized state resolver in core/utils/state.py."""
+
 from __future__ import annotations
 
 import json
@@ -49,7 +50,9 @@ class StateResolverTests(unittest.TestCase):
         self.assertTrue(state_dir.name.startswith("foo-"))
 
         # Registry has the entry
-        registry = json.loads((self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8"))
+        registry = json.loads(
+            (self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8")
+        )
         self.assertEqual(len(registry), 1)
         only_id, entry = next(iter(registry.items()))
         self.assertEqual(entry["name"], "foo")
@@ -76,6 +79,7 @@ class StateResolverTests(unittest.TestCase):
 
         # Sleep a touch so the timestamp can move forward
         import time
+
         time.sleep(1.1)
 
         second = state.resolve_target_state_dir(cwd=target, apiary_repo=self.apiary)
@@ -100,7 +104,9 @@ class StateResolverTests(unittest.TestCase):
         self.assertTrue(sa.name.startswith("foo-"))
         self.assertTrue(sb.name.startswith("foo-"))
         # Registry has two distinct entries pointing at distinct paths
-        registry = json.loads((self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8"))
+        registry = json.loads(
+            (self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8")
+        )
         self.assertEqual(len(registry), 2)
         paths = {Path(e["real_path"]) for e in registry.values()}
         self.assertEqual(paths, {a.resolve(), b.resolve()})
@@ -137,7 +143,9 @@ class StateResolverTests(unittest.TestCase):
         target = self._make_target("foo")
         with self.assertRaises(RuntimeError) as ctx:
             state.resolve_target_state_dir(
-                cwd=target, apiary_repo=self.apiary, auto_register=False,
+                cwd=target,
+                apiary_repo=self.apiary,
+                auto_register=False,
             )
         self.assertIn("not registered", str(ctx.exception).lower())
 
@@ -166,7 +174,9 @@ class StateResolverTests(unittest.TestCase):
         (self.apiary / "VERSION").write_text("0.1.0\n", encoding="utf-8")
 
         state.resolve_target_state_dir(cwd=target, apiary_repo=self.apiary)
-        registry = json.loads((self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8"))
+        registry = json.loads(
+            (self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8")
+        )
         only_id, entry = next(iter(registry.items()))
         self.assertEqual(entry["uid"], int(only_id))
         self.assertEqual(entry["version"], "0.1.0")
@@ -176,7 +186,9 @@ class StateResolverTests(unittest.TestCase):
         # No VERSION file in self.apiary at this point.
         target = self._make_target("foo")
         state.resolve_target_state_dir(cwd=target, apiary_repo=self.apiary)
-        registry = json.loads((self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8"))
+        registry = json.loads(
+            (self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8")
+        )
         _, entry = next(iter(registry.items()))
         self.assertEqual(entry["version"], state.DEFAULT_APIARY_VERSION)
 
@@ -265,7 +277,9 @@ class PinModelHelperTests(unittest.TestCase):
         self.assertEqual(loaded["schema_version"], state.PIN_SCHEMA_VERSION)
 
     def test_version_round_trip(self):
-        state.write_version(self.repo, {"apiary_version": "0.1.0", "pinned_at": "2026-05-05T00:00:00Z"})
+        state.write_version(
+            self.repo, {"apiary_version": "0.1.0", "pinned_at": "2026-05-05T00:00:00Z"}
+        )
         loaded = state.read_version(self.repo)
         self.assertEqual(loaded["apiary_version"], "0.1.0")
         self.assertEqual(loaded["schema_version"], state.PIN_SCHEMA_VERSION)
@@ -295,7 +309,9 @@ class PinModelHelperTests(unittest.TestCase):
         # If a future migration writes schema_version=2, the helper should
         # not silently downgrade it. The {schema_version: 1, **payload}
         # spread lets the caller's value win.
-        state.write_self_pointer(self.repo, {"schema_version": 2, "uid": 1, "name": "x", "real_path": "/p"})
+        state.write_self_pointer(
+            self.repo, {"schema_version": 2, "uid": 1, "name": "x", "real_path": "/p"}
+        )
         loaded = state.read_self_pointer(self.repo)
         self.assertEqual(loaded["schema_version"], 2)
 
@@ -308,6 +324,7 @@ class MainApiaryUidTests(unittest.TestCase):
 
     def test_drift_and_cascade_read_the_shared_constant(self):
         from core import cascade, drift
+
         self.assertIs(drift.state.MAIN_APIARY_UID, state.MAIN_APIARY_UID)
         self.assertIs(cascade.state.MAIN_APIARY_UID, state.MAIN_APIARY_UID)
 
@@ -325,8 +342,7 @@ class ResolveStateDirTests(unittest.TestCase):
         self.repo.mkdir()
         _git_init(self.repo)
         # Every test starts with the launcher env var absent.
-        self._env = mock.patch.dict(
-            os.environ, {state.TARGET_STATE_DIR_ENV: ""}, clear=False)
+        self._env = mock.patch.dict(os.environ, {state.TARGET_STATE_DIR_ENV: ""}, clear=False)
         self._env.start()
         self.addCleanup(self._env.stop)
         os.environ.pop(state.TARGET_STATE_DIR_ENV, None)
@@ -335,12 +351,14 @@ class ResolveStateDirTests(unittest.TestCase):
         """Give the repo real pins and create the state dir they name."""
         state_dir = self.apiary / ".repos" / f"{name}-{uid}"
         state_dir.mkdir(parents=True, exist_ok=True)
-        state.write_main_apiary_pointer(self.repo, {
-            "main_apiary_path": str(self.apiary),
-            "main_apiary_uid": state.MAIN_APIARY_UID,
-        })
-        state.write_self_pointer(self.repo, {
-            "uid": uid, "name": name, "real_path": str(self.repo)})
+        state.write_main_apiary_pointer(
+            self.repo,
+            {
+                "main_apiary_path": str(self.apiary),
+                "main_apiary_uid": state.MAIN_APIARY_UID,
+            },
+        )
+        state.write_self_pointer(self.repo, {"uid": uid, "name": name, "real_path": str(self.repo)})
         return state_dir
 
     # --- precedence ---------------------------------------------------
@@ -374,7 +392,9 @@ class ResolveStateDirTests(unittest.TestCase):
         # Pin files can outlive the directory they name (main-apiary moved,
         # state pruned). Falling through beats returning a dead path.
         state.write_main_apiary_pointer(self.repo, {"main_apiary_path": str(self.apiary)})
-        state.write_self_pointer(self.repo, {"uid": 99, "name": "gone", "real_path": str(self.repo)})
+        state.write_self_pointer(
+            self.repo, {"uid": 99, "name": "gone", "real_path": str(self.repo)}
+        )
         self.assertEqual(
             state.resolve_state_dir(self.repo, subdir="scribe"),
             self.repo / ".apiary" / "scribe",
@@ -413,8 +433,9 @@ class ResolveStateDirTests(unittest.TestCase):
     def test_repo_argument_skips_git_entirely(self):
         plain = self.root / "not-a-repo"
         plain.mkdir()
-        with mock.patch("core.utils.state.git_root",
-                        side_effect=AssertionError("git must not run")):
+        with mock.patch(
+            "core.utils.state.git_root", side_effect=AssertionError("git must not run")
+        ):
             self.assertEqual(
                 state.resolve_state_dir(repo=plain, subdir="scribe"),
                 plain / ".apiary" / "scribe",
@@ -438,16 +459,18 @@ class ResolveStateDirTests(unittest.TestCase):
     def test_require_exists_skips_a_subdir_that_is_not_there(self):
         self._register()
         self.assertIsNone(
-            state.resolve_state_dir(repo=self.repo, subdir="scribe",
-                                    use_env=False, require_exists=True)
+            state.resolve_state_dir(
+                repo=self.repo, subdir="scribe", use_env=False, require_exists=True
+            )
         )
 
     def test_require_exists_returns_the_subdir_once_it_exists(self):
         state_dir = self._register()
         (state_dir / "scribe").mkdir()
         self.assertEqual(
-            state.resolve_state_dir(repo=self.repo, subdir="scribe",
-                                    use_env=False, require_exists=True),
+            state.resolve_state_dir(
+                repo=self.repo, subdir="scribe", use_env=False, require_exists=True
+            ),
             state_dir / "scribe",
         )
 
@@ -475,12 +498,17 @@ class ResolveApiaryRepoTests(unittest.TestCase):
         (self.main / "VERSION").write_text("0.1.0\n", encoding="utf-8")
         _git_init(self.main)
         subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t",
-             "add", "-A"], cwd=self.main, check=True, capture_output=True)
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"],
+            cwd=self.main,
+            check=True,
+            capture_output=True,
+        )
         subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t",
-             "commit", "-q", "-m", "files"], cwd=self.main, check=True,
-            capture_output=True)
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "files"],
+            cwd=self.main,
+            check=True,
+            capture_output=True,
+        )
         # Neutral cwd with no pin, and no launcher env var.
         self.elsewhere = self.root / "elsewhere"
         self.elsewhere.mkdir()
@@ -496,7 +524,9 @@ class ResolveApiaryRepoTests(unittest.TestCase):
         wt = self.root / "worktree"
         subprocess.run(
             ["git", "worktree", "add", "--detach", "-q", str(wt)],
-            cwd=self.main, check=True, capture_output=True,
+            cwd=self.main,
+            check=True,
+            capture_output=True,
         )
         return wt
 
@@ -517,10 +547,13 @@ class ResolveApiaryRepoTests(unittest.TestCase):
         (other / "core").mkdir(parents=True)
         (other / "core" / "install.py").write_text("", encoding="utf-8")
         (other / "VERSION").write_text("0.1.0\n", encoding="utf-8")
-        state.write_main_apiary_pointer(self.elsewhere, {
-            "main_apiary_path": str(other),
-            "main_apiary_uid": state.MAIN_APIARY_UID,
-        })
+        state.write_main_apiary_pointer(
+            self.elsewhere,
+            {
+                "main_apiary_path": str(other),
+                "main_apiary_uid": state.MAIN_APIARY_UID,
+            },
+        )
         with mock.patch.object(state, "_REPO_ROOT", self.main):
             self.assertEqual(state.resolve_apiary_repo(), other)
 

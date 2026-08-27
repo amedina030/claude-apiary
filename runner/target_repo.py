@@ -13,6 +13,7 @@ The path helpers (intake_dir, plans_dir, etc.) check the env var on each
 call so subprocess chains (run.py → auto_refine → ...) stay target-aware
 without every call site passing the target explicitly.
 """
+
 from __future__ import annotations
 
 import os
@@ -92,7 +93,9 @@ def resolve_target_repo(
     check fails. Returns the resolved (absolute) path.
     """
     chosen = choose_target_repo(
-        cli_override=cli_override, intake=intake, apiary_root=apiary_root,
+        cli_override=cli_override,
+        intake=intake,
+        apiary_root=apiary_root,
     )
     chosen = chosen.resolve()
     if not chosen.exists():
@@ -101,9 +104,7 @@ def resolve_target_repo(
         raise ValueError(f"target_repo path is not a directory: {chosen}")
     git_marker = chosen / ".git"
     if not git_marker.exists():
-        raise ValueError(
-            f"target_repo path is not a git repository (no .git entry): {chosen}"
-        )
+        raise ValueError(f"target_repo path is not a git repository (no .git entry): {chosen}")
     return chosen
 
 
@@ -195,7 +196,6 @@ def logs_dir(target: Optional[Path] = None) -> Path:
 
 def run_history_path(target: Optional[Path] = None) -> Path:
     return artifacts_root(target) / "run_history.jsonl"
-
 
 
 def worktrees_dir(target: Optional[Path] = None) -> Path:

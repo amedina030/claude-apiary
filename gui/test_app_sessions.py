@@ -291,8 +291,7 @@ class CloseSessionTest(AppSessionsTestBase):
         sessions = [self._open(f"s{i}") for i in range(8)]
         self.app.switch_to(keep.session_id)
         threads = [
-            threading.Thread(target=self.app.close_session, args=(s.session_id,))
-            for s in sessions
+            threading.Thread(target=self.app.close_session, args=(s.session_id,)) for s in sessions
         ]
         for t in threads:
             t.start()

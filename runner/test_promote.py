@@ -16,7 +16,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 def run_promote(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "runner.promote", *args],
-        cwd=str(REPO_ROOT), capture_output=True, text=True,
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
     )
 
 

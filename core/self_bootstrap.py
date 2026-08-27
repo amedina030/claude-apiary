@@ -11,6 +11,7 @@ Fresh-machine setup needs to:
 The function is idempotent: re-running on an already-bootstrapped main-apiary
 just refreshes the install (same as ``apiary install --target <main-apiary>``).
 """
+
 from __future__ import annotations
 
 import sys

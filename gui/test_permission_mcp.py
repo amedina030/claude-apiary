@@ -43,6 +43,7 @@ class PermissionMcpTests(unittest.TestCase):
         # Reimport module with a redirected log path so we don't touch the
         # user's real ~/.claude/.
         import gui.permission_mcp as mod
+
         importlib.reload(mod)
         mod.LOG_PATH = Path(self._tmp.name) / "permission_mcp.log"
         self.mod = mod
@@ -56,9 +57,11 @@ class PermissionMcpTests(unittest.TestCase):
         return [json.loads(line) for line in out if line.strip()]
 
     def test_initialize_returns_capabilities(self):
-        responses = self._roundtrip([
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
-        ])
+        responses = self._roundtrip(
+            [
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            ]
+        )
         self.assertEqual(len(responses), 1)
         r = responses[0]
         self.assertEqual(r["id"], 1)
@@ -67,16 +70,19 @@ class PermissionMcpTests(unittest.TestCase):
         self.assertIn("tools", r["result"]["capabilities"])
 
     def test_tools_list_exposes_permission_prompt(self):
-        responses = self._roundtrip([
-            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-        ])
+        responses = self._roundtrip(
+            [
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            ]
+        )
         self.assertEqual(len(responses), 1)
         tools = responses[0]["result"]["tools"]
         self.assertEqual(len(tools), 1)
         self.assertEqual(tools[0]["name"], self.mod.TOOL_NAME)
         schema = tools[0]["inputSchema"]
         self.assertEqual(
-            set(schema["required"]), {"tool_name", "input", "tool_use_id"},
+            set(schema["required"]),
+            {"tool_name", "input", "tool_use_id"},
         )
 
     def test_tools_call_without_bridge_denies(self):
@@ -89,10 +95,16 @@ class PermissionMcpTests(unittest.TestCase):
             "input": {"file_path": "/x", "old_string": "a", "new_string": "b"},
         }
         with _env({self.mod.BRIDGE_URL_ENV: None, self.mod.ALLOW_ALL_ENV: None}):
-            responses = self._roundtrip([
-                {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-                 "params": {"name": self.mod.TOOL_NAME, "arguments": args}},
-            ])
+            responses = self._roundtrip(
+                [
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "tools/call",
+                        "params": {"name": self.mod.TOOL_NAME, "arguments": args},
+                    },
+                ]
+            )
         self.assertEqual(len(responses), 1)
         content = responses[0]["result"]["content"]
         self.assertEqual(content[0]["type"], "text")
@@ -115,8 +127,10 @@ class PermissionMcpTests(unittest.TestCase):
 
     def test_allow_all_flag_does_not_bypass_a_live_bridge(self):
         from gui.permission_bridge import PermissionBridge
+
         def on_request(pid, payload):
             bridge.resolve(pid, {"behavior": "deny", "message": "policy"})
+
         bridge = PermissionBridge(on_request, timeout_seconds=5.0)
         url = bridge.start()
         try:
@@ -135,14 +149,21 @@ class PermissionMcpTests(unittest.TestCase):
             "input": {
                 "file_path": "/x/secrets.env",
                 "content": "AWS_SECRET_ACCESS_KEY=abcd1234efgh5678ijkl9012mnop3456qrst7890",  # apiary:allow-secret
-                "old_string": "old", "new_string": "new",
+                "old_string": "old",
+                "new_string": "new",
             },
         }
         with _env({self.mod.BRIDGE_URL_ENV: None, self.mod.ALLOW_ALL_ENV: None}):
-            self._roundtrip([
-                {"jsonrpc": "2.0", "id": 7, "method": "tools/call",
-                 "params": {"name": self.mod.TOOL_NAME, "arguments": args}},
-            ])
+            self._roundtrip(
+                [
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 7,
+                        "method": "tools/call",
+                        "params": {"name": self.mod.TOOL_NAME, "arguments": args},
+                    },
+                ]
+            )
         log = self.mod.LOG_PATH.read_text(encoding="utf-8")
         self.assertIn("REQUEST", log)
         self.assertIn("/x/secrets.env", log)  # structure survives
@@ -153,23 +174,37 @@ class PermissionMcpTests(unittest.TestCase):
     def test_decision_log_is_redacted_too(self):
         # An Allow carries updatedInput with the full Write body; the log must
         # not keep it (the REQUEST line was redacted, the DECISION line was not).
-        args = {"tool_use_id": "t", "tool_name": "Write",
-                "input": {"file_path": "/x/secrets.env", "content": "TOKEN=zyxw9876vuts5432"}}  # apiary:allow-secret
+        args = {
+            "tool_use_id": "t",
+            "tool_name": "Write",
+            "input": {
+                "file_path": "/x/secrets.env",
+                "content": "TOKEN=zyxw9876vuts5432",  # apiary:allow-secret
+            },
+        }
         with _env({self.mod.BRIDGE_URL_ENV: None, self.mod.ALLOW_ALL_ENV: "1"}):
-            self._roundtrip([
-                {"jsonrpc": "2.0", "id": 9, "method": "tools/call",
-                 "params": {"name": self.mod.TOOL_NAME, "arguments": args}},
-            ])
+            self._roundtrip(
+                [
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 9,
+                        "method": "tools/call",
+                        "params": {"name": self.mod.TOOL_NAME, "arguments": args},
+                    },
+                ]
+            )
         log = self.mod.LOG_PATH.read_text(encoding="utf-8")
         self.assertIn("DECISION", log)
         self.assertNotIn("zyxw9876", log)
 
     def test_redact_for_log_truncates_long_strings_and_keeps_shape(self):
         long = "x" * 500
-        out = self.mod.redact_for_log({
-            "tool_name": "Bash",
-            "input": {"command": long, "nested": [{"content": "body"}]},
-        })
+        out = self.mod.redact_for_log(
+            {
+                "tool_name": "Bash",
+                "input": {"command": long, "nested": [{"content": "body"}]},
+            }
+        )
         self.assertEqual(out["tool_name"], "Bash")
         self.assertLess(len(out["input"]["command"]), 300)
         self.assertIn("more chars", out["input"]["command"])
@@ -191,6 +226,7 @@ class PermissionMcpTests(unittest.TestCase):
         # ".claude not in parts" check fails in a worktree under .claude/
         # (T-2026-274).
         from gui.paths import state_dir
+
         self.mod.LOG_PATH = None
         self.mod.CONFIG_PATH = None
         sd = state_dir()
@@ -212,17 +248,21 @@ class PermissionMcpTests(unittest.TestCase):
         # Stand up a throwaway loopback bridge; verify decide() POSTs there
         # and surfaces the decision verbatim.
         from gui.permission_bridge import PermissionBridge
+
         def on_request(pid, payload):
             bridge.resolve(pid, {"behavior": "deny", "message": "policy"})
+
         bridge = PermissionBridge(on_request, timeout_seconds=5.0)
         url = bridge.start()
         try:
             os.environ[self.mod.BRIDGE_URL_ENV] = url
-            decision = self.mod.decide({
-                "tool_use_id": "t1",
-                "tool_name": "Bash",
-                "input": {"command": "rm -rf /"},
-            })
+            decision = self.mod.decide(
+                {
+                    "tool_use_id": "t1",
+                    "tool_name": "Bash",
+                    "input": {"command": "rm -rf /"},
+                }
+            )
         finally:
             os.environ.pop(self.mod.BRIDGE_URL_ENV, None)
             bridge.stop()
@@ -233,20 +273,25 @@ class PermissionMcpTests(unittest.TestCase):
         # When APIARY_SESSION_ID is set, decide() should forward it in the
         # POST body so the GUI can route the prompt to the owning tab.
         from gui.permission_bridge import PermissionBridge
+
         captured: list[dict] = []
+
         def on_request(pid, payload):
             captured.append(payload)
             bridge.resolve(pid, {"behavior": "allow", "updatedInput": {}})
+
         bridge = PermissionBridge(on_request, timeout_seconds=5.0)
         url = bridge.start()
         try:
             os.environ[self.mod.BRIDGE_URL_ENV] = url
             os.environ[self.mod.SESSION_ID_ENV] = "sess-abc123"
-            self.mod.decide({
-                "tool_use_id": "t1",
-                "tool_name": "Bash",
-                "input": {"command": "ls"},
-            })
+            self.mod.decide(
+                {
+                    "tool_use_id": "t1",
+                    "tool_name": "Bash",
+                    "input": {"command": "ls"},
+                }
+            )
         finally:
             os.environ.pop(self.mod.BRIDGE_URL_ENV, None)
             os.environ.pop(self.mod.SESSION_ID_ENV, None)
@@ -258,34 +303,46 @@ class PermissionMcpTests(unittest.TestCase):
         # Point the env var at a closed port → decide() returns a deny.
         os.environ[self.mod.BRIDGE_URL_ENV] = "http://127.0.0.1:1/permission"
         try:
-            decision = self.mod.decide({
-                "tool_use_id": "t1",
-                "tool_name": "Edit",
-                "input": {},
-            })
+            decision = self.mod.decide(
+                {
+                    "tool_use_id": "t1",
+                    "tool_name": "Edit",
+                    "input": {},
+                }
+            )
         finally:
             os.environ.pop(self.mod.BRIDGE_URL_ENV, None)
         self.assertEqual(decision["behavior"], "deny")
         self.assertIn("bridge", decision["message"].lower())
 
     def test_tools_call_unknown_tool_denies(self):
-        responses = self._roundtrip([
-            {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
-             "params": {"name": "bogus", "arguments": {}}},
-        ])
+        responses = self._roundtrip(
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/call",
+                    "params": {"name": "bogus", "arguments": {}},
+                },
+            ]
+        )
         decision = json.loads(responses[0]["result"]["content"][0]["text"])
         self.assertEqual(decision["behavior"], "deny")
 
     def test_notification_produces_no_response(self):
-        responses = self._roundtrip([
-            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
-        ])
+        responses = self._roundtrip(
+            [
+                {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            ]
+        )
         self.assertEqual(responses, [])
 
     def test_unknown_method_returns_error(self):
-        responses = self._roundtrip([
-            {"jsonrpc": "2.0", "id": 5, "method": "completely/made_up"},
-        ])
+        responses = self._roundtrip(
+            [
+                {"jsonrpc": "2.0", "id": 5, "method": "completely/made_up"},
+            ]
+        )
         self.assertEqual(len(responses), 1)
         self.assertEqual(responses[0]["error"]["code"], -32601)
 
@@ -314,16 +371,15 @@ class PermissionMcpTests(unittest.TestCase):
             python="C:/dist/apiary-gui/apiary-gui.exe",
             frozen=True,
         )
-        entry = json.loads(dest.read_text(encoding="utf-8"))["mcpServers"][
-            self.mod.SERVER_NAME
-        ]
+        entry = json.loads(dest.read_text(encoding="utf-8"))["mcpServers"][self.mod.SERVER_NAME]
         self.assertEqual(entry["command"], "C:/dist/apiary-gui/apiary-gui.exe")
         self.assertEqual(entry["args"], [self.mod.MCP_SERVER_FLAG])
 
     def test_permission_tool_arg_format(self):
         arg = self.mod.permission_tool_arg()
         self.assertEqual(
-            arg, f"mcp__{self.mod.SERVER_NAME}__{self.mod.TOOL_NAME}",
+            arg,
+            f"mcp__{self.mod.SERVER_NAME}__{self.mod.TOOL_NAME}",
         )
 
     def test_mcp_enabled_env_var_on(self):
@@ -350,9 +406,11 @@ class PermissionMcpTests(unittest.TestCase):
         # Feed one garbage line between two valid messages. The server
         # should log-and-continue, not abort.
         stdin = io.StringIO(
-            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize"}) + "\n"
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+            + "\n"
             + "not-json-at-all\n"
-            + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}) + "\n"
+            + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+            + "\n"
         )
         stdout = io.StringIO()
         self.mod.serve(stdin=stdin, stdout=stdout)

@@ -16,6 +16,7 @@ Archive policy (per spec C-2026-30):
   - Files older than ARCHIVE_MAX_AGE_DAYS (90) are candidates.
   - Candidates move to ``observations/archive/<iso-year>-<iso-week>/``.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -138,8 +139,9 @@ def main() -> int:
 
     p_validate = sub.add_parser("validate", help="validate one observation file")
     p_validate.add_argument("path")
-    p_validate.add_argument("--no-filename-check", action="store_true",
-                            help="skip session_id vs filename match check")
+    p_validate.add_argument(
+        "--no-filename-check", action="store_true", help="skip session_id vs filename match check"
+    )
     p_validate.set_defaults(func=cmd_validate)
 
     p_archive = sub.add_parser("archive", help="archive sweep (dry-run by default)")

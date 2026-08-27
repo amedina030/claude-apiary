@@ -11,6 +11,7 @@ Output: runner/plans/<uuid>.json
 Usage:
     auto_plan.py <path_to_spec.json>
 """
+
 import argparse
 import json
 import re
@@ -41,12 +42,12 @@ REPO_ROOT = SCRIPT_DIR.parent
 
 MAX_RETRIES = cfg("plan", "max_retries", 3)
 
-_CTRL_RE = re.compile(r'[\x00-\x1f\x7f]+')
+_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]+")
 
 
 def _sanitize_prompt_value(value: str, max_length: int = 300) -> str:
     """Strip control characters and truncate to prevent prompt injection from LLM-generated values."""
-    sanitized = _CTRL_RE.sub(' ', value).strip()
+    sanitized = _CTRL_RE.sub(" ", value).strip()
     return sanitized[:max_length]
 
 
@@ -58,6 +59,7 @@ def _resolve_banned_tokens_for_prompt(target_repo: str) -> dict:
     to avoid a module-level circular import.
     """
     from .validate_plan import _resolve_banned_tokens
+
     return _resolve_banned_tokens(target_repo)
 
 
@@ -187,8 +189,8 @@ def build_prompt(
             "For any other files the spec requires, use Grep/Glob sparingly — at most "
             "3 search queries total, and prefer narrow glob patterns over broad content "
             "searches. Do not do exploratory reading of unrelated parts of the codebase."
-            if unique_entries else
-            "2. Read only the specific files mentioned in the spec (e.g. "
+            if unique_entries
+            else "2. Read only the specific files mentioned in the spec (e.g. "
             "files_to_modify, related_files, or files referenced in acceptance "
             "criteria). If you must locate something the spec does not name, use "
             "Grep/Glob sparingly — at most 3 search queries total, and prefer "
@@ -255,72 +257,80 @@ def build_prompt(
     if is_apiary:
         # Byte-identical apiary-case banned-token block (phase 4: this MUST
         # match the pre-refactor prompt for the apiary-self acceptance test).
-        parts.extend([
-            "## BANNED TOKENS — the validator auto-rejects plans containing these:",
-            "",
-            "- 'pytest' → use 'python -m unittest <module>' instead",
-            "- 'shell=true' → use list-form subprocess args instead",
-            "- 'import requests' / 'from requests' → stdlib only (use urllib)",
-            "",
-            "These apply to ALL fields: description, code_spec, and file names.",
-            "Even one occurrence anywhere in the plan causes automatic rejection.",
-            "",
-        ])
+        parts.extend(
+            [
+                "## BANNED TOKENS — the validator auto-rejects plans containing these:",
+                "",
+                "- 'pytest' → use 'python -m unittest <module>' instead",
+                "- 'shell=true' → use list-form subprocess args instead",
+                "- 'import requests' / 'from requests' → stdlib only (use urllib)",
+                "",
+                "These apply to ALL fields: description, code_spec, and file names.",
+                "Even one occurrence anywhere in the plan causes automatic rejection.",
+                "",
+            ]
+        )
     elif banned_tokens:
         # Non-apiary with a configured override: render the configured list.
-        parts.append(
-            "## BANNED TOKENS — the validator auto-rejects plans containing these:"
-        )
+        parts.append("## BANNED TOKENS — the validator auto-rejects plans containing these:")
         parts.append("")
         for token, reason in banned_tokens.items():
             parts.append(f"- '{token}' → {reason}")
-        parts.extend([
-            "",
-            "These apply to ALL fields: description, code_spec, and file names.",
-            "Even one occurrence anywhere in the plan causes automatic rejection.",
-            "",
-        ])
+        parts.extend(
+            [
+                "",
+                "These apply to ALL fields: description, code_spec, and file names.",
+                "Even one occurrence anywhere in the plan causes automatic rejection.",
+                "",
+            ]
+        )
     # Non-apiary with no configured override: no banned-tokens section at all.
 
-    parts.extend([
-        "## Output format",
-        "",
-        "Output ONLY valid JSON matching this schema (no markdown, no explanation):",
-        "",
-        "```json",
-        PLAN_SCHEMA,
-        "```",
-        "",
-        "Valid step types and actions: create, modify, delete, test, verify.",
-    ])
+    parts.extend(
+        [
+            "## Output format",
+            "",
+            "Output ONLY valid JSON matching this schema (no markdown, no explanation):",
+            "",
+            "```json",
+            PLAN_SCHEMA,
+            "```",
+            "",
+            "Valid step types and actions: create, modify, delete, test, verify.",
+        ]
+    )
 
     # Inject the target repo's CLAUDE.md for non-apiary runs so the planner
     # can consult the actual target conventions without a separate file read.
     if target_claude_md is not None:
-        parts.extend([
-            "",
-            "## Target repo conventions",
-            "",
-            "The following is the target repository's CLAUDE.md. Treat these "
-            "as the hard rules for this plan (test framework, imports, style, "
-            "forbidden patterns). If it conflicts with generic advice above, "
-            "the target's CLAUDE.md wins.",
-            "",
-            target_claude_md.rstrip(),
-            "",
-        ])
+        parts.extend(
+            [
+                "",
+                "## Target repo conventions",
+                "",
+                "The following is the target repository's CLAUDE.md. Treat these "
+                "as the hard rules for this plan (test framework, imports, style, "
+                "forbidden patterns). If it conflicts with generic advice above, "
+                "the target's CLAUDE.md wins.",
+                "",
+                target_claude_md.rstrip(),
+                "",
+            ]
+        )
 
     # Inject file-trust context if spec has files_examined
     if unique_entries:
-        parts.extend([
-            "",
-            "## Files already examined by the refiner",
-            "",
-            "The following files were read during the spec-writing stage. "
-            "Treat them as already-read context — do NOT re-read these files "
-            "unless you need to verify behavior that may have changed.",
-            "",
-        ])
+        parts.extend(
+            [
+                "",
+                "## Files already examined by the refiner",
+                "",
+                "The following files were read during the spec-writing stage. "
+                "Treat them as already-read context — do NOT re-read these files "
+                "unless you need to verify behavior that may have changed.",
+                "",
+            ]
+        )
         for entry in unique_entries:
             # Sanitize LLM-generated values to prevent prompt injection (ATK-001)
             path = _sanitize_prompt_value(entry.get("path", ""))
@@ -331,11 +341,13 @@ def build_prompt(
         parts.append("")
 
     if previous_errors:
-        parts.extend([
-            "",
-            "## Previous attempt failed validation with these errors:",
-            "",
-        ])
+        parts.extend(
+            [
+                "",
+                "## Previous attempt failed validation with these errors:",
+                "",
+            ]
+        )
         for err in previous_errors:
             parts.append(f"- {err}")
         parts.append("")
@@ -421,8 +433,7 @@ def _merge_subsumed_steps(steps: list[dict]) -> list[dict]:
             a_spec = a.get("code_spec", "") or ""
             b_spec = b.get("code_spec", "") or ""
             merged["code_spec"] = (
-                f"{a_spec}\n\nAdditionally:\n{b_spec}" if a_spec and b_spec
-                else (a_spec or b_spec)
+                f"{a_spec}\n\nAdditionally:\n{b_spec}" if a_spec and b_spec else (a_spec or b_spec)
             )
             a_pc = a.get("post_conditions") or []
             b_pc = b.get("post_conditions") or []
@@ -433,7 +444,7 @@ def _merge_subsumed_steps(steps: list[dict]) -> list[dict]:
             if seen:
                 merged["post_conditions"] = seen
 
-            new_steps = current[:i] + [merged] + current[i + 2:]
+            new_steps = current[:i] + [merged] + current[i + 2 :]
             for s in new_steps:
                 if not isinstance(s, dict):
                     continue
@@ -536,8 +547,7 @@ def main():
 
     try:
         ok, best_plan, best_errors = retry_until_valid(
-            build_prompt=lambda errors: build_prompt(
-                spec, errors, target_repo=spec_target_repo),
+            build_prompt=lambda errors: build_prompt(spec, errors, target_repo=spec_target_repo),
             call_model=run_claude,
             parse=extract_plan,
             assemble=lambda data: _assemble_plan(data, spec, spec_id),
@@ -561,7 +571,9 @@ def main():
         best_plan["valid"] = False
         _write(plan_path, best_plan)
 
-    print(f"Failed after {MAX_RETRIES} attempts. Best attempt written to {plan_path}", file=sys.stderr)
+    print(
+        f"Failed after {MAX_RETRIES} attempts. Best attempt written to {plan_path}", file=sys.stderr
+    )
     for err in best_errors:
         print(f"  {err}", file=sys.stderr)
     sys.exit(1)

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """CLI wrapper: print total tokens for a given request_id to stdout."""
+
 import argparse
 import sys
 from pathlib import Path
@@ -10,9 +11,13 @@ from budgeter.lib import logger, query
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Sum tokens for a request_id from the budgeter log.")
+    parser = argparse.ArgumentParser(
+        description="Sum tokens for a request_id from the budgeter log."
+    )
     parser.add_argument("--request-id", required=True, help="APIARY_REQUEST_ID to query")
-    parser.add_argument("--cwd", default=None, help="Project working directory (selects project log)")
+    parser.add_argument(
+        "--cwd", default=None, help="Project working directory (selects project log)"
+    )
     args = parser.parse_args()
 
     try:

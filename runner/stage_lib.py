@@ -15,6 +15,7 @@ Before this module the same four jobs were reimplemented once per stage
 There is one of each here. Stages keep their thin wrappers only where the
 wrapper carries stage-specific config (which model, which timeout).
 """
+
 from __future__ import annotations
 
 import json
@@ -42,6 +43,7 @@ class ClaudeMissingError(RuntimeError):
 # UUID / slug safety
 # --------------------------------------------------------------------------- #
 
+
 def is_uuid_safe(value: Any) -> bool:
     """True if *value* is a plain filename component safe to interpolate.
 
@@ -67,16 +69,14 @@ def check_uuid_safe(value: Any, label: str = "uuid") -> str:
     if not isinstance(value, str):
         raise ValueError(f"{label} field is not a string")
     if not is_uuid_safe(value):
-        raise ValueError(
-            f"{label} field contains invalid characters "
-            f"(path separators not allowed)"
-        )
+        raise ValueError(f"{label} field contains invalid characters (path separators not allowed)")
     return value.strip()
 
 
 # --------------------------------------------------------------------------- #
 # JSON salvage
 # --------------------------------------------------------------------------- #
+
 
 def sanitize_json_newlines(text: str) -> str:
     """Escape literal newlines/tabs inside JSON string values.
@@ -164,11 +164,9 @@ def extract_json(
 
     Raises ``json.JSONDecodeError`` when nothing parses.
     """
+
     def _wanted(value: Any) -> bool:
-        return (
-            isinstance(value, dict)
-            and all(key in value for key in require_keys)
-        )
+        return isinstance(value, dict) and all(key in value for key in require_keys)
 
     text = raw_output if isinstance(raw_output, str) else ""
     try:
@@ -220,6 +218,7 @@ def extract_json_str(raw_output: str, *, allow_list: bool = True) -> str:
 # --------------------------------------------------------------------------- #
 # The validate → retry loop
 # --------------------------------------------------------------------------- #
+
 
 def retry_until_valid(
     *,
@@ -305,7 +304,10 @@ def run_validator(module: str, path: Path, *, cwd: Path) -> list:
 
     result = subprocess.run(
         [sys.executable, "-m", module, str(path)],
-        capture_output=True, text=True, encoding="utf-8", cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=str(cwd),
     )
     if result.returncode == 0:
         return []

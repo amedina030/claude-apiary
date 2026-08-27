@@ -3,6 +3,7 @@
 Adapted from the source scribe oracle ``test_status_changed_at``: a status
 change stamps ``status_changed_at``; a content-only update does not.
 """
+
 import sys
 import tempfile
 import unittest

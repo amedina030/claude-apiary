@@ -4,6 +4,7 @@
 Uses subprocess mocks so these tests run on any OS (the Windows backend
 only imports stdlib at module load; native schtasks calls are stubbed).
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -25,15 +26,25 @@ _CSV_SAMPLE = (
 
 
 def _fake_run_ok(stdout: str = "", stderr: str = ""):
-    return mock.Mock(return_value=subprocess.CompletedProcess(
-        args=[], returncode=0, stdout=stdout, stderr=stderr,
-    ))
+    return mock.Mock(
+        return_value=subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    )
 
 
 def _fake_run_fail(stderr: str = "boom"):
-    return mock.Mock(return_value=subprocess.CompletedProcess(
-        args=[], returncode=1, stdout="", stderr=stderr,
-    ))
+    return mock.Mock(
+        return_value=subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr=stderr,
+        )
+    )
 
 
 class ListEntriesTests(unittest.TestCase):
@@ -111,7 +122,8 @@ class CreateAndDeleteTests(unittest.TestCase):
         fake = _fake_run_ok()
         with mock.patch.object(backend, "_run", fake):
             backend.create_entry(
-                "\\apiary\\", "overnight",
+                "\\apiary\\",
+                "overnight",
                 ["python", "-m", "runner.run", "--detached"],
                 "D:\\apiary",
                 {"type": "daily", "time": "02:00"},
@@ -131,7 +143,8 @@ class CreateAndDeleteTests(unittest.TestCase):
         )
         self.assertIn("<Command>python</Command>", body)
         self.assertIn(
-            "<Arguments>-m runner.run --detached</Arguments>", body,
+            "<Arguments>-m runner.run --detached</Arguments>",
+            body,
         )
         self.assertIn("<WorkingDirectory>D:\\apiary</WorkingDirectory>", body)
         self.assertIn("<StartBoundary>2026-01-01T02:00:00</StartBoundary>", body)
@@ -139,14 +152,16 @@ class CreateAndDeleteTests(unittest.TestCase):
 
     def test_create_xml_body_omits_workingdirectory_when_cwd_empty(self):
         body = win_mod._build_task_xml(
-            ["python", "-m", "x"], "",
+            ["python", "-m", "x"],
+            "",
             {"type": "daily", "time": "02:00"},
         )
         self.assertNotIn("<WorkingDirectory>", body)
 
     def test_create_xml_body_escapes_special_chars(self):
         body = win_mod._build_task_xml(
-            ["python & go", "-c", "print('<hi>')"], "D:\\dir",
+            ["python & go", "-c", "print('<hi>')"],
+            "D:\\dir",
             {"type": "daily", "time": "02:00"},
         )
         # XML escaping: & → &amp;, < → &lt;, > → &gt;
@@ -160,7 +175,11 @@ class CreateAndDeleteTests(unittest.TestCase):
         with mock.patch.object(backend, "_run", fake):
             with self.assertRaises(SchedulerError) as ctx:
                 backend.create_entry(
-                    "\\apiary\\", "x", ["python"], "D:\\", {"type": "weekly"},
+                    "\\apiary\\",
+                    "x",
+                    ["python"],
+                    "D:\\",
+                    {"type": "weekly"},
                 )
         self.assertIn("not supported", str(ctx.exception))
         fake.assert_not_called()  # guard ran before any schtasks call
@@ -168,7 +187,9 @@ class CreateAndDeleteTests(unittest.TestCase):
     def test_create_empty_command_raises(self):
         with self.assertRaises(SchedulerError):
             win_mod._build_task_xml(
-                [], "D:\\", {"type": "daily", "time": "02:00"},
+                [],
+                "D:\\",
+                {"type": "daily", "time": "02:00"},
             )
 
     def test_create_failure_raises_with_stderr(self):
@@ -176,8 +197,11 @@ class CreateAndDeleteTests(unittest.TestCase):
         with mock.patch.object(backend, "_run", _fake_run_fail("access denied")):
             with self.assertRaises(SchedulerError) as ctx:
                 backend.create_entry(
-                    "\\apiary\\", "x",
-                    ["python"], "D:\\", {"type": "daily", "time": "02:00"},
+                    "\\apiary\\",
+                    "x",
+                    ["python"],
+                    "D:\\",
+                    {"type": "daily", "time": "02:00"},
                 )
         self.assertIn("access denied", ctx.exception.stderr)
 

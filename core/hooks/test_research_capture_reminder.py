@@ -6,6 +6,7 @@ behavior that matters (which tools fire, the once-per-session gate, and the
 reminder content pointing at the researcher) lives in the pure helpers
 ``should_remind`` and ``reminder_text``, which are exercised here.
 """
+
 import unittest
 
 from core.hooks.research_capture_reminder import (

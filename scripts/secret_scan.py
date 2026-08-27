@@ -102,7 +102,7 @@ class Pattern:
         if not m:
             return None
         if "v" in m.groupdict() and m.group("v") is not None:
-            return m.group("v"), line[m.start():m.start("v")]
+            return m.group("v"), line[m.start() : m.start("v")]
         return m.group(0), ""
 
 
@@ -243,7 +243,9 @@ def parse_staged_diff(diff: str) -> list[tuple[str, int, str]]:
             # "+++ b/some/path" — or /dev/null for a deletion.  # portability-ok: git diff syntax, not a path we open
             # git emits the literal string below; it is diff syntax, not a path
             # we open, so the portable-devnull rule doesn't apply.
-            path = "" if target == "/dev/null" else target[2:] if target.startswith("b/") else target  # portability-ok: git diff syntax, not a path we open
+            path = (
+                "" if target == "/dev/null" else target[2:] if target.startswith("b/") else target
+            )  # portability-ok: git diff syntax, not a path we open
             continue
         if raw.startswith("@@"):
             m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", raw)
@@ -282,7 +284,7 @@ def scan_lines(
                 findings.append(
                     Finding(path, line_no, pattern.name, pattern.hint, prefix + _redact(secret))
                 )
-                break            # one finding per line is enough to block
+                break  # one finding per line is enough to block
         else:
             if entropy:
                 for token in _ENTROPY_TOKEN.findall(text):
@@ -334,8 +336,15 @@ def scan_staged(root: Path, entropy: bool = False) -> list[Finding]:
     """Scan what a commit would add. Raises ``GitError`` if git cannot be run."""
     allowlist = load_allowlist(root)
     diff = _git(
-        [*_GIT_DIFF_OPTS, "diff", "--cached", "--unified=0", "--no-color",
-         "--no-ext-diff", "--no-textconv"],
+        [
+            *_GIT_DIFF_OPTS,
+            "diff",
+            "--cached",
+            "--unified=0",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+        ],
         root,
     )
     findings = blocked_files(staged_paths(root), allowlist)
@@ -353,8 +362,16 @@ def _git_visible_files(root: Path, target: Path) -> list[Path] | None:
     """
     try:
         out = _git(
-            [*_GIT_DIFF_OPTS, "ls-files", "--cached", "--others", "--exclude-standard",
-             "-z", "--", str(target)],
+            [
+                *_GIT_DIFF_OPTS,
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "-z",
+                "--",
+                str(target),
+            ],
             root,
         )
     except GitError:
@@ -392,7 +409,7 @@ def scan_path(target: Path, root: Path | None = None, entropy: bool = False) -> 
         try:
             text = f.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            continue        # binary or unreadable: nothing to scan
+            continue  # binary or unreadable: nothing to scan
         for i, line in enumerate(text.splitlines(), start=1):
             triples.append((rel, i, line))
     findings = blocked_files(paths, allowlist)
@@ -411,9 +428,14 @@ def report(findings: Sequence[Finding], *, hook_mode: bool) -> None:
     print("If a finding is a false positive, either:", file=sys.stderr)
     print(f"  - add '{ALLOW_PRAGMA}' as a comment on that line, or", file=sys.stderr)
     print(f"  - add a regex for it to {ALLOWLIST_FILENAME} in the repo root", file=sys.stderr)
-    print(f"    (a path regex exempts the file; '{ALLOWLIST_LINE_PREFIX}<regex>' exempts matching lines).", file=sys.stderr)
+    print(
+        f"    (a path regex exempts the file; '{ALLOWLIST_LINE_PREFIX}<regex>' exempts matching lines).",
+        file=sys.stderr,
+    )
     if hook_mode:
-        print("  - last resort: git commit --no-verify (skips ALL pre-commit hooks).", file=sys.stderr)
+        print(
+            "  - last resort: git commit --no-verify (skips ALL pre-commit hooks).", file=sys.stderr
+        )
     print("", file=sys.stderr)
 
 
@@ -443,8 +465,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             findings = scan_staged(root, entropy=args.entropy)
         except GitError as exc:
             print(f"secret-scan: the scan did NOT run — {exc}", file=sys.stderr)
-            print("secret-scan: refusing to pass an unscanned commit; fix git and retry,",
-                  file=sys.stderr)
+            print(
+                "secret-scan: refusing to pass an unscanned commit; fix git and retry,",
+                file=sys.stderr,
+            )
             print("             or bypass once with: git commit --no-verify", file=sys.stderr)
             return 2
     else:
@@ -452,7 +476,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not target.exists():
             print(f"secret-scan: no such path: {target}", file=sys.stderr)
             return 2
-        findings = scan_path(target, repo_root(target if target.is_dir() else target.parent), args.entropy)
+        findings = scan_path(
+            target, repo_root(target if target.is_dir() else target.parent), args.entropy
+        )
 
     if findings:
         report(findings, hook_mode=args.staged)

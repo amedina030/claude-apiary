@@ -28,6 +28,7 @@ written before that field existed. Measuring from creation instead archived
 notes the moment they were closed, which is what made them vanish out from
 under a follow-up ``update`` (review §3 bug 3).
 """
+
 from __future__ import annotations
 
 import sys
@@ -47,18 +48,18 @@ DONE_RETENTION_DAYS = 1
 DEFAULT_ARCHIVE_DAYS = 30
 
 #: ``(role, mission)`` defaults for a row that carries neither.
-_DEFAULT_OWNER = ('user', 'general')
+_DEFAULT_OWNER = ("user", "general")
 
 #: One entry per type with a plain age rule: type name -> retention days.
 _AGE_RULES: dict[str, int] = {
-    'context': CONTEXT_RETENTION_DAYS,
-    'decision': DECISION_RETENTION_DAYS,
+    "context": CONTEXT_RETENTION_DAYS,
+    "decision": DECISION_RETENTION_DAYS,
 }
 
 
 def note_key(row: dict) -> tuple:
     """Return the ``(type, year, seq)`` triple that addresses a note."""
-    return (row.get('type'), row.get('year'), row.get('seq'))
+    return (row.get("type"), row.get("year"), row.get("seq"))
 
 
 def handoff_owner(row: dict) -> tuple:
@@ -67,8 +68,7 @@ def handoff_owner(row: dict) -> tuple:
     Handoffs are retained per owner, not globally: an ``attacker``/``harden``
     session's handoff must not evict the ``user``/``general`` one.
     """
-    return (row.get('role', _DEFAULT_OWNER[0]),
-            row.get('mission', _DEFAULT_OWNER[1]))
+    return (row.get("role", _DEFAULT_OWNER[0]), row.get("mission", _DEFAULT_OWNER[1]))
 
 
 def latest_handoffs(rows) -> dict:
@@ -79,9 +79,9 @@ def latest_handoffs(rows) -> dict:
     """
     latest: dict[tuple, datetime] = {}
     for row in rows:
-        if row.get('type') != 'handoff':
+        if row.get("type") != "handoff":
             continue
-        ts = parse_iso(row.get('timestamp'))
+        ts = parse_iso(row.get("timestamp"))
         if ts is None:
             continue
         key = handoff_owner(row)
@@ -97,7 +97,7 @@ def done_at(row: dict) -> "datetime | None":
     existed; without it every legacy done note would look freshly closed and
     never age out.
     """
-    return parse_iso(row.get('status_changed_at')) or parse_iso(row.get('timestamp'))
+    return parse_iso(row.get("status_changed_at")) or parse_iso(row.get("timestamp"))
 
 
 def should_auto_archive(row: dict, *, now: datetime, latest_handoff: dict) -> bool:
@@ -111,16 +111,16 @@ def should_auto_archive(row: dict, *, now: datetime, latest_handoff: dict) -> bo
     to its type's own age rule, so closing a month-old decision does not
     reset its clock.
     """
-    created = parse_iso(row.get('timestamp'))
+    created = parse_iso(row.get("timestamp"))
     if created is None:
         # No usable clock: leave it alone rather than archive on a guess.
         return False
-    if row.get('status') == 'done':
+    if row.get("status") == "done":
         closed = done_at(row) or created
         if closed < now - timedelta(days=DONE_RETENTION_DAYS):
             return True
-    note_type = row.get('type', '')
-    if note_type == 'handoff':
+    note_type = row.get("type", "")
+    if note_type == "handoff":
         return created < latest_handoff.get(handoff_owner(row), created)
     days = _AGE_RULES.get(note_type)
     return days is not None and created < now - timedelta(days=days)
@@ -135,7 +135,8 @@ def select_auto_archive(rows, *, now: "datetime | None" = None) -> list:
     now = now or datetime.now(timezone.utc)
     latest_handoff = latest_handoffs(rows)
     return [
-        note_key(row) for row in rows
+        note_key(row)
+        for row in rows
         if should_auto_archive(row, now=now, latest_handoff=latest_handoff)
     ]
 
@@ -149,10 +150,10 @@ def select_archivable_before(rows, cutoff: datetime) -> list:
     """
     keys = []
     for row in rows:
-        created = parse_iso(row.get('timestamp'))
+        created = parse_iso(row.get("timestamp"))
         if created is None or created >= cutoff:
             continue
-        if row.get('status') == 'done' or row.get('type') == 'handoff':
+        if row.get("status") == "done" or row.get("type") == "handoff":
             keys.append(note_key(row))
     return keys
 
@@ -173,10 +174,10 @@ def external_ticket_links(note: dict) -> list:
     missing or unparseable ticket cannot raise.
     """
     refs = []
-    for tag in (note.get('tags') or []):
-        if isinstance(tag, str) and tag.startswith('ticket:'):
-            ref = tag.split(':', 1)[1].strip()
-            if ref.upper().startswith('K-'):
+    for tag in note.get("tags") or []:
+        if isinstance(tag, str) and tag.startswith("ticket:"):
+            ref = tag.split(":", 1)[1].strip()
+            if ref.upper().startswith("K-"):
                 refs.append(ref)
     return refs
 
@@ -188,7 +189,7 @@ def run_auto_archive(store, *, now: "datetime | None" = None) -> int:
     ``add`` runs it after each write, ``tidy`` on demand, ``core/startup.py``
     once per session.
     """
-    keys = select_auto_archive(store.list_notes(status='active'), now=now)
+    keys = select_auto_archive(store.list_notes(status="active"), now=now)
     archived = 0
     for note_type, year, seq in keys:
         if store.archive_note(note_type, year, seq) is not None:

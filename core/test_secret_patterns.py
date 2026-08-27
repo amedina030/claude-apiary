@@ -38,7 +38,12 @@ FIXTURES = {
     "pypi-token": "pypi-AgEIcHlwaS5vcmc" + "A" * 50,
     "sendgrid-key": "SG." + "a" * 22 + "." + "b" * 43,
     "slack-token": "xoxb-" + "1234567890-abcdefghij",
-    "slack-webhook": "https://hooks.slack.com/services/T" + "ABCDEF12" + "/B" + "ABCDEF12" + "/" + "a" * 24,
+    "slack-webhook": "https://hooks.slack.com/services/T"
+    + "ABCDEF12"
+    + "/B"
+    + "ABCDEF12"
+    + "/"
+    + "a" * 24,
     "twilio-key": "SK" + "0123456789abcdef" * 2,
     "google-api-key": "AIza" + "D" * 35,
     "jwt": "eyJ" + "a" * 20 + ".eyJ" + "b" * 20 + "." + "c" * 20,
@@ -170,6 +175,7 @@ class AllowlistParityTests(unittest.TestCase):
 
     def test_path_rule_exempts_file_in_both_gates(self):
         import re
+
         allow = secret_patterns.Allowlist(paths=(re.compile(r"^fixtures/"),))
         text = FIXTURES["aws-access-key"]
         self.assertEqual(commit_gate.scan_lines([("fixtures/k.py", 1, text)], allow), [])

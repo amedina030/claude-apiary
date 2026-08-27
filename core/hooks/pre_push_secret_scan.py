@@ -34,6 +34,7 @@ not run: a security control that quietly stops working is worse than one that
 is loudly broken. Runner subprocesses are exempt (consistent with the other
 core hooks, #228).
 """
+
 from __future__ import annotations
 
 import os
@@ -102,16 +103,17 @@ def _compose_cwd(base: str | None, extra: str | None) -> str | None:
         return UNRESOLVED_CWD
     return os.path.join(base, extra)
 
+
 SCAN_TIMEOUT_SECONDS = 120
 
 
 class PushTarget(NamedTuple):
     """What a ``git push`` command line is about to send."""
 
-    remote: str | None      # named remote, or None for "default"/URL
-    refs: tuple[str, ...]   # local refs to scan; ("HEAD",) when unnamed
-    everything: bool        # --all / --mirror / --branches
-    cwd: str | None         # from `git -C <dir>`, if given
+    remote: str | None  # named remote, or None for "default"/URL
+    refs: tuple[str, ...]  # local refs to scan; ("HEAD",) when unnamed
+    everything: bool  # --all / --mirror / --branches
+    cwd: str | None  # from `git -C <dir>`, if given
     url: str | None = None  # URL / path destination (no configured remote to diff against)
 
 
@@ -339,13 +341,13 @@ def push_targets(command: str) -> list[PushTarget]:
                     j += 2
                     continue
                 src = spec.lstrip("+").split(":", 1)[0]
-                if src and not deleting:    # ":ref" / --delete: nothing outgoing
+                if src and not deleting:  # ":ref" / --delete: nothing outgoing
                     refs.append(src)
                 j += 1
         if specs or deleting:
-            out_refs = tuple(refs)          # explicit specs; may be all deletions
+            out_refs = tuple(refs)  # explicit specs; may be all deletions
         else:
-            out_refs = ("HEAD",)            # unqualified push sends HEAD
+            out_refs = ("HEAD",)  # unqualified push sends HEAD
         targets.append(PushTarget(remote, out_refs, everything, cwd, url))
     return targets
 
@@ -372,18 +374,33 @@ def outgoing_log_args(
     if target.url:
         exclude = list(destination_tips or [])
         return [
-            "-c", "core.quotepath=false",
-            "log", "-p", "--no-color", "--no-ext-diff", "--no-textconv", "--format=%H",
-            *refs, *(["--not", *exclude] if exclude else []),
+            "-c",
+            "core.quotepath=false",
+            "log",
+            "-p",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--format=%H",
+            *refs,
+            *(["--not", *exclude] if exclude else []),
         ]
     remote = target.remote
     if known_remotes is not None and remote not in known_remotes:
         remote = None
     remotes = f"--remotes={remote}" if remote else "--remotes"
     return [
-        "-c", "core.quotepath=false",
-        "log", "-p", "--no-color", "--no-ext-diff", "--no-textconv", "--format=%H",
-        *refs, "--not", remotes,
+        "-c",
+        "core.quotepath=false",
+        "log",
+        "-p",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--format=%H",
+        *refs,
+        "--not",
+        remotes,
     ]
 
 
@@ -438,7 +455,7 @@ def _scan(payload: dict):  # pragma: no cover — subprocess shell.
     targets = push_targets(command) or [PushTarget(None, ("HEAD",), False, None)]
     for target in targets:
         if not target.refs and not target.everything:
-            continue                        # deletions only — nothing outgoing
+            continue  # deletions only — nothing outgoing
         if target.cwd == UNRESOLVED_CWD:
             _block(
                 "Push blocked: the secret scan cannot follow a `cd` whose target "
@@ -447,26 +464,30 @@ def _scan(payload: dict):  # pragma: no cover — subprocess shell.
                 "from inside the repo, or use `git -C <dir> push`."
             )
         found = _scan_target(target, base_cwd, _block)
-        if found is None:                   # git unusable: fail open — unless
-            if findings:                    # an earlier target already found something
+        if found is None:  # git unusable: fail open — unless
+            if findings:  # an earlier target already found something
                 break
             return None
         findings.extend(found)
     if not findings:
         return None
 
-    lines = [f"  {path}:{lineno}  @{sha[:8]}  [{rule}]  {preview}"
-             for sha, path, lineno, rule, preview in findings]
-    return HookResult(block_reason=(
-        "Push blocked: possible secret(s) in the outgoing commits. The values "
-        "below are about to leave your machine — verify each, then remove or "
-        "rotate it before pushing. A secret that was later deleted is still in "
-        "the history being pushed; rewrite the commits, don't just remove the line.\n\n"
-        + "\n".join(lines)
-        + "\n\nIf a hit is an intentional fixture/example, append "
-        "'apiary:allow-secret' (or 'pragma: allowlist secret') to that line, "
-        "or add a path regex for the file to the repo-root .secretsallow."
-    ))
+    lines = [
+        f"  {path}:{lineno}  @{sha[:8]}  [{rule}]  {preview}"
+        for sha, path, lineno, rule, preview in findings
+    ]
+    return HookResult(
+        block_reason=(
+            "Push blocked: possible secret(s) in the outgoing commits. The values "
+            "below are about to leave your machine — verify each, then remove or "
+            "rotate it before pushing. A secret that was later deleted is still in "
+            "the history being pushed; rewrite the commits, don't just remove the line.\n\n"
+            + "\n".join(lines)
+            + "\n\nIf a hit is an intentional fixture/example, append "
+            "'apiary:allow-secret' (or 'pragma: allowlist secret') to that line, "
+            "or add a path regex for the file to the repo-root .secretsallow."
+        )
+    )
 
 
 def _scan_target(target, base_cwd, hook_block):  # pragma: no cover — shell
@@ -484,8 +505,12 @@ def _scan_target(target, base_cwd, hook_block):  # pragma: no cover — shell
     def _git(*args, timeout=30):
         return subprocess.run(
             ["git", "-C", str(cwd), *args],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=timeout, check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
         )
 
     # Everything up to here is "is this even a push we can inspect?" — git
@@ -493,8 +518,7 @@ def _scan_target(target, base_cwd, hook_block):  # pragma: no cover — shell
     # real git call on, a scan that doesn't complete blocks.
     try:
         verified = [
-            r for r in target.refs
-            if _git("rev-parse", "--verify", "--quiet", r).returncode == 0
+            r for r in target.refs if _git("rev-parse", "--verify", "--quiet", r).returncode == 0
         ]
     except (OSError, subprocess.SubprocessError):
         return None
@@ -531,7 +555,7 @@ def _scan_target(target, base_cwd, hook_block):  # pragma: no cover — shell
         if top.returncode == 0 and top.stdout.strip():
             allowlist = secret_patterns.load_allowlist(Path(top.stdout.strip()))
     except (OSError, subprocess.SubprocessError):
-        pass                                # no allowlist → strictest scan
+        pass  # no allowlist → strictest scan
 
     return scan_patch_series(log.stdout, allowlist)
 
@@ -551,6 +575,7 @@ def _destination_tips(_git, url: str) -> list[str]:  # pragma: no cover — netw
         if re.fullmatch(r"[0-9a-f]{40,64}", sha):
             tips.append(sha)
     return sorted(set(tips))
+
 
 if __name__ == "__main__":  # pragma: no cover
     from core.hook_context import run_standalone

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for files_examined field in spec validation and plan prompt injection."""
+
 import json
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from runner.auto_plan import build_prompt
 from runner.validate_spec import validate_files_examined
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
 
 def _base_spec(**overrides):
     """Return a minimally valid spec dict with optional overrides."""
@@ -24,7 +26,9 @@ def _base_spec(**overrides):
             "dependencies": "none",
         },
         "behavior": {
-            "input": "data", "processing": "steps", "output": "result",
+            "input": "data",
+            "processing": "steps",
+            "output": "result",
             "error_cases": [{"trigger": "bad input", "behavior": "error shown"}],
             "edge_cases": [{"condition": "empty input", "behavior": "default used"}],
         },
@@ -55,10 +59,12 @@ class TestValidateFilesExamined(unittest.TestCase):
         self.assertEqual(validate_files_examined({"files_examined": []}), [])
 
     def test_valid_entries(self):
-        data = {"files_examined": [
-            {"path": "runner/auto_plan.py", "sha": "abc123", "summary": "Planner logic"},
-            {"path": "runner/run.py", "sha": None, "summary": "Orchestrator"},
-        ]}
+        data = {
+            "files_examined": [
+                {"path": "runner/auto_plan.py", "sha": "abc123", "summary": "Planner logic"},
+                {"path": "runner/run.py", "sha": None, "summary": "Orchestrator"},
+            ]
+        }
         self.assertEqual(validate_files_examined(data), [])
 
     def test_empty_path_rejected(self):
@@ -104,16 +110,20 @@ class TestValidateSpecCLIFilesExamined(unittest.TestCase):
             p.write_text(json.dumps(spec_dict), encoding="utf-8")
             result = subprocess.run(
                 [sys.executable, "-m", "runner.validate_spec", str(p)],
-                capture_output=True, text=True, cwd=str(REPO_ROOT),
+                capture_output=True,
+                text=True,
+                cwd=str(REPO_ROOT),
             )
         return result
 
     def test_spec_with_valid_files_examined_passes(self):
-        spec = _base_spec(files_examined=[
-            {"path": "runner/auto_plan.py", "sha": "abc123", "summary": "Planner logic"},
-            {"path": "runner/run.py", "sha": "def456", "summary": "Orchestrator"},
-            {"path": "runner/config.py", "sha": "789abc", "summary": "Config loader"},
-        ])
+        spec = _base_spec(
+            files_examined=[
+                {"path": "runner/auto_plan.py", "sha": "abc123", "summary": "Planner logic"},
+                {"path": "runner/run.py", "sha": "def456", "summary": "Orchestrator"},
+                {"path": "runner/config.py", "sha": "789abc", "summary": "Config loader"},
+            ]
+        )
         result = self._run_validate(spec)
         self.assertEqual(result.returncode, 0)
         self.assertIn("Valid", result.stdout)
@@ -157,10 +167,12 @@ class TestAutoPlanPromptFilesExamined(unittest.TestCase):
     """Tests for build_prompt() file-trust section injection."""
 
     def test_prompt_includes_file_trust_section(self):
-        spec = _base_spec(files_examined=[
-            {"path": "runner/auto_plan.py", "sha": "abc123", "summary": "Planner logic"},
-            {"path": "runner/run.py", "sha": None, "summary": "Orchestrator"},
-        ])
+        spec = _base_spec(
+            files_examined=[
+                {"path": "runner/auto_plan.py", "sha": "abc123", "summary": "Planner logic"},
+                {"path": "runner/run.py", "sha": None, "summary": "Orchestrator"},
+            ]
+        )
         prompt = build_prompt(spec)
         self.assertIn("Files already examined", prompt)
         self.assertIn("runner/auto_plan.py", prompt)
@@ -179,10 +191,12 @@ class TestAutoPlanPromptFilesExamined(unittest.TestCase):
         self.assertNotIn("Files already examined", prompt)
 
     def test_prompt_deduplicates_paths(self):
-        spec = _base_spec(files_examined=[
-            {"path": "runner/auto_plan.py", "sha": "abc", "summary": "First read"},
-            {"path": "runner/auto_plan.py", "sha": "abc", "summary": "Second read"},
-        ])
+        spec = _base_spec(
+            files_examined=[
+                {"path": "runner/auto_plan.py", "sha": "abc", "summary": "First read"},
+                {"path": "runner/auto_plan.py", "sha": "abc", "summary": "Second read"},
+            ]
+        )
         prompt = build_prompt(spec)
         count = prompt.count("`runner/auto_plan.py`")
         self.assertEqual(count, 1, f"Expected 1 occurrence, got {count}")

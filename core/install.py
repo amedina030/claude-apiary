@@ -8,6 +8,7 @@ without disturbing user-owned content.
 
 See ``docs/architecture/per-repo-install.md`` for the full step list.
 """
+
 from __future__ import annotations
 
 import copy
@@ -54,6 +55,7 @@ class InstallError(Exception):
 @dataclasses.dataclass
 class InstallResult:
     """Summary returned by :func:`install`. Useful in tests and CLI output."""
+
     uid: int
     name: str
     slug: str
@@ -111,36 +113,49 @@ def install(
     (pin / "flags").mkdir(exist_ok=True)
     (pin / "session-tmp").mkdir(exist_ok=True)
     _write_launcher(pin / "launch.py")
-    state.write_main_apiary_pointer(target_root, {
-        "main_apiary_path": str(apiary),
-        "main_apiary_uid": state.MAIN_APIARY_UID,
-        "registered_at": registered_at,
-    })
+    state.write_main_apiary_pointer(
+        target_root,
+        {
+            "main_apiary_path": str(apiary),
+            "main_apiary_uid": state.MAIN_APIARY_UID,
+            "registered_at": registered_at,
+        },
+    )
     # Always rewritten, never merely created: an existing pin that disagrees
     # with the registry is the Bug 4 state — the launcher builds a state-dir
     # name from the pinned uid, so a stale one silently reroutes every tool's
     # state to a directory nothing else knows about. The registry is the
     # source of truth; only the drift timestamp is carried over.
-    state.write_self_pointer(target_root, {
-        "uid": uid,
-        "name": name,
-        "real_path": str(target_root),
-        "registered_at": registered_at,
-        "last_drift_check": (pinned or {}).get("last_drift_check", now),
-    })
-    state.write_version(target_root, {
-        "apiary_version": apiary_version,
-        "pinned_at": now,
-    })
+    state.write_self_pointer(
+        target_root,
+        {
+            "uid": uid,
+            "name": name,
+            "real_path": str(target_root),
+            "registered_at": registered_at,
+            "last_drift_check": (pinned or {}).get("last_drift_check", now),
+        },
+    )
+    state.write_version(
+        target_root,
+        {
+            "apiary_version": apiary_version,
+            "pinned_at": now,
+        },
+    )
 
     # Per-repo settings.json with hooks pointing at per-repo launcher
     settings_hash, profile_settings = _write_per_repo_settings(
-        target_root, apiary, profile, _dict_field(previous, "profile_settings"),
+        target_root,
+        apiary,
+        profile,
+        _dict_field(previous, "profile_settings"),
     )
 
     # Slash commands
     commands_hashes = _copy_slash_commands(
-        target_root, apiary, _dict_field(previous, "commands_dir_hashes"))
+        target_root, apiary, _dict_field(previous, "commands_dir_hashes")
+    )
 
     # CLAUDE.md managed zone
     claude_md_hash = _write_claude_md_zone(target_root, apiary)
@@ -156,19 +171,33 @@ def install(
     _install_secret_scan_hook(target_root)
 
     # bootstrap_state.json with hashes for doctor's drift detection
-    _write_bootstrap_state(state_dir, profile, apiary_version, settings_hash,
-                           commands_hashes, claude_md_hash, profile_settings,
-                           previous, is_first, now)
+    _write_bootstrap_state(
+        state_dir,
+        profile,
+        apiary_version,
+        settings_hash,
+        commands_hashes,
+        claude_md_hash,
+        profile_settings,
+        previous,
+        is_first,
+        now,
+    )
 
     return InstallResult(
-        uid=uid, name=name, slug=slug,
-        target_repo=target_root, apiary_repo=apiary,
-        state_dir=state_dir, apiary_version=apiary_version,
+        uid=uid,
+        name=name,
+        slug=slug,
+        target_repo=target_root,
+        apiary_repo=apiary,
+        state_dir=state_dir,
+        apiary_version=apiary_version,
         is_first_install=is_first,
     )
 
 
 # --- Registry interaction -------------------------------------------------
+
 
 def _resolve_target(target_repo: Path) -> Path:
     target = Path(target_repo).resolve()
@@ -204,7 +233,9 @@ def _readoptable_uid(pinned: dict | None, registry: dict) -> int | None:
 
 
 def _register_or_update(
-    target_root: Path, apiary: Path, pinned: dict | None = None,
+    target_root: Path,
+    apiary: Path,
+    pinned: dict | None = None,
 ) -> tuple[int, str, bool, str]:
     """Return (uid, name, is_first_install, registered_at_iso). Holds the
     registry FileLock for the read-update-write.
@@ -261,6 +292,7 @@ def _register_or_update(
 
 # --- File generation ------------------------------------------------------
 
+
 def _write_launcher(launcher_path: Path) -> None:
     """Write the per-repo launcher shim atomically. Marks executable on
     Unix-like systems (no-op on Windows)."""
@@ -272,7 +304,9 @@ def _write_launcher(launcher_path: Path) -> None:
 
 
 def _write_per_repo_settings(
-    target_root: Path, apiary: Path, profile: str,
+    target_root: Path,
+    apiary: Path,
+    profile: str,
     previous_profile: dict | None = None,
 ) -> tuple[str, dict]:
     """Generate ``<target>/.claude/settings.json`` with hooks dispatched
@@ -304,7 +338,9 @@ def _write_per_repo_settings(
 
 
 def _apply_profile_settings(
-    settings_path: Path, apiary: Path, profile: str,
+    settings_path: Path,
+    apiary: Path,
+    profile: str,
     previous_profile: dict | None = None,
 ) -> dict:
     """Merge the resolved profile into *settings_path*; return what it applied.
@@ -323,8 +359,7 @@ def _apply_profile_settings(
     from core.apiary_profiles import resolve
 
     resolved = resolve(profile, apiary / "profiles")
-    applied = {k: v for k, v in resolved.merged.items()
-               if k not in _APIARY_OWNED_KEYS}
+    applied = {k: v for k, v in resolved.merged.items() if k not in _APIARY_OWNED_KEYS}
     settings = load_settings(settings_path)
     _prune_stale_profile_values(settings, previous_profile or {}, applied)
     for key, value in applied.items():
@@ -380,8 +415,9 @@ def _prune_stale_profile_values(user: Any, previous: Any, current: Any) -> None:
             user[:] = [v for v in user if v not in stale]
 
 
-def _copy_slash_commands(target_root: Path, apiary: Path,
-                         previous_hashes: dict[str, str] | None = None) -> dict[str, str]:
+def _copy_slash_commands(
+    target_root: Path, apiary: Path, previous_hashes: dict[str, str] | None = None
+) -> dict[str, str]:
     """Copy ``<apiary>/<tool>/commands/*.md`` into ``<target>/.claude/commands/``.
     Returns ``{filename: sha256}`` for the bootstrap_state hash record.
 
@@ -433,9 +469,7 @@ def _read_bootstrap_state(state_dir: Path) -> dict:
             "re-run `apiary install` to rebuild it from the current install."
         ) from exc
     if not isinstance(data, dict):
-        raise InstallError(
-            f"{p} is not a JSON object. Delete it and re-run `apiary install`."
-        )
+        raise InstallError(f"{p} is not a JSON object. Delete it and re-run `apiary install`.")
     return data
 
 
@@ -448,8 +482,16 @@ def _dict_field(payload: dict, key: str) -> dict:
 def _slash_command_sources(apiary: Path) -> Iterable[Path]:
     """Yield every ``<tool>/commands/*.md`` path under main-apiary."""
     for tool in (
-        "budgeter", "scribe", "core", "docs", "refiner",
-        "harden", "compass", "researcher", "runner", "incubator",
+        "budgeter",
+        "scribe",
+        "core",
+        "docs",
+        "refiner",
+        "harden",
+        "compass",
+        "researcher",
+        "runner",
+        "incubator",
     ):
         cmd_dir = apiary / tool / "commands"
         if cmd_dir.is_dir():
@@ -507,9 +549,7 @@ def _write_claude_md_zone(target_root: Path, apiary: Path) -> str:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(merged, encoding="utf-8")
     except OSError as exc:
-        raise InstallError(
-            f"could not write {target} ({exc.__class__.__name__}: {exc})"
-        ) from exc
+        raise InstallError(f"could not write {target} ({exc.__class__.__name__}: {exc})") from exc
     return hashlib.sha256(rendered_zone.encode("utf-8")).hexdigest()
 
 
@@ -531,8 +571,7 @@ _GITIGNORE_BLOCK = """# Apiary-managed Claude Code install — per-machine, not 
 
 # Forms that already exclude .claude, in either the old blanket spelling or
 # the stepwise one. Presence of any means we leave the file alone.
-_GITIGNORE_PRESENT = (".claude/", "/.claude/", ".claude", "/.claude",
-                      ".claude/*", "/.claude/*")
+_GITIGNORE_PRESENT = (".claude/", "/.claude/", ".claude", "/.claude", ".claude/*", "/.claude/*")
 
 # The old spelling, which works but offers no way to track repo-owned commands.
 _GITIGNORE_BLANKET = (".claude/", "/.claude/", ".claude", "/.claude")
@@ -588,10 +627,14 @@ def _install_secret_scan_hook(target_root: Path) -> None:
     if rc == 0:
         print(f"  secret-scan hook : {git_hooks.hook_path(target_root)}")
     else:
-        print("  secret-scan hook : NOT installed — an existing pre-commit hook is in "
-              "the way. Inspect it, then run:")
-        print("                     python .claude/apiary/launch.py "
-              "scripts/install_git_hooks.py --force")
+        print(
+            "  secret-scan hook : NOT installed — an existing pre-commit hook is in "
+            "the way. Inspect it, then run:"
+        )
+        print(
+            "                     python .claude/apiary/launch.py "
+            "scripts/install_git_hooks.py --force"
+        )
 
 
 def _ensure_gitignore_entry(target_root: Path) -> None:
@@ -660,7 +703,9 @@ def _write_bootstrap_state(
         # What the profile contributed to settings.json, so the next install
         # can withdraw an entry the profile has stopped shipping.
         "profile_settings": profile_settings,
-        "bootstrapped_at": existing.get("bootstrapped_at", now_iso) if not is_first_install else now_iso,
+        "bootstrapped_at": existing.get("bootstrapped_at", now_iso)
+        if not is_first_install
+        else now_iso,
         "last_updated_at": now_iso,
     }
     try:

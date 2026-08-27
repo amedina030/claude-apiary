@@ -3,6 +3,7 @@
 Archives crashed artifacts to ``<state>/runner/crashes/<uuid>/``, removes the
 worktree and branch, deletes the lockfile, and emits a rollback summary.
 """
+
 from __future__ import annotations
 
 import json
@@ -40,15 +41,15 @@ def _archive_artifacts(uuid: str) -> Path:
     lock_data = run_lock.read(uuid)
     if lock_data:
         (dest / "lockfile.json").write_text(
-            json.dumps(lock_data, indent=2), encoding="utf-8",
+            json.dumps(lock_data, indent=2),
+            encoding="utf-8",
         )
     return dest
 
 
 def _owning_repo(worktree_path: Path) -> Path | None:
     """The main checkout a worktree belongs to, or None if it can't be read."""
-    r = git("rev-parse", "--path-format=absolute", "--git-common-dir",
-            cwd=worktree_path)
+    r = git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=worktree_path)
     if r.returncode != 0:
         return None
     common = Path(r.stdout.strip())
@@ -79,12 +80,12 @@ def _delete_branches(uuid: str, repo: Path | None = None) -> list[str]:
     branch names."""
     if repo is None:
         repo = resolve_target_repo()
-    result = git("for-each-ref", "--format=%(refname:short)",
-                 "refs/heads/runner/", cwd=repo)
+    result = git("for-each-ref", "--format=%(refname:short)", "refs/heads/runner/", cwd=repo)
     if result.returncode != 0:
         return []
 
     from .run import _find_runner_branches_from_refs
+
     refs = result.stdout.splitlines()
     branches = _find_runner_branches_from_refs(refs, uuid)
 
@@ -95,9 +96,13 @@ def _delete_branches(uuid: str, repo: Path | None = None) -> list[str]:
     return deleted
 
 
-def _build_summary(uuid: str, lock_data: dict | None, archive_path: Path,
-                   branches_deleted: list[str],
-                   worktree_removed: bool) -> str:
+def _build_summary(
+    uuid: str,
+    lock_data: dict | None,
+    archive_path: Path,
+    branches_deleted: list[str],
+    worktree_removed: bool,
+) -> str:
     """Build a human-readable rollback summary."""
     lines = [f"=== Abort summary for run {uuid} ==="]
     if lock_data:
@@ -129,16 +134,18 @@ def abort_run(uuid: str) -> str:
 
     if lock_data and not run_lock.is_stale(lock_data):
         pid = lock_data.get("pid", "?")
-        raise RuntimeError(
-            f"Run {uuid} is still active (PID {pid}) — kill the process first."
-        )
+        raise RuntimeError(f"Run {uuid} is still active (PID {pid}) — kill the process first.")
 
     archive_path = _archive_artifacts(uuid)
 
     worktree_path = (lock_data or {}).get("worktree_path", "")
     # Resolve the owning repo BEFORE the worktree goes away — after removal
     # there is nothing left to read it back from.
-    repo = _owning_repo(Path(worktree_path)) if worktree_path and Path(worktree_path).exists() else None
+    repo = (
+        _owning_repo(Path(worktree_path))
+        if worktree_path and Path(worktree_path).exists()
+        else None
+    )
     wt_ok = _remove_worktree(worktree_path)
 
     branches = _delete_branches(uuid, repo)

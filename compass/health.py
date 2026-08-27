@@ -6,6 +6,7 @@ broken install, and the doctor's exit code gates CI. ``core/doctor.py``
 holds a ten-line adapter; the facts and their thresholds live here so they
 can be tested without building a fake registry.
 """
+
 from __future__ import annotations
 
 import json
@@ -66,8 +67,7 @@ def collect(state_dir: Path | None = None, *, now: float | None = None) -> dict:
 
     active = 0
     if observations.is_dir():
-        active = sum(1 for p in observations.iterdir()
-                     if p.is_file() and p.suffix == ".json")
+        active = sum(1 for p in observations.iterdir() if p.is_file() and p.suffix == ".json")
     archived = len(list(archive.rglob("*.json"))) if archive.is_dir() else 0
 
     profile_chars = None
@@ -108,8 +108,9 @@ def collect(state_dir: Path | None = None, *, now: float | None = None) -> dict:
 def format_notes(facts: dict) -> list[str]:
     """Render :func:`collect`'s facts as doctor notes (report-only)."""
     if not facts.get("exists"):
-        return [f"no compass state at {facts['compass_dir']} — "
-                "nothing captured for this target yet"]
+        return [
+            f"no compass state at {facts['compass_dir']} — nothing captured for this target yet"
+        ]
 
     notes = [
         f"observations: {facts['active_observations']} active, "
@@ -117,8 +118,9 @@ def format_notes(facts: dict) -> list[str]:
     ]
 
     if facts["profile_chars"] is None:
-        notes.append("personality.md: not written yet "
-                     "(run `/compass-sync` once observations exist)")
+        notes.append(
+            "personality.md: not written yet (run `/compass-sync` once observations exist)"
+        )
     else:
         stale = " — STALE" if facts["stale"] else ""
         notes.append(
@@ -136,13 +138,14 @@ def format_notes(facts: dict) -> list[str]:
             f"rolling window)"
         )
     else:
-        notes.append("A/B: disabled (compass/config.json ab_enabled=false) — "
-                     "every session gets the profile; see docs/compass-measurement.md")
+        notes.append(
+            "A/B: disabled (compass/config.json ab_enabled=false) — "
+            "every session gets the profile; see docs/compass-measurement.md"
+        )
 
     cached = facts["last_evaluate"]
     if not cached:
-        notes.append("evaluate: never run — "
-                     "`compass/evaluate.py offline` writes the headline here")
+        notes.append("evaluate: never run — `compass/evaluate.py offline` writes the headline here")
     else:
         headline = cached.get("headline")
         lift = cached.get("lift_over_majority")

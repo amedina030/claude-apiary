@@ -5,6 +5,7 @@ section; a template without ``required:`` is guidance and never blocks; a type
 with no template accepts anything; ``--force`` bypasses and says so. There is
 no hash to acknowledge — that flow was deleted.
 """
+
 import io
 import sys
 import tempfile
@@ -18,18 +19,33 @@ from scribe import notes as notes_mod
 from scribe import templates as templates_mod
 from scribe.store import VALID_TYPES, ScribeStore
 
-HANDOFF_OK = ("## Session abcd1234 Handoff\n\n### What was done\n- x\n\n"
-              "### Key decisions\n- y\n\n### What's pending\n- z\n\n"
-              "### Where it stopped\n- w\n")
-HANDOFF_MISSING_PENDING = ("### What was done\n- x\n\n### Key decisions\n- y\n\n"
-                           "### Where it stopped\n- w\n")
+HANDOFF_OK = (
+    "## Session abcd1234 Handoff\n\n### What was done\n- x\n\n"
+    "### Key decisions\n- y\n\n### What's pending\n- z\n\n"
+    "### Where it stopped\n- w\n"
+)
+HANDOFF_MISSING_PENDING = (
+    "### What was done\n- x\n\n### Key decisions\n- y\n\n### Where it stopped\n- w\n"
+)
 
 
 def _args(store, **over):
-    base = dict(store=store, content=None, content_file=None, type="todo",
-                summary="", brief_summary="", session_id="s", auto=False,
-                if_no_handoff_for=None, role="", mission="",
-                tags="", unique_tag="", force=False)
+    base = dict(
+        store=store,
+        content=None,
+        content_file=None,
+        type="todo",
+        summary="",
+        brief_summary="",
+        session_id="s",
+        auto=False,
+        if_no_handoff_for=None,
+        role="",
+        mission="",
+        tags="",
+        unique_tag="",
+        force=False,
+    )
     base.update(over)
     return SimpleNamespace(**base)
 
@@ -37,8 +53,9 @@ def _args(store, **over):
 class TestPureHelpers(unittest.TestCase):
     def test_required_sections_parse(self):
         tpl = "---\nrequired: [shipped, open, pick up next session with]\n---\nbody"
-        self.assertEqual(templates_mod.required_sections(tpl),
-                         ["shipped", "open", "pick up next session with"])
+        self.assertEqual(
+            templates_mod.required_sections(tpl), ["shipped", "open", "pick up next session with"]
+        )
 
     def test_no_required_key(self):
         self.assertEqual(templates_mod.required_sections("---\nfoo: bar\n---\n"), [])
@@ -54,8 +71,9 @@ class TestPureHelpers(unittest.TestCase):
         self.assertFalse(templates_mod.section_present("nothing relevant", "shipped"))
 
     def test_missing_required(self):
-        self.assertEqual(templates_mod.missing_sections("## Shipped", ["shipped", "open"]),
-                         ["open"])
+        self.assertEqual(
+            templates_mod.missing_sections("## Shipped", ["shipped", "open"]), ["open"]
+        )
 
     def test_hash_ack_helpers_are_gone(self):
         self.assertFalse(hasattr(notes_mod, "template_hash"))
@@ -81,29 +99,33 @@ class TestBundledTemplates(unittest.TestCase):
         for note_type, expected in self.REQUIRED.items():
             with self.subTest(note_type=note_type):
                 text = (templates_mod.DEFAULT_TEMPLATES_DIR / f"{note_type}.md").read_text(
-                    encoding="utf-8")
+                    encoding="utf-8"
+                )
                 self.assertEqual(templates_mod.required_sections(text), expected)
 
     def test_guidance_templates_declare_nothing(self):
         for note_type in self.GUIDANCE_ONLY:
             with self.subTest(note_type=note_type):
                 text = (templates_mod.DEFAULT_TEMPLATES_DIR / f"{note_type}.md").read_text(
-                    encoding="utf-8")
+                    encoding="utf-8"
+                )
                 self.assertEqual(templates_mod.required_sections(text), [])
 
     def test_templates_satisfy_their_own_required_sections(self):
         for note_type in self.REQUIRED:
             with self.subTest(note_type=note_type):
                 text = (templates_mod.DEFAULT_TEMPLATES_DIR / f"{note_type}.md").read_text(
-                    encoding="utf-8")
+                    encoding="utf-8"
+                )
                 self.assertEqual(
-                    templates_mod.missing_sections(
-                        text, templates_mod.required_sections(text)), [])
+                    templates_mod.missing_sections(text, templates_mod.required_sections(text)), []
+                )
 
     def test_handoff_required_matches_wrapup_skill(self):
         """The gate must accept the handoff shape core/commands/wrapup.md prescribes."""
-        wrapup = (Path(__file__).resolve().parent.parent
-                  / "core" / "commands" / "wrapup.md").read_text(encoding="utf-8")
+        wrapup = (
+            Path(__file__).resolve().parent.parent / "core" / "commands" / "wrapup.md"
+        ).read_text(encoding="utf-8")
         for section in self.REQUIRED["handoff"]:
             with self.subTest(section=section):
                 self.assertIn(f"### {section}", wrapup)
@@ -156,21 +178,22 @@ class TestGate(unittest.TestCase):
         self.assertEqual(len(self.store.list_notes(note_type="todo")), 1)
 
     def test_conforming_handoff_passes(self):
-        notes_mod.cmd_add(_args(self.store, type="handoff", content=HANDOFF_OK,
-                                summary="s1"))
+        notes_mod.cmd_add(_args(self.store, type="handoff", content=HANDOFF_OK, summary="s1"))
         self.assertEqual(len(self.store.list_notes(note_type="handoff")), 1)
 
     def test_missing_section_rejected_and_nothing_written(self):
         with self.assertRaises(SystemExit):
-            notes_mod.cmd_add(_args(self.store, type="handoff",
-                                    content=HANDOFF_MISSING_PENDING, summary="s1"))
+            notes_mod.cmd_add(
+                _args(self.store, type="handoff", content=HANDOFF_MISSING_PENDING, summary="s1")
+            )
         self.assertEqual(len(self.store.list_notes(note_type="handoff", status="all")), 0)
 
     def test_rejection_message_inlines_the_template(self):
         buf = io.StringIO()
         with redirect_stderr(buf), self.assertRaises(SystemExit):
-            notes_mod.cmd_add(_args(self.store, type="handoff",
-                                    content=HANDOFF_MISSING_PENDING, summary="s1"))
+            notes_mod.cmd_add(
+                _args(self.store, type="handoff", content=HANDOFF_MISSING_PENDING, summary="s1")
+            )
         err = buf.getvalue()
         self.assertIn("What's pending", err)
         self.assertIn("--- handoff.md ---", err)
@@ -179,34 +202,53 @@ class TestGate(unittest.TestCase):
     def test_force_bypasses_and_logs(self):
         buf = io.StringIO()
         with redirect_stderr(buf):
-            notes_mod.cmd_add(_args(self.store, type="handoff",
-                                    content=HANDOFF_MISSING_PENDING, summary="s1",
-                                    force=True))
+            notes_mod.cmd_add(
+                _args(
+                    self.store,
+                    type="handoff",
+                    content=HANDOFF_MISSING_PENDING,
+                    summary="s1",
+                    force=True,
+                )
+            )
         self.assertEqual(len(self.store.list_notes(note_type="handoff")), 1)
         self.assertIn("bypassed via --force", buf.getvalue())
 
     def test_force_is_silent_when_nothing_was_missing(self):
         buf = io.StringIO()
         with redirect_stderr(buf):
-            notes_mod.cmd_add(_args(self.store, type="handoff", content=HANDOFF_OK,
-                                    summary="s1", force=True))
+            notes_mod.cmd_add(
+                _args(self.store, type="handoff", content=HANDOFF_OK, summary="s1", force=True)
+            )
         self.assertNotIn("--force", buf.getvalue())
 
     def test_gate_is_per_type(self):
         # The handoff template must not constrain a decision note, and vice versa.
-        notes_mod.cmd_add(_args(self.store, type="decision",
-                                content="### Context\n### Decision\n### Why\n### Consequences\n"))
+        notes_mod.cmd_add(
+            _args(
+                self.store,
+                type="decision",
+                content="### Context\n### Decision\n### Why\n### Consequences\n",
+            )
+        )
         self.assertEqual(len(self.store.list_notes(note_type="decision")), 1)
         with self.assertRaises(SystemExit):
             notes_mod.cmd_add(_args(self.store, type="blocker", content=HANDOFF_OK))
 
     def test_gate_is_forward_only(self):
         """Existing notes are never validated or rewritten — only `add` checks."""
-        entry = self.store.add_note("handoff", "free-form legacy handoff", "s0",
-                                    summary="legacy")
-        notes_mod.cmd_update(_args(self.store, id=entry["display_id"],
-                                   content="still free-form", session_id=None,
-                                   brief_summary="", add_tag=[], remove_tag=[]))
+        entry = self.store.add_note("handoff", "free-form legacy handoff", "s0", summary="legacy")
+        notes_mod.cmd_update(
+            _args(
+                self.store,
+                id=entry["display_id"],
+                content="still free-form",
+                session_id=None,
+                brief_summary="",
+                add_tag=[],
+                remove_tag=[],
+            )
+        )
         got = self.store.get_note("handoff", entry["year"], entry["seq"])
         self.assertEqual(got["content"], "still free-form")
 

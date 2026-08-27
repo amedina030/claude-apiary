@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for harden/assign_ids.py."""
+
 import json
 import subprocess
 import sys
@@ -20,7 +21,6 @@ def run_assign(input_json: str, prefix: str) -> subprocess.CompletedProcess:
 
 
 class TestAssignIds(unittest.TestCase):
-
     def test_atk_prefix_assigns_sequential_ids(self):
         items = [{"category": "security"}, {"category": "input"}]
         result = run_assign(json.dumps(items), "ATK")
