@@ -40,6 +40,21 @@ pythonnet = { version = ">=3.0,<4.0", markers = "sys_platform == 'win32'", pytho
 pywinpty = { version = ">=2.0,<3.0", markers = "sys_platform == 'win32'" }
 watchdog = ">=4.0,<7.0"
 
+# Build-only tooling for the packaged GUI. Was installed ad hoc with
+# `poetry run pip install pyinstaller`, which left the one tool that decides
+# what an .exe contains unpinned and out of the lockfile.
+# Install with: poetry install --with gui --with build
+[tool.poetry.group.build]
+optional = true
+
+[tool.poetry.group.build.dependencies]
+# 6.x is the series the spec is written against (SPEC/workpath injection,
+# `PYZ(a.pure)` single-arg form). 7.x may change both. The python bound
+# mirrors the gui group's pythonnet pin: 6.x publishes no wheels past the
+# Python it was cut against, and there is no point building a bundle for an
+# interpreter the GUI's own deps refuse to install on.
+pyinstaller = { version = ">=6.0,<7.0", python = ">=3.11,<3.13" }
+
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
 

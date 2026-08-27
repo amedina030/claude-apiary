@@ -41,15 +41,38 @@ The window title becomes `apiary [dev]` so it's visually distinct from the main 
 sidebar state survive. Useful for iterating on `gui/web/*`. Backend changes
 (`gui/*.py`) still need a full process restart.
 
+### Frontend tests
+
+The browser-free parts of the frontend live in their own modules, each with a
+`node:test` suite beside it — `prompt_detector.js` (prompt parsing),
+`bubble_monitor.js` (thinking-bubble anomaly classification),
+`message_reconcile.js` (optimistic-render reconciliation + queued ordering),
+`thinking_state.js` (the per-tab turn state machine). `app.js` keeps the DOM
+and calls into them.
+
+```bash
+node gui/web/test_thinking_state.js      # one suite
+poetry run pytest gui/test_js_suites.py  # all of them, via pytest
+```
+
+`gui/test_js_suites.py` shells out to `node` for every `gui/web/test_*.js`, so
+`pytest gui` covers them too. It skips rather than fails when `node` is not on
+PATH. New pure logic pulled out of `app.js` should arrive with a suite.
+
 ## Build .exe (one-folder, Windows)
 
 V1 builds a one-folder bundle for local iteration — `dist/apiary-gui/apiary-gui.exe`
 plus its `_internal/` sibling. Not intended for distribution yet.
 
 ```bash
-poetry run pip install "pyinstaller>=6.0,<7.0"   # one-time, build-only dep
+poetry install --with gui --with build
 poetry run python gui/packaging/build.py
 ```
+
+PyInstaller is pinned in the optional `build` poetry group
+(`pyproject.toml`), so it is lockfile-managed like every other dependency
+rather than `pip install`-ed ad hoc. The build script refuses to run without
+it and tells you the command above.
 
 The build script wraps `pyinstaller gui/packaging/apiary_gui.spec`, cleans
 stale `build/` and `dist/apiary-gui/` first, and prints the exe path on
@@ -59,6 +82,27 @@ way frozen as it does from source.
 
 HiDPI: `gui/packaging/apiary_gui.manifest` declares PerMonitorV2 awareness
 so the window doesn't blur on display scaling > 100%.
+
+### Which commit is this build?
+
+The spec stamps the commit it was built from into
+`_internal/gui/build_info.json` (`{version, commit, dirty, built_at}`), and
+the build script prints it:
+
+```
+built: …\dist\apiary-gui\apiary-gui.exe
+stamped: 0.1.0 @ 1a2b3c4d5e6f
+```
+
+`gui/build_info.py` reads that stamp back at runtime. From source there is no
+bundle, so the same answer is resolved live from git. The version shows up in
+two places: the line the GUI prints to stderr on startup, and the `serverInfo`
+version in the permission-MCP handshake (so `permission_mcp.log` records which
+build answered).
+
+`dirty: true` means the build came from a tree with uncommitted changes to
+tracked files — the commit alone does not describe it. A build with no git
+available reports `0.1.0+unknown` rather than guessing.
 
 ## Config files
 

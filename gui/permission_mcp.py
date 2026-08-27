@@ -35,7 +35,6 @@ from typing import Any
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "apiary"
-SERVER_VERSION = "0.1.0"
 TOOL_NAME = "permission_prompt"
 # CLI flag the frozen GUI exe recognizes to dispatch into `serve()` instead
 # of booting the webview. Used only in PyInstaller builds — dev-mode runs
@@ -200,11 +199,31 @@ def _error(req_id: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
 
 
+def server_version() -> str:
+    """Version reported in the MCP handshake, stamped with the build's commit.
+
+    Was a hard-coded "0.1.0" that nobody ever bumped, so the handshake (and
+    the log line it produces) could not tell you which build answered. Falls
+    back to the bare version if provenance is unavailable — a handshake must
+    not fail over a version string.
+    """
+    try:
+        try:
+            from gui.build_info import version_string
+        except ImportError:
+            # Run as a bare script — same fallback as _state_dir() above.
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+            from gui.build_info import version_string
+        return version_string()
+    except Exception:  # noqa: BLE001 - never break the handshake
+        return "0.1.0"
+
+
 def handle_initialize(_params: dict[str, Any]) -> dict[str, Any]:
     return {
         "protocolVersion": PROTOCOL_VERSION,
         "capabilities": {"tools": {}},
-        "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+        "serverInfo": {"name": SERVER_NAME, "version": server_version()},
     }
 
 

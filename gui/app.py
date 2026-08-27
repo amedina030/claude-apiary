@@ -15,7 +15,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from gui import composer_state, file_refs, picker, pty_capture, sidebar_state, tabs_state, usage_fetcher
+from gui import build_info, composer_state, file_refs, picker, pty_capture, sidebar_state, tabs_state, usage_fetcher
 from gui import permission_mcp
 from gui.permission_bridge import PermissionBridge
 from gui.permission_mcp import BRIDGE_URL_ENV as _PERMISSION_MCP_BRIDGE_URL_ENV
@@ -1100,6 +1100,11 @@ def main() -> int:
         if not INDEX_HTML.is_file():
             print(f"missing frontend bundle at {INDEX_HTML}", file=sys.stderr)
             return 1
+
+        # Which build is this? Frozen bundles read the commit stamped in at
+        # build time; from source it's resolved live from git. Printed before
+        # anything can go wrong, so a bug report can name a tree state.
+        print(f"apiary GUI {build_info.version_string()}", file=sys.stderr)
 
         for _w in _environment_warnings():
             print(f"warning: {_w}", file=sys.stderr)
