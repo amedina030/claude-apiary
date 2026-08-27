@@ -4,7 +4,7 @@ title: Legacy Scribe Format
 scope: project
 description: Sanitized format reference for the source machine's per-repo .scribe/ store — used to build the read-only legacy importer (spec §7)
 framework_version: "1.0"
-last_verified: 2026-06-12
+last_verified: "2026-08-27"
 ---
 
 # Legacy Scribe Format

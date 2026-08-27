@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-08-26"
+last_verified: "2026-08-27"
 ---
 
 # CLI Tools
@@ -1269,6 +1269,85 @@ Exit codes:
 - `2` — argparse usage error, or `--fix` on a check that has no fix.
 
 See [Bootstrapping a repo](../guides/bootstrapping-a-repo.md) for profile authoring and the full workflow.
+
+## core/update.py
+
+The implementation behind `apiary update`: runs the pending scripts in
+`migrations/` against every bootstrapped repo and re-pins each one to
+main-apiary's current `VERSION`. A repo already at that version is skipped.
+
+```bash
+poetry run apiary update --dry-run
+python core/update.py --target /path/to/repo
+```
+
+<!-- generated:start: cli:core/update.py:flag -->
+| Flag | Description |
+|------|-------------|
+| `--target TARGET` | Update only this repo (default: every registered repo) |
+| `--dry-run` | Print the migrations that would run; write nothing |
+| `--apiary-repo APIARY_REPO` | Path to main-apiary checkout (default: resolved via launcher / pointer) |
+<!-- generated:end: cli:core/update.py:flag -->
+
+## runner/monolithic_executor.py
+
+The single-subprocess variant of runner stage 4: hands the whole plan to one
+Claude call instead of one call per step. Selected by
+`executor.mode = "monolithic"` in `runner/config.json`, and timed out by
+`monolithic_executor.timeout_seconds` rather than `executor.timeout`.
+
+```bash
+python -m runner.monolithic_executor <state-dir>/runner/plans/<uuid>.json
+```
+
+<!-- generated:start: cli:runner/monolithic_executor.py:arg -->
+| Argument | Description |
+|----------|-------------|
+| `plan` | Path to plan JSON file |
+<!-- generated:end: cli:runner/monolithic_executor.py:arg -->
+
+## runner/usher.py
+
+Ticket sizing gate. Reads an intake JSON, counts distinct files and top-level
+directories in its scope, measures the description length, and compares each
+against the `usher.*` thresholds in `runner/config.json` for a pass/warn/fail
+verdict.
+
+```bash
+python -m runner.usher <state-dir>/runner/intake/<uuid>.json
+python -m runner.usher <state-dir>/runner/intake/<uuid>.json --warn-only
+```
+
+<!-- generated:start: cli:runner/usher.py:arg -->
+| Argument | Description |
+|----------|-------------|
+| `file` | Path to intake JSON file |
+<!-- generated:end: cli:runner/usher.py:arg -->
+
+<!-- generated:start: cli:runner/usher.py:flag -->
+| Flag | Description |
+|------|-------------|
+| `--warn-only` | Print verdict but always exit 0 |
+<!-- generated:end: cli:runner/usher.py:flag -->
+
+Exit codes: `0` pass or warn; `1` fail (unless `--warn-only`).
+
+## scripts/install_repo_hooks.py
+
+Installs main-apiary's own `.git/hooks/{pre-commit,post-merge}` from
+`docs/hooks/` and `runner/hooks/`. These are repo-local **git** hooks for the
+apiary checkout itself — unrelated to Claude Code hooks and to the per-repo
+install model. Honours `core.hooksPath`, and leaves a pre-commit hook that does
+not reference `docs/check.py` alone as somebody else's.
+
+<!-- no-run -->
+```bash
+python scripts/install_repo_hooks.py
+```
+
+Takes no arguments — it has no argparse at all, so **`--help` installs the
+hooks rather than printing usage**. That is why the block above is marked
+`<!-- no-run -->` for `docs/test_doc_examples.py`.
 
 ## core/hooks/dispatch.py
 

@@ -4,7 +4,7 @@ title: Adding a Command
 scope: project
 description: End-to-end steps for writing a slash command, registering it, and testing
 framework_version: "1.0"
-last_verified: 2026-04-02
+last_verified: "2026-08-27"
 ---
 
 # Adding a Command
@@ -13,7 +13,7 @@ How to add a new slash command to the project.
 
 ## Prerequisites
 
-- Slash commands are markdown files that Claude Code loads at session start
+- Slash commands are markdown files. `apiary install` copies them into `<repo>/.claude/commands/<name>.md`, and Claude Code loads them from there at session start — per repo, not from a global directory
 - They define instructions for Claude, not executable code
 - See existing commands in `*/commands/*.md` for examples
 
@@ -56,14 +56,23 @@ Add the command's source dir name to `_slash_command_sources()` in `core/install
 
 ### 4. Update docs
 
-- Add the command to `docs/reference/slash-commands.md`
-- If the command uses a CLI script, ensure it's in `docs/reference/cli-tools.md`
+The command list in `docs/reference/slash-commands.md` is **generated** from
+your file's frontmatter — you do not hand-edit it:
+
+```bash
+python docs/generate_reference.py --write
+```
+
+`--check` runs in `docs/hooks/pre-commit` and in CI, so a command with no
+frontmatter `name`/`description` fails the commit rather than landing
+undocumented. If the command drives a CLI script, make sure that script has a
+section in `docs/reference/cli-tools.md`.
 
 ## Checklist
 
 - [ ] Command markdown file created under `<tool>/commands/`
 - [ ] Frontmatter includes `name`, `description`, `user-invocable`
 - [ ] Tool directory is in `core/install._slash_command_sources`' tool list
-- [ ] `docs/reference/slash-commands.md` updated
+- [ ] `python docs/generate_reference.py --write` run and the diff committed
 - [ ] `poetry run apiary doctor` passes
 - [ ] `python docs/check.py` passes

@@ -2,9 +2,9 @@
 type: reference
 title: Config Files
 scope: project
-description: All configuration files, their location, format, and editable fields
+description: Every config file, with the key tables generated from the shipped JSON
 framework_version: "1.0"
-last_verified: 2026-08-26
+last_verified: "2026-08-27"
 ---
 
 # Config Files

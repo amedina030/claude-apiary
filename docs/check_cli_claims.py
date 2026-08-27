@@ -60,6 +60,7 @@ SKIP_HEADERS = {
                                     # import on the hottest path in the toolkit
     "docs/docgen.py",               # library shared by the generators
     "docs/test_doc_examples.py",    # pytest module, not a CLI
+    "scripts/install_repo_hooks.py",  # no argparse: --help would INSTALL
     "Test scripts",                 # prose category, not a tool
 }
 

@@ -66,6 +66,9 @@ flag — `--check` runs in `docs/hooks/pre-commit` and in CI.
 | `python runner/mark_done.py` | Mark a backlog ticket as done. | slug |
 | `python -m runner.cron_health` | Check or repair the host scheduler's entries against apiary's canonical registry. | check, repair |
 | `apiary` | Per-repo install, drift and version tooling (console script over `core/cli.py`) | cascade-fix, doctor, install, self-bootstrap, uninstall, update, version |
+| `python core/update.py` | Run pending migrations/ and re-pin bootstrapped repos. | --apiary-repo, --dry-run, --target |
+| `python -m runner.monolithic_executor` | Monolithic executor — runner stage 4 (single-subprocess variant) | plan |
+| `python -m runner.usher` | Usher — ticket sizing gate | file |
 | `python docs/check.py` | Documentation framework conformance checker | --strict |
 | `python docs/generate_cli_docs.py` | Generate the CLI reference tables from each tool's argparse | --check, --diff, --write |
 | `python docs/generate_reference.py` | Generate the non-argparse reference tables from code | --check, --diff, --write |
@@ -95,4 +98,5 @@ cannot quietly join it.
 | `core/hooks/dispatch.py` | one hand-parsed positional verb (argparse would cost an import on the hottest path) | [hooks.md](hooks.md#the-dispatcher) |
 | `docs/docgen.py` | library shared by the doc generators | [cli-tools.md](cli-tools.md#docsdocgenpy) |
 | `docs/test_doc_examples.py` | pytest module, not a CLI | [cli-tools.md](cli-tools.md#docstest_doc_examplespy) |
+| `scripts/install_repo_hooks.py` | no argparse — running it with `--help` installs the git hooks | [cli-tools.md](cli-tools.md#scriptsinstall_repo_hookspy) |
 | `Test scripts` | prose category, not a tool | [cli-tools.md](cli-tools.md#test-scripts) |

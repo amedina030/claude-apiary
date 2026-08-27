@@ -1,20 +1,30 @@
 #!/usr/bin/env python3
 """Documentation framework conformance checker.
 
-Validates that all docs under docs/ conform to the current framework version
-defined in docs/_framework.md. Checks:
-- Required frontmatter fields are present
-- framework_version matches current version
-- No unexpected doc types
-- Known tool directories have corresponding reference docs
-- Hook scripts are documented in hooks.md
-- Command files are documented in slash-commands.md
-- CLI entry points are documented in cli-tools.md
-- All docs have entries in _index.md
+Four checks, and deliberately no more (review §5 Phase 5). What this used to
+do was validate the *shape* of six frontmatter keys and then assert that the
+strings "budgeter", "scribe" and "core" appeared somewhere in the concatenated
+reference docs — which is how it stayed green for four months while a migration
+invalidated most of the content it was checking.
 
-Issues are classified as errors or warnings:
-- Errors: broken docs (missing frontmatter, invalid type, missing required fields)
-- Warnings: coverage gaps, stale versions, missing index entries
+1. **Frontmatter is present and well-formed** — parsed by ``core.frontmatter``,
+   the one dialect; six required keys; a `type` and `scope` from the known sets.
+2. **`last_verified` is not older than the file's last git change.** This is the
+   check with teeth. Editing a doc without re-verifying it now fails the commit,
+   which is the only mechanism that makes "verified on this date" mean anything
+   (review §5a-D.3). Skipped for untracked files and shallow clones, where the
+   git dates are not real.
+3. **The index is complete and honest** — every doc has an `_index.md` entry, and
+   every entry points at a doc that exists.
+4. **Coverage, against a tool list derived from the tree** — every hook script,
+   command file and argparse entry point is named in its reference doc.
+   ``KNOWN_TOOLS`` used to be a hard-coded ``{"budgeter", "scribe", "core"}``,
+   so harden, refiner, compass, researcher, runner, incubator, captures, gui
+   and scripts were all invisible to it (T-2026-287). The list is now whatever
+   the repo actually contains.
+
+Errors are broken docs (1-3); coverage gaps are warnings, because a missing
+row is a smaller lie than a wrong one and the generators fix most of them.
 
 Exit codes:
   0 — no errors (warnings may be present)
@@ -24,6 +34,7 @@ Exit codes:
 import argparse
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -40,12 +51,89 @@ SKIP_DIRS = {"commands", "hooks", "reports"}  # Not framework docs — command d
 #                          docs/standards/report-style.md, not this checker's types)
 
 VALID_TYPES = {"reference", "architecture", "standard", "guide"}
-VALID_SCOPES = {"budgeter", "scribe", "core", "project", "docs"}
 REQUIRED_FIELDS = {"type", "title", "scope", "description", "framework_version", "last_verified"}
 
-# Top-level tool dirs that should have at least one reference doc mentioning them
-KNOWN_TOOLS = {"budgeter", "scribe", "core"}
+#: Scopes that are not a tool directory.
+EXTRA_SCOPES = {"project", "docs"}
 
+#: Top-level directories that hold data or config, never code to document.
+NON_TOOL_DIRS = {"profiles", "context-rules", "cron_registry", "captures"}
+
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+# --------------------------------------------------------------------------- #
+# The tool list, derived from the tree
+# --------------------------------------------------------------------------- #
+
+def known_tools() -> set[str]:
+    """Top-level tool directories, read off the repo rather than hard-coded.
+
+    A tool directory is a non-hidden top-level directory that ships Python or
+    slash commands. ``captures/`` names both a tool and a GUI data directory,
+    so the data-only names are excluded by name.
+    """
+    tools = set()
+    for entry in sorted(REPO_ROOT.iterdir()):
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+        if entry.name in NON_TOOL_DIRS and not any(entry.glob("*.py")):
+            continue
+        if any(entry.glob("*.py")) or (entry / "commands").is_dir():
+            tools.add(entry.name)
+    return tools
+
+
+def valid_scopes() -> set[str]:
+    return known_tools() | EXTRA_SCOPES
+
+
+# --------------------------------------------------------------------------- #
+# Git dates
+# --------------------------------------------------------------------------- #
+
+def _git(*args: str) -> str:
+    """Run a read-only git command in the repo. Empty string on any failure."""
+    try:
+        res = subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True,
+                             text=True, encoding="utf-8", timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return res.stdout if res.returncode == 0 else ""
+
+
+def is_shallow() -> bool:
+    """True for a shallow clone, where per-file history does not exist.
+
+    ``actions/checkout`` defaults to depth 1, which would make every file's
+    "last change" the tip commit — and every doc stale. CI asks for the full
+    history; anywhere else, the check simply does not run.
+    """
+    return _git("rev-parse", "--is-shallow-repository").strip() == "true"
+
+
+def last_change_dates() -> dict[str, str]:
+    """``{repo-relative path: YYYY-MM-DD}`` of each file's newest commit.
+
+    One ``git log`` for the whole history rather than one per doc — 28 docs
+    meant 28 subprocesses on the hook path, and this runs on every commit.
+    """
+    out = _git("log", "--format=@%cs", "--name-only", "--no-renames")
+    dates: dict[str, str] = {}
+    current = ""
+    for line in out.splitlines():
+        if line.startswith("@"):
+            current = line[1:].strip()
+            continue
+        path = line.strip()
+        if path and current and path not in dates:  # log is newest-first
+            dates[path] = current
+    return dates
+
+
+# --------------------------------------------------------------------------- #
+# Docs
+# --------------------------------------------------------------------------- #
 
 def parse_frontmatter(path: Path) -> dict | None:
     """Extract frontmatter from a markdown doc as a dict, or None if absent.
@@ -54,8 +142,7 @@ def parse_frontmatter(path: Path) -> dict | None:
     so a doc whose block is malformed reports as "missing frontmatter" the way
     a doc with no block at all always has, rather than crashing the checker.
     """
-    text = path.read_text(encoding="utf-8")
-    fm, _ = frontmatter.parse(text)
+    fm, _ = frontmatter.parse(path.read_text(encoding="utf-8"))
     return fm or None
 
 
@@ -79,26 +166,23 @@ def find_docs() -> list[Path]:
             rel_posix = rel.replace("\\", "/")
             if rel_posix in SKIP_FILES:
                 continue
-            # Skip non-doc directories (commands, hooks)
-            parts = rel_posix.split("/")
-            if parts[0] in SKIP_DIRS:
+            if rel_posix.split("/")[0] in SKIP_DIRS:
                 continue
             docs.append(Path(root) / f)
     return sorted(docs)
 
 
-def check_doc(path: Path, framework_version: str) -> tuple[list[str], list[str]]:
+def check_doc(path: Path, framework_version: str, scopes: set[str],
+              git_dates: dict[str, str]) -> tuple[list[str], list[str]]:
     """Check a single doc for conformance. Returns (errors, warnings)."""
-    errors = []
-    warnings = []
+    errors: list[str] = []
+    warnings: list[str] = []
     rel = path.relative_to(DOCS_DIR).as_posix()
 
     fm = parse_frontmatter(path)
     if fm is None:
-        errors.append(f"{rel}: missing frontmatter block")
-        return errors, warnings
+        return [f"{rel}: missing frontmatter block"], warnings
 
-    # Errors: broken doc structure
     missing = REQUIRED_FIELDS - set(fm.keys())
     if missing:
         errors.append(f"{rel}: missing required fields: {', '.join(sorted(missing))}")
@@ -108,14 +192,20 @@ def check_doc(path: Path, framework_version: str) -> tuple[list[str], list[str]]
         errors.append(f"{rel}: invalid type '{doc_type}' (expected: {', '.join(sorted(VALID_TYPES))})")
 
     scope = fm.get("scope", "")
-    if scope and scope not in VALID_SCOPES:
-        errors.append(f"{rel}: invalid scope '{scope}' (expected: {', '.join(sorted(VALID_SCOPES))})")
+    if scope and scope not in scopes:
+        errors.append(f"{rel}: invalid scope '{scope}' (expected: {', '.join(sorted(scopes))})")
 
-    lv = fm.get("last_verified", "")
-    if lv and not re.match(r"^\d{4}-\d{2}-\d{2}$", lv):
+    lv = str(fm.get("last_verified", "")).strip('"')
+    if lv and not DATE_RE.match(lv):
         errors.append(f"{rel}: last_verified '{lv}' not in YYYY-MM-DD format")
+    elif lv:
+        changed = git_dates.get(path.relative_to(REPO_ROOT).as_posix())
+        if changed and lv < changed:
+            errors.append(
+                f"{rel}: last_verified {lv} is older than the file's last change "
+                f"({changed}) — re-verify the doc against the code and bump it, "
+                f"or explain the edit in the commit")
 
-    # Warnings: stale but not broken
     doc_version = fm.get("framework_version", "")
     if doc_version and doc_version != framework_version:
         warnings.append(f"{rel}: framework_version '{doc_version}' behind current '{framework_version}'")
@@ -123,124 +213,108 @@ def check_doc(path: Path, framework_version: str) -> tuple[list[str], list[str]]
     return errors, warnings
 
 
-def check_coverage(docs: list[Path]) -> list[str]:
-    """Check that known tools have reference docs covering them. Returns warnings."""
-    issues = []
-    ref_docs = [d for d in docs if "reference" in d.relative_to(DOCS_DIR).as_posix()]
-
-    ref_content = ""
-    for d in ref_docs:
-        ref_content += d.read_text(encoding="utf-8").lower()
-
-    for tool in KNOWN_TOOLS:
-        if tool not in ref_content:
-            issues.append(f"coverage: no reference doc mentions '{tool}'")
-
-    return issues
-
+# --------------------------------------------------------------------------- #
+# Coverage
+# --------------------------------------------------------------------------- #
 
 def _read_ref_doc(name: str) -> str:
-    """Read a reference doc's content, returning empty string if missing."""
     path = DOCS_DIR / "reference" / name
-    if path.exists():
-        return path.read_text(encoding="utf-8").lower()
-    return ""
+    return path.read_text(encoding="utf-8").lower() if path.exists() else ""
 
 
-def check_hooks_coverage() -> list[str]:
-    """Verify every hook script is mentioned in docs/reference/hooks.md."""
+def check_hooks_coverage(tools: set[str]) -> list[str]:
+    """Every hook script under any tool's hooks/ is named in hooks.md."""
     issues = []
-    hooks_content = _read_ref_doc("hooks.md")
-    if not hooks_content:
-        issues.append("coverage: docs/reference/hooks.md not found")
-        return issues
-
-    for tool_dir in KNOWN_TOOLS:
-        hooks_dir = REPO_ROOT / tool_dir / "hooks"
+    content = _read_ref_doc("hooks.md")
+    if not content:
+        return ["coverage: docs/reference/hooks.md not found"]
+    for tool in sorted(tools):
+        hooks_dir = REPO_ROOT / tool / "hooks"
         if not hooks_dir.is_dir():
             continue
-        for py_file in sorted(hooks_dir.glob("*.py")):
-            if py_file.name.startswith("test_") or py_file.name == "__init__.py":
+        for py in sorted(hooks_dir.glob("*.py")):
+            if py.name.startswith("test_") or py.name == "__init__.py":
                 continue
-            if py_file.stem not in hooks_content:
-                issues.append(f"coverage: hook {tool_dir}/hooks/{py_file.name} not in hooks.md")
-
-    # Also check docs/hooks/ for non-git-hook scripts
-    docs_hooks_dir = DOCS_DIR / "hooks"
-    if docs_hooks_dir.is_dir():
-        for py_file in sorted(docs_hooks_dir.glob("*.py")):
-            if py_file.name.startswith("test_") or py_file.name == "__init__.py":
-                continue
-            if py_file.stem not in hooks_content:
-                issues.append(f"coverage: hook docs/hooks/{py_file.name} not in hooks.md")
-
+            if py.stem not in content:
+                issues.append(f"coverage: hook {tool}/hooks/{py.name} not in hooks.md")
     return issues
 
 
-def check_commands_coverage() -> list[str]:
-    """Verify every command file is mentioned in docs/reference/slash-commands.md."""
+def check_commands_coverage(tools: set[str]) -> list[str]:
+    """Every <tool>/commands/*.md is named in slash-commands.md."""
     issues = []
-    cmds_content = _read_ref_doc("slash-commands.md")
-    if not cmds_content:
-        issues.append("coverage: docs/reference/slash-commands.md not found")
-        return issues
-
-    for tool_dir in list(KNOWN_TOOLS) + ["docs"]:
-        cmd_dir = REPO_ROOT / tool_dir / "commands"
+    content = _read_ref_doc("slash-commands.md")
+    if not content:
+        return ["coverage: docs/reference/slash-commands.md not found"]
+    for tool in sorted(tools):
+        cmd_dir = REPO_ROOT / tool / "commands"
         if not cmd_dir.is_dir():
             continue
-        for md_file in sorted(cmd_dir.glob("*.md")):
-            # Check for the command name (stem) in the doc
-            if md_file.stem not in cmds_content:
-                issues.append(f"coverage: command {tool_dir}/commands/{md_file.name} not in slash-commands.md")
-
+        for md in sorted(cmd_dir.glob("*.md")):
+            if md.stem not in content:
+                issues.append(f"coverage: command {tool}/commands/{md.name} not in slash-commands.md")
     return issues
 
 
-def check_cli_coverage() -> list[str]:
-    """Verify CLI entry points (files with argparse + __main__) are in cli-tools.md."""
-    issues = []
-    cli_content = _read_ref_doc("cli-tools.md")
-    if not cli_content:
-        issues.append("coverage: docs/reference/cli-tools.md not found")
-        return issues
+def check_cli_coverage(tools: set[str]) -> list[str]:
+    """Every argparse entry point has a `## <path>` section in cli-tools.md.
 
-    # Scan for Python files that are CLI entry points
-    for tool_dir in list(KNOWN_TOOLS) + ["docs"]:
-        tool_path = REPO_ROOT / tool_dir
-        if not tool_path.is_dir():
-            continue
-        for py_file in sorted(tool_path.glob("*.py")):
-            if py_file.name.startswith("test_") or py_file.name == "__init__.py":
+    Matched on the section header, not on a substring of the whole document:
+    "check" appears in cli-tools.md a hundred times, which is how
+    ``docs/check.py`` counted as documented while having no section at all.
+    """
+    issues = []
+    path = DOCS_DIR / "reference" / "cli-tools.md"
+    if not path.exists():
+        return ["coverage: docs/reference/cli-tools.md not found"]
+    headers = {line[3:].strip()
+               for line in path.read_text(encoding="utf-8").splitlines()
+               if line.startswith("## ") and not line.startswith("### ")}
+    # A console script's section is named for the command, not the module it
+    # runs (`## apiary`, not `## core/cli.py`). One mapping, in the checker
+    # that already owns it.
+    sys.path.insert(0, str(DOCS_DIR))
+    try:
+        from check_cli_claims import CONSOLE_SCRIPTS
+        headers |= {module for module in CONSOLE_SCRIPTS.values()
+                    if set(CONSOLE_SCRIPTS) & headers}
+    except ImportError:
+        pass
+    for tool in sorted(tools):
+        tool_path = REPO_ROOT / tool
+        for py in sorted(tool_path.glob("*.py")):
+            if py.name.startswith("test_") or py.name == "__init__.py":
                 continue
             try:
-                content = py_file.read_text(encoding="utf-8")
+                content = py.read_text(encoding="utf-8")
             except OSError:
                 continue
-            # Heuristic: file has argparse and __main__ guard = CLI entry point
-            if "argparse" in content and '__name__' in content and '__main__' in content:
-                if py_file.stem not in cli_content:
-                    issues.append(f"coverage: CLI tool {tool_dir}/{py_file.name} not in cli-tools.md")
-
+            if "argparse" not in content or "__main__" not in content:
+                continue
+            rel = py.relative_to(REPO_ROOT).as_posix()
+            if rel not in headers:
+                issues.append(f"coverage: CLI tool {rel} has no section in cli-tools.md")
     return issues
 
 
-def check_index_completeness(docs: list[Path]) -> list[str]:
-    """Verify every doc file has an entry in _index.md."""
-    issues = []
+def check_index(docs: list[Path]) -> list[str]:
+    """The index lists every doc, and every doc it lists exists."""
     if not INDEX_FILE.exists():
-        issues.append("coverage: docs/_index.md not found")
-        return issues
-
-    index_content = INDEX_FILE.read_text(encoding="utf-8").lower()
+        return ["index: docs/_index.md not found"]
+    text = INDEX_FILE.read_text(encoding="utf-8")
+    lowered = text.lower()
+    issues = []
     for doc in docs:
         rel = doc.relative_to(DOCS_DIR).as_posix()
-        # Check that the relative path appears in the index
-        if rel.lower() not in index_content:
+        if rel.lower() not in lowered:
             issues.append(f"index: {rel} not listed in _index.md")
-
+    for target in re.findall(r"\]\(([^)#]+\.md)\)", text):
+        if not (DOCS_DIR / target).exists():
+            issues.append(f"index: _index.md links to {target}, which does not exist")
     return issues
 
+
+# --------------------------------------------------------------------------- #
 
 def main():
     parser = argparse.ArgumentParser(description="Documentation framework conformance checker")
@@ -250,24 +324,25 @@ def main():
 
     framework_version = get_framework_version()
     docs = find_docs()
-    all_errors = []
-    all_warnings = []
-
     if not docs:
         print(f"Framework v{framework_version} — no docs to check")
         return
 
+    tools = known_tools()
+    scopes = valid_scopes()
+    git_dates = {} if is_shallow() else last_change_dates()
+
+    all_errors: list[str] = []
+    all_warnings: list[str] = []
     for doc in docs:
-        errors, warnings = check_doc(doc, framework_version)
+        errors, warnings = check_doc(doc, framework_version, scopes, git_dates)
         all_errors.extend(errors)
         all_warnings.extend(warnings)
 
-    # Coverage and index checks are warnings (gaps, not broken docs)
-    all_warnings.extend(check_coverage(docs))
-    all_warnings.extend(check_hooks_coverage())
-    all_warnings.extend(check_commands_coverage())
-    all_warnings.extend(check_cli_coverage())
-    all_warnings.extend(check_index_completeness(docs))
+    all_errors.extend(check_index(docs))
+    all_warnings.extend(check_hooks_coverage(tools))
+    all_warnings.extend(check_commands_coverage(tools))
+    all_warnings.extend(check_cli_coverage(tools))
 
     if all_errors or all_warnings:
         total = len(all_errors) + len(all_warnings)
@@ -276,13 +351,13 @@ def main():
             print(f"  ERROR   {issue}")
         for issue in all_warnings:
             print(f"  WARN    {issue}")
-
         if all_errors:
             sys.exit(1)
         if args.strict and all_warnings:
             sys.exit(1)
     else:
-        print(f"Framework v{framework_version} — {len(docs)} doc(s), all conformant")
+        print(f"Framework v{framework_version} — {len(docs)} doc(s) across "
+              f"{len(tools)} tool(s), all conformant")
 
 
 if __name__ == "__main__":
