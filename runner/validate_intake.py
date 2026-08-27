@@ -16,7 +16,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-
 REQUIRED_FIELDS = ["id", "title", "problem", "description", "scope", "created_at"]
 MIN_LENGTH_FIELDS = {"problem": 20, "description": 20}
 

@@ -9,15 +9,14 @@ tool_response.totalTokens and logs it directly.
 import os
 import re
 import sys
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apiary root
 
 from budgeter.lib import logger
 from core import flags
 from core.hook_context import run_standalone
-
 
 # /harden encodes the run's request_id in the Agent description as "[rid:<id>]"
 # because the Agent tool has no `env` parameter — there is no LLM-controlled

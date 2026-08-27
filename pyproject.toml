@@ -124,6 +124,25 @@ exclude = ["docs", ".claude", ".repos", ".apiary", "_tmp_*"]
 preview = true
 explicit-preview-rules = true
 select = ["E", "F", "I", "PLW1514", "S602", "S605"]
+# E402 (import not at top of file) is the one rule this repo cannot satisfy.
+# Every occurrence — 81 of them across 25 files, checked one by one — is the
+# `sys.path.insert(0, <repo root>)` bootstrap that docs/standards/code-style.md
+# mandates (file-structure step 4): hooks, the `apiary` CLI modules and
+# `scribe/api.py` are all entered by absolute path under a bare `python3`, so
+# the repo root has to be on `sys.path` *before* the first `from core import …`.
+# Moving those imports up is not a fix, it is an ImportError.
+ignore = ["E402"]
+
+[tool.ruff.lint.isort]
+# Spelled out rather than left to ruff's directory sniffing: the checkout that
+# CI lints and the checkout a git hook lints are not always the repo root, and
+# a package silently reclassified as third-party reorders imports on one
+# machine and not the other. This list is `[tool.poetry] packages` plus
+# `refiner`, which ships no Python but is imported by name in docs examples.
+known-first-party = [
+    "core", "budgeter", "scribe", "runner", "harden", "gui", "captures",
+    "compass", "researcher", "incubator", "migrations", "scripts", "refiner",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests shell out on purpose: the git-repo fixtures, the launcher execution

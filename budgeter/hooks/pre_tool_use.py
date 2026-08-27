@@ -10,12 +10,12 @@ The final tool in a session is logged by the Stop hook.
 """
 import os
 import sys
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apiary root
 
-from budgeter.lib import logger, estimator
+from budgeter.lib import estimator, logger
 from core import flags
 from core.hook_context import HookResult, context_block, join_contexts, run_standalone
 from core.session import SessionId

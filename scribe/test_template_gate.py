@@ -14,9 +14,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scribe.store import ScribeStore
 from scribe import notes as notes_mod
 from scribe import templates as templates_mod
+from scribe.store import VALID_TYPES, ScribeStore
 
 HANDOFF_OK = ("## Session abcd1234 Handoff\n\n### What was done\n- x\n\n"
               "### Key decisions\n- y\n\n### What's pending\n- z\n\n"
@@ -73,7 +73,7 @@ class TestBundledTemplates(unittest.TestCase):
     GUIDANCE_ONLY = ["todo", "wishlist", "reference", "context", "general"]
 
     def test_one_template_per_type(self):
-        for note_type in notes_mod.VALID_TYPES:
+        for note_type in VALID_TYPES:
             with self.subTest(note_type=note_type):
                 self.assertTrue((templates_mod.DEFAULT_TEMPLATES_DIR / f"{note_type}.md").is_file())
 
@@ -119,8 +119,8 @@ class TestScaffold(unittest.TestCase):
 
     def test_scaffold_writes_every_type(self):
         written = templates_mod.scaffold_defaults(self.state_dir)
-        self.assertEqual(written, sorted(notes_mod.VALID_TYPES))
-        for note_type in notes_mod.VALID_TYPES:
+        self.assertEqual(written, sorted(VALID_TYPES))
+        for note_type in VALID_TYPES:
             self.assertTrue(templates_mod.template_path(self.state_dir, note_type).is_file())
 
     def test_scaffold_is_idempotent(self):

@@ -10,7 +10,6 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
-
 # DWMWINDOWATTRIBUTE values. The "20" name landed in Windows 10 build 19041; older
 # builds (before that release) used "19" for the same flag. Try 20 first, fall back to 19.
 _DWMWA_USE_IMMERSIVE_DARK_MODE_NEW = 20

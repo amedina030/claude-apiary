@@ -12,16 +12,16 @@ runner stage subprocesses are not real user sessions and must not appear
 in the history ring buffer (#223). The constant name matches the canonical
 ``RUNNER_SUBPROCESS_ENV_VAR`` defined in ``runner/claude_subprocess.py``.
 """
+import json
 import os
 import sys
-import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.hook_context import run_standalone
-from core.utils.filelock import FileLock
 from core.session import dump_history, load_history, sessions_dir, sweep_stale_session_files
 from core.utils.atomic import write_text_atomic
+from core.utils.filelock import FileLock
 from core.utils.timeutil import now_iso
 
 MAX_HISTORY = 10

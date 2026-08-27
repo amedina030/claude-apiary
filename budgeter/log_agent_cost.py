@@ -14,15 +14,14 @@ Usage:
 import argparse
 import re
 import sys
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from budgeter.lib import logger
 from core import flags
 from core.session import SessionId
-
 
 _MAX_STDIN_BYTES = 64 * 1024  # 64 KB — far more than any <usage> block needs
 

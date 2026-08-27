@@ -17,7 +17,6 @@ import threading
 import time
 from typing import Callable, Optional, Sequence
 
-
 # Chunk size for send_text. Chosen well under MAX_CANON (4096 on Linux/macOS)
 # and the historical Windows ConPTY cooked-mode line-input limit. See
 # send_text() docstring.

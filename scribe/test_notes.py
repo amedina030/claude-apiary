@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """Tests for scribe/notes.py — ScribeStore-backed CLI commands."""
-import json
-import subprocess
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import scribe.notes as notes
-from scribe import policy
-from scribe.store import ScribeStore
+from scribe import formatting, policy, templates
+from scribe.store import VALID_TYPES, ScribeStore
 
 
 class TestScribeNotes(unittest.TestCase):
@@ -42,7 +41,7 @@ class TestScribeNotes(unittest.TestCase):
 
     def test_add_general_type(self):
         # 'general' is now a valid type
-        self.assertIn('general', notes.VALID_TYPES)
+        self.assertIn('general', VALID_TYPES)
         entry = self.store.add_note('general', 'general note', 'sess1')
         self.assertEqual(entry['type'], 'general')
 
@@ -152,9 +151,9 @@ class TestScribeNotes(unittest.TestCase):
 
     def test_format_age(self):
         now = datetime.now(timezone.utc)
-        self.assertEqual(notes.format_age(now.strftime('%Y-%m-%dT%H:%M:%SZ')), 'just now')
+        self.assertEqual(formatting.format_age(now.strftime('%Y-%m-%dT%H:%M:%SZ')), 'just now')
         five_min = (now - timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ')
-        self.assertEqual(notes.format_age(five_min), '5m ago')
+        self.assertEqual(formatting.format_age(five_min), '5m ago')
 
     def test_cmd_add_handoff_requires_summary(self):
         args = self._make_args(
@@ -400,7 +399,7 @@ class TestScribeNotes(unittest.TestCase):
         self.assertEqual(p, self.tmp_dir / 'templates' / 'todo.md')
 
     def test_template_text_returns_none_when_missing(self):
-        self.assertIsNone(notes.template_text(self.tmp_dir, 'todo'))
+        self.assertIsNone(templates.template_text(self.tmp_dir, 'todo'))
 
     def test_cmd_template_show_prints_content(self):
         self._write_template('todo', 'use a target dir')

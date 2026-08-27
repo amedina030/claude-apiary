@@ -16,7 +16,6 @@ from typing import Iterable
 
 from gui.paths import state_dir
 
-
 STATE_PATH = state_dir() / "sidebar_state.json"
 
 

@@ -4,27 +4,27 @@
 Stdlib unittest only (no pytest), per docs/standards/code-style.md.
 """
 import os
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from runner.validate_plan import (
-    validate,
-    _check_test_code_spec_format,
-    _check_test_shell_metacharacters,
-    _check_banned_tokens as _check_banned_tokens_impl,
-    _check_test_failure_language,
-    _check_path_allowlist,
-    _check_gitignored_paths,
-    _check_criteria_coverage,
-    _criterion_bigrams,
-    _check_file_overlap,
-    _resolve_banned_tokens,
-)
 from runner import validate_plan
-
+from runner.validate_plan import (
+    _check_banned_tokens as _check_banned_tokens_impl,
+)
+from runner.validate_plan import (
+    _check_criteria_coverage,
+    _check_file_overlap,
+    _check_gitignored_paths,
+    _check_path_allowlist,
+    _check_test_code_spec_format,
+    _check_test_failure_language,
+    _check_test_shell_metacharacters,
+    _criterion_bigrams,
+    _resolve_banned_tokens,
+    validate,
+)
 
 # Phase 4: _check_banned_tokens now takes the banned-tokens dict explicitly.
 # Existing tests assert apiary-default behavior, so wrap with the apiary map

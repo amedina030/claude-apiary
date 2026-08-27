@@ -11,7 +11,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME, BRIEF_SUMMARY_MAX, derive_brief_summary, reset_layout_cache
+from scribe.store import (
+    ARCHIVE_DIRNAME,
+    BRIEF_SUMMARY_MAX,
+    INDEX_FILENAME,
+    LEARNING_FOLDER,
+    NEXT_SEQ_FILENAME,
+    TYPE_FOLDERS,
+    ScribeStore,
+    derive_brief_summary,
+    reset_layout_cache,
+)
 
 
 class TestEnsureLayout(unittest.TestCase):
@@ -21,7 +31,7 @@ class TestEnsureLayout(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir = Path(tmp) / 'scribe_state'
             year = datetime.now(timezone.utc).year
-            store = ScribeStore(state_dir)
+            ScribeStore(state_dir)  # constructing it is what scaffolds the folders
             all_folders = list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]
             for folder_name in all_folders:
                 folder = state_dir / folder_name
@@ -129,7 +139,7 @@ class TestAddNote(unittest.TestCase):
             self.assertTrue(result['has_body'])
             # Check year-dir index file
             idx_path = Path(tmp) / 'todos' / str(year) / INDEX_FILENAME
-            lines = [l for l in idx_path.read_text(encoding='utf-8').splitlines() if l.strip()]
+            lines = [ln for ln in idx_path.read_text(encoding='utf-8').splitlines() if ln.strip()]
             self.assertEqual(len(lines), 1)
             entry = json.loads(lines[0])
             self.assertEqual(entry['seq'], 1)
@@ -157,7 +167,6 @@ class TestGetNote(unittest.TestCase):
 
     def test_get_existing_note(self):
         with tempfile.TemporaryDirectory() as tmp:
-            year = datetime.now(timezone.utc).year
             store = ScribeStore(Path(tmp))
             added = store.add_note('todo', 'fix bug', 's1')
             result = store.get_note(added['type'], added['year'], added['seq'])
@@ -384,7 +393,7 @@ class TestLearnings(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = ScribeStore(Path(tmp))
             l1 = store.add_learning('learned thing 1', 's1')
-            l2 = store.add_learning('learned thing 2', 's1')
+            store.add_learning('learned thing 2', 's1')
             self.assertEqual(l1['type'], 'learning')
             results = store.list_learnings()
             self.assertEqual(len(results), 2)
@@ -517,7 +526,7 @@ class TestLearningFrontmatter(unittest.TestCase):
     def test_list_learnings_status_all_unions_active_and_archive(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = ScribeStore(Path(tmp))
-            a = store.add_learning('alive', 's1')
+            store.add_learning('alive', 's1')
             b = store.add_learning('dead', 's1')
             store.archive_learning(b['year'], b['seq'])
             everything = store.list_learnings(status='all')

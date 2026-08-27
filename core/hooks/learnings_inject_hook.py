@@ -168,6 +168,7 @@ def run(payload: dict):  # pragma: no cover — covered by integration; the
     from core.flags import is_enabled
     from core.hook_context import HookResult, context_block
     from core.sanitizer import sanitize_and_report
+
     # scribe.paths, not scribe.notes: this runs before every Edit/Write/Bash,
     # and importing the CLI would pull argparse plus the maintenance and
     # inference modules onto the hot path for a single path lookup.

@@ -32,13 +32,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.session import SessionId
 from scribe import formatting, infer, maintenance, paths, policy, templates
 from scribe.cli_args import (
-    build_parser, check_length, content_from_args, die, tag_list,
+    build_parser,
+    check_length,
+    content_from_args,
+    die,
+    tag_list,
 )
-from scribe.formatting import format_age, format_id as _format_id
-from scribe.paths import PROJECTS_DIR, SCRIBE_SUBDIR, scribe_state_dir
-from scribe.store import BRIEF_SUMMARY_MAX, ScribeStore, VALID_TYPES, derive_summary
+from scribe.formatting import format_id as _format_id
+from scribe.store import BRIEF_SUMMARY_MAX, ScribeStore, derive_summary
 from scribe.templates import (
-    required_sections as template_required_sections, template_path, template_text,
+    template_path,
 )
 
 MAX_CONTENT_LENGTH = 100_000  # bytes; prevents runaway JSONL file growth

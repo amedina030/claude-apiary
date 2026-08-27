@@ -15,7 +15,6 @@ Usage:
 """
 import argparse
 import json
-import os
 import re
 import shlex
 import subprocess
@@ -23,6 +22,12 @@ import sys
 from pathlib import Path
 
 from .config_loader import get as cfg
+from .schema_versions import (
+    EXECUTION_SCHEMA_VERSION,
+    PLAN_SCHEMA_VERSION,
+    assert_schema_version,
+)
+
 # Eager-import stage_lib (and transitively claude_subprocess / cost_emit) at
 # module top. These modules MUST be resolved while the working tree is still
 # on the parent branch (typically master). If we let run_claude() do a
@@ -34,14 +39,10 @@ from .config_loader import get as cfg
 from .stage_lib import (
     check_uuid_safe,
     extract_json,
+)
+from .stage_lib import (
     run_claude as _spawn_claude,
 )
-from .schema_versions import (
-    EXECUTION_SCHEMA_VERSION,
-    PLAN_SCHEMA_VERSION,
-    assert_schema_version,
-)
-
 from .target_repo import executions_dir
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -62,13 +63,18 @@ class NoChangesError(RuntimeError):
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
 from core.utils.atomic import write_json_atomic
+
 from .git_lib import (
     branch_exists,
     create_branch,
-    current_branch as get_current_branch,
-    format_git_error as _format_git_error,
     git,
     run_branch_from_env,
+)
+from .git_lib import (
+    current_branch as get_current_branch,
+)
+from .git_lib import (
+    format_git_error as _format_git_error,
 )
 
 
@@ -632,7 +638,7 @@ def build_verify_prompt(step: dict, spec: dict) -> str:
         "",
         f"## Verification: {step['description']}",
         "",
-        f"## What to check",
+        "## What to check",
         step.get("code_spec", ""),
         "",
         "## Instructions",

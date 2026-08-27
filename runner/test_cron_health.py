@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for runner/cron_health.py."""
 from __future__ import annotations
-import io
+
 import json
 import os
 import sys
@@ -12,7 +12,10 @@ from unittest import mock
 
 from runner import cron_health
 from runner.schedulers.base import (
-    ObservedEntry, SchedulerBackend, SchedulerError, UnsupportedPlatformError,
+    ObservedEntry,
+    SchedulerBackend,
+    SchedulerError,
+    UnsupportedPlatformError,
 )
 
 
@@ -31,9 +34,7 @@ class HostnameRegistryPathTests(unittest.TestCase):
         self.assertEqual(path.parent, cron_health.CRON_REGISTRY_DIR)
 
     def test_hostname_defaults_to_platform_node(self):
-        import platform
         path = cron_health.registry_path_for_host()
-        expected = platform.node().strip() or "unknown"
         # Don't assert exact characters (the sanitiser may swap some) —
         # just verify the file lives under CRON_REGISTRY_DIR and has a name.
         self.assertEqual(path.parent, cron_health.CRON_REGISTRY_DIR)

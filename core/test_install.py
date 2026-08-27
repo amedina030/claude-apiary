@@ -14,6 +14,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from core import git_hooks
 from core import install as install_mod
+
 # The fake main-apiary and the throwaway git repos come from one place now —
 # see core/testing.py for why they are built the way they are.
 from core.testing import init_git_repo as _git_init

@@ -28,10 +28,11 @@ from .stage_lib import (
     ClaudeMissingError,
     extract_json,
     retry_until_valid,
-    run_claude as _spawn,
     run_validator,
 )
-
+from .stage_lib import (
+    run_claude as _spawn,
+)
 from .target_repo import plans_dir
 
 SCRIPT_DIR = Path(__file__).resolve().parent

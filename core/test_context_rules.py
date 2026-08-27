@@ -21,7 +21,6 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from core import context_rules as cr  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Layer 4 — source files conform
 # ---------------------------------------------------------------------------

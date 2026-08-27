@@ -15,7 +15,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scribe.maintenance import (
-    BACKUPS_DIRNAME, DEFAULT_RETAIN, create_backup, prune_backups,
+    BACKUPS_DIRNAME,
+    DEFAULT_RETAIN,
+    create_backup,
+    prune_backups,
 )
 from scribe.paths import ProjectKeyError, resolve_store_dir
 

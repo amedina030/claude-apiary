@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Tests for runner/usher.py — ticket sizing gate."""
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,9 +9,9 @@ from unittest import mock
 from runner.usher import (
     _extract_file_paths,
     _extract_subsystems,
-    score,
     assess,
     main,
+    score,
 )
 
 

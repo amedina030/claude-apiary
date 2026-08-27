@@ -17,12 +17,13 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from incubator import cli
 from core import install as install_mod
+
 # Reuse the throwaway-apiary fixture from the install tests so the end-to-end
 # spawn test never touches the real registry under <apiary>/.repos.
 from core import testing
-from core.test_install import _make_fake_apiary, _git_init
+from core.test_install import _git_init
+from incubator import cli
 from scripts import install_git_hooks
 
 

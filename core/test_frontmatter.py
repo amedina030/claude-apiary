@@ -15,7 +15,6 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from core import frontmatter  # noqa: E402
 
-
 # Values that must survive dump → parse unchanged, in a scalar and in a list.
 # The first three are the exact inputs recorded in knowledge.md §3 2; the globs
 # and the timestamp are real values from the live store.

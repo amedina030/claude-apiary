@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """Tests for runner/abort.py (T-2026-128)."""
-import json
-import os
 import tempfile
 import time
 import unittest

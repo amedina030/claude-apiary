@@ -5,13 +5,13 @@ Uses subprocess mocks so these tests run on any OS (the Windows backend
 only imports stdlib at module load; native schtasks calls are stubbed).
 """
 from __future__ import annotations
+
 import subprocess
 import unittest
 from unittest import mock
 
 from runner.schedulers import windows as win_mod
 from runner.schedulers.base import SchedulerError
-
 
 _CSV_SAMPLE = (
     '"HostName","TaskName","Task To Run","Start In","Schedule Type","Start Time"\r\n'

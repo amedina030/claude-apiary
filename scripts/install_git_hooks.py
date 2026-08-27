@@ -34,7 +34,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from core.utils.gitutil import git_root  # noqa: E402
 from core.git_hooks import (  # noqa: E402
     HOOK_SOURCE,
     OWNED_MARKER,
@@ -47,6 +46,7 @@ from core.git_hooks import (  # noqa: E402
     report,
     uninstall,
 )
+from core.utils.gitutil import git_root  # noqa: E402
 
 __all__ = [
     "HOOK_SOURCE", "OWNED_MARKER", "classify", "_classify", "configured_hooks_path",

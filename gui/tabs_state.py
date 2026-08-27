@@ -27,7 +27,6 @@ from core.utils.atomic import write_json_atomic
 from core.utils.jsonio import read_json_object
 from gui.paths import state_dir
 
-
 STATE_DIR = state_dir()
 TABS_PATH = STATE_DIR / "tabs.json"
 

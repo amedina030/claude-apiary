@@ -39,10 +39,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
-from .schedulers.base import (
-    ObservedEntry, SchedulerBackend, SchedulerError, UnsupportedPlatformError,
-)
 from core.hooks_lib import resolve_python
+
+from .schedulers.base import (
+    ObservedEntry,
+    SchedulerBackend,
+    SchedulerError,
+    UnsupportedPlatformError,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 APIARY_REPO_ROOT = SCRIPT_DIR.parent

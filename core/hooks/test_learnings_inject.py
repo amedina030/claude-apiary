@@ -6,9 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.hooks.learnings_inject_hook import (
-    score_learnings,
     _area_is_specific,
     _tokenize_command,
+    score_learnings,
 )
 
 

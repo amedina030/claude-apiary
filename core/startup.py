@@ -19,11 +19,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.session import SessionId, load_history, sessions_dir
 from core.utils.project import get_project_key
-from scribe.formatting import format_age, format_id as _format_id
+from scribe.formatting import format_age
+from scribe.formatting import format_id as _format_id
 from scribe.paths import PROJECTS_DIR, scribe_state_dir
 from scribe.policy import run_auto_archive
-from scribe.store import ScribeStore, TYPE_FOLDERS
-
+from scribe.store import TYPE_FOLDERS, ScribeStore
 
 
 def history_path() -> Path:
@@ -205,7 +205,9 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
         items.append(f"#{did} {ntype} ({age}) {summary}")
 
     learn_entries = store.list_learnings()
-    learning_count = sum(1 for l in learn_entries if _matches_role_mission(l, role, mission))
+    learning_count = sum(
+        1 for e in learn_entries if _matches_role_mission(e, role, mission)
+    )
     review_marker = _review_staleness_marker(sd)
 
     handoffs = [n for n in filtered_active if n.get("type") == "handoff"]

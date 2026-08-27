@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -21,8 +21,8 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from core.hook_context import HookResult  # noqa: E402
-from core.testing import hermetic_env  # noqa: E402
 from core.hooks import dispatch  # noqa: E402
+from core.testing import hermetic_env  # noqa: E402
 
 
 class _FakeHooks:

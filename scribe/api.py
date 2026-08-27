@@ -25,7 +25,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from core.utils.state import resolve_apiary_repo, repos_dir, registry_path, find_state_dir
+from core.utils.state import find_state_dir, registry_path, repos_dir, resolve_apiary_repo
 from core.utils.timeutil import parse_iso
 from scribe.store import ScribeStore
 

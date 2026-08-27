@@ -24,9 +24,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.session import SessionId
 from core.hook_context import HookResult, context_block, run_standalone
 from core.sanitizer import sanitize_and_report
+from core.session import SessionId
 from core.startup import run_init, run_summary
 from core.utils.gitutil import git_root
 from core.utils.state import find_state_dir, state_dir_from_env

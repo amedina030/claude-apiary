@@ -17,15 +17,15 @@ from pathlib import Path
 
 from core.hooks.pre_push_secret_scan import (
     UNRESOLVED_CWD,
-    push_targets,
     PushTarget,
+    _shannon_entropy,
     iter_added_lines,
     outgoing_log_args,
     push_target,
+    push_targets,
     scan_diff,
     scan_line,
     scan_patch_series,
-    _shannon_entropy,
 )
 
 AWS_ID = "AKIA" + "IOSFODNN7EXAMPLE"
@@ -203,6 +203,7 @@ class ScanPatchSeriesTest(unittest.TestCase):
 
     def test_repo_allowlist_is_honoured(self):
         import re
+
         from core.secret_patterns import Allowlist
         log = f"{self.SHA_A}\n\n" + _diff(f"key = {AWS_ID}", path="tests/fixtures.py")
         by_path = Allowlist(paths=(re.compile(r"^tests/"),))

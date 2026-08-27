@@ -5,11 +5,11 @@ import unittest
 from pathlib import Path
 
 from core.apiary_profiles import (
+    SUPPORTED_SCHEMA_VERSION,
     ProfileCycleError,
     ProfileMergeError,
     ProfileNotFoundError,
     ProfileSchemaError,
-    SUPPORTED_SCHEMA_VERSION,
     list_available,
     resolve,
 )

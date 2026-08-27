@@ -358,7 +358,7 @@ class PermissionMcpTests(unittest.TestCase):
         self.mod.serve(stdin=stdin, stdout=stdout)
         lines = stdout.getvalue().strip().splitlines()
         self.assertEqual(len(lines), 2)
-        ids = [json.loads(l)["id"] for l in lines]
+        ids = [json.loads(ln)["id"] for ln in lines]
         self.assertEqual(ids, [1, 2])
 
 

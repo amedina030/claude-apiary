@@ -1,7 +1,6 @@
 """Tests for the repair subcommand in scribe/notes.py."""
 import contextlib
 import io
-import json
 import shutil
 import sys
 import tempfile
@@ -11,11 +10,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scribe.store import (
-    ScribeStore, TYPE_FOLDERS, LEARNING_FOLDER, INDEX_FILENAME,
-    ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME,
-)
 import scribe.notes as notes_mod
+from scribe.store import (
+    ARCHIVE_DIRNAME,
+    INDEX_FILENAME,
+    NEXT_SEQ_FILENAME,
+    TYPE_FOLDERS,
+    ScribeStore,
+)
 
 
 class RepairTests(unittest.TestCase):
@@ -108,7 +110,7 @@ class RepairTests(unittest.TestCase):
 
     def test_dry_run_makes_no_changes(self):
         entry = self.store.add_note('todo', 'dry run test', 'sess1')
-        year, seq = entry['year'], entry['seq']
+        year = entry['year']
 
         year_dir = self.state_dir / 'todos' / str(year)
         idx_path = year_dir / INDEX_FILENAME

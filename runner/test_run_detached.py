@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """Integration tests for run.py --detached flow. Uses unittest.mock to stub stages."""
-import io, json, os, subprocess, sys, tempfile, unittest
-from contextlib import redirect_stdout, redirect_stderr
+import io
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -11,13 +17,12 @@ from unittest import mock
 # (the TestDetachedRun.setUp forwards that patch automatically).
 os.environ["APIARY_RUNNER_TEST_ISOLATION"] = "1"
 
-from runner import run          # noqa: E402
-from runner import detached_lib  # noqa: E402
+from runner import queue as runner_queue  # noqa: E402
+from runner import run  # noqa: E402
 from runner import run_history as run_history_module  # noqa: E402
 from runner import run_lock as run_lock_module  # noqa: E402
 from runner import run_tracker as run_tracker_module  # noqa: E402
 from runner import target_repo as target_repo_module  # noqa: E402
-from runner import queue as runner_queue  # noqa: E402
 
 
 def _make_fake_usage(tokens: int = 1000) -> str:
@@ -194,7 +199,6 @@ class TestDetachedRun(unittest.TestCase):
             uid = 'phase2-abcd-ef01-2345-6789abcdef01'
             intake_file = self._make_intake_file(backlog, uid=uid)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = self._history_path
 
             captured_input_paths = []
 
@@ -259,7 +263,6 @@ class TestDetachedRun(unittest.TestCase):
             intake_file = self._make_intake_file(td / 'backlog')
             scratch = self._init_scratch_repo(td / 'scratch')
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = self._history_path
 
             captured = {}
             def _capture(branch, *args, **kwargs):
@@ -326,7 +329,6 @@ class TestDetachedRun(unittest.TestCase):
                 'target_repo': str(scratch),
             }), encoding='utf-8')
             wt_path = self._make_fake_worktree(td, intake_path)
-            log_path = self._history_path
 
             captured = {}
             def _capture(branch, *args, **kwargs):
@@ -443,8 +445,7 @@ class TestDetachedRun(unittest.TestCase):
 
     def test_hygiene_queue_full(self):
         """hygiene_precheck blocks run → exit 0, log entry contains 'queue full'."""
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
+        with tempfile.TemporaryDirectory():
             log_path = self._history_path
 
             with (
@@ -459,8 +460,7 @@ class TestDetachedRun(unittest.TestCase):
 
     def test_backlog_empty(self):
         """No backlog items available → exit 0, log entry contains 'backlog empty'."""
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
+        with tempfile.TemporaryDirectory():
             log_path = self._history_path
 
             with (
@@ -585,7 +585,6 @@ class TestDetachedRun(unittest.TestCase):
             uid = 'abc12345-feed-face-cafe-1234567890ab'
             intake_file = self._make_intake_file(backlog, uid=uid)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = self._history_path
 
             captured = {}
 

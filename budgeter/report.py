@@ -11,11 +11,11 @@ Usage:
     python report.py --grouped          # group by session only (no task breakdown)
     python report.py --by-agent         # per-agent-type token breakdown
 """
+import argparse
 import json
 import sys
-import argparse
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 BUDGETER_DIR = Path(__file__).parent
 LOG_PATH = BUDGETER_DIR / "data" / "usage_log.jsonl"

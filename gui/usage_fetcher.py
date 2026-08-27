@@ -39,7 +39,6 @@ import urllib.request
 from pathlib import Path
 from typing import Callable, Optional
 
-
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 OAUTH_BETA_HEADER = "oauth-2025-04-20"
 CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"

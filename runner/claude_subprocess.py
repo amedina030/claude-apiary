@@ -31,8 +31,8 @@ ALLOW_ALL_ENV_VAR : str
     Name of the escape-hatch env var. If set to "1" in the parent env,
     the full parent environment is forwarded (legacy behavior).
 """
-import os
 import json
+import os
 import shutil
 import subprocess
 

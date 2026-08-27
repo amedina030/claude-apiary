@@ -1,5 +1,4 @@
 """Tests for runner.run_tracker — cross-invocation run tracking."""
-import json
 import tempfile
 import unittest
 from pathlib import Path

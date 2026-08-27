@@ -15,8 +15,18 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from gui import build_info, composer_state, file_refs, picker, pty_capture, sidebar_state, tabs_state, usage_fetcher
-from gui import permission_mcp
+from gui import (
+    build_info,
+    composer_state,
+    file_refs,
+    permission_mcp,
+    picker,
+    pty_capture,
+    sidebar_state,
+    tabs_state,
+    usage_fetcher,
+)
+from gui.paths import main_apiary, state_dir
 from gui.permission_bridge import PermissionBridge
 from gui.permission_mcp import BRIDGE_URL_ENV as _PERMISSION_MCP_BRIDGE_URL_ENV
 from gui.scribe_aggregator import NoteEntry, read_body
@@ -25,12 +35,13 @@ from gui.single_instance import SingleInstance
 from gui.tabs_state import TabEntry
 from gui.theme import (
     ThemeWatcher,
-    ensure_defaults as ensure_theme_defaults,
     load_launch,
     load_theme,
 )
+from gui.theme import (
+    ensure_defaults as ensure_theme_defaults,
+)
 from gui.transcript import Message, parse_jsonl_lines
-from gui.paths import main_apiary, state_dir
 from scribe import api as scribe_api
 
 # Note types the quick-capture box may write. Deliberately narrow: the box is
@@ -41,6 +52,7 @@ from scribe import api as scribe_api
 QUICK_NOTE_TYPES = ("wishlist", "todo")
 from gui.win_notify import flash_taskbar
 from gui.win_titlebar import apply_dark_titlebar, find_window_by_title
+
 
 def _web_dir() -> Path:
     # PyInstaller-frozen builds put the entry script at the bundle root, so

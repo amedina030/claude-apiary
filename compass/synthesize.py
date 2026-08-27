@@ -34,7 +34,6 @@ from compass import store
 from core.utils.atomic import write_text_atomic
 from runner.claude_subprocess import run_claude
 
-
 VOLATILE_RECENT_WINDOW = 5  # last N sessions count toward volatile dimensions
 CRON_MIN_AGE_DAYS = 7        # --cron mode no-ops if personality.md is younger than this
 DEFAULT_MODEL = "opus"       # synthesis benefits from Opus's integration of subtle signals

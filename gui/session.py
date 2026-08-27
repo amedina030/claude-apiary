@@ -22,8 +22,7 @@ from gui.ask_prompt import AskPromptWatcher
 from gui.file_refs import FileRefs
 from gui.permission_mcp import SESSION_ID_ENV, permission_tool_arg, write_mcp_config
 from gui.pty_capture import CaptureWriter
-from gui.pty_wrapper import PtySpawnError, PtyWrapper
-from gui.pty_wrapper import contains_ctrl_c
+from gui.pty_wrapper import PtySpawnError, PtyWrapper, contains_ctrl_c
 from gui.scribe_aggregator import ScribeAggregatorService, aggregate
 from gui.subagent_tracker import SubagentTracker
 from gui.transcript import (
@@ -167,7 +166,8 @@ class Session:
         # Transcript-sourced AskUserQuestion banner. The watcher reads the
         # structured tool_use/tool_result records (no xterm scraping), and these
         # callbacks route the pending prompt / its resolution to the active tab.
-        _noop = lambda *_a, **_k: None
+        def _noop(*_a, **_k):
+            return None
         _push_ask = on_ask_prompt or _noop
         _push_ask_resolved = on_ask_prompt_resolved or _noop
         self.ask_watcher = AskPromptWatcher(

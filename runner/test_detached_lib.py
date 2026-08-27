@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Unit tests for runner/detached_lib.py."""
-import json, sys, tempfile, unittest
+import json
+import tempfile
+import unittest
 from pathlib import Path
 from unittest import mock
 
 from runner import detached_lib
+
 
 class TestSlug(unittest.TestCase):
     def test_basic(self):
@@ -49,7 +52,7 @@ class TestPickBacklog(unittest.TestCase):
             b = bdir / 'b.json'
             a.write_text(json.dumps({'id': 'uuid-a', 'title': 'A'}), encoding='utf-8')
             b.write_text(json.dumps({'id': 'uuid-b', 'title': 'B'}), encoding='utf-8')
-            import os, time
+            import os
             os.utime(a, (1000, 1000))
             os.utime(b, (2000, 2000))
             with mock.patch.object(detached_lib, 'BACKLOG_DIR', bdir):

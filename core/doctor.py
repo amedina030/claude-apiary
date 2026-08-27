@@ -47,7 +47,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.utils import state
 
-
 # A check returns (notes, issues). Notes are informational and never fail
 # a run; issues do. The split lets expected-but-worth-saying status (e.g. a
 # machine where `apiary self-bootstrap` has not been run yet, so there is no

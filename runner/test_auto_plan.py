@@ -9,7 +9,6 @@ Covers the two build_prompt modes introduced in phase 4:
     '## Target repo conventions', banned-tokens section driven by config
     overrides (empty by default for non-apiary targets).
 """
-import json
 import subprocess
 import tempfile
 import unittest

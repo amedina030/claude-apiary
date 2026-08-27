@@ -1,12 +1,11 @@
 import json
-from datetime import datetime, timezone
 import os
 import sys
-import time
 import threading
+import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.session import SessionId

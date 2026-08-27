@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -31,9 +30,9 @@ from pathlib import Path
 # Make the apiary repo root importable so ``from core import install`` works
 # when this CLI runs under the per-repo launcher (mirrors scribe/notes.py:33).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core import git_hooks
 from core import install as core_install
 from core.utils import state
-from core import git_hooks
 
 EXIT_OK = 0
 EXIT_VALIDATION = 2

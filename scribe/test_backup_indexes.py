@@ -8,8 +8,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scribe.store import ScribeStore, TYPE_FOLDERS, LEARNING_FOLDER, INDEX_FILENAME
 from scribe import backup_indexes
+from scribe.store import INDEX_FILENAME, LEARNING_FOLDER, ScribeStore
 
 
 class BackupIndexesTests(unittest.TestCase):

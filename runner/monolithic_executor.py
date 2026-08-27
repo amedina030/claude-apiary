@@ -48,13 +48,12 @@ import sys
 from pathlib import Path
 
 from .config_loader import get as cfg
-from .stage_lib import check_uuid_safe, run_claude as _spawn_claude
 from .executor import (
     EXECUTIONS_DIR,
     _ensure_on_branch,
     _norm_rel,
-    verify_post_conditions,
     persist_execution_log,
+    verify_post_conditions,
 )
 from .git_lib import git, run_branch_from_env
 from .schema_versions import (
@@ -62,6 +61,8 @@ from .schema_versions import (
     PLAN_SCHEMA_VERSION,
     assert_schema_version,
 )
+from .stage_lib import check_uuid_safe
+from .stage_lib import run_claude as _spawn_claude
 
 MONOLITHIC_TIMEOUT = cfg("monolithic_executor", "timeout_seconds", 1800)
 
@@ -104,8 +105,8 @@ def build_monolithic_prompt(plan: dict) -> str:
         "",
         "## Commit protocol (CRITICAL — the orchestrator parses these)",
         "",
-        f"After each create/modify/delete step, run:",
-        f"    git add <exact files from step.files>",
+        "After each create/modify/delete step, run:",
+        "    git add <exact files from step.files>",
         f"    git commit -m \"runner/{uuid} step <N>: <step description>\"",
         "",
         "The subject line MUST start with "
@@ -113,18 +114,18 @@ def build_monolithic_prompt(plan: dict) -> str:
         "will record the step as missing.",
         "",
         "Rules:",
-        f"- Steps run in ``step_number`` order.",
-        f"- A file-mutating step (action=create/modify/delete) produces "
-        f"EXACTLY one commit, touching ONLY its declared files. No "
-        f"commits outside this loop.",
-        f"- Test steps (action=test): run code_spec as a shell command. "
-        f"Non-zero exit is fatal — stop and explain.",
-        f"- Verify steps (action=verify): inspect the files and include "
-        f"a line 'verify <N>: PASS' or 'verify <N>: FAIL <reason>' in "
-        f"your final response.",
-        f"- If a step's work is already done (e.g. a prior step naturally "
-        f"included it), SKIP its commit and move on — do not create an "
-        f"empty commit.",
+        "- Steps run in ``step_number`` order.",
+        "- A file-mutating step (action=create/modify/delete) produces "
+        "EXACTLY one commit, touching ONLY its declared files. No "
+        "commits outside this loop.",
+        "- Test steps (action=test): run code_spec as a shell command. "
+        "Non-zero exit is fatal — stop and explain.",
+        "- Verify steps (action=verify): inspect the files and include "
+        "a line 'verify <N>: PASS' or 'verify <N>: FAIL <reason>' in "
+        "your final response.",
+        "- If a step's work is already done (e.g. a prior step naturally "
+        "included it), SKIP its commit and move on — do not create an "
+        "empty commit.",
         "",
         "## Steps",
         "",

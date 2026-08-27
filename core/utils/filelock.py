@@ -1,7 +1,6 @@
 """Cross-platform file lock using OS-level locking."""
 import os
 import time
-from contextlib import contextmanager
 from pathlib import Path
 
 

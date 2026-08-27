@@ -22,20 +22,22 @@ import sys
 import time
 from pathlib import Path
 
-from .config_loader import get as cfg
-from . import run_lock
-from . import run_tracker
 from . import abort as abort_mod
-from .git_lib import RUNNER_BRANCH_ENV
-from .usher import assess as usher_assess
-from .stage_lib import is_uuid_safe
-from .run_history import append_entry as history_append
+from . import run_lock, run_tracker
+from .config_loader import get as cfg
 from .detached_lib import (
-    slugify, pick_backlog_item, hygiene_precheck,
     all_backlog_items_claimed,
-    git_worktree_create, git_commit_all_in, git_worktree_remove,
+    git_commit_all_in,
+    git_worktree_create,
+    git_worktree_remove,
+    hygiene_precheck,
+    pick_backlog_item,
     prune_stale_worktrees,
+    slugify,
 )
+from .git_lib import RUNNER_BRANCH_ENV
+from .run_history import append_entry as history_append
+from .stage_lib import is_uuid_safe
 from .target_repo import (
     executions_dir,
     hardens_dir,
@@ -47,6 +49,7 @@ from .target_repo import (
     set_active_target,
     specs_dir,
 )
+from .usher import assess as usher_assess
 
 # Stages that legitimately make no Claude calls and so always emit zero
 # <usage> blocks. Used by run_detached's no_usage safety check (ATK-010):
@@ -370,7 +373,6 @@ def print_cost_summary(stage_costs: list) -> None:
     total_cache_read = 0
     total_input_plus_create = 0
     total_output = 0
-    any_logged = False
     any_breakdown = False
     for entry in stage_costs:
         stage = entry['stage']
@@ -416,7 +418,6 @@ def print_cost_summary(stage_costs: list) -> None:
         else:
             print(f'  runner-{stage}{retry_tag}: {tokens} tokens ({tool_uses} tool uses, {duration_ms}ms)')
         total_tokens += tokens
-        any_logged = True
     if any_breakdown:
         fresh_total = total_input_plus_create + total_cache_read
         cache_pct = (total_cache_read * 100.0 / fresh_total) if fresh_total > 0 else 0.0

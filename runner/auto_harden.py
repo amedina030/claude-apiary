@@ -22,7 +22,6 @@ import tempfile
 from pathlib import Path
 
 from .config_loader import get as cfg
-
 from .target_repo import hardens_dir, plans_dir
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -39,7 +38,8 @@ MAX_ROUNDS = cfg("harden", "max_rounds", 3)
 
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
-from .git_lib import branch_exists, checkout, current_branch as get_current_branch, git
+from .git_lib import branch_exists, checkout, git
+from .git_lib import current_branch as get_current_branch
 from .schema_versions import (
     EXECUTION_SCHEMA_VERSION,
     HARDEN_SCHEMA_VERSION,
@@ -48,8 +48,12 @@ from .schema_versions import (
 )
 from .stage_lib import (
     extract_json_str as extract_json_from_text,
+)
+from .stage_lib import (
     extract_text,
     iter_unique,
+)
+from .stage_lib import (
     run_claude as _spawn,
 )
 

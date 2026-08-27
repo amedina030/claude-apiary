@@ -16,7 +16,6 @@ Usage:
 import argparse
 import json
 import re
-import sys
 from pathlib import Path
 
 from lenses import LENSES, is_valid_lens

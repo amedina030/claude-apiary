@@ -6,9 +6,11 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, NEXT_SEQ_FILENAME, INDEX_FILENAME
-from scribe.formatting import PREFIX_TO_TYPE as _PREFIX_TO_TYPE, format_id as _format_id
+from scribe.formatting import PREFIX_TO_TYPE as _PREFIX_TO_TYPE
+from scribe.formatting import format_id as _format_id
 from scribe.notes import _parse_id_arg
+from scribe.store import NEXT_SEQ_FILENAME, TYPE_FOLDERS, TYPE_PREFIXES, ScribeStore
+
 
 class TestTypePrefixes(unittest.TestCase):
     def test_all_types_have_prefixes(self):
@@ -70,7 +72,6 @@ class TestPerTypeYearCounters(unittest.TestCase):
             store = ScribeStore(Path(tmp))
             # Add note in 'current' year
             entry1 = store.add_note('todo', 'note1', 'sess1')
-            year1 = entry1['year']
             self.assertEqual(entry1['seq'], 1)
 
             # Manually create a 2027 year dir and add_note with mocked year

@@ -356,7 +356,7 @@ class DiffParsingTests(unittest.TestCase):
         self.assertEqual(secret_scan.scan_lines(added), [])
 
     def test_deleted_file_contributes_nothing(self):
-        diff = "--- a/gone.py\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n"  # noqa: null-device
+        diff = "--- a/gone.py\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n"  # portability-ok: git diff syntax, not a path we open
         self.assertEqual(secret_scan.parse_staged_diff(diff), [])
 
     def test_quoted_path_header_is_unquoted(self):

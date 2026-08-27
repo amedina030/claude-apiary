@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """List runner/* branches ready for review, joined with run_history.jsonl entries."""
 from __future__ import annotations
-import json, sys
+
+import json
+import sys
+
 from .detached_lib import list_unmerged_runner_branches
 from .run_history import RUN_HISTORY_FILE
 from .target_repo import backlog_dir, hardens_dir, intake_dir, resolve_target_repo

@@ -38,7 +38,6 @@ import json
 import re
 import sys
 
-
 VAGUE_PATTERNS = re.compile(
     r"\b(works?\s+correctly|handles?\s+gracefully|functions?\s+properly|"
     r"behaves?\s+as\s+expected|performs?\s+well|is\s+robust)\b",

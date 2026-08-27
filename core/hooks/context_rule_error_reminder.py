@@ -31,7 +31,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from core.hook_context import HookResult, run_standalone
 
-
 REMINDER = (
     "[context-rule: recover_from_trivial_errors] A tool call just failed. "
     "If the fix is obvious from the error message and doesn't change your "

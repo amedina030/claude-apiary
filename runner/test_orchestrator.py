@@ -9,11 +9,10 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from runner import run as orchestrator
-from runner.run import run_stage, main, STAGES, SCRIPT_DIR, REPO_ROOT
-
+from runner.run import REPO_ROOT
 
 # ---------------------------------------------------------------------------
 # Helpers

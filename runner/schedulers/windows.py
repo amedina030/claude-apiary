@@ -9,6 +9,7 @@ happen inside ``WindowsTaskScheduler`` methods, which cron_health only
 instantiates after a platform check.
 """
 from __future__ import annotations
+
 import csv
 import io
 import shlex

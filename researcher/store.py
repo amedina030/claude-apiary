@@ -14,7 +14,6 @@ by standard sections (Summary / Context / Findings / Code / Caveats).
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -27,7 +26,8 @@ from core import frontmatter  # noqa: E402
 # while there is exactly one definition in the tree (review X-3).
 from core.utils.state import (  # noqa: F401
     LEGACY_STATE_DIRNAME as APIARY_STATE_DIRNAME,
-    TARGET_STATE_DIR_ENV,
+)
+from core.utils.state import (
     resolve_state_dir,
 )
 

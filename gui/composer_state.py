@@ -17,7 +17,6 @@ from pathlib import Path
 
 from gui.paths import state_dir
 
-
 STATE_PATH = state_dir() / "composer_state.json"
 DEFAULT_HEIGHT = 0
 MIN_HEIGHT = 24

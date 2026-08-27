@@ -240,10 +240,10 @@ def parse_staged_diff(diff: str) -> list[tuple[str, int, str]]:
     for raw in diff.splitlines():
         if raw.startswith("+++ "):
             target = _unquote_path(raw[4:].strip())
-            # "+++ b/some/path" — or /dev/null for a deletion.  # noqa: null-device
+            # "+++ b/some/path" — or /dev/null for a deletion.  # portability-ok: git diff syntax, not a path we open
             # git emits the literal string below; it is diff syntax, not a path
             # we open, so the portable-devnull rule doesn't apply.
-            path = "" if target == "/dev/null" else target[2:] if target.startswith("b/") else target  # noqa: null-device
+            path = "" if target == "/dev/null" else target[2:] if target.startswith("b/") else target  # portability-ok: git diff syntax, not a path we open
             continue
         if raw.startswith("@@"):
             m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", raw)

@@ -29,7 +29,10 @@ from pathlib import Path
 # while there is exactly one definition in the tree (review X-3).
 from core.utils.state import (  # noqa: F401
     LEGACY_STATE_DIRNAME as APIARY_STATE_DIRNAME,
-    TARGET_STATE_DIR_ENV,
+)
+from core.utils.state import (
+    TARGET_STATE_DIR_ENV,  # noqa: F401 — re-export: compass.evaluate and the
+    # compass tests read it as compass.store.TARGET_STATE_DIR_ENV.
     resolve_state_dir,
 )
 

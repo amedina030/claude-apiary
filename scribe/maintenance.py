@@ -23,9 +23,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.utils.atomic import write_text_atomic
 from scribe.store import (
-    ARCHIVE_DIRNAME, INDEX_FILENAME, LEARNING_FOLDER, NEXT_SEQ_FILENAME,
-    ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES,
-    derive_brief_summary, derive_summary,
+    ARCHIVE_DIRNAME,
+    INDEX_FILENAME,
+    LEARNING_FOLDER,
+    NEXT_SEQ_FILENAME,
+    TYPE_FOLDERS,
+    TYPE_PREFIXES,
+    ScribeStore,
+    derive_brief_summary,
+    derive_summary,
 )
 
 #: Every folder scribe manages, type folders plus learnings.

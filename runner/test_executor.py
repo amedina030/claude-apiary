@@ -16,17 +16,17 @@ from unittest import mock
 
 from runner import executor
 from runner.executor import (
-    execute_step,
-    load_previous_log,
-    run_test_command,
+    _assert_action_matches_staged,
     assert_files_clean,
     assert_no_unexpected_writes,
-    _assert_action_matches_staged,
-    validate_resume_state,
-    persist_execution_log,
     build_step_prompt,
     build_verify_prompt,
+    execute_step,
+    load_previous_log,
     parse_verify_output,
+    persist_execution_log,
+    run_test_command,
+    validate_resume_state,
 )
 
 
@@ -421,14 +421,10 @@ class TestExecutorEndToEnd(unittest.TestCase):
     def test_validate_then_execute_produces_branch_commit_and_log(self):
         plan_path, plan = self._write_plan("e2e-test")
 
-        # Run real validate_plan on the real file. Must return 0.
-        vp_result = subprocess.run(
-            [sys.executable, "-m", "validate_plan", str(plan_path)],
-            cwd=str(Path(__file__).resolve().parent),
-            capture_output=True, text=True,
-        )
-        # Either runs as a module or we call the function directly — let's
-        # just call the function since cwd is finicky.
+        # Run the real validator on the real file. (This used to also shell
+        # out to `python -m validate_plan`, discard the result and then call
+        # the function anyway — a subprocess per test run that asserted
+        # nothing.)
         errors = self._validate_plan.validate(plan)
         self.assertEqual(errors, [], f"plan should validate: {errors}")
 

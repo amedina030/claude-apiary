@@ -9,6 +9,7 @@ The registry stores scheduled entries in a backend-agnostic shape
 translating to and from its native representation.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Optional, Protocol
 

@@ -23,8 +23,8 @@ from captures import store as captures_store  # noqa: E402
 from core import context_rules, frontmatter  # noqa: E402
 from docs import check as docs_check  # noqa: E402
 from researcher import store as researcher_store  # noqa: E402
-from scribe import templates as scribe_templates  # noqa: E402
 from scribe import store as scribe_store  # noqa: E402
+from scribe import templates as scribe_templates  # noqa: E402
 
 # One document exercising every dialect feature, written the way each subsystem
 # writes its own files. Every reader below must return exactly EXPECTED_META.

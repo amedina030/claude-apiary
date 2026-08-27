@@ -18,8 +18,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from core.session import SessionId
 from core.hook_context import HookResult, context_block, run_standalone
+from core.session import SessionId
 
 
 def run(payload: dict) -> HookResult | None:

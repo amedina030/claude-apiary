@@ -8,7 +8,6 @@ git being runnable.
 from __future__ import annotations
 
 import io
-import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout

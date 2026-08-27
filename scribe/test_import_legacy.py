@@ -54,7 +54,7 @@ class TestImportLegacy(unittest.TestCase):
         new_l1 = self.id_map["L-2026-1"]
         self.assertNotEqual(new_l1, "L-2026-1")  # pre-seed shifted the ids
         learnings = self.store.list_learnings(status="all")
-        beta = next(l for l in learnings if l.get("orig_display_id") == "L-2026-2")
+        beta = next(e for e in learnings if e.get("orig_display_id") == "L-2026-2")
         self.assertEqual(beta.get("supersedes"), new_l1)
 
     def test_archived_note_lands_in_archive(self):

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import sys
 
-
 _DEFAULT_NAME = "Global\\apiary_gui_singleton_v1"
 
 

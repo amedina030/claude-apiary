@@ -11,9 +11,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scribe.store import ScribeStore
 from scribe import notes as notes_mod
 from scribe import policy
+from scribe.store import ScribeStore
 
 
 class TestCascade(unittest.TestCase):

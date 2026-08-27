@@ -7,8 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from runner.validate_spec import validate_files_examined
 from runner.auto_plan import build_prompt
+from runner.validate_spec import validate_files_examined
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 

@@ -53,7 +53,6 @@ def _render(size: int) -> Image.Image:
     triangle_h = d * math.sqrt(3) / 2
 
     cluster_h = triangle_h + 2 * r        # top vertex of top hex to bottom flat of bottom row
-    cluster_w = d + 2 * apothem
     cx0 = s / 2
     cy0 = (s - cluster_h) / 2 + r          # vertical center of the top hex
 

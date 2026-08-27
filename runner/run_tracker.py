@@ -10,11 +10,9 @@ import json
 from pathlib import Path
 
 from .target_repo import (
-    artifacts_root,
     executions_dir,
     hardens_dir,
     plans_dir,
-    reports_dir,
     runs_dir,
     specs_dir,
 )

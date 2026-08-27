@@ -1,7 +1,6 @@
 """Tests for ``core/cascade.py`` — main-apiary move propagation."""
 from __future__ import annotations
 
-import json
 import sys
 import tempfile
 import unittest
@@ -10,8 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from core import cascade, drift
-from core import testing
+from core import cascade, drift, testing
 from core.utils import state
 
 

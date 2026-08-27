@@ -23,8 +23,8 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from scribe.store import ScribeStore, ARCHIVE_DIRNAME, INDEX_FILENAME, _parse_learning_content
 from scribe import api
+from scribe.store import ARCHIVE_DIRNAME, INDEX_FILENAME, ScribeStore, _parse_learning_content
 
 # Legacy plural folder -> apiary note type. `tickets` is intentionally absent
 # (skipped, F2). Apiary supports every type listed here.

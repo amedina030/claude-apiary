@@ -7,7 +7,6 @@ import unittest
 from pathlib import Path
 
 from scribe import templates
-from scribe.store import VALID_TYPES
 
 
 class ScaffoldRefreshTest(unittest.TestCase):

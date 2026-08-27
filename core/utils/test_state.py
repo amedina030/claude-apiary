@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core import testing
 from core.utils import state
 
-
 # A fresh git repo with a single empty commit, so
 # ``git rev-parse --show-toplevel`` resolves to it — the resolver has to see a
 # real repo, not a directory that happens to hold a .git folder.

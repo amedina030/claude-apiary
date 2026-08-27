@@ -12,13 +12,12 @@ Covers:
   - Session-length nudge tiers, and its one-shot behaviour in the PRE hook
   - Reading log entries written before the warning feature was deleted
 """
-import os
-import sys
 import json
+import os
 import subprocess
-import uuid
-import shutil
+import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 BUDGETER_DIR = Path(__file__).parent
@@ -32,7 +31,6 @@ PYTHON = sys.executable
 os.environ["APIARY_BUDGETER_TEST_ISOLATION"] = "1"
 
 sys.path.insert(0, str(APIS_DIR))
-from budgeter.lib import logger as _logger_module
 
 
 # ---------------------------------------------------------------------------
@@ -653,7 +651,7 @@ def test_cumulative_tokens_dedupes_by_message_id_and_counts_cache_creation(tmp_p
     import budgeter.lib.logger as lg
     usage = {"input_tokens": 10, "cache_read_input_tokens": 900,
              "cache_creation_input_tokens": 300, "output_tokens": 40}
-    entries = [json.loads(l) for l in _assistant_lines("m1", usage, ("thinking", "text", "tool_use"))]
+    entries = [json.loads(ln) for ln in _assistant_lines("m1", usage, ("thinking", "text", "tool_use"))]
     # Three lines, one API call: 10 + 900 + 300 + 40, not 3x that.
     assert lg.get_cumulative_tokens(entries) == 1250
     # A record with no id is counted on its own.
@@ -832,6 +830,7 @@ def test_report_reads_entries_written_before_the_warning_feature(tmp_path):
     Deleting the field must not make a single one of them unreadable."""
     import io
     from contextlib import redirect_stdout
+
     from budgeter import report
     old = {
         "timestamp": "2026-04-02T10:00:00+00:00", "session_id": "s1",

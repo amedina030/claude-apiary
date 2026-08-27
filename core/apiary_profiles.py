@@ -18,7 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from core.utils.jsonc import JsoncParseError, load as load_jsonc
+from core.utils.jsonc import JsoncParseError
+from core.utils.jsonc import load as load_jsonc
 
 SUPPORTED_SCHEMA_VERSION = 1
 _REPLACE_MARKER = "$replace"

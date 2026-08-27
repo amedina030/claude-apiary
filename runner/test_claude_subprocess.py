@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for runner/claude_subprocess.py env allowlist."""
-import unittest
 import subprocess
+import unittest
 from pathlib import Path
 from unittest import mock
 
@@ -255,8 +255,9 @@ class TestResolveClaudeBin(unittest.TestCase):
         self.assertEqual(cs.resolve_claude_bin(env), "/opt/bin/claude-next")
 
     def test_falls_back_to_bare_name_when_not_on_path(self):
-        from runner import claude_subprocess as cs
         import tempfile
+
+        from runner import claude_subprocess as cs
         with tempfile.TemporaryDirectory() as td:
             self.assertEqual(cs.resolve_claude_bin({"PATH": td}), "claude")
 
@@ -264,9 +265,10 @@ class TestResolveClaudeBin(unittest.TestCase):
         """A bare "claude" is resolved by CreateProcess on Windows, which
         only ever appends .exe — an npm-installed claude.cmd is invisible to
         it. `which` honours PATHEXT, so both installs launch."""
-        from runner import claude_subprocess as cs
         import os
         import tempfile
+
+        from runner import claude_subprocess as cs
         with tempfile.TemporaryDirectory() as td:
             name = "claude.bat" if os.name == "nt" else "claude"
             shim = Path(td) / name

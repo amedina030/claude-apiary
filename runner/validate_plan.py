@@ -271,7 +271,6 @@ def _check_post_conditions(steps: list[dict]) -> list[str]:
 def _detect_cycles(steps: list[dict]) -> list[str]:
     """Detect circular dependencies in step graph. Returns error strings."""
     # Build adjacency: step_number -> list of step_numbers it depends on
-    step_nums = {s["step_number"] for s in steps if isinstance(s.get("step_number"), int)}
     graph = {}
     for s in steps:
         num = s.get("step_number")

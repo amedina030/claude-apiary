@@ -10,8 +10,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from core import drift
-from core import testing
+from core import drift, testing
 from core.utils import state
 
 
@@ -44,7 +43,6 @@ class CheckAndHandleTests(unittest.TestCase):
         self.uid = _bootstrap_target(self.target, self.apiary)
 
     def test_no_drift_returns_none_and_refreshes_check_ts(self):
-        before = state.read_self_pointer(self.target)["last_drift_check"]
         # Force a different timestamp by resetting it
         sp = state.read_self_pointer(self.target)
         sp["last_drift_check"] = "2000-01-01T00:00:00Z"

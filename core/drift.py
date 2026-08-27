@@ -25,6 +25,7 @@ from core import cascade
 from core.utils import state
 from core.utils.filelock import FileLock
 
+
 @dataclasses.dataclass
 class DriftReport:
     """Result of a drift check. ``action`` is one of:

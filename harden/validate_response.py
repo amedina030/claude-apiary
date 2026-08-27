@@ -14,7 +14,6 @@ Usage:
     validate_response.py --file response.json --expected-ids ATK-001,ATK-002 [--check-files]
 """
 import argparse
-import json
 import sys
 from pathlib import Path
 

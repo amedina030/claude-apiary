@@ -21,7 +21,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from compass import ab, evaluate, store  # noqa: E402
 from compass import synthesize as synth  # noqa: E402
 
-
 VOCAB = {
     "communication_style": {"terse": ["terse", "short"], "verbose": ["verbose"]},
     "autonomy": {"broad": ["broad"], "gated": ["gate"]},
