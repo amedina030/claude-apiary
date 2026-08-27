@@ -1167,6 +1167,34 @@ Exit codes: `0` clean; `1` findings; `2` bad arguments, not a git repo, or the s
 
 False positives have three escape hatches, in order of preference: an inline `apiary:allow-secret` comment on the offending line; an entry in the repo-root `.secretsallow` file (a plain regex exempts every file whose path matches; `line:<regex>` exempts matching lines instead); or `git commit --no-verify`, which skips every pre-commit hook. See [config files](config-files.md#secretsallow).
 
+## scripts/check_duplicates.py
+
+AST near-duplicate detector for Python functions. Report-only. The third layer of the duplication-prevention plan (deep review §5a-C): one `core/utils/` with guessable names, a duplicate-helper nudge in the hook dispatcher, and this — the check that finds the copies that already landed. The doc-only rule (`code-style.md`'s "reuse `core/`") demonstrably failed: the review counted the same `git rev-parse` block in eight files.
+
+Stdlib only, like `secret_scan.py` — it has to stay runnable from a git hook, where the Poetry virtualenv is not importable.
+
+How it decides two functions are the same: parse with `ast`, drop the docstring, rename arguments and locals to positional placeholders (`a0`, `v1`, …) so a renamed copy still matches, then hash each statement and the body as a whole. Identical body hashes are exact duplicates whatever the functions are called; bodies that merely share statements are scored by multiset Jaccard overlap and reported above `--threshold`. Names that are *not* bound inside the function — imports, helpers, module constants — keep their identifiers, so two bodies that call different helpers are never duplicates however similar their shape.
+
+It does not judge. A reported pair may be a parity test, a deliberate mirror, or a real copy-paste; deciding is a human's job. CI runs it report-only.
+
+```bash
+python scripts/check_duplicates.py                       # whole repo
+python scripts/check_duplicates.py --path core           # one subtree
+python scripts/check_duplicates.py --threshold 0.7       # widen the net
+python scripts/check_duplicates.py --fail-on-identical   # gate mode
+```
+
+| Flag | Description |
+|------|-------------|
+| `--path PATH` | File or directory to scan (default: the repo root) |
+| `--min-statements N` | Ignore functions shorter than this (default: 8) — short helpers are supposed to look alike |
+| `--threshold F` | Overlap ratio, 0–1, at which a pair is reported (default: 0.85) |
+| `--top N` | How many groups and pairs to print (default: 25) |
+| `--fail-on-identical` | Exit 1 when identical bodies are found; off by default |
+| `--quiet` | Print only the summary counts |
+
+Exit codes: `0` report produced; `1` identical bodies found **and** `--fail-on-identical` was passed; `2` bad arguments or unreadable path.
+
 ## scripts/install_git_hooks.py
 
 Install the secret-scan pre-commit hook into the **current** repo. Sibling of `install_repo_hooks.py`, which targets main-apiary's own checkout and installs the combined doc-check + secret-scan hook; this one targets any other apiary-managed repo.

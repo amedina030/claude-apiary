@@ -86,6 +86,12 @@ jobs:
       - name: Secret scan
         run: poetry run python scripts/secret_scan.py --path .
 
+      - name: Near-duplicate report
+        # Report-only by design (review §5a-C(3)): duplication is a backlog to
+        # work off, not a merge gate. `--fail-on-identical` is the gate mode
+        # to switch to once the reported groups are down to deliberate ones.
+        run: poetry run python scripts/check_duplicates.py --path .
+
   posix-scripts:
     # The Windows dev box never runs these. A syntax pass is the cheap half of
     # "CI is the only thing that exercises install.sh"; a full run would need
