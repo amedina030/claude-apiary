@@ -21,6 +21,8 @@ class _Env(unittest.TestCase):
         self.root = Path(self._tmp.name)
         self.repo = self.root / "repo"
         (self.repo / ".claude" / "apiary" / "session-tmp").mkdir(parents=True)
+        (self.repo / ".claude" / "apiary" / "self-pointer.json").write_text(
+            json.dumps({"schema_version": 1, "name": "repo", "uid": 1, "real_path": str(self.repo)}), encoding="utf-8")
         self.state = self.root / "state"
         self.state.mkdir()
         self.home = self.root / "home"

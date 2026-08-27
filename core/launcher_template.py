@@ -111,6 +111,10 @@ def main() -> int:
 
     env = os.environ.copy()
     env["APIARY_MAIN_REPO"] = str(main_apiary)
+    # The repo this launcher belongs to, so CLI tools invoked through it (e.g.
+    # the /budgeter skill) resolve the SAME repo the hooks do, even when the
+    # tool shell\'s cwd has wandered into a sibling checkout.
+    env["APIARY_TARGET_REPO"] = str(Path(__file__).resolve().parents[2])
     state_dir = _resolve_state_dir(main_apiary)
     if state_dir is not None:
         env["APIARY_TARGET_STATE_DIR"] = str(state_dir)

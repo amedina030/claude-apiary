@@ -77,7 +77,7 @@ When the user cannot state the problem this solves:
 3. Save a decision note:
    ```bash
    python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py add --type decision \
-     --content "KILLED: <original idea>\nReason: <why it was killed>\nSalvageable: <parts worth revisiting, or None>" \
+     --content "### Context\n<original idea, one line>\n\n### Decision\nKILLED\n\n### Why\n<why it was killed>\n\n### Consequences\nSalvageable: <parts worth revisiting, or None>" \
      --session-id "<session_id>"
    ```
 4. Say: "Saved a decision note. If the need becomes concrete later, revisit the salvageable parts."

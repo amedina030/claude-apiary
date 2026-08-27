@@ -65,8 +65,9 @@ class CapturedAtTest(unittest.TestCase):
 
     def test_falls_back_to_now_when_stat_fails(self):
         missing = Path(tempfile.gettempdir()) / "compass-no-such-transcript.jsonl"
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        self.assertTrue(backfill._captured_at(missing).startswith(today))
+        before = datetime.now(timezone.utc)
+        got = datetime.fromisoformat(backfill._captured_at(missing).replace("Z", "+00:00"))
+        self.assertLess(abs((got - before).total_seconds()), 60)
 
     def test_ordering_matches_transcript_age(self):
         # synthesize sorts on this string; lexical order must track real time.

@@ -52,13 +52,14 @@ def dump_history(entries: list) -> str:
 _warned_fallback = False
 
 
-def _fallback_root() -> Path:
+def _fallback_root(warn: bool = True) -> Path:
     """Where session files go when neither a repo nor a state dir can be
-    resolved. Never the home directory — and never silent: a session whose
-    identity lands in the temp dir is a misconfiguration worth one stderr line."""
+    resolved. Never the home directory — and, for writers, never silent: a
+    session whose identity lands in the temp dir is a misconfiguration worth
+    one stderr line. Read-only callers pass ``warn=False``."""
     global _warned_fallback
     root = Path(tempfile.gettempdir()) / "apiary-session-tmp"
-    if not _warned_fallback:
+    if warn and not _warned_fallback:
         _warned_fallback = True
         print(
             "[apiary] no bootstrapped repo / state dir in scope; session files "
@@ -69,16 +70,21 @@ def _fallback_root() -> Path:
     return root
 
 
-def session_tmp_dir() -> Path:
-    """``<repo>/.claude/apiary/session-tmp`` for the current repo."""
+def session_tmp_dir(warn: bool = True) -> Path:
+    """``<repo>/.claude/apiary/session-tmp`` for the current repo.
+
+    Only a *bootstrapped* repo (one with a self-pointer pin) qualifies: a hook
+    fired in a plain git checkout must not grow an un-ignored ``.claude/``
+    tree there."""
     from core.flags import _per_repo_root
+    from core.utils import state
     repo = _per_repo_root()
-    if repo is not None:
+    if repo is not None and state.read_self_pointer(Path(repo)) is not None:
         return Path(repo) / ".claude" / "apiary" / SESSION_TMP_DIRNAME
-    return _fallback_root()
+    return _fallback_root(warn)
 
 
-def sessions_dir() -> Path:
+def sessions_dir(warn: bool = True) -> Path:
     """``<state-dir>/sessions`` for the current target."""
     from core.utils import state
     sd = state.state_dir_from_env()
@@ -88,8 +94,50 @@ def sessions_dir() -> Path:
         if repo is not None:
             sd = state.find_state_dir(Path(repo))
     if sd is None:
-        return _fallback_root() / SESSIONS_DIRNAME
+        return _fallback_root(warn) / SESSIONS_DIRNAME
     return Path(sd) / SESSIONS_DIRNAME
+
+
+# Session files are small but numerous (~5 flags + 1 identity per session);
+# nothing else deletes them, so the Stop hook sweeps old ones once a day.
+FLAG_MAX_AGE_DAYS = 7
+IDENTITY_MAX_AGE_DAYS = 30
+_SWEEP_STAMP = ".last_sweep"
+
+
+def sweep_stale_session_files(now: float | None = None, force: bool = False) -> int:
+    """Delete hook flags older than ``FLAG_MAX_AGE_DAYS`` and identity files
+    older than ``IDENTITY_MAX_AGE_DAYS``; at most once per day unless *force*.
+    Returns the number of files removed. Never raises."""
+    import time
+    now = time.time() if now is None else now
+    removed = 0
+    try:
+        sessions = sessions_dir(warn=False)
+        stamp = sessions / _SWEEP_STAMP
+        if not force and stamp.exists() and now - stamp.stat().st_mtime < 86400:
+            return 0
+        targets = [
+            (session_tmp_dir(warn=False), "*_*", FLAG_MAX_AGE_DAYS * 86400),
+            (sessions, "identity-*.json", IDENTITY_MAX_AGE_DAYS * 86400),
+        ]
+        for folder, glob, max_age in targets:
+            if not folder.is_dir():
+                continue
+            for f in folder.glob(glob):
+                try:
+                    if f.is_file() and now - f.stat().st_mtime > max_age:
+                        f.unlink()
+                        removed += 1
+                except OSError:
+                    pass
+        sessions.mkdir(parents=True, exist_ok=True)
+        stamp.write_text("", encoding="utf-8")
+        import os
+        os.utime(stamp, (now, now))
+    except OSError:
+        pass
+    return removed
 
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
@@ -193,12 +241,12 @@ def load_identity(session_id=None):
 
     if session_id:
         sid = session_id if isinstance(session_id, SessionId) else SessionId(session_id)
-        identity_file = sid.identity_path()
+        identity_file = sid.identity_path(sessions_dir(warn=False))
         if not identity_file.exists():
             return defaults
         files = [identity_file]
     else:
-        root = sessions_dir()
+        root = sessions_dir(warn=False)
         try:
             files = sorted(
                 root.glob("identity-*.json"),

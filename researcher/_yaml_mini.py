@@ -61,6 +61,10 @@ def _unescape_double(body: str) -> str:
             out.append(body[i + 1])
             i += 2
             continue
+        elif ch == "\\" and i + 1 < len(body) and body[i + 1] in "nrt":
+            out.append({"n": "\n", "r": "\r", "t": "\t"}[body[i + 1]])
+            i += 2
+            continue
         out.append(ch)
         i += 1
     return "".join(out)
@@ -171,6 +175,10 @@ def loads(text: str) -> dict[str, Any]:
 def _needs_quoting(value: str) -> bool:
     if value == "":
         return True
+    if any(ch in value for ch in "\n\r\t"):
+        # A raw newline would split the scalar across lines and re-parse the
+        # tail as a new key; escape inside double quotes instead.
+        return True
     if value != value.strip():
         # Leading/trailing whitespace is stripped on load, so it must be quoted
         # to survive the round trip.
@@ -193,7 +201,8 @@ def _dump_scalar(value: Any) -> str:
         return "true" if value else "false"
     text = str(value)
     if _needs_quoting(text):
-        escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+        escaped = (text.replace("\\", "\\\\").replace('"', '\\"')
+                   .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t"))
         return f'"{escaped}"'
     return text
 

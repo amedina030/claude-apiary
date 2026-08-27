@@ -21,6 +21,15 @@ Add a structured note using the scribe tool.
 
    If the user specifies a type explicitly (e.g. `/note --type todo Fix the bug`), use that.
 
+   `decision` and `blocker` notes have required sections (see
+   `<state-dir>/scribe/templates/<type>.md`; `add` rejects a note that lacks
+   them). Expand a one-liner into those sections before saving — keep the
+   user's words, do not invent detail; a section can be one line:
+   - decision: `### Context` / `### Decision` / `### Why` / `### Consequences`
+   - blocker: `### Blocked on` / `### Tried` / `### Unblock when`
+   Pass multi-line content with `--content-file` (write it to a temp file
+   first) rather than quoting it on the command line.
+
    Special subcommand: `/note done <N>` marks note N as done:
    ```bash
    python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py done <N>

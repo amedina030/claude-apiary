@@ -20,7 +20,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.utils.filelock import FileLock
-from core.session import dump_history, load_history, sessions_dir
+from core.session import dump_history, load_history, sessions_dir, sweep_stale_session_files
+from core.utils.atomic import write_text_atomic
 
 MAX_HISTORY = 10
 
@@ -63,7 +64,7 @@ def _append_to_history(session_id, transcript_path):
         # Cap at MAX_HISTORY
         history = history[-MAX_HISTORY:]
 
-        hist.write_text(dump_history(history), encoding="utf-8")
+        write_text_atomic(hist, dump_history(history))
 
 
 def main():
@@ -99,10 +100,11 @@ def _run():
     # Write current session metadata
     last = last_session_path()
     last.parent.mkdir(parents=True, exist_ok=True)
-    last.write_text(
-        json.dumps({"session_id": session_id, "transcript_path": transcript_path}),
-        encoding="utf-8",
+    write_text_atomic(
+        last, json.dumps({"session_id": session_id, "transcript_path": transcript_path}),
     )
+    # Bound the per-session file growth (review S1, second half).
+    sweep_stale_session_files()
 
 
 if __name__ == "__main__":

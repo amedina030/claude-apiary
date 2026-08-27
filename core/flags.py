@@ -36,7 +36,7 @@ PIN_FLAGS_SUBPATH = ".claude/apiary/flags"
 
 # Flag names become filenames — keep them to a conservative slug so a
 # caller can never walk out of the flags directory.
-_FLAG_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_FLAG_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\Z")  # \Z: `$` would accept a trailing newline
 
 
 class FlagsRepoUnresolved(RuntimeError):
@@ -175,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
             state = False
         else:  # status
             state = is_enabled(name)
-    except FlagsRepoUnresolved as exc:
+    except (FlagsRepoUnresolved, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

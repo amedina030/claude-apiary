@@ -31,6 +31,8 @@ def _run_hook(hook_name: str, payload: dict, home: Path, *, runner_subprocess: b
     # temp dirs so the hook never touches this checkout's own state.
     repo = home / "repo"
     (repo / ".claude" / "apiary" / "session-tmp").mkdir(parents=True, exist_ok=True)
+    (repo / ".claude" / "apiary" / "self-pointer.json").write_text(
+        json.dumps({"schema_version": 1, "name": "repo", "uid": 1, "real_path": str(repo)}), encoding="utf-8")
     env["APIARY_TARGET_REPO"] = str(repo)
     env["APIARY_TARGET_STATE_DIR"] = str(home / "state")
     env.pop("CLAUDE_PROJECT_DIR", None)

@@ -114,7 +114,7 @@ def install(
     settings_hash = _write_per_repo_settings(target_root, apiary, profile)
 
     # Slash commands
-    commands_hashes = _copy_slash_commands(target_root, apiary)
+    commands_hashes = _copy_slash_commands(target_root, apiary, _previous_commands_hashes(state_dir))
 
     # CLAUDE.md managed zone
     claude_md_hash = _write_claude_md_zone(target_root, apiary)
@@ -279,9 +279,17 @@ def _apply_profile_permissions(settings_path: Path, apiary: Path, profile: str) 
     save_settings(settings_path, settings)
 
 
-def _copy_slash_commands(target_root: Path, apiary: Path) -> dict[str, str]:
+def _copy_slash_commands(target_root: Path, apiary: Path,
+                         previous_hashes: dict[str, str] | None = None) -> dict[str, str]:
     """Copy ``<apiary>/<tool>/commands/*.md`` into ``<target>/.claude/commands/``.
-    Returns ``{filename: sha256}`` for the bootstrap_state hash record."""
+    Returns ``{filename: sha256}`` for the bootstrap_state hash record.
+
+    A command apiary no longer ships is pruned from the target — but only
+    when the installed copy still matches the hash recorded at the previous
+    install (*previous_hashes*), i.e. the user never edited it. Without this
+    every bootstrapped repo kept deleted commands forever, and the rewritten
+    hash record then hid them from ``doctor stale`` and ``uninstall``.
+    """
     dest = target_root / ".claude" / "commands"
     dest.mkdir(parents=True, exist_ok=True)
     hashes: dict[str, str] = {}
@@ -289,7 +297,27 @@ def _copy_slash_commands(target_root: Path, apiary: Path) -> dict[str, str]:
         target = dest / src.name
         shutil.copy2(src, target)
         hashes[src.name] = _hash_file(target)
+    for name, recorded in (previous_hashes or {}).items():
+        if name in hashes:
+            continue
+        stale = dest / name
+        if stale.is_file() and _hash_file(stale) == recorded:
+            stale.unlink()
+            print(f"  removed {stale} (no longer shipped by apiary)")
+        elif stale.is_file():
+            print(f"  kept {stale}: apiary no longer ships it but the copy was edited locally")
     return hashes
+
+
+def _previous_commands_hashes(state_dir: Path) -> dict[str, str]:
+    """The ``commands_dir_hashes`` recorded by the previous install, if any."""
+    p = Path(state_dir) / "bootstrap_state.json"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    hashes = data.get("commands_dir_hashes") if isinstance(data, dict) else None
+    return dict(hashes) if isinstance(hashes, dict) else {}
 
 
 def _slash_command_sources(apiary: Path) -> Iterable[Path]:

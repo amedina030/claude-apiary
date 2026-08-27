@@ -231,18 +231,39 @@ def scaffold_default_templates(state_dir: Path) -> list:
     on every ``apiary install`` (bootstrap and self-bootstrap are idempotent).
     Returns the sorted list of note types actually written.
     """
+    import hashlib
     dst_dir = Path(state_dir) / TEMPLATES_DIRNAME
+    record_path = dst_dir / '.bundled_hashes.json'
+    try:
+        recorded = json.loads(record_path.read_text(encoding='utf-8'))
+        if not isinstance(recorded, dict):
+            recorded = {}
+    except (OSError, ValueError):
+        recorded = {}
     written: list = []
+    _sha = lambda text: hashlib.sha256(text.encode('utf-8')).hexdigest()
     for note_type in VALID_TYPES:
         src = DEFAULT_TEMPLATES_DIR / f"{note_type}.md"
         if not src.is_file():
             continue
         dst = dst_dir / f"{note_type}.md"
+        bundled = src.read_text(encoding='utf-8')
         if dst.exists():
-            continue
+            # Refresh only a copy the user never touched: its hash still equals
+            # what we recorded when we scaffolded it. An edited template is theirs.
+            current = dst.read_text(encoding='utf-8')
+            untouched = recorded.get(note_type) == _sha(current)
+            if not untouched or current == bundled:
+                continue
         dst_dir.mkdir(parents=True, exist_ok=True)
-        dst.write_text(src.read_text(encoding='utf-8'), encoding='utf-8')
+        dst.write_text(bundled, encoding='utf-8')
+        recorded[note_type] = _sha(bundled)
         written.append(note_type)
+    try:
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        record_path.write_text(json.dumps(recorded, indent=2, sort_keys=True), encoding='utf-8')
+    except OSError:
+        pass
     return sorted(written)
 
 
@@ -397,7 +418,10 @@ def _content_from_args(args):
     quoting it through a shell mangles backticks and ``/``-prefixed tokens.
     """
     content_file = getattr(args, 'content_file', None)
-    if content_file:
+    if content_file is not None:
+        if not str(content_file).strip():
+            print('Error: --content-file needs a path (got an empty string).', file=sys.stderr)
+            sys.exit(1)
         try:
             return Path(content_file).read_text(encoding='utf-8')
         except OSError as e:
@@ -774,7 +798,14 @@ def cmd_resume(args):
     if note.get('status') != 'deferred':
         print(f'Note {args.id} is not deferred (status: {note.get("status", "?")}).')
         return
-    _require_updated(store.update_note(note_type, year, seq, status='active'), args.id)
+    updated = store.update_note(note_type, year, seq, status='active')
+    _require_updated(updated, args.id)
+    if updated.get('_from_archive'):
+        # An archived note that becomes active again has to leave the
+        # archive, or `list` and the startup banner never show it.
+        store.unarchive_note(note_type, year, seq)
+        print(f'Resumed {args.id} (moved back out of the archive).')
+        return
     print(f'Resumed {args.id}.')
 
 
@@ -792,6 +823,8 @@ def cmd_unarchive(args):
 
 
 def cmd_update(args):
+    if getattr(args, 'content_file', None) is not None:
+        args.content = _content_from_args(args)
     brief_override = (getattr(args, 'brief_summary', '') or '').strip()
     add_tags = [t for t in (getattr(args, 'add_tag', None) or []) if t]
     remove_tags = [t for t in (getattr(args, 'remove_tag', None) or []) if t]
@@ -1112,6 +1145,8 @@ def cmd_archive_learning(args):
 
 
 def cmd_supersede(args):
+    if getattr(args, 'content_file', None) is not None:
+        args.content = _content_from_args(args)
     """Archive an old learning and write a replacement that points back at it.
 
     Frontmatter on the new learning carries ``supersedes: L-old`` so the
@@ -1496,6 +1531,8 @@ def main():
     p_update = sub.add_parser("update")
     p_update.add_argument("id", type=str)
     p_update.add_argument("--content", default=None)
+    p_update.add_argument("--content-file", dest="content_file", default=None,
+                          help="Read the new body from a file (for multi-line / large bodies)")
     p_update.add_argument("--session-id", default=None)
     p_update.add_argument("--brief-summary", default="", dest="brief_summary",
                           help=f"Replace brief_summary (<={BRIEF_SUMMARY_MAX} chars).")
@@ -1561,6 +1598,8 @@ def main():
                                   help="Archive an existing learning and write a replacement")
     p_supersede.add_argument("id", type=str, help="ID of the learning to supersede (e.g. L-2026-5)")
     p_supersede.add_argument("--content", required=True, help="Content of the replacement learning")
+    p_supersede.add_argument("--content-file", dest="content_file", default=None,
+                             help="Read the body from a file")
     p_supersede.add_argument("--session-id", default="")
     p_supersede.add_argument("--tags", default="",
                               help="Comma-separated tag list. Omit to infer via claude -p.")

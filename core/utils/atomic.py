@@ -20,8 +20,37 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import tempfile
+import time
 from pathlib import Path
+
+# os.replace onto a file another process has open raises PermissionError on
+# Windows; readers hold files for milliseconds, so a few short retries turn
+# a lost write into a delayed one.
+_REPLACE_ATTEMPTS = 8
+_REPLACE_BACKOFF_SECONDS = 0.05
+
+
+def _replace_with_retry(tmp_path: str, target: Path) -> None:
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp_path, target)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_SECONDS * (attempt + 1))
+
+
+def _match_mode(tmp_path: str, target: Path) -> None:
+    """mkstemp creates 0600 files; give the temp the target's mode (or a
+    normal 0644) so an atomic rewrite does not silently lock the file down."""
+    try:
+        mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else 0o644
+        os.chmod(tmp_path, mode)
+    except OSError:
+        pass
 
 
 def write_text_atomic(path: Path | str, text: str, *, encoding: str = "utf-8") -> None:
@@ -34,7 +63,8 @@ def write_text_atomic(path: Path | str, text: str, *, encoding: str = "utf-8") -
     try:
         with os.fdopen(fd, "w", encoding=encoding) as handle:
             handle.write(text)
-        os.replace(tmp_path, target)
+        _match_mode(tmp_path, target)
+        _replace_with_retry(tmp_path, target)
     except BaseException:
         # Includes KeyboardInterrupt/SystemExit: never leave the temp behind.
         try:
