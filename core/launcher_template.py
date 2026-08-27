@@ -116,6 +116,9 @@ def main() -> int:
             f"[apiary] hook script removed: {script} — re-run apiary install",
             file=sys.stderr,
         )
+        # An exit-0 hook with EMPTY stdout is shown as a "hook error" notice;
+        # `{}` is the documented "no opinion" response.
+        print("{}")
         return 0  # do not block
 
     os.environ["APIARY_MAIN_REPO"] = str(main_apiary)

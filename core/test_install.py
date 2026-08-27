@@ -238,7 +238,9 @@ class GeneratedLauncherTests(unittest.TestCase):
         # traceback — anything else surfaces as a hook error every tool call.
         result = self._run("core/hooks/deleted_in_a_later_release.py")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertEqual(result.stdout, "")
+        # `{}` is the documented "no opinion" response; an empty stdout with
+        # exit 0 is shown as a hook-error notice on every tool call.
+        self.assertEqual(result.stdout.strip(), "{}")
         self.assertIn("hook script removed", result.stderr)
         self.assertIn("re-run apiary install", result.stderr)
         self.assertNotIn("Traceback", result.stderr)

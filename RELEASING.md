@@ -75,3 +75,5 @@ checking out the older main-apiary and re-running `apiary install --target`,
 which rewrites every generated file from that checkout. Data written by a
 migration stays written — which is why migrations are required to be
 idempotent and to avoid destructive edits.
+
+> Note: `apiary update` treats main-apiary itself (uid 1) as a registered repo and migrates and re-pins it like any other.

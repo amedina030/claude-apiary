@@ -504,8 +504,13 @@ def dump(data: dict[str, Any], body: str = "", *, list_style: str = "block") -> 
     case an empty block is written so :func:`parse` cannot mistake the body's
     horizontal rule for frontmatter.
     """
+    # Mirror the body's line endings so a rewritten CRLF file is not mixed-EOL.
+    nl = "\r\n" if "\r\n" in body else "\n"
     if not data:
         if not _opens_with_fence(body):
             return body
-        return f"{FENCE}\n{FENCE}\n{body}"
-    return f"{FENCE}\n{dumps(data, list_style=list_style)}{FENCE}\n{body}"
+        return f"{FENCE}{nl}{FENCE}{nl}{body}"
+    head = dumps(data, list_style=list_style)
+    if nl != "\n":
+        head = head.replace("\n", nl)
+    return f"{FENCE}{nl}{head}{FENCE}{nl}{body}"

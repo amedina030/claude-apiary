@@ -111,16 +111,29 @@ class DispatchTest(unittest.TestCase):
         self.assertIn("kaboom", text)
         self.assertIn("Traceback", text)
 
-    def test_a_hook_calling_sys_exit_does_not_take_the_chain_down(self):
-        # SystemExit is a BaseException; a hook that still called sys.exit()
-        # would otherwise skip every hook after it AND lose the merged context.
+    def test_a_hook_calling_sys_exit_2_is_a_block(self):
+        # A hook that still calls sys.exit(2) meant "block"; the dispatcher
+        # keeps that meaning instead of dying with no JSON on stdout.
         def exits(_payload):
             raise SystemExit(2)
 
         hooks = (self.fake.add("exiter", exits),
                  self.fake.record("after", HookResult(context="[b] two")))
-        with self.assertRaises(SystemExit):
-            dispatch.dispatch("PreToolUse", {"tool_name": "Bash"}, hooks)
+        result = dispatch.dispatch("PreToolUse", {"tool_name": "Bash"}, hooks)
+        self.assertIn("exited 2", result.block_reason)
+
+    def test_a_hook_calling_sys_exit_0_is_logged_and_the_chain_continues(self):
+        # sys.exit(0) from a hook is a failure of that hook alone: logged, the
+        # rest of the chain runs, the merged context survives.
+        def exits(_payload):
+            raise SystemExit(0)
+
+        hooks = (self.fake.add("exiter", exits),
+                 self.fake.record("after", HookResult(context="[b] two")))
+        result = dispatch.dispatch("PreToolUse", {"tool_name": "Bash"}, hooks)
+        self.assertIsNone(result.block_reason)
+        self.assertEqual(result.context, "[b] two")
+        self.assertIn("exiter", self.log.read_text(encoding="utf-8"))
 
     def test_a_hook_returning_the_wrong_type_is_logged_not_fatal(self):
         hooks = (self.fake.record("legacy", {"decision": "block"}),

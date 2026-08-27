@@ -285,6 +285,16 @@ def dispatch(event: str, payload: dict,
                     "expected HookResult | None"
                 )
             block_reason, context = result.block_reason, result.context
+        except SystemExit as exc:
+            # A hook that still calls sys.exit() (a leftover standalone
+            # habit) would otherwise end the process here with no JSON and
+            # silently skip every later hook. Exit 2 keeps its meaning (a
+            # block); anything else is a failure of that hook alone.
+            code = exc.code if isinstance(exc.code, int) else 1
+            if code == 2:
+                return HookResult(block_reason=f"{hook.name} exited 2 without a reason")
+            log_failure(event, hook.name, exc)
+            continue
         except Exception as exc:  # noqa: BLE001 — fail open, per hook
             log_failure(event, hook.name, exc)
             continue

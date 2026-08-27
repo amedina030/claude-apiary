@@ -30,6 +30,7 @@ jobs:
   test:
     name: test · ${{ matrix.os }} · py${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -60,7 +61,8 @@ jobs:
         run: |
           git config --global user.email "ci@apiary.invalid"
           git config --global user.name "apiary CI"
-          git config --global init.defaultBranch main
+          # The runner/approval code and several tests assume `master`.
+          git config --global init.defaultBranch master
 
       - name: Check lockfile is in sync
         run: poetry check --lock
@@ -99,6 +101,7 @@ jobs:
     # review flags (subsystems/infra-docs-skills.md §5 finding 2).
     name: shell scripts · ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
