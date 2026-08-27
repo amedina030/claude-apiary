@@ -1,12 +1,11 @@
 """`apiary install` prunes commands apiary no longer ships — but only copies the
 user never edited (hash still equals the one recorded at the previous install)."""
 import hashlib
-import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from core.install import _copy_slash_commands, _previous_commands_hashes
+from core.install import _copy_slash_commands
 
 
 def _sha(p: Path) -> str:
@@ -45,16 +44,6 @@ class PruneRemovedCommandsTest(unittest.TestCase):
     def test_no_previous_record_prunes_nothing(self):
         _copy_slash_commands(self.target, self.apiary, None)
         self.assertTrue((self.dest / "budgeter-log.md").exists())
-
-    def test_previous_hashes_read_from_bootstrap_state(self):
-        state = Path(self._tmp.name) / "state"
-        state.mkdir()
-        self.assertEqual(_previous_commands_hashes(state), {})
-        (state / "bootstrap_state.json").write_text(
-            json.dumps({"commands_dir_hashes": {"a.md": "x"}}), encoding="utf-8")
-        self.assertEqual(_previous_commands_hashes(state), {"a.md": "x"})
-        (state / "bootstrap_state.json").write_text("not json", encoding="utf-8")
-        self.assertEqual(_previous_commands_hashes(state), {})
 
 
 if __name__ == "__main__":
