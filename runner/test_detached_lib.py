@@ -14,12 +14,6 @@ class TestSlug(unittest.TestCase):
     def test_unicode(self):
         self.assertTrue(detached_lib.slugify('A B C').startswith('a-b'))
 
-class TestShortUuid(unittest.TestCase):
-    def test_length_and_hex(self):
-        u = detached_lib.short_uuid()
-        self.assertEqual(len(u), 8)
-        int(u, 16)
-
 class TestHygiene(unittest.TestCase):
     def test_ok_when_below_max(self):
         with mock.patch.object(detached_lib, 'list_unmerged_runner_branches', return_value=['runner/a-1', 'runner/b-2']):
@@ -57,22 +51,9 @@ class TestPickBacklog(unittest.TestCase):
             with mock.patch.object(detached_lib, 'BACKLOG_DIR', bdir):
                 self.assertIsNone(detached_lib.pick_backlog_item())
 
-class TestOvernightLog(unittest.TestCase):
-    def test_append(self):
-        with tempfile.TemporaryDirectory() as td:
-            p = Path(td) / 'overnight.jsonl'
-            with mock.patch.object(detached_lib, 'OVERNIGHT_LOG', p):
-                self.assertTrue(detached_lib.append_overnight_log({'a': 1}))
-                self.assertTrue(detached_lib.append_overnight_log({'a': 2}))
-            lines = p.read_text(encoding='utf-8').splitlines()
-            self.assertEqual(len(lines), 2)
-            self.assertEqual(json.loads(lines[0])['a'], 1)
-
-class TestStageReviewArtifacts(unittest.TestCase):
-    """Review-artifact commit path (T-2026-122 followup): per-uuid
-    specs/plans/executions/hardens/reports .json files must land in the
-    runner-branch commit even though their directories are gitignored,
-    so human reviewers see the run's structure on merge."""
+class TestGitCommitAllIn(unittest.TestCase):
+    """The bundle commit sweeps the worktree with `git add -A`, so
+    gitignored paths stay out of the runner branch."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -106,62 +87,20 @@ class TestStageReviewArtifacts(unittest.TestCase):
                      encoding='utf-8')
         return p
 
-    def test_existing_artifacts_are_force_staged(self):
-        uuid = 'abc12345'
-        for sub in ('specs', 'plans', 'executions', 'hardens', 'reports'):
-            self._make_artifact(sub, uuid)
-        staged = detached_lib.stage_review_artifacts(self.root, uuid)
-        self.assertEqual(
-            sorted(staged),
-            sorted(f'runner/{s}/{uuid}.json' for s in
-                   ('specs', 'plans', 'executions', 'hardens', 'reports')),
-        )
-
-    def test_missing_artifacts_skipped_silently(self):
-        uuid = 'missing-uuid'
-        self._make_artifact('specs', uuid)
-        self._make_artifact('plans', uuid)
-        staged = detached_lib.stage_review_artifacts(self.root, uuid)
-        self.assertEqual(sorted(staged), [
-            f'runner/plans/{uuid}.json', f'runner/specs/{uuid}.json',
-        ])
-
-    def test_other_uuid_artifacts_not_staged(self):
-        self._make_artifact('specs', 'target-uuid')
-        self._make_artifact('specs', 'other-uuid')
-        staged = detached_lib.stage_review_artifacts(self.root, 'target-uuid')
-        self.assertEqual(staged, ['runner/specs/target-uuid.json'])
-
-    def test_commit_with_uuid_includes_artifacts(self):
+    def test_commit_sweeps_worktree_but_not_gitignored_paths(self):
         import subprocess
-        uuid = 'commit-uuid'
-        for sub in ('specs', 'plans', 'executions', 'hardens', 'reports'):
-            self._make_artifact(sub, uuid)
+        uuid = 'gitignored-uuid'
+        self._make_artifact('specs', uuid)
         (self.root / 'README.md').write_text('hello\n', encoding='utf-8')
         ok, err = detached_lib.git_commit_all_in(
-            self.root, 'runner/commit-uuid: test', uuid=uuid,
+            self.root, 'runner/gitignored-uuid: test',
         )
         self.assertTrue(ok, err)
         tree = subprocess.run(
             ['git', 'ls-tree', '-r', 'HEAD', '--name-only'],
             cwd=str(self.root), capture_output=True, text=True, check=True,
         )
-        for sub in ('specs', 'plans', 'executions', 'hardens', 'reports'):
-            self.assertIn(f'runner/{sub}/{uuid}.json', tree.stdout)
-
-    def test_commit_without_uuid_skips_artifacts(self):
-        import subprocess
-        uuid = 'gitignored-uuid'
-        self._make_artifact('specs', uuid)
-        (self.root / 'README.md').write_text('hello\n', encoding='utf-8')
-        ok, _ = detached_lib.git_commit_all_in(
-            self.root, 'plain commit, no uuid',
-        )
-        self.assertTrue(ok)
-        tree = subprocess.run(
-            ['git', 'ls-tree', '-r', 'HEAD', '--name-only'],
-            cwd=str(self.root), capture_output=True, text=True, check=True,
-        )
+        self.assertIn('README.md', tree.stdout)
         self.assertNotIn(f'runner/specs/{uuid}.json', tree.stdout)
 
 

@@ -241,14 +241,6 @@ def log_stage_cost(stage_name: str, runner_uuid: str, usage_xml: str) -> None:
         print(f'WARN: cost logging failed for {stage_name}: {e}', file=sys.stderr)
 
 
-def extract_usage_block(text: str) -> str | None:
-    """Return the first <usage>...</usage> block found in text, or None."""
-    if not text:
-        return None
-    match = _USAGE_RE.search(text)
-    return match.group(0) if match else None
-
-
 def extract_all_usage_blocks(text: str) -> list[str]:
     """Return all <usage>...</usage> blocks found in text."""
     if not text:
@@ -820,12 +812,7 @@ def _run_detached_impl(cli_args) -> int:
         # capture commit failure into exit_status so the log entry does not
         # falsely report 'ok' when no artifacts were committed.
         commit_msg = f'runner/{uuid}: {title}'
-        # Force-stage per-uuid review artifacts (specs/plans/executions/
-        # hardens/reports .json) so they ride along with the branch on
-        # merge. Without this, the worktree teardown on success leaves
-        # reviewers with only the diff — no harden findings, no plan
-        # structure, no per-step execution log.
-        commit_ok, commit_err = git_commit_all_in(wt_path, commit_msg, uuid=uuid)
+        commit_ok, commit_err = git_commit_all_in(wt_path, commit_msg)
         if not commit_ok:
             print(f'WARN: git commit failed: {commit_err}', file=sys.stderr)
             if exit_status == 'ok':

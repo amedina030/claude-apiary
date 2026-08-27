@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Helpers for the detached cron-driven runner mode."""
 from __future__ import annotations
-import json, os, re, shutil, subprocess, sys, uuid as uuid_mod
+import json
+import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Optional
 
 from .target_repo import (
     backlog_dir,
     intake_dir,
-    overnight_log_path,
     worktrees_dir,
 )
 
@@ -16,24 +18,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 BACKLOG_DIR = backlog_dir()
 INTAKE_DIR = intake_dir()
-OVERNIGHT_LOG = overnight_log_path()
 WORKTREES_DIR = worktrees_dir()
-
-_DEFAULT_OVERNIGHT_LOG = OVERNIGHT_LOG
-
-
-def _assert_isolated_in_test_mode(target) -> None:
-    """Refuse to write to the production overnight.jsonl when
-    APIARY_RUNNER_TEST_ISOLATION=1 (T-2026-123)."""
-    if os.environ.get("APIARY_RUNNER_TEST_ISOLATION") != "1":
-        return
-    if Path(target).resolve() == Path(_DEFAULT_OVERNIGHT_LOG).resolve():
-        raise RuntimeError(
-            f"runner test-isolation violation: write to default overnight "
-            f"log {_DEFAULT_OVERNIGHT_LOG} while "
-            f"APIARY_RUNNER_TEST_ISOLATION=1. Patch "
-            f"runner.detached_lib.OVERNIGHT_LOG to a tempdir path in setUp."
-        )
 
 _SLUG_RE = re.compile(r'[^a-z0-9]+')
 
@@ -41,10 +26,6 @@ def slugify(title: str) -> str:
     """Lowercase, replace non-alnum with '-', strip leading/trailing '-'. Returns 'item' if empty."""
     s = _SLUG_RE.sub('-', (title or '').lower()).strip('-')
     return s or 'item'
-
-def short_uuid() -> str:
-    """Return first 8 chars of a uuid4 hex."""
-    return uuid_mod.uuid4().hex[:8]
 
 def _git(args: list, cwd: Path = REPO_ROOT) -> subprocess.CompletedProcess:
     """Run git with list-form args. Never uses shell. Returns CompletedProcess."""
@@ -119,18 +100,6 @@ def all_backlog_items_claimed() -> bool:
             return False
     return True
 
-def append_overnight_log(entry: dict) -> bool:
-    """Append one JSON line to overnight.jsonl. Returns True on success, False on OSError (prints warning to stderr)."""
-    _assert_isolated_in_test_mode(OVERNIGHT_LOG)
-    try:
-        OVERNIGHT_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with OVERNIGHT_LOG.open('a', encoding='utf-8') as f:
-            f.write(json.dumps(entry) + '\n')
-        return True
-    except OSError as e:
-        print(f'WARN: overnight log write failed: {e}', file=sys.stderr)
-        return False
-
 def worktrees_dir_for(target_repo: Path | None = None) -> Path:
     """Return the .runner-worktrees/ path for a given target repo.
 
@@ -180,41 +149,8 @@ def git_worktree_create(
         return False, None, r.stderr
     return True, wt_path, ''
 
-_REVIEW_ARTIFACT_SUBDIRS = ('specs', 'plans', 'executions', 'hardens', 'reports')
-
-
-def stage_review_artifacts(wt_path: Path, uuid: str) -> list:
-    """Force-add the per-uuid runner/{specs,plans,executions,hardens,reports}.json
-    files that are normally gitignored, so they travel with the runner
-    branch on merge (T-2026-122 followup — human reviewers need the
-    spec/plan/harden context, not just the diff).
-
-    Returns the list of paths actually staged (best-effort; files that
-    a stage didn't produce are silently skipped). Never raises; caller
-    treats this as a soft step before the bundled run commit.
-    """
-    staged = []
-    for subdir in _REVIEW_ARTIFACT_SUBDIRS:
-        rel = f'runner/{subdir}/{uuid}.json'
-        src = wt_path / rel
-        if not src.exists():
-            continue
-        r = _git(['add', '-f', '--', rel], cwd=wt_path)
-        if r.returncode == 0:
-            staged.append(rel)
-    return staged
-
-
-def git_commit_all_in(cwd: Path, message: str, uuid: str | None = None) -> tuple:
-    """git add -A and git commit -m message inside `cwd` (a worktree). Allows empty.
-
-    When ``uuid`` is given, force-stages the runner review artifacts for
-    that uuid first (specs/plans/executions/hardens/reports), then does
-    the normal add -A sweep. Callers that want only the default behavior
-    pass ``uuid=None``.
-    """
-    if uuid:
-        stage_review_artifacts(cwd, uuid)
+def git_commit_all_in(cwd: Path, message: str) -> tuple:
+    """git add -A and git commit -m message inside `cwd` (a worktree). Allows empty."""
     r = _git(['add', '-A'], cwd=cwd)
     if r.returncode != 0:
         return False, r.stderr

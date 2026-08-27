@@ -357,7 +357,7 @@ def main():
         # Harden run is structurally broken — defender produced no responses
         # despite attacker findings. Do not auto-merge, do not review deferrals
         # (there are none), do not write a scribe note. The reviewer sees this
-        # in the runner queue via the HARDEN column and overnight.jsonl status.
+        # in the runner queue via the HARDEN column and run_history.jsonl status.
         path_taken = "defender-failed"
         exit_code = 1
 

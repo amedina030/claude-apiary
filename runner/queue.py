@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""List runner/* branches ready for review, joined with overnight.jsonl entries."""
+"""List runner/* branches ready for review, joined with run_history.jsonl entries."""
 from __future__ import annotations
 import json, sys
-from pathlib import Path
-from .detached_lib import list_unmerged_runner_branches, OVERNIGHT_LOG, SCRIPT_DIR
+from .detached_lib import list_unmerged_runner_branches
+from .run_history import RUN_HISTORY_FILE
 from .target_repo import backlog_dir, hardens_dir, intake_dir
 
 INTAKE_DIR = intake_dir()
@@ -24,13 +24,13 @@ def load_harden_verdict(uuid: str) -> str:
     except (OSError, json.JSONDecodeError):
         return 'unknown'
 
-def load_overnight_entries() -> dict:
+def load_run_history_entries() -> dict:
     """Return dict mapping branch_name -> latest entry dict. Missing file -> {}."""
-    if not OVERNIGHT_LOG.exists():
+    if not RUN_HISTORY_FILE.exists():
         return {}
     result = {}
     try:
-        for line in OVERNIGHT_LOG.read_text(encoding='utf-8').splitlines():
+        for line in RUN_HISTORY_FILE.read_text(encoding='utf-8').splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -63,7 +63,7 @@ def load_ticket_summary(uuid: str) -> tuple:
     return 'unknown', ''
 
 def main() -> int:
-    entries = load_overnight_entries()
+    entries = load_run_history_entries()
     branches = list_unmerged_runner_branches()
     if not branches:
         print('No runner/* branches ready for review.')

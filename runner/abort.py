@@ -1,8 +1,7 @@
 """Abort handler for crashed runner runs (T-2026-128).
 
 Archives crashed artifacts to runner/crashes/<uuid>/, removes worktree
-and branch, deletes the lockfile, emits a rollback summary, and saves
-a scribe blocker note.
+and branch, deletes the lockfile, and emits a rollback summary.
 """
 from __future__ import annotations
 
@@ -107,22 +106,7 @@ def _build_summary(uuid: str, lock_data: dict | None, archive_path: Path,
     return "\n".join(lines)
 
 
-def _save_blocker_note(summary: str, session_id: str = "") -> None:
-    """Save a scribe blocker note with the rollback summary."""
-    launch = Path.home() / ".claude" / "apiary_launch.py"
-    if not launch.exists():
-        return
-    cmd = [
-        sys.executable, str(launch), "scribe/notes.py", "add",
-        "--type", "blocker",
-        "--content", summary,
-    ]
-    if session_id:
-        cmd.extend(["--session-id", session_id])
-    subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-
-def abort_run(uuid: str, session_id: str = "") -> str:
+def abort_run(uuid: str) -> str:
     """Full abort sequence for a single crashed run. Returns the summary."""
     lock_data = run_lock.read(uuid)
 
@@ -144,11 +128,10 @@ def abort_run(uuid: str, session_id: str = "") -> str:
     summary = _build_summary(uuid, lock_data, archive_path, branches, wt_ok)
     print(summary)
 
-    _save_blocker_note(summary, session_id)
     return summary
 
 
-def abort_all(session_id: str = "") -> int:
+def abort_all() -> int:
     """Abort all stale runs. Returns count of runs aborted."""
     stale = run_lock.scan_stale()
     if not stale:
@@ -160,7 +143,7 @@ def abort_all(session_id: str = "") -> int:
         if not uuid:
             continue
         try:
-            abort_run(uuid, session_id)
+            abort_run(uuid)
             count += 1
         except RuntimeError as e:
             print(f"Skipping {uuid}: {e}", file=sys.stderr)

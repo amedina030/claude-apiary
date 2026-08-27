@@ -825,7 +825,7 @@ python -m runner.approval runner/hardens/<uuid>.json
 |----------|----------|-------------|
 | `harden_result` | yes | Path to harden result JSON |
 
-Output: `runner/reports/<uuid>.json`. Path taken: `merged-locally`, `pending-review`, `defender-failed`, or a merge error. Exits non-zero on `defender_failed` so `overnight.jsonl` records the failure.
+Output: `runner/reports/<uuid>.json`. Path taken: `merged-locally`, `pending-review`, `defender-failed`, or a merge error. Exits non-zero on `defender_failed` so `run_history.jsonl` records the failure.
 
 ## runner/draft_ticket.py
 

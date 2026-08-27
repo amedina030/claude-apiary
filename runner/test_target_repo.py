@@ -254,11 +254,10 @@ class TestArtifactPathHelpers(_EnvIsolation):
                     root / subdir,
                 )
 
-    def test_run_history_and_overnight_are_files(self):
+    def test_run_history_is_a_file(self):
         t = Path("/tmp/some-target").resolve()
         root = target_repo.artifacts_root(t)
         self.assertEqual(target_repo.run_history_path(t), root / "run_history.jsonl")
-        self.assertEqual(target_repo.overnight_log_path(t), root / "overnight.jsonl")
 
     def test_worktrees_dir_sibling_of_runner(self):
         t = Path("/tmp/some-target").resolve()

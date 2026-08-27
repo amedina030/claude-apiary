@@ -127,7 +127,7 @@ After overnight runs, inspect pending branches:
 python -m runner.queue
 ```
 
-Lists all `runner/*` branches joined with `overnight.jsonl` entries.
+Lists all `runner/*` branches joined with `run_history.jsonl` entries.
 
 ## Cleanup
 

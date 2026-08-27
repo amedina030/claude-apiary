@@ -188,9 +188,6 @@ def run_history_path(target: Optional[Path] = None) -> Path:
     return artifacts_root(target) / "run_history.jsonl"
 
 
-def overnight_log_path(target: Optional[Path] = None) -> Path:
-    return artifacts_root(target) / "overnight.jsonl"
-
 
 def worktrees_dir(target: Optional[Path] = None) -> Path:
     """Live git worktrees under the target repo.

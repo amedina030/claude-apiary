@@ -6,10 +6,9 @@ from pathlib import Path
 from unittest import mock
 
 # T-2026-123: flip the runner-side test-isolation guard BEFORE importing the
-# runner modules so any unpatched write to production run_history.jsonl /
-# overnight.jsonl raises loudly. Tests must patch RUN_HISTORY_FILE and
-# OVERNIGHT_LOG to tempdir paths per-case (the TestDetachedRun.setUp
-# forwards the history-file patch automatically).
+# runner modules so any unpatched write to the production run_history.jsonl
+# raises loudly. Tests must patch RUN_HISTORY_FILE to a tempdir path per-case
+# (the TestDetachedRun.setUp forwards that patch automatically).
 os.environ["APIARY_RUNNER_TEST_ISOLATION"] = "1"
 
 from runner import run          # noqa: E402
@@ -150,10 +149,9 @@ class TestDetachedRun(unittest.TestCase):
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -196,7 +194,7 @@ class TestDetachedRun(unittest.TestCase):
             uid = 'phase2-abcd-ef01-2345-6789abcdef01'
             intake_file = self._make_intake_file(backlog, uid=uid)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = apiary_runner / 'overnight.jsonl'
+            log_path = self._history_path
 
             captured_input_paths = []
 
@@ -206,7 +204,6 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(target_repo, 'APIARY_REPO_ROOT', td),
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
@@ -261,7 +258,7 @@ class TestDetachedRun(unittest.TestCase):
             intake_file = self._make_intake_file(td / 'backlog')
             scratch = self._init_scratch_repo(td / 'scratch')
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             captured = {}
             def _capture(branch, *args, **kwargs):
@@ -269,7 +266,6 @@ class TestDetachedRun(unittest.TestCase):
                 return (True, wt_path, '')
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -294,10 +290,9 @@ class TestDetachedRun(unittest.TestCase):
             intake_file = self._make_intake_file(td / 'backlog')
             scratch = self._init_scratch_repo(td / 'scratch')
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -330,7 +325,7 @@ class TestDetachedRun(unittest.TestCase):
                 'target_repo': str(scratch),
             }), encoding='utf-8')
             wt_path = self._make_fake_worktree(td, intake_path)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             captured = {}
             def _capture(branch, *args, **kwargs):
@@ -338,7 +333,6 @@ class TestDetachedRun(unittest.TestCase):
                 return (True, wt_path, '')
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_path),
@@ -361,12 +355,11 @@ class TestDetachedRun(unittest.TestCase):
             (td / 'backlog').mkdir()
             (td / 'intake').mkdir()
             intake_file = self._make_intake_file(td / 'backlog')
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             create_calls = []
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -394,10 +387,9 @@ class TestDetachedRun(unittest.TestCase):
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -424,7 +416,7 @@ class TestDetachedRun(unittest.TestCase):
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             stage_seq = iter([
                 (True, _make_fake_usage(100), '', 0.1),    # stage 1 ok
@@ -432,7 +424,6 @@ class TestDetachedRun(unittest.TestCase):
             ])
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -453,10 +444,9 @@ class TestDetachedRun(unittest.TestCase):
         """hygiene_precheck blocks run → exit 0, log entry contains 'queue full'."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.hygiene_precheck', return_value='queue full (5/5)'),
             ):
                 rc = run.run_detached(_make_cli_args())
@@ -470,10 +460,9 @@ class TestDetachedRun(unittest.TestCase):
         """No backlog items available → exit 0, log entry contains 'backlog empty'."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=None),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
@@ -494,10 +483,9 @@ class TestDetachedRun(unittest.TestCase):
             intake_dir = td / 'intake'
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -522,7 +510,7 @@ class TestDetachedRun(unittest.TestCase):
             intake_dir = td / 'intake'
             intake_dir.mkdir()
             evil = self._make_intake_file(backlog, uid='..\\evil')
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             create_branch_calls = []
 
@@ -531,7 +519,6 @@ class TestDetachedRun(unittest.TestCase):
                 return (True, td / 'wt', '')
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=evil),
@@ -557,7 +544,7 @@ class TestDetachedRun(unittest.TestCase):
             uid = 'abc12345-feed-face-cafe-1234567890ab'
             intake_file = self._make_intake_file(backlog, uid=uid)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             captured = {}
 
@@ -566,7 +553,6 @@ class TestDetachedRun(unittest.TestCase):
                 return (True, wt_path, '')
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -590,7 +576,7 @@ class TestDetachedRun(unittest.TestCase):
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             stage_seq = iter([
                 (True, _make_fake_usage(50), '', 0.1),  # validate_intake (exempt anyway)
@@ -598,7 +584,6 @@ class TestDetachedRun(unittest.TestCase):
             ])
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -625,7 +610,7 @@ class TestDetachedRun(unittest.TestCase):
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             # validate_intake emits no usage; subsequent stages do.
             stage_seq = iter([
@@ -638,7 +623,6 @@ class TestDetachedRun(unittest.TestCase):
             ])
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -665,10 +649,9 @@ class TestDetachedRun(unittest.TestCase):
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -697,7 +680,7 @@ class TestDetachedRun(unittest.TestCase):
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             # Stage 1 succeeds; stage 2 simulates the signal handler firing
             # mid-flight by flipping _interrupt_requested before returning.
@@ -715,7 +698,6 @@ class TestDetachedRun(unittest.TestCase):
 
             try:
                 with (
-                    mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                     mock.patch('runner.run.SCRIPT_DIR', td),
                     mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -749,7 +731,7 @@ class TestDetachedRun(unittest.TestCase):
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             stage_seq = iter([
                 (True, _make_fake_usage(100), '', 0.1),    # stage 1 ok
@@ -761,7 +743,6 @@ class TestDetachedRun(unittest.TestCase):
                 return (True, '')
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -796,10 +777,9 @@ class TestDetachedRun(unittest.TestCase):
             intake_dir.mkdir()
             intake_file = self._make_intake_file(backlog)
             wt_path = self._make_fake_worktree(td, intake_file)
-            log_path = td / 'overnight.jsonl'
+            log_path = self._history_path
 
             with (
-                mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
@@ -816,12 +796,12 @@ class TestDetachedRun(unittest.TestCase):
             self.assertEqual(entries[0]['exit_status'], 'commit_failed')
 
     def test_queue_py_handles_missing_log(self):
-        """Missing overnight.jsonl + unmerged branch → exit 0, 'unknown' appears in output."""
+        """Missing run_history.jsonl + unmerged branch → exit 0, 'unknown' appears in output."""
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
 
             with (
-                mock.patch.object(runner_queue, 'OVERNIGHT_LOG', td / 'no_such.jsonl'),
+                mock.patch.object(runner_queue, 'RUN_HISTORY_FILE', td / 'no_such.jsonl'),
                 mock.patch.object(runner_queue, 'list_unmerged_runner_branches',
                                   return_value=['runner/fake-item-00000001']),
                 mock.patch.object(runner_queue, 'load_ticket_summary',
@@ -837,9 +817,9 @@ class TestDetachedRun(unittest.TestCase):
 
 class TestIsolationGuards(unittest.TestCase):
     """T-2026-123: self-tests for the APIARY_RUNNER_TEST_ISOLATION guard.
-    Confirms a test that forgets to redirect RUN_HISTORY_FILE /
-    OVERNIGHT_LOG to a tempdir path fails loudly instead of silently
-    polluting production state."""
+    Confirms a test that forgets to redirect RUN_HISTORY_FILE to a
+    tempdir path fails loudly instead of silently polluting production
+    state."""
 
     def test_run_history_default_path_raises(self):
         # Module env is already APIARY_RUNNER_TEST_ISOLATION=1 (set at
@@ -866,15 +846,6 @@ class TestIsolationGuards(unittest.TestCase):
                 )
             self.assertTrue(ok)
             self.assertTrue(target.exists())
-
-    def test_overnight_log_default_path_raises(self):
-        with mock.patch.object(
-            detached_lib, "OVERNIGHT_LOG", detached_lib._DEFAULT_OVERNIGHT_LOG,
-        ):
-            with self.assertRaises(RuntimeError) as ctx:
-                detached_lib.append_overnight_log({"uuid": "guard-check"})
-            self.assertIn("test-isolation violation", str(ctx.exception))
-            self.assertIn("overnight.jsonl", str(ctx.exception))
 
 
 class TestRunCleanup(unittest.TestCase):
