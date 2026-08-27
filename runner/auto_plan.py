@@ -30,7 +30,6 @@ from .stage_lib import (
     retry_until_valid,
     run_claude as _spawn,
     run_validator,
-    sanitize_json_newlines as _sanitize_json_newlines,
 )
 
 from .target_repo import plans_dir

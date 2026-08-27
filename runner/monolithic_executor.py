@@ -52,8 +52,6 @@ from .stage_lib import check_uuid_safe, run_claude as _spawn_claude
 from .executor import (
     EXECUTIONS_DIR,
     _ensure_on_branch,
-    snapshot_worktree_state,
-    _porcelain_path,
     _norm_rel,
     verify_post_conditions,
     persist_execution_log,
