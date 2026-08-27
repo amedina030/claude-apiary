@@ -433,7 +433,7 @@ class StateDirSandbox(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.state = self.root / "state"
         self.observations = self.state / "compass" / "observations"
         self.observations.mkdir(parents=True)

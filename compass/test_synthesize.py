@@ -65,7 +65,7 @@ class CapSessionsTest(unittest.TestCase):
 class SynthesizeTestBase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.state = Path(self._tmp.name) / "state"
+        self.state = Path(self._tmp.name).resolve() / "state"
         self._env = mock.patch.dict(
             os.environ,
             {store.TARGET_STATE_DIR_ENV: str(self.state)},

@@ -87,7 +87,7 @@ class WriteTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.dest = Path(self._tmp.name) / "work"
+        self.dest = Path(self._tmp.name).resolve() / "work"
 
     def test_write_creates_a_readable_stamp_and_returns_it(self):
         info = {
@@ -121,7 +121,7 @@ class LoadTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.dir = Path(self._tmp.name)
+        self.dir = Path(self._tmp.name).resolve()
         # load() memoises; every test here needs a clean slate.
         patcher = mock.patch.object(build_info, "_cached", None)
         patcher.start()

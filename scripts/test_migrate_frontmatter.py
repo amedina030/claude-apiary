@@ -21,7 +21,7 @@ from scripts import migrate_frontmatter as mig  # noqa: E402
 class MigrateTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
-        self.state = Path(self._tmp.name)
+        self.state = Path(self._tmp.name).resolve()
         self.addCleanup(self._tmp.cleanup)
 
     def write(self, rel: str, text: str) -> Path:

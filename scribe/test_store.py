@@ -70,7 +70,7 @@ class TestLazyLayout(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.state_dir = Path(self._tmp.name) / "scribe_state"
+        self.state_dir = Path(self._tmp.name).resolve() / "scribe_state"
         reset_layout_cache()
 
     def tearDown(self):

@@ -190,7 +190,7 @@ class ListActiveTest(unittest.TestCase):
     def setUp(self):
         self._orig_cwd = os.getcwd()
         self._tmp = tempfile.TemporaryDirectory()
-        self.repo = Path(self._tmp.name)
+        self.repo = Path(self._tmp.name).resolve()
         # Mimic a git repo so compass_dir resolves under us.
         os.chdir(self.repo)
         # Restore cwd before tempfile cleanup runs (Windows can't rmdir an in-use cwd).

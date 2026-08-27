@@ -26,7 +26,7 @@ class StateResolverTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = self.root / "apiary"
         self.apiary.mkdir()
         # Apiary repo needs to look real enough for resolve_apiary_repo
@@ -214,7 +214,7 @@ class ReserveUidTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.apiary = Path(self._tmp.name)
+        self.apiary = Path(self._tmp.name).resolve()
 
     def test_raises_a_lost_counter_above_the_reserved_uid(self):
         state.reserve_uid(self.apiary, 7)
@@ -254,7 +254,7 @@ class PinModelHelperTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.repo = Path(self._tmp.name)
+        self.repo = Path(self._tmp.name).resolve()
 
     def test_pin_dir_is_under_dot_claude_apiary(self):
         self.assertEqual(state.pin_dir(self.repo), self.repo / ".claude" / "apiary")

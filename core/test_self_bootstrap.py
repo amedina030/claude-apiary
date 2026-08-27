@@ -27,7 +27,7 @@ class SelfBootstrapTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_fake_apiary(self.root)
 
     def test_fresh_machine_bootstrap_creates_registry_and_self_install(self):

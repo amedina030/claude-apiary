@@ -19,7 +19,7 @@ class LogBubbleAnomalyTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         # Nested path so we also verify parent-dir creation.
-        self.log_path = Path(self._tmp.name) / "apiary_gui" / "bubble_anomalies.jsonl"
+        self.log_path = Path(self._tmp.name).resolve() / "apiary_gui" / "bubble_anomalies.jsonl"
         patcher = mock.patch.object(gui_app, "BUBBLE_ANOMALY_LOG", self.log_path)
         patcher.start()
         self.addCleanup(patcher.stop)

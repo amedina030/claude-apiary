@@ -297,7 +297,7 @@ class TestResolveClaudeBin(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             name = "claude.bat" if os.name == "nt" else "claude"
-            shim = Path(td) / name
+            shim = Path(td).resolve() / name
             shim.write_text("", encoding="utf-8")
             if os.name != "nt":
                 shim.chmod(0o755)

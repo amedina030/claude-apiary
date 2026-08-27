@@ -105,7 +105,7 @@ class ProcessOneTest(unittest.TestCase):
     def setUp(self):
         self.prompts = []
         self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self._env = mock.patch.dict(
             os.environ,
             {store.TARGET_STATE_DIR_ENV: str(self.root / "state")},

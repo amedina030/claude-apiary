@@ -70,7 +70,7 @@ EXPECTED_BODY = "# Body\n\nLeft alone, --- and all.\n"
 class ParityTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
+        self.tmp = Path(self._tmp.name).resolve()
         self.addCleanup(self._tmp.cleanup)
 
     def write(self, name: str, text: str = PARITY_DOC) -> Path:

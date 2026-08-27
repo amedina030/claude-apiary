@@ -39,7 +39,7 @@ def make_payload(**overrides) -> dict:
 class CaptureTestCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.state = self.root / "state"
         self.state.mkdir()
 

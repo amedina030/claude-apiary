@@ -29,7 +29,7 @@ class LauncherTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        root = Path(self._tmp.name)
+        root = Path(self._tmp.name).resolve()
         self.main_apiary = root / "main-apiary"
         self.target = root / "target"
         self.launcher = self.target / ".claude" / "apiary" / "launch.py"

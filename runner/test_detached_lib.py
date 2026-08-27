@@ -57,7 +57,7 @@ class TestHygiene(unittest.TestCase):
 class TestPickBacklog(unittest.TestCase):
     def test_picks_oldest_not_claimed(self):
         with tempfile.TemporaryDirectory() as td:
-            bdir = Path(td) / "backlog"
+            bdir = Path(td).resolve() / "backlog"
             bdir.mkdir()
             # create two items, write older one first
             a = bdir / "a.json"
@@ -82,7 +82,7 @@ class TestPickBacklog(unittest.TestCase):
         """An item that names its own target_repo is checked for an
         in-flight branch in THAT repo, not the invocation's default."""
         with tempfile.TemporaryDirectory() as td:
-            bdir = Path(td) / "backlog"
+            bdir = Path(td).resolve() / "backlog"
             bdir.mkdir()
             item = bdir / "a.json"
             item.write_text(
@@ -103,7 +103,7 @@ class TestPickBacklog(unittest.TestCase):
 
     def test_empty(self):
         with tempfile.TemporaryDirectory() as td:
-            bdir = Path(td) / "backlog"
+            bdir = Path(td).resolve() / "backlog"
             bdir.mkdir()
             with mock.patch.object(detached_lib, "BACKLOG_DIR", bdir):
                 self.assertIsNone(detached_lib.pick_backlog_item(_REPO))

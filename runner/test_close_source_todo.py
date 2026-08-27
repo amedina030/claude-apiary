@@ -97,7 +97,7 @@ class TestUuidsFromMerge(unittest.TestCase):
 class TestSourceForUuid(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.history_path = Path(self._tmp.name) / "run_history.jsonl"
+        self.history_path = Path(self._tmp.name).resolve() / "run_history.jsonl"
         self._patch = mock.patch.object(
             close_source_todo,
             "RUN_HISTORY_FILE",

@@ -114,7 +114,7 @@ class TestResolveTargetRepo(_EnvIsolation):
 
     def test_resolves_real_git_repo(self):
         with tempfile.TemporaryDirectory() as td:
-            repo = Path(td) / "scratch_repo"
+            repo = Path(td).resolve() / "scratch_repo"
             repo.mkdir()
             _git_init(repo)
             resolved = target_repo.resolve_target_repo(cli_override=repo)
@@ -135,7 +135,7 @@ class TestResolveTargetRepo(_EnvIsolation):
 
     def test_file_path_raises(self):
         with tempfile.TemporaryDirectory() as td:
-            f = Path(td) / "not_a_dir"
+            f = Path(td).resolve() / "not_a_dir"
             f.write_text("hello", encoding="utf-8")
             with self.assertRaises(ValueError) as ctx:
                 target_repo.resolve_target_repo(cli_override=f)
@@ -143,7 +143,7 @@ class TestResolveTargetRepo(_EnvIsolation):
 
     def test_dir_without_git_raises(self):
         with tempfile.TemporaryDirectory() as td:
-            d = Path(td) / "empty_dir"
+            d = Path(td).resolve() / "empty_dir"
             d.mkdir()
             with self.assertRaises(ValueError) as ctx:
                 target_repo.resolve_target_repo(cli_override=d)
@@ -153,7 +153,7 @@ class TestResolveTargetRepo(_EnvIsolation):
         # Worktrees and submodules use a .git FILE, not a dir. The
         # validator must accept that.
         with tempfile.TemporaryDirectory() as td:
-            d = Path(td) / "git_via_file"
+            d = Path(td).resolve() / "git_via_file"
             d.mkdir()
             (d / ".git").write_text("gitdir: /elsewhere\n", encoding="utf-8")
             resolved = target_repo.resolve_target_repo(cli_override=d)
@@ -186,14 +186,14 @@ class TestActiveTargetEnv(unittest.TestCase):
 
     def test_env_var_feeds_choose_target_repo(self):
         with tempfile.TemporaryDirectory() as td:
-            target_repo.set_active_target(Path(td))
+            target_repo.set_active_target(Path(td).resolve())
             with mock.patch.object(target_repo, "cfg", return_value=None):
                 chosen = target_repo.choose_target_repo()
             self.assertEqual(chosen, Path(td).resolve())
 
     def test_env_var_feeds_path_helpers(self):
         with tempfile.TemporaryDirectory() as td:
-            target_repo.set_active_target(Path(td))
+            target_repo.set_active_target(Path(td).resolve())
             self.assertEqual(
                 target_repo.intake_dir(),
                 Path(td).resolve() / ".apiary" / "runner" / "intake",

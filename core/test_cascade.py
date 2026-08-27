@@ -39,7 +39,7 @@ class CascadeFixTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_main_apiary(self.root)
         # Bootstrap two test targets
         self.target_a = self.root / "demo_a"
@@ -86,7 +86,7 @@ class MainApiaryDriftDispatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_main_apiary(self.root)
         self.target = self.root / "demo"
         self.target.mkdir()

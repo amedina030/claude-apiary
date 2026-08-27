@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 import time
+import os
 import unittest
 from pathlib import Path
 
@@ -664,6 +665,7 @@ class SessionDiscoveryTests(unittest.TestCase):
             finally:
                 disc.stop()
 
+    @unittest.skipUnless(os.name == "nt", "min_ctime pinning assumes st_ctime is creation time; off Windows it is inode-change time, so touching the old JSONL re-latches it (review gui #8, T-2026-292)")
     def test_re_pin_after_lock_unlatches_for_new_jsonl(self):
         """Models the /clear flow: discovery locked onto JSONL A via lock_after_first,
         then set_pin bumps min_ctime so a fresh post-clear JSONL B takes over."""

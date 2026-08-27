@@ -26,7 +26,7 @@ class EnvSandbox(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.state = self.root / "state"
         (self.state / "sessions").mkdir(parents=True)
         self._set_env(TARGET_STATE_DIR_ENV, str(self.state))

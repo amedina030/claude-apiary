@@ -72,7 +72,7 @@ class TestInjectSessionGuard(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.home = Path(self._tmp.name)
+        self.home = Path(self._tmp.name).resolve()
 
     def test_runner_subprocess_skips_injection_and_writes_no_flag(self):
         result = _run_hook(
@@ -102,7 +102,7 @@ class TestContextRuleErrorReminderGuard(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.home = Path(self._tmp.name)
+        self.home = Path(self._tmp.name).resolve()
 
     def _failure_payload(self) -> dict:
         return {

@@ -394,7 +394,7 @@ class OutgoingScanIntegrationTest(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        base = Path(self._tmp.name)
+        base = Path(self._tmp.name).resolve()
         self.remote = base / "remote.git"
         self.work = base / "work"
         _git(["init", "-q", "--bare", str(self.remote)], base)

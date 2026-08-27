@@ -133,7 +133,7 @@ class FakeBackend(SchedulerBackend):
 class LoadRegistryTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
+        self.tmp = Path(self._tmp.name).resolve()
         self.apiary = self.tmp / "apiary"
         self.apiary.mkdir()
 
@@ -210,7 +210,7 @@ class LoadRegistryTests(unittest.TestCase):
 class ClassifyTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
+        self.tmp = Path(self._tmp.name).resolve()
         self.apiary = self.tmp / "apiary"
         self.apiary.mkdir()
 
@@ -311,7 +311,7 @@ class ClassifyTests(unittest.TestCase):
 class CheckAndRepairTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
+        self.tmp = Path(self._tmp.name).resolve()
         self.apiary = self.tmp / "apiary"
         self.apiary.mkdir()
 
@@ -449,7 +449,7 @@ class CheckAndRepairTests(unittest.TestCase):
 class MainCLITests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
+        self.tmp = Path(self._tmp.name).resolve()
         self.apiary = self.tmp / "apiary"
         self.apiary.mkdir()
         self.registry_path = self.tmp / "cron_registry.json"
@@ -533,7 +533,7 @@ class MainCLITests(unittest.TestCase):
 class BootstrapHookTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
+        self.tmp = Path(self._tmp.name).resolve()
         self.apiary = self.tmp / "apiary"
         self.apiary.mkdir()
 

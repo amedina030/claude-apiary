@@ -23,7 +23,7 @@ from researcher import cli, store
 class ResearcherTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp_path = Path(self._tmp.name)
+        self.tmp_path = Path(self._tmp.name).resolve()
         self._patch = mock.patch(
             "core.utils.state.git_root",
             return_value=self.tmp_path,

@@ -395,7 +395,7 @@ class TestPathAllowlist(unittest.TestCase):
         # repo, used as the "rejected" location.
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.outside_root = Path(self._tmp.name) / "outside"
+        self.outside_root = Path(self._tmp.name).resolve() / "outside"
         self.outside_root.mkdir(parents=True)
 
     def test_relative_in_repo_path_accepted(self):

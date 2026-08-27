@@ -39,7 +39,7 @@ class TestLoadPreviousLog(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp_path = Path(self._tmp.name)
+        self.tmp_path = Path(self._tmp.name).resolve()
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -156,7 +156,7 @@ class TestRunTestCommand(unittest.TestCase):
                 f'cd {td} && python -c "import os; print(os.getcwd())"'
             )
             self.assertTrue(passed, output)
-            self.assertIn(Path(td).name, output)
+            self.assertIn(Path(td).resolve().name, output)
 
     def test_plain_command_no_cd(self):
         passed, output = run_test_command('python -c "print(42)"')
@@ -1179,7 +1179,7 @@ class TestPersistExecutionLog(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp_path = Path(self._tmp.name)
+        self.tmp_path = Path(self._tmp.name).resolve()
 
     def tearDown(self):
         self._tmp.cleanup()

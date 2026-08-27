@@ -206,7 +206,7 @@ class UserHookSurvivalTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.settings = Path(self._tmp.name) / "settings.json"
+        self.settings = Path(self._tmp.name).resolve() / "settings.json"
         self.user_entry = _entry("python scripts/runner/lint.py")
         self.settings.write_text(
             json.dumps({"hooks": {"PreToolUse": [self.user_entry]}}),

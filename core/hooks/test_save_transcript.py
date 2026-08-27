@@ -52,7 +52,7 @@ class TestSaveTranscript(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.home = Path(self._tmp.name)
+        self.home = Path(self._tmp.name).resolve()
         self.state = self.home / "state"
         self.history = self.state / "sessions" / "history.json"
         self.last = self.state / "sessions" / "last-session.json"

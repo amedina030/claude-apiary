@@ -152,7 +152,7 @@ class TicketDirsMixin:
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.intake = self.root / "intake"
         self.backlog = self.root / "backlog"
         for patcher in (

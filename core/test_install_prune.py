@@ -17,7 +17,7 @@ class PruneRemovedCommandsTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        root = Path(self._tmp.name)
+        root = Path(self._tmp.name).resolve()
         self.apiary = root / "apiary"
         (self.apiary / "budgeter" / "commands").mkdir(parents=True)
         (self.apiary / "budgeter" / "commands" / "budgeter.md").write_text(

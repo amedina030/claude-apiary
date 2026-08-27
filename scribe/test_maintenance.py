@@ -25,7 +25,7 @@ from scribe.store import ARCHIVE_DIRNAME, INDEX_FILENAME, ScribeStore
 class IterIndexFoldersTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.state_dir = Path(self._tmp.name) / "scribe"
+        self.state_dir = Path(self._tmp.name).resolve() / "scribe"
         self.store = ScribeStore(self.state_dir)
 
     def tearDown(self):
@@ -59,7 +59,7 @@ class IterIndexFoldersTests(unittest.TestCase):
 class BackupRestoreTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.state_dir = Path(self._tmp.name) / "scribe"
+        self.state_dir = Path(self._tmp.name).resolve() / "scribe"
         self.store = ScribeStore(self.state_dir)
         self.root = maintenance.backups_root(self.state_dir)
 

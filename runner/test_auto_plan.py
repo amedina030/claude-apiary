@@ -74,7 +74,7 @@ class TestNonApiaryBuildPrompt(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.target = Path(self._tmp.name)
+        self.target = Path(self._tmp.name).resolve()
         # Minimal git repo — resolve_target_repo isn't called here, but a
         # realistic shape keeps fixtures honest.
         subprocess.run(
@@ -171,7 +171,7 @@ class TestResolveBannedTokens(unittest.TestCase):
         from runner.validate_plan import _resolve_banned_tokens
 
         with tempfile.TemporaryDirectory() as td:
-            key = Path(td).name
+            key = Path(td).resolve().name
             fake_cfg = {
                 "runner": {
                     "target_overrides": {key: {"banned_tokens": {"foo": "bar"}}},

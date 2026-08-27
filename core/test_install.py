@@ -27,7 +27,7 @@ class InstallTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_fake_apiary(self.root)
         self.target = _git_init(self.root / "demo")
 
@@ -143,7 +143,7 @@ class ScribeTemplateScaffoldTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_fake_apiary(self.root)
         self.target = _git_init(self.root / "demo")
 
@@ -197,7 +197,7 @@ class GeneratedLauncherTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_fake_apiary(self.root)
         self.target = _git_init(self.root / "demo")
         install_mod.install(self.target, apiary_repo=self.apiary)
@@ -282,7 +282,7 @@ class SecretScanHookOnInstallTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_fake_apiary(self.root)
         self.target = self.root / "target"
         self.target.mkdir()
@@ -330,7 +330,7 @@ class GitignoreDotClaudeTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.repo = Path(self._tmp.name)
+        self.repo = Path(self._tmp.name).resolve()
 
     def _gitignore(self):
         return (self.repo / ".gitignore").read_text(encoding="utf-8")
@@ -362,7 +362,7 @@ class _InstalledRepoCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_fake_apiary(self.root)
         self.target = _git_init(self.root / "demo")
         self.first = install_mod.install(self.target, apiary_repo=self.apiary)
@@ -567,7 +567,7 @@ class GitignoreSemanticsTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.repo = Path(self._tmp.name)
+        self.repo = Path(self._tmp.name).resolve()
         subprocess.run(["git", "init", "-q"], cwd=str(self.repo), check=False)
         install_mod._ensure_gitignore_entry(self.repo)
         (self.repo / ".claude" / "commands").mkdir(parents=True)

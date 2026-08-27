@@ -26,7 +26,7 @@ def _write(profiles_dir: Path, name: str, body: str) -> Path:
 class _ProfilesDir(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.profiles = Path(self._tmp.name)
+        self.profiles = Path(self._tmp.name).resolve()
 
     def tearDown(self):
         self._tmp.cleanup()

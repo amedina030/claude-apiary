@@ -23,7 +23,7 @@ class UninstallTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_fake_apiary(self.root)
         self.target = _git_init(self.root / "demo")
         self.install_result = install_mod.install(self.target, apiary_repo=self.apiary)
@@ -119,7 +119,7 @@ class UninstallOrderingTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_fake_apiary(self.root)
         self.target = _git_init(self.root / "demo")
         self.install_result = install_mod.install(self.target, apiary_repo=self.apiary)

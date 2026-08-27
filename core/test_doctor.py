@@ -34,7 +34,7 @@ class CheckRegistryTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_apiary(self.root)
 
     def test_clean_registry_returns_no_findings(self):
@@ -100,7 +100,7 @@ class CheckPointersTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_apiary(self.root)
 
     def test_missing_self_pointer_is_a_note_not_an_issue(self):
@@ -139,7 +139,7 @@ class CheckVersionsTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_apiary(self.root, version="0.2.0")
 
     def test_pinned_version_matching_main_returns_clean(self):
@@ -179,7 +179,7 @@ class CheckOrphansAndDuplicatesTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_apiary(self.root)
 
     def test_orphan_state_dir_with_unknown_uid(self):
@@ -217,7 +217,7 @@ class CheckUnreachableTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_apiary(self.root)
 
     def test_real_path_missing_on_disk_is_unreachable(self):
@@ -240,7 +240,7 @@ class MainTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_apiary(self.root)
 
     def test_main_returns_zero_on_clean_registry(self):
@@ -283,7 +283,7 @@ class FixActionsTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_apiary(self.root)
 
     def test_fix_without_subcommand_errors(self):
@@ -311,7 +311,7 @@ class CheckStaleTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_apiary(self.root)
 
     def _add_source_command(self, filename: str, content: str) -> Path:
@@ -396,7 +396,7 @@ class CheckPinsTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_apiary(self.root)
         self.repo = self.root / "repo"
         self.repo.mkdir()
@@ -507,7 +507,7 @@ class FixPinsTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_apiary(self.root)
         self.repo = self.root / "repo"
         self.repo.mkdir()
@@ -623,7 +623,7 @@ class CheckCompassTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_apiary(self.root)
 
     def test_unregistered_apiary_reports_a_note_not_an_issue(self):

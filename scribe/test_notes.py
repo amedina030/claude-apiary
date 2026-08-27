@@ -19,7 +19,7 @@ from scribe.store import VALID_TYPES, ScribeStore
 class TestScribeNotes(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp_dir = Path(self._tmp.name)
+        self.tmp_dir = Path(self._tmp.name).resolve()
         self.store = ScribeStore(self.tmp_dir)
 
     def tearDown(self):
@@ -529,7 +529,7 @@ class TestArchiveAwareMutations(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp_dir = Path(self._tmp.name)
+        self.tmp_dir = Path(self._tmp.name).resolve()
         self.store = ScribeStore(self.tmp_dir)
 
     def tearDown(self):
@@ -639,7 +639,7 @@ class TestAutoArchivePolicy(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp_dir = Path(self._tmp.name)
+        self.tmp_dir = Path(self._tmp.name).resolve()
         self.store = ScribeStore(self.tmp_dir)
 
     def tearDown(self):
@@ -686,7 +686,7 @@ class TestTidyAndMarkReviewed(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp_dir = Path(self._tmp.name)
+        self.tmp_dir = Path(self._tmp.name).resolve()
         self.store = ScribeStore(self.tmp_dir)
 
     def tearDown(self):

@@ -61,7 +61,7 @@ class DispatchTest(unittest.TestCase):
         # hooks.log must never land in this checkout during tests.
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        log = Path(self._tmp.name) / ".claude" / "apiary" / "hooks.log"
+        log = Path(self._tmp.name).resolve() / ".claude" / "apiary" / "hooks.log"
         log_patch = mock.patch.object(dispatch, "log_path", lambda: log)
         log_patch.start()
         self.addCleanup(log_patch.stop)
@@ -361,7 +361,7 @@ class EndToEndTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.home = Path(self._tmp.name)
+        self.home = Path(self._tmp.name).resolve()
         self.repo = self.home / "repo"
         (self.repo / ".claude" / "apiary" / "session-tmp").mkdir(parents=True)
         (self.repo / ".claude" / "apiary" / "self-pointer.json").write_text(

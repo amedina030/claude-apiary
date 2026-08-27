@@ -25,7 +25,7 @@ class _Env(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.repo = self.root / "repo"
         (self.repo / ".claude" / "apiary" / "session-tmp").mkdir(parents=True)
         (self.repo / ".claude" / "apiary" / "self-pointer.json").write_text(
@@ -120,7 +120,7 @@ class LoadIdentityTest(_Env):
 class HistoryShapeTest(unittest.TestCase):
     def test_load_accepts_v1_dict_and_bare_list_and_junk(self):
         with tempfile.TemporaryDirectory() as td:
-            p = Path(td) / "history.json"
+            p = Path(td).resolve() / "history.json"
             p.write_text(
                 json.dumps({"schema_version": 1, "sessions": [{"session_id": "a"}, 3]}),
                 encoding="utf-8",
@@ -130,7 +130,7 @@ class HistoryShapeTest(unittest.TestCase):
             self.assertEqual(sess.load_history(p), [{"session_id": "b"}])
             p.write_text("not json", encoding="utf-8")
             self.assertEqual(sess.load_history(p), [])
-            self.assertEqual(sess.load_history(Path(td) / "missing.json"), [])
+            self.assertEqual(sess.load_history(Path(td).resolve() / "missing.json"), [])
             self.assertEqual(
                 json.loads(sess.dump_history([{"x": 1}])),
                 {"schema_version": 1, "sessions": [{"x": 1}]},
@@ -157,7 +157,7 @@ class FindStateDirTest(unittest.TestCase):
         from core.utils import state
 
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
+            root = Path(td).resolve()
             repo = root / "proj"
             (repo / ".claude" / "apiary").mkdir(parents=True)
             self.assertIsNone(state.find_state_dir(repo))  # no pins yet
@@ -179,7 +179,7 @@ class FindStateDirTest(unittest.TestCase):
 
     def test_session_dirs_follow_the_pins_without_launcher_env(self):
         with tempfile.TemporaryDirectory() as td:
-            main, repo = self._pinned(Path(td))
+            main, repo = self._pinned(Path(td).resolve())
             saved = {
                 v: os.environ.get(v)
                 for v in ("APIARY_TARGET_STATE_DIR", "CLAUDE_PROJECT_DIR", "APIARY_TARGET_REPO")

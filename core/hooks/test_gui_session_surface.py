@@ -69,7 +69,7 @@ class TestGuiSessionSurface(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.home = Path(self._tmp.name)
+        self.home = Path(self._tmp.name).resolve()
 
     def test_gui_session_emits_surface_line(self):
         result = _run_hook(self.home, gui_session=True)

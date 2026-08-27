@@ -16,7 +16,7 @@ class ReadJsonObjectTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
 
     def _write(self, name: str, text: str) -> Path:
         p = self.root / name

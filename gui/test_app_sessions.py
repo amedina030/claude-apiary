@@ -105,7 +105,7 @@ class AppSessionsTestBase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         # FileRefs.wipe_all touches the real per-profile state dir; tabs_state
         # .save writes tabs.json there. Neither belongs in a unit test.
         for target, attr in (

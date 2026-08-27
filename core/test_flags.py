@@ -23,7 +23,7 @@ class FlagsResolutionTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.repo = self.root / "myrepo"
         (self.repo / ".claude" / "apiary").mkdir(parents=True)
         # Save / clear env so individual tests can set as needed
@@ -128,7 +128,7 @@ class FlagsCliTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.repo = Path(self._tmp.name) / "myrepo"
+        self.repo = Path(self._tmp.name).resolve() / "myrepo"
         (self.repo / ".claude" / "apiary").mkdir(parents=True)
         # ``_per_repo_root`` reads CLAUDE_PROJECT_DIR *before*
         # APIARY_TARGET_REPO, so clear it or a live session's value wins.

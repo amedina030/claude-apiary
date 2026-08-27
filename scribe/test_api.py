@@ -70,21 +70,21 @@ class TestDisplayId(unittest.TestCase):
 class TestResolver(unittest.TestCase):
     def test_resolve_by_name(self):
         with tempfile.TemporaryDirectory() as td:
-            apiary = Path(td)
+            apiary = Path(td).resolve()
             _make_apiary(apiary, {"7": {"name": "foo", "real_path": str(apiary / "src")}})
             got = api.resolve_scribe_dir("foo", apiary_repo=apiary)
             self.assertEqual(got, apiary / ".repos" / "foo-7" / "scribe")
 
     def test_resolve_unknown_name_raises_keyerror(self):
         with tempfile.TemporaryDirectory() as td:
-            apiary = Path(td)
+            apiary = Path(td).resolve()
             _make_apiary(apiary, {"7": {"name": "foo", "real_path": str(apiary / "src")}})
             with self.assertRaises(KeyError):
                 api.resolve_scribe_dir("nope", apiary_repo=apiary)
 
     def test_resolve_ambiguous_name_raises_valueerror(self):
         with tempfile.TemporaryDirectory() as td:
-            apiary = Path(td)
+            apiary = Path(td).resolve()
             _make_apiary(
                 apiary,
                 {
@@ -97,9 +97,9 @@ class TestResolver(unittest.TestCase):
 
     def test_resolve_by_repo_path_via_pointer(self):
         with tempfile.TemporaryDirectory() as td:
-            apiary = Path(td) / "apiary"
+            apiary = Path(td).resolve() / "apiary"
             _make_apiary(apiary, {"7": {"name": "foo", "real_path": "ignored"}})
-            target = Path(td) / "target"
+            target = Path(td).resolve() / "target"
             pointer_dir = target / ".apiary"
             pointer_dir.mkdir(parents=True)
             (pointer_dir / "pointer").write_text(
@@ -111,7 +111,7 @@ class TestResolver(unittest.TestCase):
 
     def test_open_store_round_trips_a_note(self):
         with tempfile.TemporaryDirectory() as td:
-            apiary = Path(td)
+            apiary = Path(td).resolve()
             _make_apiary(apiary, {"7": {"name": "foo", "real_path": str(apiary / "src")}})
             store = api.open_store("foo", apiary_repo=apiary)
             entry = store.add_note("todo", "body text", session_id="s1")

@@ -45,7 +45,7 @@ class TempTreeCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
 
     def _collect(self, min_statements: int = 5):
         functions, errors = cd.collect(self.root, min_statements)

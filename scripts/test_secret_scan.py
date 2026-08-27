@@ -404,7 +404,7 @@ class StagedIntegrationTests(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         _run_git(["init", "-q"], self.root)
         _run_git(["config", "user.email", "t@example.com"], self.root)
         _run_git(["config", "user.name", "T"], self.root)

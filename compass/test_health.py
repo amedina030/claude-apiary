@@ -19,7 +19,7 @@ class HealthTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.state = Path(self._tmp.name) / "state"
+        self.state = Path(self._tmp.name).resolve() / "state"
         self.compass = self.state / "compass"
         self.observations = self.compass / "observations"
         self.observations.mkdir(parents=True)
@@ -66,7 +66,7 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(facts["archived_observations"], 1)
 
     def test_missing_state_reports_not_exists(self):
-        facts = health.collect(Path(self._tmp.name) / "nowhere")
+        facts = health.collect(Path(self._tmp.name).resolve() / "nowhere")
         self.assertFalse(facts["exists"])
         self.assertIn("no compass state", health.format_notes(facts)[0])
 

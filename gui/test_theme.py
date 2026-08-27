@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import os
 import unittest
 from pathlib import Path
 
@@ -77,6 +78,7 @@ class ThemeWatcherTests(unittest.TestCase):
                 watcher.stop()
 
 
+@unittest.skipUnless(os.name == "nt", "SingleInstance is a Win32 named mutex; on POSIX nothing holds it and the second instance also acquires (T-2026-292)")
 class SingleInstanceTests(unittest.TestCase):
     def test_first_acquires_second_does_not(self):
         name = "Local\\apiary_gui_test_singleton_xyz"

@@ -56,7 +56,7 @@ class TestSourceFiles(unittest.TestCase):
 
 class TestFrontmatter(unittest.TestCase):
     def _write(self, body: str) -> Path:
-        d = Path(self._tmp.name) / "behavioral"
+        d = Path(self._tmp.name).resolve() / "behavioral"
         d.mkdir(parents=True, exist_ok=True)
         p = d / "test_rule.md"
         p.write_text(body, encoding="utf-8")

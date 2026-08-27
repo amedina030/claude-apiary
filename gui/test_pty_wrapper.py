@@ -160,7 +160,7 @@ class StopKillsGrandchildTest(unittest.TestCase):
         except ImportError:
             self.skipTest("pywinpty not installed")
         with tempfile.TemporaryDirectory() as td:
-            pidfile = Path(td) / "pid"
+            pidfile = Path(td).resolve() / "pid"
             code = (
                 "import os,time;open(r'%s','w',encoding='utf-8').write(str(os.getpid()));time.sleep(60)"
                 % str(pidfile)

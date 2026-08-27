@@ -14,7 +14,7 @@ class ScaffoldRefreshTest(unittest.TestCase):
     def test_unrecorded_preexisting_template_is_never_overwritten(self):
         # A state dir from before the hash record existed (pre-Phase-1 installs).
         with tempfile.TemporaryDirectory() as td:
-            state = Path(td)
+            state = Path(td).resolve()
             tdir = state / templates.TEMPLATES_DIRNAME
             tdir.mkdir()
             (tdir / "handoff.md").write_text("my old handoff template\n", encoding="utf-8")
@@ -30,7 +30,7 @@ class ScaffoldRefreshTest(unittest.TestCase):
 
     def test_unmodified_copy_refreshes_when_bundled_changes_and_edited_copy_does_not(self):
         with tempfile.TemporaryDirectory() as td:
-            state = Path(td)
+            state = Path(td).resolve()
             templates.scaffold_defaults(state)
             tdir = state / templates.TEMPLATES_DIRNAME
             record = json.loads((tdir / ".bundled_hashes.json").read_text(encoding="utf-8"))

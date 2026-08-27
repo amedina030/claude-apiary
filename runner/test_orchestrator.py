@@ -58,7 +58,7 @@ class _RunnerTestCase(unittest.TestCase):
 
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.tmp_path = Path(self._tmp.name)
+        self.tmp_path = Path(self._tmp.name).resolve()
         # run.main()'s target_repo resolution sets APIARY_TARGET_REPO; don't let
         # it leak across test methods or between test classes.
         self._prior_active_target = os.environ.pop("APIARY_TARGET_REPO", None)

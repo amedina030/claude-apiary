@@ -437,7 +437,7 @@ class E2EPipelineBase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory(prefix="runner_e2e_")
         self.addCleanup(self._cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.origin = self.root / "origin.git"
         self.target = self.root / "target"
         self.state = self.root / "state"

@@ -106,7 +106,7 @@ class TestValidateSpecCLIFilesExamined(unittest.TestCase):
 
     def _run_validate(self, spec_dict):
         with tempfile.TemporaryDirectory() as td:
-            p = Path(td) / "spec.json"
+            p = Path(td).resolve() / "spec.json"
             p.write_text(json.dumps(spec_dict), encoding="utf-8")
             result = subprocess.run(
                 [sys.executable, "-m", "runner.validate_spec", str(p)],

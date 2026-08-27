@@ -79,7 +79,7 @@ class LearnDoesNotCallAModelTests(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp_dir = Path(self._tmp.name)
+        self.tmp_dir = Path(self._tmp.name).resolve()
         self.store = ScribeStore(self.tmp_dir)
 
     def tearDown(self):
@@ -149,7 +149,7 @@ class LearnDoesNotCallAModelTests(unittest.TestCase):
 class RetrotagTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp_dir = Path(self._tmp.name)
+        self.tmp_dir = Path(self._tmp.name).resolve()
         self.store = ScribeStore(self.tmp_dir)
 
     def tearDown(self):

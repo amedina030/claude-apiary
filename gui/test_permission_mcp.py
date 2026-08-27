@@ -45,7 +45,7 @@ class PermissionMcpTests(unittest.TestCase):
         import gui.permission_mcp as mod
 
         importlib.reload(mod)
-        mod.LOG_PATH = Path(self._tmp.name) / "permission_mcp.log"
+        mod.LOG_PATH = Path(self._tmp.name).resolve() / "permission_mcp.log"
         self.mod = mod
 
     def _roundtrip(self, messages: list[dict]) -> list[dict]:
@@ -236,10 +236,10 @@ class PermissionMcpTests(unittest.TestCase):
         home_claude = Path.home() / ".claude"
         self.assertFalse(self.mod.log_path().is_relative_to(home_claude))
         self.assertFalse(self.mod.config_path().is_relative_to(home_claude))
-        self.mod.LOG_PATH = Path(self._tmp.name) / "permission_mcp.log"
+        self.mod.LOG_PATH = Path(self._tmp.name).resolve() / "permission_mcp.log"
 
     def test_write_mcp_config_default_dest_is_config_path(self):
-        self.mod.CONFIG_PATH = Path(self._tmp.name) / "cfg" / "mcp.json"
+        self.mod.CONFIG_PATH = Path(self._tmp.name).resolve() / "cfg" / "mcp.json"
         dest = self.mod.write_mcp_config(python="/fake/python", script=Path("/fake/s.py"))
         self.assertEqual(dest, self.mod.CONFIG_PATH)
         self.assertTrue(dest.exists())
@@ -347,7 +347,7 @@ class PermissionMcpTests(unittest.TestCase):
         self.assertEqual(responses[0]["error"]["code"], -32601)
 
     def test_write_mcp_config_shape(self):
-        dest = Path(self._tmp.name) / "mcp.json"
+        dest = Path(self._tmp.name).resolve() / "mcp.json"
         self.mod.write_mcp_config(
             dest=dest,
             python="/fake/python",
@@ -365,7 +365,7 @@ class PermissionMcpTests(unittest.TestCase):
         # In a PyInstaller bundle sys.executable is the frozen GUI exe, which
         # can't run an arbitrary .py. Config must invoke the exe with
         # MCP_SERVER_FLAG so the bundled main() routes into serve().
-        dest = Path(self._tmp.name) / "mcp.json"
+        dest = Path(self._tmp.name).resolve() / "mcp.json"
         self.mod.write_mcp_config(
             dest=dest,
             python="C:/dist/apiary-gui/apiary-gui.exe",

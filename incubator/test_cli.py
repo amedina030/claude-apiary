@@ -140,7 +140,7 @@ class ValidateTargetTests(unittest.TestCase):
 
     def test_existing_path_rejected(self):
         with tempfile.TemporaryDirectory() as td:
-            existing = Path(td) / "already-here"
+            existing = Path(td).resolve() / "already-here"
             existing.mkdir()
             path, err = cli._validate_target(str(existing))
             self.assertIsNone(path)
@@ -148,14 +148,14 @@ class ValidateTargetTests(unittest.TestCase):
 
     def test_missing_parent_rejected(self):
         with tempfile.TemporaryDirectory() as td:
-            target = Path(td) / "no-such-parent" / "child"
+            target = Path(td).resolve() / "no-such-parent" / "child"
             path, err = cli._validate_target(str(target))
             self.assertIsNone(path)
             self.assertIn("parent directory", err)
 
     def test_inside_existing_git_repo_rejected(self):
         with tempfile.TemporaryDirectory() as td:
-            outer = Path(td)
+            outer = Path(td).resolve()
             subprocess.run(
                 ["git", "init", "--quiet"],
                 cwd=str(outer),
@@ -169,7 +169,7 @@ class ValidateTargetTests(unittest.TestCase):
 
     def test_valid_path_accepted(self):
         with tempfile.TemporaryDirectory() as td:
-            target = Path(td) / "fresh-project"
+            target = Path(td).resolve() / "fresh-project"
             path, err = cli._validate_target(str(target))
             self.assertIsNone(err)
             self.assertEqual(path, target.resolve())
@@ -189,7 +189,7 @@ class SkeletonLayoutTests(unittest.TestCase):
 
     def test_spawn_writes_full_skeleton(self):
         with tempfile.TemporaryDirectory() as td:
-            target = Path(td) / "spawn-target"
+            target = Path(td).resolve() / "spawn-target"
 
             args = argparse.Namespace(
                 path=str(target),
@@ -205,7 +205,7 @@ class SkeletonLayoutTests(unittest.TestCase):
                 args=[], returncode=0, stdout="Marked C-2026-999 done.\n", stderr=""
             )
 
-            apiary = _minimal_apiary(Path(td))
+            apiary = _minimal_apiary(Path(td).resolve())
             with (
                 mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)),
                 mock.patch.object(cli, "_run_scribe", side_effect=[fake_add, fake_done]),
@@ -235,7 +235,7 @@ class SkeletonLayoutTests(unittest.TestCase):
 
     def test_spawn_rolls_back_on_git_init_failure(self):
         with tempfile.TemporaryDirectory() as td:
-            target = Path(td) / "rollback-target"
+            target = Path(td).resolve() / "rollback-target"
             args = argparse.Namespace(
                 path=str(target),
                 spec_note_id="C-2026-999",
@@ -253,7 +253,7 @@ class SkeletonLayoutTests(unittest.TestCase):
 
     def test_spawn_reports_partial_on_migration_failure(self):
         with tempfile.TemporaryDirectory() as td:
-            target = Path(td) / "partial-target"
+            target = Path(td).resolve() / "partial-target"
             args = argparse.Namespace(
                 path=str(target),
                 spec_note_id="C-2026-999",
@@ -263,7 +263,7 @@ class SkeletonLayoutTests(unittest.TestCase):
             fake_add_fail = subprocess.CompletedProcess(
                 args=[], returncode=1, stdout="", stderr="scribe blew up"
             )
-            apiary = _minimal_apiary(Path(td))
+            apiary = _minimal_apiary(Path(td).resolve())
             with (
                 mock.patch.object(cli, "_fetch_spec", return_value=(self.SAMPLE_SPEC, None)),
                 mock.patch.object(cli, "APIARY_REPO", apiary),
@@ -280,7 +280,7 @@ class SkeletonLayoutTests(unittest.TestCase):
         """If per-repo install fails, migration must NOT run and the repo is
         left intact for recovery (EXIT_MIGRATION_FAILED)."""
         with tempfile.TemporaryDirectory() as td:
-            target = Path(td) / "bootstrap-fail"
+            target = Path(td).resolve() / "bootstrap-fail"
             args = argparse.Namespace(
                 path=str(target),
                 spec_note_id="C-2026-999",
@@ -326,7 +326,7 @@ class MigrateSpecTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(cli, "_run_scribe", side_effect=fake_run_scribe):
-                ok, _msg, added = cli._migrate_spec(Path(td) / "t", self.SPEC, "C-2026-999", "sess")
+                ok, _msg, added = cli._migrate_spec(Path(td).resolve() / "t", self.SPEC, "C-2026-999", "sess")
 
         self.assertTrue(ok)
         self.assertTrue(added)
@@ -348,7 +348,7 @@ class MigrateSpecTests(unittest.TestCase):
     def test_migrate_survives_an_oserror(self):
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(cli.subprocess, "run", side_effect=OSError("boom")):
-                ok, msg, added = cli._migrate_spec(Path(td) / "t", "spec", "C-2026-999", None)
+                ok, msg, added = cli._migrate_spec(Path(td).resolve() / "t", "spec", "C-2026-999", None)
         self.assertFalse(ok)
         self.assertFalse(added)
         self.assertIn("boom", msg)
@@ -359,7 +359,7 @@ class MigrateSpecTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(cli, "_run_scribe", return_value=fail_add):
-                ok, msg, added = cli._migrate_spec(Path(td) / "t", "spec", "C-2026-999", None)
+                ok, msg, added = cli._migrate_spec(Path(td).resolve() / "t", "spec", "C-2026-999", None)
         self.assertFalse(ok)
         self.assertFalse(added, "add failed, so nothing landed in the new repo")
         self.assertIn("scribe blew up", msg)
@@ -373,7 +373,7 @@ class MigrateSpecTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(cli, "_run_scribe", side_effect=[ok_add, fail_done]):
-                ok, msg, added = cli._migrate_spec(Path(td) / "t", "spec", "C-2026-999", None)
+                ok, msg, added = cli._migrate_spec(Path(td).resolve() / "t", "spec", "C-2026-999", None)
         self.assertFalse(ok)
         self.assertTrue(added, "the spec did land — only the close failed")
         self.assertIn("no such note", msg)
@@ -386,14 +386,14 @@ class RecoveryHintTests(unittest.TestCase):
 
     def _spawn_with(self, scribe_results) -> str:
         with tempfile.TemporaryDirectory() as td:
-            target = Path(td) / "hint-target"
+            target = Path(td).resolve() / "hint-target"
             args = argparse.Namespace(
                 path=str(target),
                 spec_note_id="C-2026-999",
                 author="x",
                 session_id=None,
             )
-            apiary = _minimal_apiary(Path(td))
+            apiary = _minimal_apiary(Path(td).resolve())
             err = io.StringIO()
             with (
                 mock.patch.object(cli, "_fetch_spec", return_value=(self.SPEC, None)),
@@ -489,7 +489,7 @@ class TemplateTests(unittest.TestCase):
 class SpecFetchErrorTests(unittest.TestCase):
     def test_missing_spec_returns_exit_3(self):
         with tempfile.TemporaryDirectory() as td:
-            target = Path(td) / "x"
+            target = Path(td).resolve() / "x"
             args = argparse.Namespace(
                 path=str(target),
                 spec_note_id="C-2026-999",
@@ -659,7 +659,7 @@ class VerifySpawnTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.target = self.root / "proj"
         self.target.mkdir()
         self.apiary = _minimal_apiary(self.root)
@@ -729,7 +729,7 @@ class VerifyCommandTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
 
     def test_missing_directory_is_a_validation_error(self):
         args = argparse.Namespace(path=str(self.root / "nope"))

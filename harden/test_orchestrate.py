@@ -78,7 +78,7 @@ def make_launcher(root: Path, record: Path, exit_code: int = 0) -> Path:
 class OrchestrateTestCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.state = str(self.root / "state")
         Path(self.state).mkdir()
         self.repo = make_repo(self.root)

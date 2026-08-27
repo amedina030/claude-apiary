@@ -378,7 +378,7 @@ def main():
     # Every test builds its own throwaway project and enables the flags it
     # needs there, so nothing depends on this checkout's flag state.
     with tempfile.TemporaryDirectory() as td:
-        tmp_path = Path(td)
+        tmp_path = Path(td).resolve()
 
         print("Unit: isolation guard blocks default paths ", end="")
         test_isolation_guard_blocks_default_paths(tmp_path)

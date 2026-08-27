@@ -58,7 +58,7 @@ class SpecTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.workpath = Path(self._tmp.name)
+        self.workpath = Path(self._tmp.name).resolve()
         self.result = run_spec(self.workpath)
         self.analysis = self.result["calls"]["Analysis"]["kwargs"]
 

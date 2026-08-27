@@ -17,7 +17,7 @@ from gui.file_refs import FileRefs
 class FileRefsTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
+        self.tmp = Path(self._tmp.name).resolve()
         self.refs = FileRefs(store=self.tmp / "file_refs.json")
         self.refs.reset()
 
