@@ -262,6 +262,38 @@ Inspect and maintain per-session personality observation files at `<state-dir>/c
 | `validate` | `observations.py validate <path> [--no-filename-check]` | Validate one observation file's schema. Default checks `session_id` matches the filename stem |
 | `archive` | `observations.py archive [--apply]` | Archive sweep — moves files older than 90 days into `observations/archive/<iso-year>-<iso-week>/`. Skips entirely when active count is below 50. Dry-run by default; `--apply` performs the move |
 
+## compass/capture.py
+
+The write side of `/wrapup` Step 4. Takes the session's observation JSON, validates it against the dimension config and the session-id guard, and only then writes `<state-dir>/compass/observations/<sid>.json`. Nothing is written when validation fails, so a malformed payload can never reach the synthesizer. `compass/observations.py` remains the read and maintenance surface.
+
+```bash
+python compass/capture.py dimensions [--json]
+python compass/capture.py template --session-id abc12345
+python compass/capture.py validate --content-file obs.json [--session-id abc12345]
+python compass/capture.py store --content-file obs.json --session-id abc12345 [--allow-empty] [--dry-run]
+```
+
+### Subcommands
+
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `dimensions` | `capture.py dimensions [--json]` | Print the dimensions to look for and which are volatile; `--json` prints the raw config |
+| `template` | `capture.py template [--session-id ID]` | Print a skeleton payload so the skill never retypes the schema |
+| `validate` | `capture.py validate --content-file PATH` | Validate a payload without storing it |
+| `store` | `capture.py store --content-file PATH --session-id ID` | Validate, then write the observation file |
+
+### Flags
+
+| Flag | Applies to | Description |
+|------|-----------|-------------|
+| `--content-file PATH` | validate, store | The observation JSON (one wrapping markdown fence is tolerated) |
+| `--session-id ID` | template, validate, store | 8-char prefix or full UUID. The payload's `session_id` must match it |
+| `--json` | dimensions | Print the raw dimensions config |
+| `--allow-empty` | store | Write the file even when `observations` is empty (skipped by default) |
+| `--dry-run` | store | Validate and report the target path, write nothing |
+
+Exit codes: `0` stored (or honestly empty and skipped), `1` invalid payload or write failure (capture is non-blocking: `/wrapup` warns and moves on), `2` usage error.
+
 ## compass/synthesize.py
 
 Read active observations, previous `personality.md`, and `corrections.md`; call headless `claude -p` to produce a new `personality.md`. Used by `/compass-sync` and the weekly cron entry.
@@ -396,6 +428,92 @@ Manage visual captures (screenshots, UI mockups, viewport shots, etc.) per repo.
 | `3` | Config error: invalid YAML in `tags.yaml` or sidecar frontmatter |
 
 State is auto-created on first `add` or `register-tag`: `<state-dir>/captures/` directory and a default `tags.yaml` with empty tag list.
+
+## harden/orchestrate.py
+
+The `/harden` control flow. Owns path selection, directory expansion, the pre-flight size cap, the cost estimate, agent-prompt assembly, the validate/retry/degrade policy, the budget abort threshold, worktree lifecycle and TODO filing — everything `harden/commands/harden.md` used to specify in prose. The skill calls a subcommand, spawns the agents it prints, and relays the results.
+
+Run state (the plan JSON, staged agent output, validated output) lives in `harden/tmp/` — override with `HARDEN_TMP_DIR`.
+
+```bash
+python harden/orchestrate.py plan --session-id SID --targets src/a.py src/b/ [--lenses security,correctness] [--focus general] [--deep] [--rounds 3] [--max-files 5] [--max-target-kb 50] [--budget-tokens 450000] [--model-attacker sonnet] [--model-consolidator sonnet] [--model-defender sonnet] [--cwd DIR] [--repo DIR] [--out PATH] [--json]
+python harden/orchestrate.py plan --session-id SID --plan-note 42 [--launcher PATH] [--request-id RID]
+python harden/orchestrate.py prompt attacker --session-id SID --round 2 [--lens security] [--prev-findings F.json] [--prev-response R.json] [--rejections C.json]
+python harden/orchestrate.py prompt consolidator|defender --session-id SID --round 1 --findings F.json
+python harden/orchestrate.py prompt defender-continue --session-id SID --round 2 --findings F.json --prev-response R.json
+python harden/orchestrate.py worktree check|create|remove|diff --session-id SID [--delete-branch] [--plan-file PATH]
+python harden/orchestrate.py round start|tick|status|reset --session-id SID
+python harden/orchestrate.py round defender --session-id SID (--set AGENT_ID | --get)
+python harden/orchestrate.py validate findings --file reply.json --session-id SID --round 1 [--lens security] [--attempt 1] [--check-files] [--deep] [--out PATH]
+python harden/orchestrate.py validate response --file reply.json --session-id SID --expected-ids CON-001,CON-002
+python harden/orchestrate.py validate consolidation --file reply.json --session-id SID --source-ids ATK-SEC-001 [--degrade]
+python harden/orchestrate.py budget check --session-id SID --round 2 [--spent N] [--budget N] [--request-id RID] [--cwd DIR] [--empty-findings] [--query-script PATH]
+python harden/orchestrate.py file-todos --session-id SID --round 2 --response R.json [--findings F.json] [--launcher PATH] [--dry-run]
+python harden/orchestrate.py save-summary --session-id SID --content-file summary.md [--type context] [--launcher PATH]
+```
+
+### Subcommands
+
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `plan` | `plan --session-id SID --targets ...` | Resolve targets, pick the path (legacy / single-lens / multi-lens), run the size cap, estimate cost, mint the `request_id`. Writes the run plan every other subcommand reads. Creates no other state |
+| `prompt` | `prompt {attacker,consolidator,defender,defender-continue}` | Print ready-to-spawn `AGENT` blocks (description carrying the `[rid:...]` tag, model, prompt) with every template placeholder filled. `defender-continue` prints a SendMessage body instead |
+| `worktree` | `worktree {check,create,remove,diff}` | Readiness check (refuses dirty or untracked targets), create the run's worktree and branch from HEAD, remove it, or show the accumulated diff |
+| `round` | `round {start,tick,status,reset,defender}` | Round counter and the stored Defender agent id (wraps `harden/round_counter.py`) |
+| `validate` | `validate {findings,response,consolidation}` | Strip fences, run the validator, and decide what happens next: `ok`, `retry`, `drop` (a lens), `ask` (the user, in plain prose) or `degrade` |
+| `budget` | `budget check` | Query per-request spend, format the round-summary suffix, and decide whether the run must abort |
+| `file-todos` | `file-todos --response R.json` | File the Defender's `todos` and every deferred finding as scribe todos, through the launcher with `--content-file` |
+| `save-summary` | `save-summary --content-file S.md` | Save the run summary as a scribe note through the launcher |
+
+### Flags
+
+| Flag | Applies to | Description |
+|------|-----------|-------------|
+| `--session-id ID` | all | The harden run. Keys the plan file, the round counter and the worktree name |
+| `--plan-file PATH` | most | Read the plan from here instead of `harden/tmp/plan_<sid>.json` |
+| `--targets ...` | plan | Files and/or directories (directories expand recursively; tests and `__pycache__`/`node_modules`/`.git` are skipped) |
+| `--plan-note ID` | plan | Harden a scribe note instead of files (plan mode, always the legacy path) |
+| `--lenses LIST` | plan | Comma-separated lens subset; default all seven. One lens gives the single-lens path, two or more the multi-lens path |
+| `--focus NAME` | plan | Legacy focus vocabulary. Given *without* `--lenses`, selects the legacy single-attacker path |
+| `--deep` | plan, validate | Require Given/When/Then attack scenarios |
+| `--rounds N` | plan | Max attack-defend rounds (default 3) |
+| `--max-files N` | plan | Refuse more than N resolved target files (default 5) |
+| `--max-target-kb K` | plan | Refuse targets totalling more than K KB (default 50) |
+| `--budget-tokens N` | plan | Token budget for the run (default 450000) |
+| `--model-attacker M` | plan | Model for every lens attacker (default `sonnet`) |
+| `--model-consolidator M` | plan | Model for the referee (default `sonnet`) |
+| `--model-defender M` | plan | Model for the Defender (default `sonnet`) |
+| `--request-id RID` | plan, budget | Override or reuse the minted request id |
+| `--cwd DIR` | plan, budget | Session working directory: resolves relative targets and selects the project budgeter log |
+| `--repo DIR` | plan, worktree, file-todos, save-summary | Repo root override (default: the git toplevel) |
+| `--launcher PATH` | plan, file-todos, save-summary | Path to `.claude/apiary/launch.py` |
+| `--out PATH` | plan, validate | Write the plan / validated JSON here |
+| `--json` | plan | Print the plan JSON instead of the human summary |
+| `--round N` | prompt, validate, budget, file-todos | Round number: drives worktree-vs-original paths, file naming and messages |
+| `--lens NAME` | prompt, validate | Repeatable on `prompt` (limit the fan-out); selects per-lens validation on `validate findings` |
+| `--findings PATH` | prompt, file-todos | This round's validated findings |
+| `--prev-findings PATH` | prompt | Previous round's validated findings, for the mechanical prior record |
+| `--prev-response PATH` | prompt | Previous round's validated Defender JSON |
+| `--rejections PATH` | prompt | Previous round's consolidation output, for the referee-rejection lines |
+| `--set AGENT_ID` | round defender | Store the persistent Defender agent id |
+| `--get` | round defender | Print the stored Defender agent id (exit 1 when unset) |
+| `--delete-branch` | worktree remove | Also delete the `harden-<sid>` branch (kept by default) |
+| `--file PATH` | validate | Raw agent reply; markdown fences are stripped before validation |
+| `--attempt N` | validate | `1` = first try, `2` = the one retry. Attempt-2 failures fall back per kind |
+| `--expected-ids IDS` | validate response | Finding ids the Defender must have addressed |
+| `--source-ids IDS` | validate consolidation | Dispatched `ATK-<CODE>-NNN` ids, for exactly-once coverage |
+| `--degrade` | validate consolidation | Deterministic dedup fallback instead of adjudication |
+| `--check-files` | validate | Force file-existence checks (implied in code mode) |
+| `--spent N` | budget | Known spend; skips the log query |
+| `--budget N` | budget | Override the plan's budget |
+| `--empty-findings` | budget | Clean empty-findings exit: never marks BUDGET EXCEEDED |
+| `--query-script PATH` | budget | Override the spend query script (tests) |
+| `--response PATH` | file-todos | Validated Defender JSON |
+| `--content-file PATH` | save-summary | Summary body, kept off argv (Windows caps argv at 32,767 chars) |
+| `--type TYPE` | save-summary | Scribe note type (default `context`) |
+| `--dry-run` | file-todos, save-summary | Print what would be written, write nothing |
+
+Exit codes: `0` success, `1` abort or hard error (one user-facing line on stderr), `3` `validate` rejected the agent output — the decision object on stdout says what to do next.
 
 ## harden/validate_and_assign.py
 

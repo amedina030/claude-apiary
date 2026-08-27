@@ -22,9 +22,9 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 | `/notes` | `scribe/commands/notes.md` | List and query notes |
 | `/review-learnings` | `scribe/commands/review-learnings.md` | Walk through all learnings grouped by tag, archive or supersede stale entries, stamp `last_review` timestamp |
 | `/refine` | `refiner/commands/refine.md` | Refine a fuzzy idea into a structured handoff spec through value-first adversarial questioning |
-| `/harden` | `harden/commands/harden.md` | Adversarial attack-defend loop that stress-tests code or plans |
+| `/harden` | `harden/commands/harden.md` | Adversarial attack-defend loop that stress-tests code or plans. The control flow (path selection, size cap, cost estimate, worktree, retry/degrade policy, budget abort, TODO filing) lives in `harden/orchestrate.py`; the skill spawns the agents it prints |
 | `/review` | `docs/commands/review.md` | Review changes against standards, then fix issues |
-| `/wrapup` | `core/commands/wrapup.md` | Commit, capture learnings + TODOs, and generate a session handoff note. Also captures compass observations from the session (Step 4, non-blocking). |
+| `/wrapup` | `core/commands/wrapup.md` | Commit, capture learnings + TODOs, and generate a session handoff note. Also captures compass observations from the session (Step 4, non-blocking, via `compass/capture.py`). |
 | `/compass-sync` | `compass/commands/compass-sync.md` | Manually trigger compass synthesis — regenerate `personality.md` from active observations |
 | `/research` | `researcher/commands/research.md` | Add, find, list, show, verify, or register tags for research findings stored per-target under `<state-dir>/research/` |
 | `/runner-prep` | `runner/commands/runner-prep.md` | Audit active scribe todos and prepare automation-ready intake JSONs for the runner pipeline, with dependency ordering and safety classification |

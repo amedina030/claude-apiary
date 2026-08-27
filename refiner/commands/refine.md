@@ -221,12 +221,10 @@ Produce the handoff in **exactly** this format. Every section and sub-field is r
 
 ## Step 4: Present and iterate
 
-Show the complete handoff to the user. Use AskUserQuestion:
+Show the complete handoff to the user and ask, **in plain prose**, whether it is approved or needs edits. Do not use a multiple-choice picker.
 
-| Option | Action |
-|--------|--------|
-| **Approved** | Proceed to Step 5 |
-| **Edit needed** | User provides feedback. Apply edits to the existing handoff — don't restart. Show only what changed. Re-run the 8 validation rules after every edit. |
+- **Approved** → proceed to Step 5.
+- **Edit needed** → apply the user's feedback to the existing handoff, don't restart. Show only what changed, and re-run the 9 validation rules after every edit.
 
 Iterate until the user approves.
 

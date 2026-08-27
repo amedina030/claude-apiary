@@ -54,60 +54,26 @@ Be concise but specific — file names, function names, concrete details.
 
 ## Step 4: Compass capture (non-blocking)
 
-Extract personality/behavior observations from this session and write them to `<state-dir>/compass/observations/<session_id_8char>.json`. These accumulate into a personality profile (`personality.md`) that future sessions read at startup so Claude can anticipate the user's preferences.
+Extract personality/behaviour observations from this session. `compass/capture.py` owns the schema, the target path and the validation — you only supply the observations.
 
-### What to capture
+Compass is about **how** the user engages — personality, behaviour, quirks — *not* what they know or rules they've stated. Facts and explicit preferences belong in auto-memory, not here.
 
-Compass is about **how** the user engages — personality, behavior, quirks — *not* what they know or rules they've stated. Facts and explicit preferences belong in auto-memory, not here.
+**Skip silently** when the session was startup-only or trivial (< ~5 user messages of real interaction): write nothing, say nothing.
 
-Look for signals across these dimensions (load full descriptions from the dimensions config if needed):
+Otherwise:
 
-- `communication_style`, `decision_making`, `pushback`, `engagement`, `autonomy`, `risk_tolerance`, `trust_calibration`, `meta_awareness`, `mood_tone`
+1. Read the dimensions and which of them are volatile:
 
-`mood_tone` is **volatile** (current state, not stable trait); the rest are stable.
+   ```bash
+   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/capture.py dimensions
+   ```
 
-Full dimension descriptions:
-```bash
-cat "$(python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" --print-repo-path)/compass/dimensions.json"
-```
+2. Write the observation JSON to a scratch file (`compass/capture.py template --session-id <sid>` prints the exact shape). Quality bar: 3–7 observations across the dimensions where you saw **clear signal**; skip the rest rather than padding. Every observation needs an evidence quote or paraphrase from this session. Tag mood/tone as `"volatility": "volatile"`, everything else `"stable"`. Honest emptiness is fine — `"observations": []` beats anything fabricated.
 
-### Quality bar
+3. Store it:
 
-- 3–7 observations across the dimensions where you saw clear signal. Skip dimensions with no signal — do NOT pad.
-- Each observation needs an evidence quote/paraphrase from the actual session.
-- If no clear signal at all, write `"observations": []` — empty is honest, fabricated is harmful.
-- Tag mood/tone observations as `"volatility": "volatile"`. Everything else is `"stable"`.
+   ```bash
+   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/capture.py store --content-file <scratch.json> --session-id <session_id_8char>
+   ```
 
-### Schema
-
-Write this exact shape to `<state-dir>/compass/observations/<session_id_8char>.json`:
-
-```json
-{
-  "session_id": "<8-char prefix>",
-  "captured_at": "<ISO 8601 UTC, e.g. 2026-04-17T20:30:00Z>",
-  "observations": [
-    {
-      "dimension": "<one of the dimension names>",
-      "observation": "<1–2 sentences describing the trait/pattern>",
-      "evidence": "<short quote or paraphrase from this session>",
-      "volatility": "stable"
-    }
-  ]
-}
-```
-
-### Validation
-
-After writing, validate the file:
-
-```bash
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/observations.py validate "$(python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" core/utils/state.py)/compass/observations/<sid>.json"
-```
-
-If validation fails, fix and re-write. If validation keeps failing, log a brief warning to the user and move on — capture is non-blocking and should never prevent /wrapup from completing.
-
-### Skip conditions
-
-- Session was startup-only or trivial (< ~5 user messages of real interaction): write nothing, skip silently.
-- Compass directory write fails: log warning, skip silently. Do NOT block /wrapup.
+`store` validates before it writes, so a rejected payload leaves nothing behind. Exit 0 means stored (or honestly empty and skipped). On a non-zero exit, fix the payload and run it once more; if it still fails, log a one-line warning to the user and move on. Capture is non-blocking and must never prevent `/wrapup` from completing.
