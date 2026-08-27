@@ -162,11 +162,6 @@ Profile manifests themselves live at `<apiary-repo>/profiles/<name>.jsonc` (not 
 | Last transcript | `~/.claude/.last-transcript.jsonl` | Most recent session transcript (for handoff generation) |
 | Transcript archive | `~/.claude/transcripts/` | Saved transcripts by session ID |
 
-## Session state (repo-local)
-
-| File | Path | Description |
-|------|------|-------------|
-| Session identity | `.claude-session-identity.json` | Current session ID, role, mission (git-ignored) |
 
 ## Installed files (per bootstrapped repo)
 

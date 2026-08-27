@@ -3,7 +3,7 @@
 Per-repo apiary version migrations. Each file upgrades a bootstrapped repo
 from one apiary version to the next. `apiary update` chains them in order.
 
-> Spec: `MIGRATION-PLAN.md` §7.5, §3.3 (D10–D13), §13.8.
+> Spec: [`docs/architecture/per-repo-install.md`](../docs/architecture/per-repo-install.md).
 
 ## Naming
 
@@ -75,7 +75,7 @@ main-apiary checkout. Migrations are tiny and tracked — never moved to
 ## Helpers (planned, not yet implemented)
 
 A future `migrations/_lib.py` will host shared helpers for migrations
-(snapshot-before-mutate, etc.). Open question §14.2 in MIGRATION-PLAN.md.
+(snapshot-before-mutate, etc.). Still an open question.
 
 ## Phase-0 status
 

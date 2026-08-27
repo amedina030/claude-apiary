@@ -534,55 +534,6 @@ Track harden round counts per session. Also used by `/refine`, which scopes its 
 
 State is stored at `harden/tmp/round_<session-id>.json`. Format: `{"session_id": "...", "count": N, "defender_agent_id": "..."}`.
 
-## setup.py
-
-Redirect stub since the per-repo migration. `--global`, `--project-path`, and
-`--check` now exit 1 with a message pointing at the new commands. The real
-entry points are:
-
-```bash
-poetry run apiary self-bootstrap                    # bootstrap main-apiary
-poetry run apiary install --target /path/to/repo    # bootstrap a target
-poetry run apiary doctor                            # validate install
-python scripts/install_repo_hooks.py                # main-apiary's own .git/hooks/
-```
-
-See [`apiary` CLI](#apiary) below.
-
-## scripts/install_context_rules.py
-
-Install / sync / audit shareable context-rules into `~/.claude/CLAUDE.md`. Owns a marked managed zone wrapped in `<!-- apiary-context-rules-start --> ... <!-- apiary-context-rules-end -->` sentinels — content outside that zone is never touched. Hand-edits inside the zone are detected as tampering and require `--force`.
-
-```bash
-python scripts/install_context_rules.py                # interactive y/n/v per rule
-python scripts/install_context_rules.py --list
-python scripts/install_context_rules.py --install-all
-python scripts/install_context_rules.py --install <id>...
-python scripts/install_context_rules.py --install-category behavioral
-python scripts/install_context_rules.py --uninstall <id>...
-python scripts/install_context_rules.py --sync
-python scripts/install_context_rules.py --check
-python scripts/install_context_rules.py --diff <id>
-```
-
-| Flag | Description |
-|------|-------------|
-| `--list` | List all rules with installed/out-of-date/tampered status |
-| `--install ID...` | Install specific rule ids |
-| `--install-all` | Install every rule under `context-rules/` |
-| `--install-category CAT` | Install all rules in a category (e.g. `behavioral`) |
-| `--uninstall ID...` | Remove specific rule ids; leaves outer zone intact |
-| `--sync` | Re-render currently-installed rules from source |
-| `--check` | Audit only; exit 1 on drift, 2 on tampering, 0 clean |
-| `--diff ID` | Unified diff between installed body and source body |
-| `--dry-run` | Print what would change without writing |
-| `--force` | Bypass tamper checks and rebuild the zone |
-| `--replace-stopgap` | Strip known stopgap inline rule paragraphs before injecting |
-| `--target PATH` | Override CLAUDE.md target (default: `~/.claude/CLAUDE.md`) |
-| `--rules-dir PATH` | Override source rules directory (default: `context-rules/`) |
-
-Exit codes: `0` clean, `1` drift detected, `2` tampering detected, `64` usage error.
-
 ## scripts/preflight.py
 
 Pre-install environment check, run by `scripts/install.ps1` / `scripts/install.sh` (and usable standalone) before `poetry install`. Reports every missing or fragile prerequisite at once — Python version, git, install-path sanity (spaces / apostrophes / non-ASCII), and the `claude` CLI — instead of surfacing them one cryptic failure at a time. With `--gui` it also checks the GUI's Python pin (3.11/3.12, since pythonnet has no 3.13+ wheel) and the Edge WebView2 runtime. Stdlib only and imports nothing from apiary, so it runs on a bare clone whose dependencies are not installed yet.
@@ -878,7 +829,7 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" runner/cron_h
 
 Windows Task Scheduler only in this release — backed by `schtasks`. The scheduler-backend protocol (`runner/schedulers/base.py`) keeps launchd (macOS) and crontab (Linux) cheap to add when there's a real user for them. Running on any other platform exits with code 2 and a "not supported" message.
 
-`scripts/bootstrap.py` invokes `check` at the tail of its run, prints the status table, and never propagates drift into its own exit code — the check is informational only.
+`run_bootstrap_check()` is the library entry point for an install flow that wants the status table without letting drift affect its own exit code — the check is informational only.
 
 ## runner/config_loader.py
 

@@ -97,11 +97,11 @@ If you spot a violation while doing other work, file a follow-up rather than fix
 
 ## Troubleshooting
 
-**`python scripts/bootstrap.py` complains about Python version.**
+**`python scripts/preflight.py` complains about Python version.**
 You're on a Python older than 3.11. Install a newer version and make sure `python` on your `PATH` resolves to it. Check with `python --version`.
 
-**Missing packages warning from bootstrap.**
-Run `poetry install` (or `pip install -r requirements.txt`). If you use a virtualenv, make sure it's activated before bootstrapping.
+**Missing packages warning from preflight.**
+Run `poetry install` (or `pip install -r requirements.txt`). If you use a virtualenv, make sure it's activated before installing.
 
 **`CLAUDE_PROJECT_DIR` not set in hook commands.**
 Claude Code sets this automatically when invoking hooks. If you're running a hook manually for testing, set it to the repo root: `CLAUDE_PROJECT_DIR=$(pwd) python core/hooks/<hook>.py`.

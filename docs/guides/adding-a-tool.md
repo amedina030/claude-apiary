@@ -60,15 +60,14 @@ See [Adding a Command](adding-a-command.md).
 ### 8. Write documentation
 
 - Update all relevant reference docs (see [New Tool Checklist](../standards/new-tool-checklist.md) section 7)
-- Update `README.md` tool listing and repository structure
+- Update the `README.md` tool listing
 - Update `docs/_index.md`
 
 ### 9. Add CLAUDE.md rules (if needed)
 
 If the tool requires behavioral rules:
-- Write them in `<tool>/CLAUDE.md`
-- Document that users append them to `~/.claude/CLAUDE.md`
-- Add a setup.py warning if rules are missing
+- Write them as a rule file under `context-rules/<category>/<id>.md`
+- `apiary install` renders them into the managed zone of `<repo>/CLAUDE.md`
 
 ## Checklist
 

@@ -13,7 +13,7 @@ No external runtime dependencies — dev dependencies (pytest) are managed via `
 
 ## Install Model
 
-Apiary uses a **per-repo opt-in** install. Each repo you want apiary to act on is bootstrapped individually; sessions in non-bootstrapped repos run as vanilla Claude Code with no apiary hooks, no managed CLAUDE.md zone, no budgeter logging. The single `~/.claude/apiary*` global install model was retired in 2026-05 — see `MIGRATION-PLAN.md` for the full design.
+Apiary uses a **per-repo opt-in** install. Each repo you want apiary to act on is bootstrapped individually; sessions in non-bootstrapped repos run as vanilla Claude Code with no apiary hooks, no managed CLAUDE.md zone, no budgeter logging. The single `~/.claude/apiary*` global install model was retired in 2026-05 — see [`docs/architecture/per-repo-install.md`](docs/architecture/per-repo-install.md) for the full design.
 
 What lives where after bootstrap:
 
@@ -353,4 +353,5 @@ Check `<repo>/.claude/apiary/flags/budgeter-log-enabled` exists when ON, is abse
 Check `/budgeter session-warn` is ON, and note the nudge fires once per tier per session — the flag file at `<repo>/.claude/apiary/session-tmp/<session>_budgeter_session_len_soft_fired` records that. It is also skipped entirely in detached runner runs (`APIARY_RUNNER_SUBPROCESS=1`).
 
 **`setup.py --global` still in your muscle memory**
-That mode is gone. The redirect stub at `setup.py` will print the new commands.
+That mode is gone, and so is `setup.py`. Use `poetry run apiary self-bootstrap`
+for main-apiary and `poetry run apiary install --target <repo>` for anything else.

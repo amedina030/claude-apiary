@@ -2,7 +2,7 @@
 type: guide
 title: Adding a Hook
 scope: project
-description: End-to-end steps for writing a new hook, registering it in setup.py, and testing
+description: End-to-end steps for writing a new hook, registering it in core/hooks_factory.py, and testing
 framework_version: "1.0"
 last_verified: 2026-04-07
 ---
@@ -50,9 +50,9 @@ Key rules:
 - Use `context_block()` and `join_contexts()` to format output
 - Print to stdout to inject context into Claude's view
 
-### 2. Register in setup.py
+### 2. Register in core/hooks_factory.py
 
-Add the hook to the appropriate section in `setup.py` using `core/hooks_lib.py`:
+Add the hook to the appropriate `build_*_hooks` builder, using `core/hooks_lib.py`'s `hook_cmd`:
 - Specify the `matcher` (tool type or `"*"` for all)
 - Specify the lifecycle event (`PreToolUse`, `PostToolUse`, or `Stop`)
 - Use the full path from repo root in the command string

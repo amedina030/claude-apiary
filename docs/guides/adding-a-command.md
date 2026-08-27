@@ -63,7 +63,7 @@ Add the command's source dir name to `_slash_command_sources()` in `core/install
 
 - [ ] Command markdown file created under `<tool>/commands/`
 - [ ] Frontmatter includes `name`, `description`, `user-invocable`
-- [ ] Added to `setup.py` copy list
+- [ ] Tool directory is in `core/install._slash_command_sources`' tool list
 - [ ] `docs/reference/slash-commands.md` updated
 - [ ] `poetry run apiary doctor` passes
 - [ ] `python docs/check.py` passes
