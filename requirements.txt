@@ -5,3 +5,8 @@
 
 # Test runner — only required for running the test suites.
 pytest>=8.0,<9.0
+
+# Coverage reporting. Not needed for a plain `pytest` run: `--cov` is
+# deliberately absent from addopts, so this is only pulled in when you ask
+# for `pytest --cov`.
+pytest-cov>=5.0,<8.0

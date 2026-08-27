@@ -1,29 +1,62 @@
-[tool.poetry]
+[project]
 name = "claude-apiary"
 version = "0.1.0"
 description = "A toolkit extending Claude Code with budgeter, scribe, refiner, harden, and runner."
-authors = ["amedina030 <amedina030@gmail.com>"]
 readme = "README.md"
+authors = [{ name = "amedina030", email = "amedina030@gmail.com" }]
+requires-python = ">=3.11,<4.0"
+# The toolkit is stdlib-only on purpose: every tool has to be runnable from a
+# git hook, where `py -3`/`python3` resolves the system interpreter and not
+# the Poetry virtualenv. Optional components declare their deps in the
+# `gui` / `build` groups below.
+dependencies = []
+
+[project.scripts]
+# `apiary install --target <repo>`, `apiary doctor`, `apiary update`, etc.
+# See core/cli.py and docs/architecture/per-repo-install.md.
+apiary = "core.cli:main"
+
+[tool.poetry]
+# Every importable top-level package plus the data directories the CLI reads
+# at runtime. The list used to stop at seven entries, so `pip install .`
+# produced a distribution with no captures/compass/researcher/incubator and
+# no profiles for `apiary install` to resolve — invisible from a source
+# checkout because pytest runs from the repo root
+# (review subsystems/infra-docs-skills.md §1 "Dependency locking").
 packages = [
     { include = "core" },
     { include = "budgeter" },
     { include = "scribe" },
     { include = "runner" },
-    { include = "refiner" },
     { include = "harden" },
     { include = "gui" },
+    { include = "captures" },
+    { include = "compass" },
+    { include = "researcher" },
+    { include = "incubator" },
+    { include = "migrations" },
+    { include = "scripts" },
+    { include = "docs" },
 ]
-
-[tool.poetry.dependencies]
-python = "^3.11"
-
-[tool.poetry.scripts]
-# `apiary install --target <repo>`, `apiary doctor`, etc. See core/cli.py
-# and docs/architecture/per-repo-install.md.
-apiary = "core.cli:main"
+# Non-package data `core/install.py` reads out of the checkout: the version
+# pin it stamps into every bootstrapped repo, the profile family it merges
+# into settings.json, the CLAUDE.md context rules it renders, and `refiner/`,
+# which ships slash commands and no Python at all (poetry refuses to call it
+# a package, so it travels as data).
+include = [
+    { path = "VERSION", format = ["sdist", "wheel"] },
+    { path = "profiles/**/*", format = ["sdist", "wheel"] },
+    { path = "context-rules/**/*", format = ["sdist", "wheel"] },
+    { path = "refiner/**/*", format = ["sdist", "wheel"] },
+]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0,<9.0"
+# Coverage is reported, never gated — `--cov` is deliberately absent from
+# addopts so the default run stays fast. Ask for it explicitly:
+#   poetry run pytest --cov
+# Settings live in [tool.coverage.*] below.
+pytest-cov = ">=5.0,<8.0"
 
 # Optional gui/ component — see gui/README.md and decision D-2026-47.
 # Install with: poetry install --with gui
@@ -36,6 +69,11 @@ pywebview = ">=5.0,<6.0"
 # pythonnet 2.5.2 has no PEP-517 build backend and fails on Python ≥ 3.12 (its
 # bundled `tools/nuget/nuget.exe update -self` shells out and exits non-zero).
 # pythonnet 3.0.5 ships wheels for Python 3.7-3.13.
+#
+# The `sys_platform` markers are what let CI run `poetry install --with gui`
+# on ubuntu and macos: these two are Windows-only wheels, and pywebview's
+# GTK/Qt bindings are extras nobody asks for, so the group resolves
+# everywhere.
 pythonnet = { version = ">=3.0,<4.0", markers = "sys_platform == 'win32'", python = ">=3.11,<3.13" }
 pywinpty = { version = ">=2.0,<3.0", markers = "sys_platform == 'win32'" }
 watchdog = ">=4.0,<7.0"
@@ -57,6 +95,27 @@ pyinstaller = { version = ">=6.0,<7.0", python = ">=3.11,<3.13" }
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
+
+# Report-only coverage. Nothing fails on a low number: the point is to see
+# which subsystems the 1,700-test suite never touches, not to defend a
+# percentage (review §5 Phase 4, "pytest-cov (report only)").
+[tool.coverage.run]
+branch = true
+source = [
+    "core", "budgeter", "scribe", "runner", "harden", "compass",
+    "researcher", "captures", "incubator", "gui", "refiner",
+]
+omit = ["*/test_*.py", "*/__pycache__/*", "*/.venv/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+skip_empty = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
 
 [build-system]
 requires = ["poetry-core"]

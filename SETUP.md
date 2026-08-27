@@ -7,7 +7,7 @@
 - [Poetry](https://python-poetry.org/) (recommended) or pip
 - git (every bootstrapped repo must be a git repo — apiary uses `git rev-parse` to identify targets)
 
-No external runtime dependencies — dev dependencies (pytest) are managed via `pyproject.toml`.
+No external runtime dependencies — dev dependencies (`pytest`, `pytest-cov`) are managed via `pyproject.toml`. Coverage is report-only and off by default: `poetry run pytest --cov` when you want the numbers.
 
 ---
 

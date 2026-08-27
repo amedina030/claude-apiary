@@ -53,7 +53,7 @@ SKIP_HEADERS = {
     "Test scripts",                 # prose category, not a tool
 }
 
-# Console scripts declared in pyproject's [tool.poetry.scripts]. Their section
+# Console scripts declared in pyproject's [project.scripts]. Their section
 # header is the command name, so there is no `<repo>/<header>` file to run
 # `--help` against — map the header to the module whose `main()` the entry
 # point calls and introspect that instead. Reconciling these matters more than
