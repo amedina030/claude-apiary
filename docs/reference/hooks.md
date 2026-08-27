@@ -113,7 +113,7 @@ Separate from Claude Code hooks: `docs/hooks/pre-commit` and `docs/hooks/pre-com
 | Script | Installed by | What it does |
 |---|---|---|
 | `docs/hooks/pre-commit` | `scripts/install_repo_hooks.py` | Runs `docs/check.py`, `docs/check_cli_claims.py`, both doc generators' `--check`, `docs/change_map.py --staged` and `scripts/secret_scan.py --staged` on every commit |
-| `docs/hooks/commit-msg` | *not yet installed* — needs one line in `scripts/install_repo_hooks.py` | Runs `docs/change_map.py --staged --message "$1"`, which is the only place the `docs: unchanged` trailer can be read: at pre-commit time git has not written this commit's message yet, so `.git/COMMIT_EDITMSG` still holds the previous one |
+| `docs/hooks/commit-msg` | `scripts/install_repo_hooks.py` | Reads the `docs: unchanged` trailer that waives `docs/change_map.py` for one commit (git has not written the message yet when pre-commit runs) |
 | `docs/hooks/pre-commit-secret-scan` | `core/git_hooks.py` (every bootstrapped repo) | The secret scan alone, for repos that do not ship the docs framework |
 | `runner/hooks/post-merge` | `runner/` setup | Closes the source scribe todo after a runner branch is merged |
 

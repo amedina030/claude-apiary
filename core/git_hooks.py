@@ -66,6 +66,22 @@ def hooks_dir(repo: Path) -> tuple[Path, str | None]:
     """
     configured = configured_hooks_path(repo)
     if not configured:
+        # Ask git rather than assuming <repo>/.git/hooks: in a linked worktree
+        # `.git` is a file and the hooks live in the common git dir.
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "--git-path", "hooks"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=5,
+                check=False,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                found = Path(proc.stdout.strip())
+                return (found if found.is_absolute() else repo / found), None
+        except (OSError, subprocess.SubprocessError):
+            pass
         return repo / ".git" / "hooks", None
     target = Path(configured)
     if not target.is_absolute():

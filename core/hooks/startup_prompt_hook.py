@@ -226,9 +226,10 @@ def run(payload: dict):
         # the target repo, not main-apiary, so `python docs/...` only resolves
         # in this one checkout (review §5 Phase 5).
         parts.append(
-            "--- cli-tools index (run `python \"$(git rev-parse --show-toplevel)"
-            "/.claude/apiary/launch.py\" docs/reference/cli_lookup.py <tool>` "
-            "for full flags) ---")
+            '--- cli-tools index (run `python "$(git rev-parse --show-toplevel)'
+            '/.claude/apiary/launch.py" docs/reference/cli_lookup.py <tool>` '
+            "for full flags) ---"
+        )
         parts.append(scrubbed)
     except Exception:
         pass

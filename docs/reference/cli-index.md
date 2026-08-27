@@ -50,7 +50,7 @@ flag — `--check` runs in `docs/hooks/pre-commit` and in CI.
 | `python harden/round_counter.py` | Track harden/refine round counts | defender, reset, start, status, tick |
 | `python scripts/preflight.py` | Pre-install environment check for claude-apiary. | --gui |
 | `python -m runner.run` | End-to-end runner orchestrator | intake |
-| `python -m runner.ticket` | Ticket lifecycle: draft, promote, create, bridge, validate | create-intake, draft, from-note, promote, validate |
+| `python -m runner.ticket` | Ticket lifecycle: draft, promote, create, bridge, validate | create-intake, draft, from-note, mark-done, promote, validate |
 | `python -m runner.create_intake` | Create runner intake file (shim for `ticket create-intake`) | --context, --description, --explore-hints, --from-todo, --problem, --scope, --title |
 | `python -m runner.refine_to_intake` | Bridge refiner scribe note into runner intake/backlog (shim for `ticket from-note`) | --backlog, --explore-hints, --note, --title |
 | `python runner/validate_intake.py` | Validate intake JSON | file |
@@ -63,7 +63,7 @@ flag — `--check` runs in `docs/hooks/pre-commit` and in CI.
 | `python -m runner.approval` | Approval gate (stage 6) | harden_result |
 | `python -m runner.draft_ticket` | Create backlog draft ticket (shim for `ticket draft`) | --context, --description, --from-todo, --problem, --scope, --title |
 | `python -m runner.promote` | Promote backlog draft to intake (shim for `ticket promote`) | slug |
-| `python runner/mark_done.py` | Mark a backlog ticket as done. | slug |
+| `python -m runner.mark_done` | Mark a backlog ticket as done. | slug |
 | `python -m runner.cron_health` | Check or repair the host scheduler's entries against apiary's canonical registry. | check, repair |
 | `apiary` | Per-repo install, drift and version tooling (console script over `core/cli.py`) | cascade-fix, doctor, install, self-bootstrap, uninstall, update, version |
 | `python core/update.py` | Run pending migrations/ and re-pin bootstrapped repos. | --apiary-repo, --dry-run, --target |

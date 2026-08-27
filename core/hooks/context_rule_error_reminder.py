@@ -242,7 +242,7 @@ def _already_filed(session_id: str, key: str) -> bool:
     try:
         flag = SessionId(session_id).flag_path(f"doc_todo_{key}")
     except (ValueError, OSError):
-        return True          # no session: do not file, rather than file blindly
+        return True  # no session: do not file, rather than file blindly
     if flag.exists():
         return True
     try:
@@ -276,12 +276,26 @@ def file_doc_todo(repo: Path, token: str, doc_ref: str, command: str) -> bool:
         f"`python docs/check_cli_claims.py` both pass on the corrected doc."
     )
     argv = [
-        sys.executable, str(launcher), "scribe/notes.py", "add",
-        "--type", "todo", "--content", content, "--unique-tag", tag,
+        sys.executable,
+        str(launcher),
+        "scribe/notes.py",
+        "add",
+        "--type",
+        "todo",
+        "--content",
+        content,
+        "--unique-tag",
+        tag,
     ]
     try:
-        subprocess.run(argv, cwd=str(repo), capture_output=True, text=True,
-                       encoding="utf-8", timeout=SCRIBE_TIMEOUT)
+        subprocess.run(
+            argv,
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=SCRIBE_TIMEOUT,
+        )
     except (OSError, subprocess.SubprocessError):
         return False
     return True
@@ -331,11 +345,16 @@ def run(payload: dict) -> HookResult | None:
                 filed = False
             context += (
                 "\n\n[docs] That failure is doc-shaped: `" + token + "` is still "
-                "documented at " + doc_ref + ". "
-                + ("A scribe todo naming it has been filed — "
-                   if filed else "Filing a todo failed, so please note it yourself — ")
+                "documented at "
+                + doc_ref
+                + ". "
+                + (
+                    "A scribe todo naming it has been filed — "
+                    if filed
+                    else "Filing a todo failed, so please note it yourself — "
+                )
                 + "fix the doc (or re-run the generator that owns that table) "
-                  "rather than only working around it here."
+                "rather than only working around it here."
             )
     return HookResult(context=context)
 

@@ -1,4 +1,5 @@
 """A FileLock timeout inside any scribe command is one line + exit 1, not a traceback."""
+
 import io
 import sys
 import unittest
@@ -14,7 +15,14 @@ class LockTimeoutTest(unittest.TestCase):
             raise TimeoutError("Could not acquire lock: x.lock")
 
         err = io.StringIO()
-        with mock.patch.object(notes, "COMMANDS", {"list": busy}),                 mock.patch.object(notes, "_apply_session_identity", lambda a: None),                 mock.patch.object(notes.paths, "resolve_store_dir", lambda p: "unused"),                 mock.patch.object(notes, "ScribeStore", lambda d: object()),                 mock.patch.object(sys, "argv", ["notes.py", "list"]),                 redirect_stderr(err):
+        with (
+            mock.patch.object(notes, "COMMANDS", {"list": busy}),
+            mock.patch.object(notes, "_apply_session_identity", lambda a: None),
+            mock.patch.object(notes.paths, "resolve_store_dir", lambda p: "unused"),
+            mock.patch.object(notes, "ScribeStore", lambda d: object()),
+            mock.patch.object(sys, "argv", ["notes.py", "list"]),
+            redirect_stderr(err),
+        ):
             with self.assertRaises(SystemExit) as cm:
                 notes.main()
         self.assertEqual(cm.exception.code, 1)

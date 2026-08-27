@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Phase 5 — docs generated from code or tested against it (2026-08-27)
+
+- **Reference tables are generated** — the CLI index and every flag/subcommand
+  table from each tool's argparse, the hook registry from
+  `core.hooks.dispatch`, the slash-command list from command frontmatter,
+  config keys from the shipped JSON, storage paths by calling the real
+  resolvers, the scribe retention policy from `scribe/policy.py`
+  (`docs/generate_cli_docs.py`, `docs/generate_reference.py`, sentinel
+  blocks `<!-- generated:start/end -->`; `--check` in pre-commit and CI).
+  Tables that cannot be generated are tested instead (`launch.json`
+  defaults, change-map entries, the "not introspectable" list …).
+- **Every documented ```bash block that invokes an apiary CLI runs in CI**
+  with `--help` substituted — 214 invocations checked for a real target,
+  parser, subcommand and flag (`docs/test_doc_examples.py`).
+- `docs/check.py` fails when a doc's `last_verified` predates its last git
+  change, derives the tool list from the tree (3 hard-coded tools → 14) and
+  matches CLI coverage on section headers. A recursion in
+  `check_cli_claims.py --help` (the generator introspected itself) plus a
+  shared `--help` cache took a cold docs pass from 121 s to 4 s.
+- **Change-mapping:** a commit that changes mapped code without its
+  architecture doc is blocked (`docs/change_map.json`, `docs/change_map.py
+  --staged`), waived by a `docs: unchanged` trailer (read by a new
+  `commit-msg` hook — git has not written the message at pre-commit time)
+  or `APIARY_DOCS_UNCHANGED=1`.
+- **Error → todo:** a doc-shaped Bash failure — an unrecognised flag or a
+  missing path the docs still name — files a scribe todo naming `doc:line`,
+  once per session per command, deduplicated across sessions
+  (`core/hooks/context_rule_error_reminder.py`).
+- ~95 stale statements corrected across 23 files: runner artifact paths
+  moved to the state dir, `system-overview.md` and the hook docs rewritten
+  for the dispatcher, the `~/.claude` / `/startup` / `APIARY_STATE_LAYOUT`
+  leftovers removed, four undocumented CLIs documented. The review
+  appendices are marked as dated snapshots pending close-out
+  (T-2026-271).
+
 ### Phase 4 — engineering plumbing (2026-08-27)
 
 - **ruff + ruff format.** `E,F,I,PLW1514,S602,S605` at line-length 100

@@ -4,7 +4,7 @@ title: Code Style
 scope: project
 description: Naming, structure, imports, error handling, and testing conventions for Python code
 framework_version: "1.0"
-last_verified: 2026-08-26
+last_verified: 2026-08-27
 ---
 
 # Code Style
