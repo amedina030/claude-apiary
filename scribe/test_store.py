@@ -259,12 +259,16 @@ class TestArchiveNote(unittest.TestCase):
             active = store._read_index(Path(tmp).resolve() / "todos" / str(year))
             self.assertEqual(len(active), 0)
             # Archive index under year dir should have the entry
-            archived = store._read_index(Path(tmp).resolve() / "todos" / str(year) / ARCHIVE_DIRNAME)
+            archived = store._read_index(
+                Path(tmp).resolve() / "todos" / str(year) / ARCHIVE_DIRNAME
+            )
             self.assertEqual(len(archived), 1)
             self.assertEqual(archived[0]["seq"], 1)
             # .md moved to year archive
             self.assertFalse((Path(tmp).resolve() / "todos" / str(year) / "1.md").exists())
-            self.assertTrue((Path(tmp).resolve() / "todos" / str(year) / "archive" / "1.md").exists())
+            self.assertTrue(
+                (Path(tmp).resolve() / "todos" / str(year) / "archive" / "1.md").exists()
+            )
 
     def test_archive_preserves_done_status(self):
         """Archiving a done note must preserve status='done' — the original

@@ -293,7 +293,9 @@ class AllowlistTests(unittest.TestCase):
 
     def test_missing_allowlist_is_not_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(secret_scan.load_allowlist(Path(tmp).resolve()), secret_scan.Allowlist())
+            self.assertEqual(
+                secret_scan.load_allowlist(Path(tmp).resolve()), secret_scan.Allowlist()
+            )
 
 
 class BlockedFileTests(unittest.TestCase):
