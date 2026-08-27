@@ -39,7 +39,6 @@ Toggle state stored as sentinel files. Presence = enabled, absence = disabled.
 | Flag | Path | Set by |
 |------|------|--------|
 | Budgeter logging | `<repo>/.claude/apiary/flags/budgeter-log-enabled` | `/budgeter log` |
-| Budgeter warnings | `<repo>/.claude/apiary/flags/budgeter-warn-enabled` | `/budgeter warn` |
 | Budgeter session nudge | `<repo>/.claude/apiary/flags/budgeter-session-warn-enabled` | `/budgeter session-warn` |
 
 Managed via `core/flags.py`, in-process (`flags.is_enabled("budgeter-log")`,
@@ -52,8 +51,10 @@ Managed via `core/flags.py`, in-process (`flags.is_enabled("budgeter-log")`,
 | File | Path | Description |
 |------|------|-------------|
 | Usage log | `budgeter/data/usage_log.jsonl` | All token usage entries (repo-local, git-ignored) |
-| Feedback log | `budgeter/data/feedback.jsonl` | User feedback on warning accuracy |
-| Baseline files | `budgeter/tmp/baseline_<session>.json` | Per-session token baselines for PRE-to-PRE delta (cleaned up on session end) |
+| Baseline files | `budgeter/tmp/<session>_baseline.json` | Per-session token baselines for PRE-to-PRE delta (deleted by the Stop hook at the end of every assistant turn) |
+
+A project with a `.claude/budgeter.json` redirects both to
+`<project>/.claude/budgeter-log.jsonl` and `<project>/.claude/budgeter-tmp/`.
 
 ## Scribe data
 

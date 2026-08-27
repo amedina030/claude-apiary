@@ -38,7 +38,7 @@ Each Python file follows this order:
 | Functions | `snake_case` | `load_config()`, `is_enabled()` |
 | Constants | `UPPER_SNAKE` | `CLAUDE_DIR`, `VALID_TYPES` |
 | Classes | `PascalCase` | `SessionId`, `FileLock` |
-| Private functions | `_leading_underscore` | `_strip_cont()`, `_parse_usage()` |
+| Private functions | `_leading_underscore` | `_file_lock()`, `_flag_path()` |
 | CLI subcommands | `kebab-case` (argparse) | `handoff-sessions` |
 
 ## Imports

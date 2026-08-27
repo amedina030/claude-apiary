@@ -2,9 +2,9 @@
 type: architecture
 title: Hook Lifecycle
 scope: budgeter
-description: PRE-to-PRE delta pattern, agent special case, and CONT task chaining
+description: PRE-to-PRE delta pattern, the Agent special case, task attribution, baselines and the session-length nudge
 framework_version: "1.0"
-last_verified: 2026-04-02
+last_verified: 2026-08-26
 ---
 
 # Hook Lifecycle
@@ -41,36 +41,55 @@ The *next* PreToolUse hook detects that the previous call was an Agent (via a fl
 
 **Files:** `budgeter/hooks/post_tool_use.py`, `budgeter/hooks/pre_tool_use.py`
 
-## CONT: task chaining
+## Task attribution
 
-When Claude asks a mid-task clarifying question and the user replies, subsequent tool calls would be attributed to the user's reply turn — not the original request. This inflates the reply's cost and under-attributes the original task.
+Every log entry carries a `task_turn`: the user turn that started the task it
+belongs to. The first monitored tool call of a new user turn opens a new task;
+later calls in the same turn inherit the anchor from the baseline.
 
-To fix this, the hook injects an instruction telling Claude to prefix mid-task questions with `[CONT]`. When the next PRE hook detects `[CONT]` in the assistant message, it inherits `task_turn` from the prior baseline, chaining the continuation back to the originating request.
+A `[CONT]` marker used to chain a mid-task clarifying question back to the
+originating turn. It could almost never fire — the Stop hook deletes the
+baseline at the end of *every* assistant turn, so the next turn starts with no
+baseline to inherit from — and the instruction telling Claude to emit the
+marker cost context in every session. Both were deleted in the 2026-08 review
+(finding B7).
 
-This affects both the usage report (costs grouped by originating task) and the warning system (scope detection uses the original message, not the reply).
-
-**File:** `budgeter/hooks/pre_tool_use.py` — `_CONT_INSTRUCTION` constant, `_strip_cont()` function
+**File:** `budgeter/hooks/pre_tool_use.py`
 
 ## Baseline files
 
-Each session has a baseline file at `budgeter/tmp/baseline_<session_id>.json` containing:
+Each session has a baseline file at `budgeter/tmp/<session_id>_baseline.json`
+(or `<project>/.claude/budgeter-tmp/` when the project has a
+`.claude/budgeter.json`) containing:
 
-- `tokens` — token count at last PRE event
-- `task_turn` — which user message this tool call chain originates from
-- `tool_name` — name of the tool that just ran (for Agent detection)
-- `timestamp` — when the baseline was saved
+- `schema` — bumped when the meaning of the numbers changes; a baseline from
+  an older schema is kept for turn continuity but never subtracted from
+- `tokens` — cumulative token count at the last PRE, deduped per API call
+- `baseline_input` / `baseline_cache` / `baseline_cache_creation` /
+  `baseline_output` — the split of the last API call, for the marginal-cost figure
+- `turn_number` / `task_turn` — the current user turn, and the task it belongs to
+- `prev_tool_name` — the tool that just ran (also how the Agent double-count guard works)
+- `prev_assistant_message` / `user_message` / `agent_description` — context carried onto the entry
 
-Cleaned up by `budgeter/hooks/stop_session.py` on session end.
+Written atomically (temp file + `os.replace`), and deleted by
+`budgeter/hooks/stop_session.py` at the end of every assistant turn — the Stop
+hook fires per response, not per session.
 
-## Scope detection and warnings
+## Warnings
 
-When warnings are enabled and enough history exists (`min_tasks` in config), the PRE hook evaluates the current assistant message against scope detection rules:
+There are none any more, beyond the session-length nudge below. The
+rule-based "this task looks expensive" warning was measured at 9% precision
+over 3,717 tasks against a 25% base rate and deleted in the 2026-08 review,
+along with `budgeter/tune.py`, the feedback log and the `budgeter-warn` flag.
 
-1. **Keyword categories** — investigative terms, file operations, step counts, etc.
-2. **Rule weights** — each category has a configurable weight in `config.json`
-3. **Weighted score** — if the score exceeds `scope_threshold`, the hook finds similar past tasks
-4. **Percentile comparison** — if the median cost of similar tasks exceeds the `expensive_percentile`, a warning is injected
+## Session-length nudge
 
-The warning tells Claude the estimated cost and asks the user before proceeding.
+Gated by the `budgeter-session-warn` flag. On each PRE the hook compares the
+size of the last prompt (uncached input + cache reads + cache writes) against
+`session_warn_soft_tokens` and `session_warn_hard_tokens` from the config. The
+first crossing of each tier injects one advisory and stamps a per-session flag
+file so it never repeats. Skipped entirely when `APIARY_RUNNER_SUBPROCESS=1` —
+the suggestion is only actionable in a live session.
 
-**Files:** `budgeter/lib/estimator.py` (rules + scoring), `budgeter/config.json` (weights + thresholds)
+**Files:** `budgeter/lib/estimator.py` (`session_length_nudge`),
+`budgeter/config.json` (thresholds)

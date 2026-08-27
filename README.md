@@ -32,26 +32,26 @@ Full prerequisites, the desktop GUI, and troubleshooting live in [`SETUP.md`](SE
 
 ### Budgeter
 
-Token usage monitoring and cost estimation for Claude Code sessions.
+Token usage monitoring for Claude Code sessions.
 
-Claude Code has no built-in visibility into how many tokens a session consumes or when a task is about to get expensive. Budgeter adds that visibility by hooking into Claude Code's tool lifecycle — silently, without spending any tokens of its own.
+Claude Code has no built-in visibility into how many tokens a session consumes. Budgeter adds that visibility by hooking into Claude Code's tool lifecycle — silently, without spending any tokens of its own.
 
 **What it does:**
-- **Logs** token consumption per tool call to a local JSONL file
-- **Warns** Claude before running a response expected to be expensive, using rule-based scope detection — Claude asks you whether to proceed
-- **Chains** continuation turns (mid-task clarifying questions) back to the originating request, so costs are attributed correctly by task rather than by individual tool call
+- **Logs** token consumption per tool call to a local JSONL file, attributed to the user turn that started the task
+- **Nudges** you to wrap up when the session's context gets long
 - **Reports** usage history on demand via `report.py`
 
-**How warnings work:**
-When warnings are enabled and enough task history exists, the pre-hook evaluates the current assistant message against a set of scope detection rules (keyword categories, file counts, step counts). Each rule has a configurable weight; if the weighted score exceeds a threshold, the hook finds similar past tasks and injects a warning with their median cost — Claude then asks you before proceeding.
+**How the measurement works:**
+Tokens can't be read during a tool call, only between calls. Each PreToolUse hook computes the delta since the previous one and logs it against the *previous* tool; the Stop hook catches the last call of the turn. Subagents run in their own transcript, so their cost comes from the PostToolUse payload instead. See [Hook Lifecycle](docs/architecture/hook-lifecycle.md).
 
 **Session-length nudge:**
-Separate from cost warnings, the budgeter can inject a one-shot advisory when the current prompt size crosses configured thresholds (`session_warn_soft_tokens` / `session_warn_hard_tokens`) — suggesting Claude wrap up at a natural checkpoint and prompt you to start a fresh session. Skipped in detached runner runs. Gated independently via `/budgeter session-warn` so you can enable it without re-enabling the cost-warning rules.
+A one-shot advisory when the current prompt size crosses configured thresholds (`session_warn_soft_tokens` / `session_warn_hard_tokens`) — suggesting Claude wrap up at a natural checkpoint and prompt you to start a fresh session. Skipped in detached runner runs. Gated by `/budgeter session-warn`.
+
+A rule-based "this response looks expensive" warning used to sit alongside the log. Measured over 3,717 real tasks it fired at 9% precision against a 25% base rate, and it was deleted in the 2026-08 review along with its tuner, feedback log and `budgeter-warn` flag.
 
 **Toggle features:**
 ```
 /budgeter log            # turn token logging on/off
-/budgeter warn           # turn cost estimation warnings on/off
 /budgeter session-warn   # turn session-length wrap-up nudge on/off
 ```
 Each writes a sentinel file at `<repo>/.claude/apiary/flags/<flag-name>-enabled`;
@@ -236,14 +236,14 @@ claude-apiary/
 │
 ├── budgeter/                    # Token usage monitoring tool
 │   ├── hooks/
-│   │   ├── pre_tool_use.py      # Main hook: logs previous tool cost, warns if expensive
+│   │   ├── pre_tool_use.py      # Main hook: logs previous tool cost, session-length nudge
 │   │   ├── post_tool_use.py     # Logs Agent token cost from tool_response.totalTokens
 │   │   └── stop_session.py      # Logs final tool cost, cleans up temp files
 │   ├── lib/
-│   │   ├── logger.py            # All file I/O: log, baseline, snapshot, session JSONL
-│   │   └── estimator.py         # Rule-based scope detection + percentile threshold logic
+│   │   ├── logger.py            # All file I/O: log, baseline, config, session JSONL
+│   │   └── estimator.py         # Session-length nudge tiers
 │   ├── commands/
-│   │   ├── budgeter.md               # /budgeter <log|warn|session-warn> toggle definition
+│   │   ├── budgeter.md               # /budgeter <log|session-warn> toggle definition
 │   │   └── budgeter-setup.md         # /budgeter-setup slash command definition
 │   ├── data/                    # Runtime — usage_log.jsonl (git-ignored)
 │   ├── tmp/                     # Runtime — per-session baseline files (git-ignored)
@@ -366,11 +366,9 @@ Edit `budgeter/config.json` (global) or `.claude/budgeter.json` (per-project):
 
 | Field | Default | Description |
 |---|---|---|
-| `monitored_tools` | `["Agent", "Bash", "Read", "Write"]` | Tool types to track |
-| `min_tasks` | `50` | Minimum unique tasks logged before warnings activate |
-| `expensive_token_threshold` | `null` | Hard token limit. If set, overrides percentile |
-| `expensive_percentile` | `90` | Percentile of historical task costs used as warning threshold |
-| `similarity_top_n` | `10` | Number of similar past tasks to compare against |
+| `monitored_tools` | `["Agent", "Bash", "Read", "Write"]` | Tool types the PreToolUse hook fires for |
+| `session_warn_soft_tokens` | `600000` | Prompt size at which the nudge suggests wrapping up |
+| `session_warn_hard_tokens` | `800000` | Prompt size at which it suggests starting a new session now |
 
 ---
 
@@ -383,6 +381,9 @@ python budgeter/report.py --flat             # flat chronological list
 python budgeter/report.py --all              # include zero-delta entries
 python budgeter/report.py --date 2026-03-14  # single date
 python budgeter/report.py --since 2026-03-01 # from date onwards
+python budgeter/report.py --by-agent         # per-agent-type breakdown
+python budgeter/report.py --by-request       # group by request_id (one runner run = one line)
+python budgeter/report.py --weighted         # price-weight the token counts
 ```
 
 ---

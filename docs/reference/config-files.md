@@ -117,18 +117,18 @@ Global budgeter configuration. Located in the repo at `budgeter/config.json`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `monitored_tools` | array | `["Agent", "Bash", "Read", "Write"]` | Tool types to track |
-| `min_tasks` | int | `50` | Minimum unique tasks logged before warnings activate |
-| `expensive_token_threshold` | int\|null | `null` | Hard token limit. Overrides percentile if set |
-| `expensive_percentile` | int | `90` | Percentile of historical task costs for warning threshold |
-| `similarity_top_n` | int | `10` | Number of similar past tasks to compare against |
-| `scope_rules` | object | (see file) | Rule definitions for scope detection |
-| `scope_weights` | object | (see file) | Weight per rule for scoring |
-| `scope_threshold` | float | (see file) | Weighted score threshold for triggering a warning |
+| `monitored_tools` | array | `["Agent", "Bash", "Read", "Write"]` | Tool types the PreToolUse hook fires for |
+| `session_warn_soft_tokens` | int | `600000` | Prompt size at which the session-length nudge suggests wrapping up |
+| `session_warn_hard_tokens` | int | `800000` | Prompt size at which it suggests starting a new session now |
+
+`budgeter/report.py --weighted` also reads four optional pricing weights from
+this file — `price_weight_input` (1.0), `price_weight_cache` (0.1),
+`price_weight_cache_creation` (1.25) and `price_weight_output` (5.0). They are
+absent from the shipped file; the defaults in parentheses apply.
 
 ## .claude/budgeter.json (per-project)
 
-Optional per-project budgeter override. Hand-authored — the historical `setup.py --project-path` install flow that created it was retired in the per-repo migration. Same schema as `budgeter/config.json`. Loaded via `core/config.py` with `budgeter/config.json` as the defaults fallback.
+Optional per-project budgeter override. Hand-authored — the historical `setup.py --project-path` install flow that created it was retired in the per-repo migration. Same schema as `budgeter/config.json`. `logger.load_config` reads whichever single file applies — there is no merge with `budgeter/config.json`, so a per-project file must restate every key it wants. Its presence also redirects the log and baseline paths into `<project>/.claude/`.
 
 ## .claude/settings.json
 

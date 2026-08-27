@@ -17,8 +17,7 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `scribe/backup_indexes.py` | Snapshot scribe indexes with retention pruning | --retain, --project |
 | `core/startup.py` | Session initialization and summary | init, summary |
 | `core/flags.py` | Per-repo feature flag toggles | toggle, enable, disable, status |
-| `budgeter/report.py` | Usage reporting | --date, --since, --flat, --grouped, --by-turn, --by-agent, --weighted, --feedback |
-| `budgeter/tune.py` | Suggest rule weight adjustments | --min, --percentile, --yes |
+| `budgeter/report.py` | Usage reporting | --date, --since, --flat, --grouped, --by-turn, --by-agent, --by-request, --weighted |
 | `budgeter/log_agent_cost.py` | Log background agent token costs | --session-id, --agent, --cwd |
 | `budgeter/query_request.py` | Sum tokens for a given request_id | --request-id, --cwd |
 | `compass/observations.py` | Inspect/maintain personality observation files | count, list, validate, archive |

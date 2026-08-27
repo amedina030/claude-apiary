@@ -1,18 +1,17 @@
 ---
 name: budgeter
-description: Toggle a budgeter feature for this repo — log, warn, or session-warn
+description: Toggle a budgeter feature for this repo — log or session-warn
 user-invocable: true
 ---
 
 # /budgeter — feature toggles
 
 Turn one budgeter feature on or off for the current repo. Takes a single
-argument: `log`, `warn`, or `session-warn`.
+argument: `log` or `session-warn`.
 
 | Argument | Flag name | What it gates |
 |----------|-----------|---------------|
 | `log` | `budgeter-log` | Token-usage logging — records what every monitored tool call cost |
-| `warn` | `budgeter-warn` | Cost-estimation warning — Claude asks before a call that looks expensive |
 | `session-warn` | `budgeter-session-warn` | Session-length nudge — suggests wrapping up once the prompt size crosses the configured thresholds |
 
 Each flag is a sentinel file at `<repo>/.claude/apiary/flags/<flag-name>-enabled`.
@@ -39,8 +38,6 @@ Toggles are per-repo and persist across sessions.
 
    - `log` **ON** — "Budgeter logging is now **ON**. Token usage will be recorded."
    - `log` **OFF** — "Budgeter logging is now **OFF**. Token usage will not be recorded."
-   - `warn` **ON** — "Budgeter warnings are now **ON**. Claude will ask before running calls expected to be expensive."
-   - `warn` **OFF** — "Budgeter warnings are now **OFF**. Expensive calls will proceed without prompting."
    - `session-warn` **ON** — "Budgeter session-length nudge is now **ON**. Claude will suggest wrapping up once the session's prompt size crosses the configured soft/hard thresholds."
    - `session-warn` **OFF** — "Budgeter session-length nudge is now **OFF**. Long sessions will continue without a wrap-up suggestion."
 

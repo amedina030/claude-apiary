@@ -188,7 +188,7 @@ then the git root containing the cwd.
 
 | Argument / Flag | Applies to | Required | Description |
 |-----------------|-----------|----------|-------------|
-| `NAME` | all | yes | Flag name — `budgeter-log`, `budgeter-warn`, `budgeter-session-warn`, `auto-startup`. Letters, digits, `.`, `_`, `-` only |
+| `NAME` | all | yes | Flag name — `budgeter-log`, `budgeter-session-warn`, `auto-startup`. Letters, digits, `.`, `_`, `-` only |
 
 ### Output and exit codes
 
@@ -218,21 +218,6 @@ python budgeter/report.py [options]
 | `--by-agent` | Show per-agent-type token breakdown |
 | `--by-request` | Group by `request_id` (sums multi-call chains like one runner run; entries without a `request_id` bucket into `(no request)`) |
 | `--weighted` | Weight tokens by type: cache 0.1x, output 5x |
-| `--feedback` | Show warning precision and rule breakdown |
-
-## budgeter/tune.py
-
-Suggest rule weight adjustments based on historical data.
-
-```bash
-python budgeter/tune.py [options]
-```
-
-| Flag | Description |
-|------|-------------|
-| `--min N` | Min samples per rule before suggesting (default: 5) |
-| `--percentile N` | Expensive threshold percentile (default: from config) |
-| `--yes` | Apply changes without confirmation prompt |
 
 ## budgeter/query_request.py
 

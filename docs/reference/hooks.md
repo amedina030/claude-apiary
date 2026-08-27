@@ -25,7 +25,7 @@ Hooks are Python scripts registered in `~/.claude/settings.json` that fire at Cl
 
 | Hook | Event | File | Description |
 |------|-------|------|-------------|
-| Pre-tool cost logger + warning | PreToolUse | `budgeter/hooks/pre_tool_use.py` | Logs the previous tool call's token cost (PRE-to-PRE delta), evaluates whether the upcoming response looks expensive, injects warning if threshold exceeded |
+| Pre-tool cost logger | PreToolUse | `budgeter/hooks/pre_tool_use.py` | Logs the previous tool call's token cost (PRE-to-PRE delta) and injects the session-length nudge once per tier |
 | Post-tool agent logger | PostToolUse | `budgeter/hooks/post_tool_use.py` | Logs exact subagent token cost from `tool_response.totalTokens` (Agent calls only) |
 | Stop session cleanup | Stop | `budgeter/hooks/stop_session.py` | Logs the final tool call's cost, cleans up temp baseline files |
 

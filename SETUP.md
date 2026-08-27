@@ -172,8 +172,8 @@ Hooks and slash commands are loaded at session start. Restart Claude Code after 
 Inside a bootstrapped repo:
 
 ```
-/budgeter log     # start recording token usage
-/budgeter warn    # enable expensive-call warnings
+/budgeter log            # start recording token usage
+/budgeter session-warn   # nudge to wrap up once the context gets long
 ```
 
 Toggles persist per-repo at `<repo>/.claude/apiary/flags/<flag-name>-enabled`.
@@ -349,8 +349,8 @@ A registered repo's `real_path` no longer exists on disk. Either restore the rep
 **`/budgeter log` toggle has no effect**
 Check `<repo>/.claude/apiary/flags/budgeter-log-enabled` exists when ON, is absent when OFF. The slash command creates/removes this file via `core/flags.py`; run `python core/flags.py status budgeter-log` from inside the repo to see what the hooks see.
 
-**Warnings never firing**
-Warnings require at least `min_tasks` unique tasks in the log (default: 50). Run `/budgeter log` and use the repo until you've accumulated enough history.
+**The session-length nudge never fires**
+Check `/budgeter session-warn` is ON, and note the nudge fires once per tier per session — the flag file at `<repo>/.claude/apiary/session-tmp/<session>_budgeter_session_len_soft_fired` records that. It is also skipped entirely in detached runner runs (`APIARY_RUNNER_SUBPROCESS=1`).
 
 **`setup.py --global` still in your muscle memory**
 That mode is gone. The redirect stub at `setup.py` will print the new commands.

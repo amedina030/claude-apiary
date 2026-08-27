@@ -32,13 +32,12 @@ Slash commands are defined in markdown files under `commands/` directories. Clau
 
 ## Toggles
 
-`/budgeter <log|warn|session-warn>` creates or removes a sentinel file at
+`/budgeter <log|session-warn>` creates or removes a sentinel file at
 `<repo>/.claude/apiary/flags/<flag-name>-enabled`. Presence = enabled.
 
 | Invocation | Flag file | Default |
 |------------|-----------|---------|
 | `/budgeter log` | `<repo>/.claude/apiary/flags/budgeter-log-enabled` | off |
-| `/budgeter warn` | `<repo>/.claude/apiary/flags/budgeter-warn-enabled` | off |
 | `/budgeter session-warn` | `<repo>/.claude/apiary/flags/budgeter-session-warn-enabled` | off |
 
 Toggles are per-repo and persist across sessions. The skill shells out to
