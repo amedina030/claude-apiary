@@ -68,7 +68,7 @@ Per-target state lives under the apiary checkout, not inside each target repo. T
 - `<state-dir>/research/` — researcher entries + tag vocabulary
 - `<state-dir>/captures/` — image + sidecar pairs
 - `<state-dir>/runner/` — runner artifacts (intake, specs, plans, executions, etc.)
-- `<state-dir>/bootstrap_state.json` — apiary_bootstrap provenance record
+- `<state-dir>/bootstrap_state.json` — `apiary install` provenance record
 - `<repo-root>/.apiary/pointer` — JSON breadcrumb pointing at the apiary repo + target id
 
 Session transcripts (`~/.claude/projects/<key>/*.jsonl`) are Claude Code's and stay under `~/.claude/`. Apiary's own per-session files live elsewhere: identity and session history under `<main-apiary>/.repos/<slug>/sessions/`, once-per-session hook flags under `<repo>/.claude/apiary/session-tmp/`.

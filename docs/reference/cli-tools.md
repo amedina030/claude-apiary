@@ -829,7 +829,6 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" runner/cron_h
 
 Windows Task Scheduler only in this release — backed by `schtasks`. The scheduler-backend protocol (`runner/schedulers/base.py`) keeps launchd (macOS) and crontab (Linux) cheap to add when there's a real user for them. Running on any other platform exits with code 2 and a "not supported" message.
 
-`run_bootstrap_check()` is the library entry point for an install flow that wants the status table without letting drift affect its own exit code — the check is informational only.
 
 ## runner/config_loader.py
 

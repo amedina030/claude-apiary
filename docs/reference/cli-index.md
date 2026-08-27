@@ -46,5 +46,4 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `runner/cost_emit.py` | Emit usage XML from Claude envelope | Library — no CLI |
 | `runner/config_loader.py` | Shared runner config loader | Library — no CLI |
 | `scripts/probe_permission_prompt.py` | Empirical check that hooks don't auto-approve (headless `claude -p`, manual mode) | `<repo>`, --model, --timeout |
-| `core/apiary_bootstrap.py` | Apply an apiary profile to a target repo's `.claude/settings.json` | --profile, --target, --force, --apiary-repo |
 | `incubator/cli.py` | Spawn a new side-project repo wired up with apiary | spawn |

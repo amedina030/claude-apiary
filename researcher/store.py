@@ -64,7 +64,7 @@ def research_dir(start: Path | None = None) -> Path:
     """Return the researcher state directory.
 
     Resolution order:
-      1. ``APIARY_TARGET_STATE_DIR`` env var (set by apiary_launch.py after
+      1. ``APIARY_TARGET_STATE_DIR`` env var (set by the per-repo launcher, .claude/apiary/launch.py, after
          the registry resolver runs) — returns ``<state_dir>/research/``.
       2. Legacy in-repo path via git rev-parse on *start* — used for
          unmigrated targets only.

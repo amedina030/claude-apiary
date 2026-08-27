@@ -18,8 +18,8 @@ Scope (this release):
 
 Invoke via the apiary launcher:
 
-    python ~/.claude/apiary_launch.py runner/cron_health.py check
-    python ~/.claude/apiary_launch.py runner/cron_health.py repair --apply
+    python -m runner.cron_health check          # from the apiary checkout
+    python -m runner.cron_health repair --apply  # from the apiary checkout
 
 Exit codes:
   0 — healthy, or dry-run produced no errors
@@ -372,51 +372,6 @@ def _plan_line(status: EntryStatus) -> str:
     if status.entry.disabled:
         return f"would delete {status.entry.entry_id} (disabled)"
     return f"would delete and recreate {status.entry.entry_id} ({status.reason})"
-
-
-def run_bootstrap_check(
-    *, registry_path: Path = REGISTRY_PATH,
-    apiary_root: Path = APIARY_REPO_ROOT,
-    stream=sys.stdout,
-) -> None:
-    """Informational cron-health report for an install/bootstrap flow.
-
-    Prints the current cron health status to ``stream`` but never raises
-    or propagates a non-zero exit — the caller's exit semantics must not
-    depend on whether scheduled entries happen to be in sync. Currently
-    exercised only by ``runner/test_cron_health.py``; the historical
-    caller (``scripts/bootstrap.py``) was removed with the per-repo
-    migration cleanup.
-    """
-    try:
-        registry = load_registry(registry_path, apiary_root)
-    except RegistryError as exc:
-        # No registry is a valid state for a fresh clone; don't spam.
-        if registry_path.exists():
-            stream.write(f"cron_health: {exc}\n")
-        return
-    if not registry:
-        return
-    try:
-        backend = get_scheduler()
-    except UnsupportedPlatformError as exc:
-        stream.write(f"cron_health: {exc}\n")
-        return
-    try:
-        statuses, _ = check(registry, backend)
-    except SchedulerError as exc:
-        stream.write(f"cron_health: scheduler query failed: {exc}\n")
-        if exc.stderr:
-            stream.write(f"  stderr: {exc.stderr.strip()}\n")
-        return
-    stream.write("\ncron_health status:\n")
-    stream.write(format_table(statuses))
-    drifted = [s for s in statuses if s.state != "ok"]
-    if drifted:
-        stream.write(
-            "run `python ~/.claude/apiary_launch.py runner/cron_health.py "
-            "repair --apply` to fix\n"
-        )
 
 
 def main(argv: Optional[list[str]] = None) -> int:

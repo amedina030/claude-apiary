@@ -129,7 +129,7 @@ def artifacts_root(target: Optional[Path] = None) -> Path:
     """Return the umbrella directory for runner state.
 
     Resolution order:
-      1. ``APIARY_TARGET_STATE_DIR`` env var (set by apiary_launch.py after
+      1. ``APIARY_TARGET_STATE_DIR`` env var (set by the per-repo launcher, .claude/apiary/launch.py, after
          the registry resolver runs) — returns ``<state_dir>/runner/``.
          Used when the caller did not pass an explicit *target* override.
       2. ``<target>/.apiary/runner/`` — legacy in-repo path. Used when an

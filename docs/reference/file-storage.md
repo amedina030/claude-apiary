@@ -140,7 +140,7 @@ Captures state lives at `<state-dir>/captures/`. All git-ignored. Each capture i
 
 ## Bootstrap state
 
-`core/apiary_bootstrap.py` writes its provenance record at `<state-dir>/bootstrap_state.json`. For pre-migration installs that left the file at `<target>/.apiary/bootstrap_state.json`, the first centralized run reads it once as fallback, then writes only to the centralized path.
+`apiary install` writes its provenance record at `<state-dir>/bootstrap_state.json`. For pre-migration installs that left the file at `<target>/.apiary/bootstrap_state.json`, the first centralized run reads it once as fallback, then writes only to the centralized path.
 
 | Field | Description |
 |------|-------------|

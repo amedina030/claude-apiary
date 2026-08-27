@@ -34,7 +34,7 @@ def resolve_python() -> Path:
         return Path(override)
     return Path(sys.executable)
 
-# Marker string that setup.py writes into absolute-path hook commands so
+# Marker string the retired global installer wrote into absolute-path hook commands so
 # they can be recognized on re-run. Historical marker — entries using
 # the portable $CLAUDE_PROJECT_DIR template do NOT contain it, so
 # callers must use is_apiary_entry() rather than a bare `MARKER in blob`
@@ -60,7 +60,7 @@ def is_apiary_entry(entry: Any) -> bool:
     """Return True if a settings.json hook entry was installed by apiary.
 
     Recognizes four formats:
-      1. Absolute-path entries written by ``setup.py --global`` whose
+      1. Absolute-path entries written by the retired global installer whose
          path contains ``APIARY_MARKER`` ("claude-apiary").
       2. Portable hand-edited entries that use ``$CLAUDE_PROJECT_DIR/<sub>/...``
          and therefore lack the marker. Detected by known apiary subpath

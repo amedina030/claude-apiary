@@ -2,6 +2,63 @@
 
 ## Unreleased
 
+### Phase 2 — dead weight deleted (2026-08-27, ~7,100 lines net)
+
+Every deletion was grep-verified against the tree by the agent that made it
+and re-verified by a residual-reference sweep; the suite, both doc
+checkers and a full-tree secret scan are green at the end of the phase.
+
+- **core:** the drift mailbox (`core/mailbox.py`, `apiary mailbox`,
+  `doctor mailbox`) — `drift.py` now applies the registry update inline
+  under the lock it already held; zero-caller `targets.py`, `config.py`,
+  `transcript.py`; three dead hooks (`check_install.py`,
+  `check_install_stop.py`, `startup_hook.py`) and the triple
+  `learnings_inject_hook` registration collapsed to one `Edit|Write|Bash`
+  matcher (~10 fewer interpreter starts per Edit/Write/Bash);
+  `launcher_template.render()`, `_APIARY_OWNED_KEYS`, `hook_cmd`'s
+  `~/.claude/apiary_launch.py` mode. The generated launcher now reports a
+  removed hook script as one stderr line and exits 0, so repos bootstrapped
+  before this release degrade quietly until re-bootstrapped — **re-run
+  `apiary install --target <repo>` on every registered repo after
+  upgrading.** First tests that actually execute the generated `launch.py`.
+- **budgeter:** the warning feature (9% precision over 3,717 tasks):
+  `tune.py`, the estimator rule tables and magnitude estimate, the feedback
+  JSONL and `report.py --feedback`, the `budgeter-warn` flag; `[CONT]`
+  chaining and approval inheritance (fired on 11 of 25,027 entries while
+  costing context every session); `predicted_cost`/`warning_fired`/
+  `scope_flags` fields; snapshot helpers; `count_entries`. Old log entries
+  still read. `/budgeter` takes `log` or `session-warn`. The hook tests are
+  hermetic (T-2026-274).
+- **runner:** `usher_order.py` + manifest and its orchestrator wiring (the
+  detached runner selects from the backlog only); six dead helpers and the
+  `overnight.jsonl` double-write (`run_history.jsonl` is the one run log);
+  a no-op validation loop, DEBUG prints, "Chained executor" strings;
+  `runner/cron_setup.md`; 37 stranded April run artifacts. `run_tracker.py`
+  stays — the nightly pipeline reaches it at four sites and the revive
+  programme fixes it rather than deletes it. `cron_health.run_bootstrap_check`
+  (only caller was the deleted `scripts/bootstrap.py`) removed too.
+- **scribe / refiner:** `migrate` and `handoff-sessions` subcommands,
+  `_repo_scribe_dir`, legacy integer / `L<n>` note-ID resolution (the live
+  store has 1,873/1,874 rows on `TYPE-YEAR-seq` ids; the two legacy
+  mentions are prose in archived April handoffs); `refiner/round_counter.py`
+  — `/refine` uses harden's with a `refine-` session prefix.
+- **gui:** `diag_pty.py`, the pty ring buffer, `TranscriptTail.poke`/
+  `on_skip`, the unreachable `ping`/`list_sessions`/`restart_pty`/
+  `set_session_setting` bridge methods, `repo_registry`'s legacy JSON-list
+  fallback, unused imports; the pty-exit toast no longer promises a restart
+  menu that does not exist. Two GUI tests made hermetic (T-2026-274).
+- **scripts / root:** `scripts/bootstrap.py`, `uninstall_hooks.py`,
+  `install_context_rules.py` (+ tests), `audit_portability.py`, `setup.py`;
+  every `MIGRATION-PLAN.md` citation; the README's hand-maintained
+  Repository Structure tree (~40% drifted); `.gitignore` duplicates and
+  dead entries; the phantom `core/apiary_bootstrap.py` doc references;
+  local cruft (`.apiary.pre-migration/` zipped to
+  `D:\Professional\apiary-pre-migration-backup-2026-08-26.zip` before
+  removal).
+- **hooks:** `docs/hooks/pre-commit` resolves the repo root from git; from a
+  linked worktree it used to check — and secret-scan — the *main*
+  checkout's tree.
+
 ### Phase 1 — unbreak what was silently broken (2026-08-26)
 
 - **Apiary writes nothing under `~/.claude` — now true.** Session identity

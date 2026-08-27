@@ -72,7 +72,7 @@ def compass_dir(start: Path | None = None) -> Path:
     """Return the compass state directory.
 
     Resolution order:
-      1. ``APIARY_TARGET_STATE_DIR`` env var (set by apiary_launch.py after
+      1. ``APIARY_TARGET_STATE_DIR`` env var (set by the per-repo launcher, .claude/apiary/launch.py, after
          the registry resolver runs) — returns ``<state_dir>/compass/``.
       2. ``<repo-root>/.apiary/compass/`` via git rev-parse on *start*.
       3. ``<cwd>/.apiary/compass/`` when not inside a git repo.

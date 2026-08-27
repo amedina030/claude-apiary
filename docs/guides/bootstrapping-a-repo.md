@@ -150,6 +150,6 @@ If the target already has registered state under `<apiary>/.repos/<name>-<id>/` 
 ## Related
 
 - [File Storage — Bootstrap state](../reference/file-storage.md#bootstrap-state)
-- [CLI Tools — `core/apiary_bootstrap.py`](../reference/cli-tools.md#coreapiary_bootstrappy)
+- [CLI Tools — `apiary install`](../reference/cli-tools.md#apiary)
 - `core/apiary_profiles.py` — profile loader + deep merge + `$replace` implementation
 - `core/utils/jsonc.py` — JSONC parser (stdlib-only comment stripper)

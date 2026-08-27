@@ -498,48 +498,7 @@ class BootstrapHookTests(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_no_registry_is_silent(self):
-        """Fresh clone without a registry must not spam bootstrap output."""
-        stream = io.StringIO()
-        cron_health.run_bootstrap_check(
-            registry_path=self.tmp / "missing.json",
-            apiary_root=self.apiary, stream=stream,
-        )
-        self.assertEqual(stream.getvalue(), "")
 
-    def test_reports_drift_without_raising(self):
-        p = _write_registry(self.tmp, [{
-            "id": "x",
-            "command": ["python", "-m", "runner.run"],
-            "cwd": str(self.apiary),
-            "schedule": {"type": "daily", "time": "02:00"},
-        }])
-        stream = io.StringIO()
-        with mock.patch.object(cron_health, "get_scheduler",
-                                return_value=FakeBackend([])):
-            cron_health.run_bootstrap_check(
-                registry_path=p, apiary_root=self.apiary, stream=stream,
-            )
-        out = stream.getvalue()
-        self.assertIn("cron_health status", out)
-        self.assertIn("missing", out)
-        self.assertIn("repair --apply", out)
-
-    def test_unsupported_platform_logs_but_does_not_raise(self):
-        p = _write_registry(self.tmp, [{
-            "id": "x",
-            "command": ["python"],
-            "cwd": str(self.apiary),
-            "schedule": {"type": "daily", "time": "02:00"},
-        }])
-        stream = io.StringIO()
-        def raise_unsupported():
-            raise UnsupportedPlatformError("no backend for darwin")
-        with mock.patch.object(cron_health, "get_scheduler", raise_unsupported):
-            cron_health.run_bootstrap_check(
-                registry_path=p, apiary_root=self.apiary, stream=stream,
-            )
-        self.assertIn("no backend", stream.getvalue())
 
 
 class GetSchedulerTests(unittest.TestCase):
