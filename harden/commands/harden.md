@@ -55,6 +55,8 @@ Let `N` be the round number, starting at 1.
 
 **3c. Referee (multi-lens only).** Merge the per-lens `out_file` arrays into one file, then `ORCH prompt consolidator --session-id <sid> --round N --findings <merged>`; spawn that one agent; then `ORCH validate consolidation --file <reply> --session-id <sid> --round N --source-ids <ids from the merged file> --attempt 1`. Its accepted set is this round's findings. On the single-lens and legacy paths, skip this step — the attacker's findings are the findings.
 
+Once the round's findings set is settled, print the tally from the last `ok` decision's `counts` — `Round N: Attacker found <total> issues (<critical> critical, <high> high, <medium> medium, <low> low)` — using those numbers, not your own count.
+
 **3d. No findings.** When the round's findings set is empty: `ORCH round tick --session-id <sid>`, then `ORCH budget check --session-id <sid> --round N --empty-findings`, report `Round N: Attacker found 0 issues. Code/plan looks clean.` plus the returned `suffix`, and jump to Step 4.
 
 **3e. Defender.** Round 1: `ORCH prompt defender --session-id <sid> --round 1 --findings <findings>`, spawn that Agent block, then store its id with `ORCH round defender --session-id <sid> --set <agent_id>`. Round 2+: `ORCH prompt defender-continue --session-id <sid> --round N --findings <findings> --prev-response <prev>` and send that message with **SendMessage** to the id from `ORCH round defender --session-id <sid> --get`. The Defender persists across rounds; if it errors on a continuation, stop the run with "Defender agent failed on round N. Aborting." — do not respawn a fresh one.
@@ -69,7 +71,7 @@ ORCH round tick --session-id <sid>
 ORCH budget check --session-id <sid> --round N
 ```
 
-Print `Round N summary: <fixed> fixed, <refactored> refactored, <deferred> deferred` followed by the `suffix` from `budget check`, then follow its `instruction`. Carry this round's findings and validated response files into the next round's 3a and 3e. Stop early when every finding this round was deferred and `N > 1`: "All findings deferred — no further fixes possible. Exiting loop."
+Print `Round N summary: <fixed> fixed, <refactored> refactored, <deferred> deferred` — again from the `counts` of the Defender's `ok` decision — followed by the `suffix` from `budget check`, then follow its `instruction`. Carry this round's findings and validated response files into the next round's 3a and 3e. Stop early when every finding this round was deferred and `N > 1`: "All findings deferred — no further fixes possible. Exiting loop."
 
 ## Step 4 — Present results
 

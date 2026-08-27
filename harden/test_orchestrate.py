@@ -439,14 +439,22 @@ class TestPrompt(OrchestrateTestCase):
         prev_r = self.write("pr.json", {"responses": [
             {"id": "DEF-001", "finding_ref": "CON-001", "action": "fixed", "description": "x"},
             {"id": "DEF-002", "finding_ref": "CON-002", "action": "deferred", "description": "y"}]})
-        rej = self.write("rej.json", {"accepted": [],
-                                      "rejected": [{"id": "ATK-CPX-004", "reason": "dupe"}]})
+        rej = self.write("rej.json", {"accepted": [], "rejected": [
+            {"source_ids": ["ATK-CPX-004", "ATK-ARC-002"], "reason": "dupe"}]})
         out = run(["prompt", "attacker", "--session-id", "sess1234", "--round", "2",
                    "--lens", "security", "--prev-findings", prev_f,
                    "--prev-response", prev_r, "--rejections", rej], self.state).stdout
         self.assertIn("CON-001 src/a.py:1-2 — fixed", out)
         self.assertIn("CON-002 src/a.py:1-2 — deferred", out)
-        self.assertIn("ATK-CPX-004 — dupe", out)
+        self.assertIn("ATK-CPX-004, ATK-ARC-002 — dupe", out)
+
+    def test_prior_record_falls_back_to_a_rejection_id(self):
+        self.plan("--lenses", "security")
+        rej = self.write("rej.json", {"accepted": [],
+                                      "rejected": [{"id": "CON-009", "reason": "stale"}]})
+        out = run(["prompt", "attacker", "--session-id", "sess1234", "--round", "2",
+                   "--lens", "security", "--rejections", rej], self.state).stdout
+        self.assertIn("CON-009 — stale", out)
 
     def test_defender_prompt_points_at_worktree_paths(self):
         self.plan("--lenses", "security")
@@ -515,6 +523,42 @@ class TestValidate(OrchestrateTestCase):
         self.assertEqual(decision["status"], "ok")
         self.assertEqual(decision["result"][0]["id"], "ATK-SEC-001")
         self.assertTrue(Path(decision["out_file"]).is_file())
+
+    def test_findings_decision_carries_a_severity_tally(self):
+        self.plan("--lenses", "security")
+        raw = self.write("out.json", [
+            {"severity": "critical", "description": "boom", "location": "src/a.py:1"},
+            {"severity": "low", "description": "nit", "location": "src/a.py:2"},
+            {"severity": "low", "description": "nit two", "location": "src/b.py:1"}])
+        _, decision = self.decide("findings", "--file", raw, "--session-id", "sess1234",
+                                  "--lens", "security")
+        self.assertEqual(decision["counts"],
+                         {"total": 3, "critical": 1, "high": 0, "medium": 0, "low": 2})
+
+    def test_response_decision_carries_an_action_tally(self):
+        self.plan("--lenses", "security")
+        raw = self.write("out.json", {"responses": [
+            {"finding_ref": "ATK-SEC-001", "action": "fixed", "description": "patched"},
+            {"finding_ref": "ATK-SEC-002", "action": "deferred", "description": "later"}]})
+        _, decision = self.decide("response", "--file", raw, "--session-id", "sess1234",
+                                  "--expected-ids", "ATK-SEC-001,ATK-SEC-002")
+        self.assertEqual(decision["counts"],
+                         {"total": 2, "fixed": 1, "refactored": 0, "deferred": 1})
+
+    def test_consolidation_decision_counts_rejections(self):
+        self.plan("--lenses", "security,correctness")
+        raw = self.write("out.json", {
+            "accepted": [{"severity": "high", "description": "merged",
+                          "location": "src/a.py:1-2", "source_ids": ["ATK-SEC-001"],
+                          "lenses": ["security"]}],
+            "rejected": [{"source_ids": ["ATK-COR-001"], "reason": "duplicate"}]})
+        result, decision = self.decide("consolidation", "--file", raw,
+                                       "--session-id", "sess1234",
+                                       "--source-ids", "ATK-SEC-001,ATK-COR-001")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(decision["counts"]["total"], 1)
+        self.assertEqual(decision["counts"]["rejected"], 1)
+        self.assertEqual(decision["counts"]["high"], 1)
 
     def test_markdown_fences_are_stripped_before_validation(self):
         self.plan("--lenses", "security")

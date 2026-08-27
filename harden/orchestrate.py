@@ -608,7 +608,11 @@ def build_prior_record(prev_findings, prev_response, rejections, round_no: int) 
     if rejected:
         lines.append("Referee rejections:")
         for item in rejected:
-            lines.append(f"- {item.get('id', '?')} — {item.get('reason', 'no reason given')}")
+            # Rejections key on `source_ids` (the ATK ids that were dropped);
+            # `id` is only present on degraded/legacy payloads.
+            ids = item.get("source_ids") or ([item["id"]] if item.get("id") else ["?"])
+            label = ", ".join(str(i) for i in ids)
+            lines.append(f"- {label} — {item.get('reason', 'no reason given')}")
     return "\n".join(lines)
 
 
@@ -762,6 +766,34 @@ NEXT_ACTIONS = {
 }
 
 
+SEVERITIES = ("critical", "high", "medium", "low")
+ACTIONS = ("fixed", "refactored", "deferred")
+
+
+def tally(kind: str, validated) -> dict:
+    """Mechanical counts for the round-summary lines — never LLM arithmetic."""
+    if kind == "response":
+        items = validated.get("responses", []) if isinstance(validated, dict) else []
+        counts = {action: 0 for action in ACTIONS}
+        for item in items:
+            action = item.get("action")
+            if action in counts:
+                counts[action] += 1
+        return {"total": len(items), **counts}
+
+    if kind == "consolidation":
+        accepted = validated.get("accepted", []) if isinstance(validated, dict) else []
+        rejected = validated.get("rejected", []) if isinstance(validated, dict) else []
+        counts = {"total": len(accepted), "rejected": len(rejected)}
+    else:
+        accepted = validated if isinstance(validated, list) else []
+        counts = {"total": len(accepted)}
+
+    for severity in SEVERITIES:
+        counts[severity] = sum(1 for f in accepted if f.get("severity") == severity)
+    return counts
+
+
 def _fallback_action(kind: str, lens: str | None) -> str:
     if kind == "consolidation":
         return "degrade"
@@ -824,6 +856,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         out_path = Path(args.out) if args.out else tmp_dir / f"{stem}.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(result.stdout, encoding="utf-8")
+        validated = json.loads(result.stdout)
         print(json.dumps({
             "status": "ok",
             "kind": kind,
@@ -831,7 +864,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
             "attempt": args.attempt,
             "degraded": bool(args.degrade),
             "out_file": str(out_path),
-            "result": json.loads(result.stdout),
+            "counts": tally(kind, validated),
+            "result": validated,
         }, indent=2))
         return 0
 
