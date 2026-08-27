@@ -8,7 +8,6 @@ __pycache__/
 
 # Apiary's own per-target breadcrumb (lives at <target>/.apiary/pointer post-migration)
 .apiary/
-.apiary.pre-migration/
 
 # Hook forensic logs
 core/hooks/*.log
@@ -35,7 +34,6 @@ runner/reports/*
 !runner/executions/.gitkeep
 !runner/hardens/.gitkeep
 !runner/reports/.gitkeep
-!runner/reports/.gitkeep
 
 # Post-mortem / validation reports (docs/standards/report-style.md). These are
 # local-only by default; the rare load-bearing report that must be tracked can
@@ -53,14 +51,12 @@ runner/run_history.jsonl
 .runner-worktrees/
 
 # Session runtime artifacts
-.claude-session-identity.json
 session_*.txt
-
-# Scribe runtime
-.claude/notes.md
-.claude/issues.md
 
 # GUI PyInstaller build outputs
 build/
 dist/
+
+# Apiary-managed per-repo install state (written by core/install.py).
+# Blanket form: main-apiary owns no repo-local .claude/commands/ of its own.
 .claude/
