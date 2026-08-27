@@ -27,8 +27,8 @@ Managed zone format inside `<repo>/CLAUDE.md`:
     ...
     <!-- apiary-context-rules-end -->
 
-Stdlib only — no PyYAML. Frontmatter is intentionally restricted to a flat
-key/value form so the parser stays small and deterministic.
+Stdlib only — no PyYAML. Frontmatter is read by ``core.frontmatter``, the one
+dialect the whole toolkit speaks (Phase 3.3).
 """
 from __future__ import annotations
 
@@ -37,6 +37,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+from core import frontmatter
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RULES_DIR = REPO_ROOT / "context-rules"
@@ -124,51 +126,17 @@ class RuleParseError(ValueError):
 
 
 def _parse_frontmatter(text: str, source: Path) -> tuple[dict, str]:
-    """Split a rule file into (frontmatter_dict, body). Body has trailing
-    newline normalized to exactly one.
+    """Split a rule file into (frontmatter_dict, body).
+
+    Dialect and error messages come from ``core.frontmatter``; the trailing
+    newline normalization (exactly one) is this module's own, because rule
+    bodies are hashed and the hash must not move with an editor's whitespace.
     """
-    if not text.startswith("---\n") and not text.startswith("---\r\n"):
-        raise RuleParseError(f"{source}: missing opening '---' frontmatter fence")
-
-    # Locate closing fence.
-    lines = text.splitlines(keepends=False)
-    if lines[0] != "---":
-        raise RuleParseError(f"{source}: malformed opening fence")
-    end_idx: Optional[int] = None
-    for i in range(1, len(lines)):
-        if lines[i] == "---":
-            end_idx = i
-            break
-    if end_idx is None:
-        raise RuleParseError(f"{source}: missing closing '---' frontmatter fence")
-
-    fm: dict = {}
-    for raw in lines[1:end_idx]:
-        line = raw.rstrip()
-        if not line or line.startswith("#"):
-            continue
-        if ":" not in line:
-            raise RuleParseError(f"{source}: bad frontmatter line: {raw!r}")
-        key, _, value = line.partition(":")
-        key = key.strip()
-        value = value.strip()
-        fm[key] = _coerce_value(value)
-
-    body_lines = lines[end_idx + 1 :]
-    body = "\n".join(body_lines).strip("\n") + "\n"
-    return fm, body
-
-
-def _coerce_value(value: str):
-    """Coerce a frontmatter value string into list/str."""
-    if value == "[]":
-        return []
-    if value.startswith("[") and value.endswith("]"):
-        inner = value[1:-1].strip()
-        if not inner:
-            return []
-        return [item.strip().strip('"').strip("'") for item in inner.split(",")]
-    return value.strip('"').strip("'")
+    try:
+        fm, body = frontmatter.parse(text, strict=True)
+    except frontmatter.FrontmatterError as exc:
+        raise RuleParseError(f"{source}: {exc}") from exc
+    return fm, body.strip("\n") + "\n"
 
 
 def load_rule(path: Path) -> Rule:

@@ -25,7 +25,8 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from researcher import _yaml_mini, store
+from core import frontmatter
+from researcher import store
 
 TEMPLATE_PATH = Path(__file__).resolve().parent / "template.md"
 DEFAULT_FIND_LIMIT = 10
@@ -54,7 +55,7 @@ def _safe_read_tags(start: Path | None = None) -> list[str] | int:
     """Return registered tags or an exit code on YAML failure."""
     try:
         return store.read_tags(start)
-    except _yaml_mini.YamlParseError as exc:
+    except frontmatter.FrontmatterError as exc:
         print(
             f"error: {store.tags_file(start)}: {exc.message} (line {exc.line})",
             file=sys.stderr,
@@ -150,7 +151,7 @@ def _rank_hits(query: str, entries: list[Path]) -> list[tuple[int, Path, dict, s
     for path in entries:
         try:
             fm, body = store.parse_entry(path)
-        except (ValueError, _yaml_mini.YamlParseError):
+        except ValueError:
             continue
         score = 0
         title = str(fm.get("title", "")).lower()
@@ -217,7 +218,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     for path in entries:
         try:
             fm, _body = store.parse_entry(path)
-        except (ValueError, _yaml_mini.YamlParseError):
+        except ValueError:
             continue
         topic = str(fm.get("topic", "(unknown)"))
         if args.topic and topic != args.topic:
@@ -262,7 +263,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         return EXIT_VALIDATION
     try:
         fm, body = store.parse_entry(path)
-    except (ValueError, _yaml_mini.YamlParseError) as exc:
+    except ValueError as exc:
         print(f"error: failed to parse {path}: {exc}", file=sys.stderr)
         return EXIT_CONFIG
     old = fm.get("date_last_verified", "(none)")

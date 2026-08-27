@@ -1037,6 +1037,30 @@ poetry run python scripts/probe_permission_prompt.py /path/to/bootstrapped-repo 
 
 Exit codes: `0` the call was held for a prompt (hooks are not auto-approving); `1` the call ran without a prompt (something voted allow); `2` inconclusive; `3` the probe itself could not run (no `claude`, timeout, non-JSON output).
 
+## scripts/migrate_frontmatter.py
+
+Reconciles the frontmatter already on disk with the one dialect in `core/frontmatter.py`. Phase 3.3 replaced five hand-rolled `---` parsers with a single module; this answers the question that follows a swap like that — **does every existing file still parse to the same thing?**
+
+It walks a state dir by family (scribe learnings, scribe templates, memory files, research entries, capture sidecars), parses each file twice — once with a frozen copy of the parser that owned it before the swap, once with `core.frontmatter` — and reports the files where the two disagree. `backup/` snapshot directories are never walked.
+
+`--check` is the default and writes nothing. `--apply` rewrites a file only when all four hold: the legacy and new parses are identical, the rewrite round-trips back to the same `(meta, body)`, the body is preserved byte-for-byte, and the file actually changes. Rewrites are cosmetic — quoting, list style, spacing — so `--apply` is optional housekeeping, not a prerequisite. Anything that disagrees is reported and skipped.
+
+```bash
+python scripts/migrate_frontmatter.py --check
+python scripts/migrate_frontmatter.py --check --state-dir /path/to/.repos --verbose
+python scripts/migrate_frontmatter.py --apply --family learnings
+```
+
+| Flag | Description |
+|------|-------------|
+| `--check` | Report differences without writing (default) |
+| `--apply` | Rewrite files whose legacy and new parses agree |
+| `--state-dir DIR` | Store to walk (default: `<repo>/.repos`) |
+| `--family NAME` | Limit to `learnings`, `templates`, `memory`, `research`, or `captures`; repeatable |
+| `--verbose` | List every file, not just the ones needing review |
+
+Exit codes: `0` every file agrees (or every rewrite succeeded); `1` at least one file disagrees or could not be parsed; `2` the state dir does not exist.
+
 ## Test scripts
 
 All tests use `unittest` and are run directly:

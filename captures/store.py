@@ -17,10 +17,12 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
-from researcher import _yaml_mini
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core import frontmatter  # noqa: E402
 
 APIARY_STATE_DIRNAME = ".apiary"
 CAPTURES_SUBDIR = "captures"
@@ -127,7 +129,7 @@ def ensure_layout(start: Path | None = None) -> None:
     base.mkdir(parents=True, exist_ok=True)
     tags_path = tags_file(start)
     if not tags_path.exists():
-        tags_path.write_text(_yaml_mini.dumps({"tags": []}), encoding="utf-8")
+        tags_path.write_text(frontmatter.dumps({"tags": []}), encoding="utf-8")
 
 
 def normalize_topic(raw: str) -> str:
@@ -146,48 +148,43 @@ def read_tags(start: Path | None = None) -> list[str]:
     path = tags_file(start)
     if not path.exists():
         return []
-    data = _yaml_mini.loads(path.read_text(encoding="utf-8"))
+    data = frontmatter.loads(path.read_text(encoding="utf-8"))
     tags = data.get("tags", [])
     if not isinstance(tags, list):
-        raise _yaml_mini.YamlParseError("'tags' must be a list", 1)
+        raise frontmatter.FrontmatterError("'tags' must be a list", 1)
     return [str(t) for t in tags]
 
 
 def write_tags(tags: list[str], start: Path | None = None) -> None:
     path = tags_file(start)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_yaml_mini.dumps({"tags": list(tags)}), encoding="utf-8")
+    path.write_text(frontmatter.dumps({"tags": list(tags)}), encoding="utf-8")
 
 
 def parse_sidecar(path: Path) -> tuple[dict[str, Any], str]:
     """Split a sidecar file into (frontmatter, body).
 
-    Raises ``ValueError`` if the file lacks a closing frontmatter delimiter.
+    Raises ``ValueError`` if the file lacks a frontmatter block or the block
+    is outside the dialect. Body bytes are preserved exactly.
     """
     text = path.read_text(encoding="utf-8")
-    lines = text.splitlines(keepends=True)
-    if not lines or lines[0].rstrip() != FRONTMATTER_DELIM:
-        raise ValueError(f"{path} missing opening frontmatter delimiter")
-
-    close_idx = None
-    for i in range(1, len(lines)):
-        if lines[i].rstrip() == FRONTMATTER_DELIM:
-            close_idx = i
-            break
-    if close_idx is None:
-        raise ValueError(f"{path} missing closing frontmatter delimiter")
-
-    fm_text = "".join(lines[1:close_idx])
-    body = "".join(lines[close_idx + 1:])
-    frontmatter = _yaml_mini.loads(fm_text)
-    return frontmatter, body
+    try:
+        return frontmatter.parse(text, strict=True)
+    except frontmatter.FrontmatterError as exc:
+        raise ValueError(f"{path} has unreadable frontmatter: {exc}") from exc
 
 
-def write_sidecar(path: Path, frontmatter: dict[str, Any], body: str) -> None:
-    """Write a sidecar file atomically. Creates parent dirs as needed."""
+def write_sidecar(path: Path, meta: dict[str, Any], body: str) -> None:
+    """Write a sidecar file. Creates parent dirs as needed.
+
+    Fences are always written, even for empty *meta*, so ``parse_sidecar``'s
+    strict read of the file it just wrote always succeeds.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fm_dump = _yaml_mini.dumps(frontmatter)
-    content = f"{FRONTMATTER_DELIM}\n{fm_dump}{FRONTMATTER_DELIM}\n{body}"
+    if meta:
+        content = frontmatter.dump(meta, body)
+    else:
+        content = f"{FRONTMATTER_DELIM}\n{FRONTMATTER_DELIM}\n{body}"
     if not content.endswith("\n"):
         content += "\n"
     path.write_text(content, encoding="utf-8")

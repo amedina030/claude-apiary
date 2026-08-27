@@ -194,11 +194,11 @@ def template_text(state_dir: Path, note_type: str) -> "str | None":
 def template_required_sections(text: str) -> list:
     """Return the ``required:`` section names declared in a template's frontmatter.
 
-    Empty list when there is no ``required:`` key or it isn't a list. Reuses the
-    tolerant frontmatter parser, so a malformed template never raises here.
+    Empty list when there is no ``required:`` key or it isn't a list. Uses the
+    shared parser in tolerant mode, so a malformed template never raises here.
     """
-    from scribe.store import _parse_learning_content  # tolerant, shared frontmatter parser
-    fm, _ = _parse_learning_content(text)
+    from core import frontmatter  # one dialect for the whole toolkit
+    fm, _ = frontmatter.parse(text)
     req = fm.get('required')
     if isinstance(req, list):
         return [str(s).strip() for s in req if str(s).strip()]

@@ -16,7 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 from captures import cli, store
-from researcher import _yaml_mini
+from core import frontmatter
 
 # Smallest possible valid PNG — 1x1 transparent pixel.
 PNG_1X1 = bytes.fromhex(
@@ -313,7 +313,7 @@ class TestStore(CapturesTestCase):
         store.tags_file().write_text(
             "tags: not_a_list\n", encoding="utf-8"
         )
-        with self.assertRaises(_yaml_mini.YamlParseError):
+        with self.assertRaises(frontmatter.FrontmatterError):
             store.read_tags()
 
 

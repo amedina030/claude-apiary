@@ -15,6 +15,7 @@ from pathlib import Path
 
 # Repo-root import for core.utils
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core import frontmatter as fm_lib
 from core.utils.filelock import FileLock
 
 # --- Constants ---
@@ -64,71 +65,32 @@ def _format_learning_content(content: str, frontmatter: dict | None = None) -> s
     """Prefix ``content`` with a ``---`` frontmatter block when any of the
     supported fields are present. Returns ``content`` unchanged when the
     frontmatter dict is empty — so legacy learnings stay legacy-shaped.
+
+    Field selection and order are scribe policy; the rendering is
+    ``core.frontmatter``'s. ``list_style='inline'`` keeps the on-disk shape
+    the 595 existing learnings already have (``tags: [a, b]``).
     """
     if not frontmatter:
         return content
-    rendered: list[str] = []
+    meta = {}
     for key in _LEARNING_FRONTMATTER_FIELDS:
         value = frontmatter.get(key)
         if value is None or value == [] or value == '':
             continue
-        if isinstance(value, (list, tuple)):
-            rendered.append(f"{key}: [{', '.join(str(v) for v in value)}]")
-        else:
-            rendered.append(f"{key}: {value}")
-    if not rendered:
-        return content
-    return '---\n' + '\n'.join(rendered) + '\n---\n' + content
+        meta[key] = list(value) if isinstance(value, tuple) else value
+    return fm_lib.dump(meta, content, list_style='inline')
 
 
 def _parse_learning_content(text: str) -> tuple[dict, str]:
     """Split a learning .md into ``(frontmatter_dict, body)``.
 
-    Tolerant of files without frontmatter — returns ``({}, text)`` in that
-    case so legacy 102-learning corpus keeps working. Malformed frontmatter
-    (missing closing fence, bad lines) silently falls back to the same
-    empty-fm path rather than raising, because scribe callers on the hot
-    PreToolUse path cannot afford to crash on a hand-edited .md.
+    Thin wrapper over ``core.frontmatter.parse`` in tolerant mode: files
+    without frontmatter return ``({}, text)`` so the legacy corpus keeps
+    working, and a malformed block falls back to the same empty-fm path rather
+    than raising — scribe callers on the hot PreToolUse path cannot afford to
+    crash on a hand-edited .md.
     """
-    if not text:
-        return {}, text
-    if not (text.startswith('---\n') or text.startswith('---\r\n')):
-        return {}, text
-    lines = text.splitlines()
-    if not lines or lines[0] != '---':
-        return {}, text
-    end_idx: int | None = None
-    for i in range(1, len(lines)):
-        if lines[i] == '---':
-            end_idx = i
-            break
-    if end_idx is None:
-        return {}, text
-    fm: dict = {}
-    for raw in lines[1:end_idx]:
-        line = raw.rstrip()
-        if not line or line.startswith('#'):
-            continue
-        if ':' not in line:
-            continue
-        key, _, value = line.partition(':')
-        key = key.strip()
-        value = value.strip()
-        if value == '[]':
-            fm[key] = []
-        elif value.startswith('[') and value.endswith(']'):
-            inner = value[1:-1].strip()
-            if not inner:
-                fm[key] = []
-            else:
-                fm[key] = [item.strip().strip('"').strip("'") for item in inner.split(',') if item.strip()]
-        else:
-            fm[key] = value.strip('"').strip("'")
-    body_lines = lines[end_idx + 1:]
-    body = '\n'.join(body_lines)
-    if text.endswith('\n') and body and not body.endswith('\n'):
-        body += '\n'
-    return fm, body
+    return fm_lib.parse(text)
 
 
 def derive_brief_summary(content: str) -> str:

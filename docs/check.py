@@ -29,6 +29,9 @@ from pathlib import Path
 
 DOCS_DIR = Path(__file__).parent
 REPO_ROOT = DOCS_DIR.parent
+sys.path.insert(0, str(REPO_ROOT))
+from core import frontmatter  # noqa: E402
+
 FRAMEWORK_FILE = DOCS_DIR / "_framework.md"
 INDEX_FILE = DOCS_DIR / "_index.md"
 SKIP_FILES = {"_framework.md", "_index.md"}
@@ -45,17 +48,15 @@ KNOWN_TOOLS = {"budgeter", "scribe", "core"}
 
 
 def parse_frontmatter(path: Path) -> dict | None:
-    """Extract YAML frontmatter from a markdown file as a dict."""
+    """Extract frontmatter from a markdown doc as a dict, or None if absent.
+
+    Uses ``core.frontmatter`` — the one dialect (Phase 3.3) — in tolerant mode,
+    so a doc whose block is malformed reports as "missing frontmatter" the way
+    a doc with no block at all always has, rather than crashing the checker.
+    """
     text = path.read_text(encoding="utf-8")
-    match = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
-    if not match:
-        return None
-    fm = {}
-    for line in match.group(1).strip().splitlines():
-        if ":" in line:
-            key, _, value = line.partition(":")
-            fm[key.strip()] = value.strip().strip('"').strip("'")
-    return fm
+    fm, _ = frontmatter.parse(text)
+    return fm or None
 
 
 def get_framework_version() -> str:
