@@ -24,14 +24,18 @@ Run these checks before any user-facing output.
 ### Cancel
 
 If the argument is `cancel`:
-1. Run: `python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" refiner/round_counter.py reset --session-id <session_id>`
+1. Run: `python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" harden/round_counter.py reset --session-id refine-<session_id>`
 2. Respond: "Refinement cancelled. No spec was saved."
 3. Stop.
 
 ### Start the round counter
 
+`/refine` and `/harden` share one round-counter tool. The `refine-` prefix on
+`--session-id` keeps the two counters in separate state files when both run in
+the same session.
+
 ```bash
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" refiner/round_counter.py start --session-id <session_id>
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" harden/round_counter.py start --session-id refine-<session_id>
 ```
 
 ### Docs loading (conditional)
@@ -96,7 +100,7 @@ You are a demanding product architect. Your job is to interrogate the idea until
 At the start of each question round, tick the counter:
 
 ```bash
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" refiner/round_counter.py tick --session-id <session_id>
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" harden/round_counter.py tick --session-id refine-<session_id>
 ```
 
 If the returned count is **15**:
@@ -241,7 +245,7 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.
 Reset the round counter:
 
 ```bash
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" refiner/round_counter.py reset --session-id <session_id>
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" harden/round_counter.py reset --session-id refine-<session_id>
 ```
 
 Tell the user the spec is saved and suggest next steps:

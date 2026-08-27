@@ -23,12 +23,11 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `compass/observations.py` | Inspect/maintain personality observation files | count, list, validate, archive |
 | `compass/synthesize.py` | Synthesize personality.md from active observations | --dry-run, --model, --cron |
 | `compass/backfill.py` | Extract observations from historical transcripts | --last, --session-ids, --since, --force, --model |
-| `refiner/round_counter.py` | Track refinement round counts | start, tick, reset, status |
 | `harden/validate_and_assign.py` | Validate + assign IDs in one step | findings, response |
 | `harden/assign_ids.py` | Assign sequential IDs to output | --prefix, --file |
 | `harden/validate_findings.py` | Validate Attacker output | --check-files, --deep, --sanitize |
 | `harden/validate_response.py` | Validate Defender output | --expected-ids, --check-files |
-| `harden/round_counter.py` | Track harden round counts | start, tick, reset, status, defender |
+| `harden/round_counter.py` | Track harden/refine round counts | start, tick, reset, status, defender |
 | `python -m runner.run` | End-to-end runner orchestrator | `<intake_path>` |
 | `python -m runner.create_intake` | Create runner intake file | --from-todo, --title, --problem, --description, --scope, --context |
 | `python -m runner.refine_to_intake` | Bridge refiner scribe note into runner intake/backlog | --note, --title, --backlog, --explore-hints |

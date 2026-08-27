@@ -16,7 +16,6 @@ Usage:
     notes.py done <id>
     notes.py update <id> --content "..."
     notes.py archive [--before YYYY-MM-DD]
-    notes.py migrate <notes.md path>
     notes.py repair [--dry-run]
 """
 import argparse
@@ -142,18 +141,6 @@ def _git_repo_root(start: Path | None = None) -> Path | None:
     if not top:
         return None
     return Path(top)
-
-
-def _repo_scribe_dir(start: Path | None = None) -> Path:
-    """Return the legacy in-repo scribe state directory.
-
-    Resolves to ``<git-repo-root>/.apiary/scribe/`` when *start* (or cwd) is
-    inside a git repo, and falls back to ``<cwd>/.apiary/scribe/`` when it
-    is not. Used as a fallback by ``scribe_state_dir`` for unmigrated
-    targets that have no pointer file yet.
-    """
-    root = _git_repo_root(start) or (start or Path.cwd())
-    return Path(root) / APIARY_STATE_DIRNAME / SCRIBE_SUBDIR
 
 
 def scribe_state_dir(start: Path | None = None) -> Path | None:
@@ -616,72 +603,17 @@ def _format_id(entry: dict) -> str:
     return f"{prefix}-{entry.get('year', '?')}-{entry.get('seq', '?')}"
 
 
-def _parse_display_id(display_id: str) -> tuple:
-    """Parse a display ID string like 'T-2026-1' into (note_type, year, seq)."""
-    m = re.match(r'^([A-Z])-([0-9]{4})-([0-9]+)$', display_id.upper())
-    if not m:
-        raise ValueError(f'Bad display_id: {display_id}')
-    prefix = m.group(1)
-    note_type = _PREFIX_TO_TYPE.get(prefix)
-    if note_type is None:
-        raise ValueError(f'Unknown prefix {prefix!r} in display_id: {display_id}')
-    return (note_type, int(m.group(2)), int(m.group(3)))
-
-
-def _load_migration_map(store) -> dict:
-    """Load the migration ID map (old int ID -> display ID string). Returns {} if missing."""
-    path = store.state_dir / 'migration_id_map.json'
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding='utf-8'))
-    except (json.JSONDecodeError, OSError):
-        return {}
-
-
 def _parse_id_arg(raw: str, store) -> tuple:
-    """Parse an ID argument. Returns (note_type, year, seq).
+    """Parse a TYPE-YEAR-seq ID argument (e.g. T-2026-1, L-2026-3).
 
-    Accepts:
-      - TYPE-YEAR-seq format: e.g. T-2026-1, L-2026-3
-      - Legacy bare integer: e.g. 42 (looked up in migration_id_map.json)
-      - Legacy L-prefix integer: e.g. L3 (looked up in migration_id_map.json)
+    Returns ``(note_type, year, seq)``; exits 1 on anything else.
     """
     raw = raw.strip()
-    # Try TYPE-YEAR-seq format: e.g. T-2026-1
     m = re.match(r'^([A-Z])-([0-9]{4})-([0-9]+)$', raw.upper())
     if m:
         prefix, year_str, seq_str = m.group(1), m.group(2), m.group(3)
-        if prefix not in _PREFIX_TO_TYPE:
-            print(f"Error: invalid ID: {raw}", file=sys.stderr)
-            sys.exit(1)
-        return (_PREFIX_TO_TYPE[prefix], int(year_str), int(seq_str))
-
-    # Legacy: try bare integer or L<n> via migration_id_map.json
-    migration_map = _load_migration_map(store)
-    if raw.upper().startswith('L'):
-        try:
-            old_int_val = int(raw[1:])
-        except ValueError:
-            print(f"Error: invalid ID: {raw}", file=sys.stderr)
-            sys.exit(1)
-        if old_int_val <= 0:
-            print(f"Error: invalid ID: {raw}", file=sys.stderr)
-            sys.exit(1)
-        old_int = str(old_int_val)
-        mapped = migration_map.get(old_int)
-        if mapped:
-            return _parse_display_id(mapped)
-        print(f"Error: invalid ID: {raw}", file=sys.stderr)
-        sys.exit(1)
-    try:
-        old_int = str(int(raw))
-    except ValueError:
-        print(f"Error: invalid ID: {raw}", file=sys.stderr)
-        sys.exit(1)
-    mapped = migration_map.get(old_int)
-    if mapped:
-        return _parse_display_id(mapped)
+        if prefix in _PREFIX_TO_TYPE:
+            return (_PREFIX_TO_TYPE[prefix], int(year_str), int(seq_str))
     print(f"Error: invalid ID: {raw}", file=sys.stderr)
     sys.exit(1)
 
@@ -966,12 +898,6 @@ def cmd_mark_reviewed(args):
     print(f'Stamped learnings review: {marker}')
 
 
-def cmd_migrate(args):
-    """Migration from old format — deferred to Phase 3."""
-    print('Error: migrate command is not yet available (planned for Phase 3).', file=sys.stderr)
-    sys.exit(1)
-
-
 # ---------------------------------------------------------------------------
 # Learnings commands
 # ---------------------------------------------------------------------------
@@ -1152,20 +1078,6 @@ def _print_learnings_index(learnings: list[dict]) -> None:
         for l in items:
             short = l.get('summary', '').replace('\n', ' ')[:80]
             print(f'  {_format_id(l):<12} {short}')
-
-
-def cmd_handoff_sessions(args):
-    store = args.store
-    handoffs = store.list_notes(note_type='handoff')
-    seen = set()
-    for n in handoffs:
-        if n.get('status') != 'done':
-            sid = n.get('session', '').strip()
-            if sid and sid not in seen:
-                seen.add(sid)
-                print(sid)
-    if not seen:
-        print('(none)')
 
 
 def cmd_unlearn(args):
@@ -1558,7 +1470,7 @@ def main():
 
     # get / show
     p_get = sub.add_parser("get", aliases=["show"])
-    p_get.add_argument("id", type=str, help="Note ID (integer) or learning ID (L-prefix, e.g. L3)")
+    p_get.add_argument("id", type=str, help="Note or learning ID (e.g. T-2026-1, L-2026-3)")
 
     # done
     p_done = sub.add_parser("done")
@@ -1604,10 +1516,6 @@ def main():
     sub.add_parser("mark-reviewed",
                    help="Stamp the learnings review timestamp the startup banner reads")
 
-    # migrate
-    p_migrate = sub.add_parser("migrate")
-    p_migrate.add_argument("path", help="Path to old notes.md file")
-
     # learn
     p_learn = sub.add_parser("learn")
     p_learn_content = p_learn.add_mutually_exclusive_group(required=True)
@@ -1639,12 +1547,9 @@ def main():
     p_learnings.add_argument("--index", action="store_true",
                              help="Compact tag-grouped output for startup injection")
 
-    # handoff-sessions
-    sub.add_parser("handoff-sessions")
-
     # unlearn
     p_unlearn = sub.add_parser("unlearn")
-    p_unlearn.add_argument("id", type=str, help="Learning ID (integer or L-prefix, e.g. L3 or 3)")
+    p_unlearn.add_argument("id", type=str, help="Learning ID (e.g. L-2026-3)")
 
     # archive-learning — move a learning to archive (parallels note archival)
     p_archive_l = sub.add_parser("archive-learning",
@@ -1712,8 +1617,6 @@ def main():
         'learn': cmd_learn, 'learnings': cmd_learnings, 'unlearn': cmd_unlearn,
         'archive-learning': cmd_archive_learning,
         'supersede': cmd_supersede,
-        'handoff-sessions': cmd_handoff_sessions,
-        'migrate': cmd_migrate,
         'repair': cmd_repair,
         'backfill-brief': cmd_backfill_brief,
         'template': cmd_template,

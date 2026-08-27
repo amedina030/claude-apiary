@@ -1,4 +1,3 @@
-import json
 import sys
 import tempfile
 import unittest
@@ -200,28 +199,19 @@ class TestParseIdArg(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 _parse_id_arg('X-2026-1', store)
 
-    def test_legacy_bare_int_with_migration_map(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
-            # Write migration map
-            map_path = Path(tmp) / 'migration_id_map.json'
-            map_path.write_text(json.dumps({'42': 'T-2026-5'}), encoding='utf-8')
-            result = _parse_id_arg('42', store)
-            self.assertEqual(result, ('todo', 2026, 5))
-
-    def test_legacy_l_prefix_with_migration_map(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
-            map_path = Path(tmp) / 'migration_id_map.json'
-            map_path.write_text(json.dumps({'7': 'L-2026-3'}), encoding='utf-8')
-            result = _parse_id_arg('L7', store)
-            self.assertEqual(result, ('learning', 2026, 3))
-
-    def test_legacy_int_no_map_exits(self):
+    def test_bare_int_exits(self):
+        # Legacy bare-integer IDs are no longer accepted; the migration map
+        # they resolved through is gone.
         with tempfile.TemporaryDirectory() as tmp:
             store = ScribeStore(Path(tmp))
             with self.assertRaises(SystemExit):
                 _parse_id_arg('42', store)
+
+    def test_bare_l_prefix_exits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            with self.assertRaises(SystemExit):
+                _parse_id_arg('L7', store)
 
 if __name__ == '__main__':
     unittest.main()

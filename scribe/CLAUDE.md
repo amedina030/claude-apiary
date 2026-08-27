@@ -42,7 +42,7 @@ Every note and learning has a **TYPE-YEAR-seq** display ID (e.g. `T-2026-1`, `L-
 
 Each **(type, year)** pair has its own independent sequence counter, stored at `<type>/<year>/next_seq` inside the scribe state directory. For example, the first todo created in 2026 is `T-2026-1`, and the first learning in 2026 is `L-2026-1` — their counters are independent.
 
-Legacy bare-integer IDs (e.g. `42`) are still accepted by the CLI via `migration_id_map.json` lookups, but all new notes use TYPE-YEAR-seq format.
+TYPE-YEAR-seq is the only ID form the CLI accepts — legacy bare-integer IDs (e.g. `42`, `L3`) from the pre-2026-04 store were retired along with their migration map.
 
 ---
 

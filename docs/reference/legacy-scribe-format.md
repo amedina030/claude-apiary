@@ -140,7 +140,7 @@ Gates: validator duplicate-headings, assignee match, a recency window on closes.
 - **Back-stamp provenance:** record each note's original `display_id` + original `timestamp` (in
   frontmatter/body and/or metadata) so ordering is recoverable and the migration is auditable.
   Carry over `tags, areas, status, session`, and (learnings) `supersedes`.
-- Build and persist an **old→new id map** (reuse apiary's `migration_id_map.json` concept);
+- Build and persist an **old→new id map** (`import_legacy.import_into` already returns one in memory);
   rewrite `supersedes:` references to new ids where possible, else leave the old id visible.
 - `--dry-run` ingests into a scratch state-dir and emits an equivalence report: per-type counts
   in (legacy) vs out (apiary), plus a content-diff sampling modulo the provenance stamp.

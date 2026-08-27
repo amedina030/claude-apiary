@@ -155,13 +155,6 @@ class TestScribeNotes(unittest.TestCase):
         five_min = (now - timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ')
         self.assertEqual(notes.format_age(five_min), '5m ago')
 
-    def test_handoff_sessions(self):
-        self.store.add_note('handoff', 'handoff 1', 'sess-abc')
-        self.store.add_note('handoff', 'handoff 2', 'sess-def')
-        handoffs = self.store.list_notes(note_type='handoff')
-        sessions = {h.get('session', '') for h in handoffs if h.get('status') != 'done'}
-        self.assertEqual(len(sessions), 2)
-
     def test_cmd_add_handoff_requires_summary(self):
         args = self._make_args(
             type='handoff', content='body text', summary='',

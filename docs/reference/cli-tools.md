@@ -32,8 +32,6 @@ Core note and learning management.
 | `learn` | `notes.py learn (--content "<text>" \| --content-file PATH)` | Add a learning |
 | `learnings` | `notes.py learnings` | List all learnings |
 | `unlearn` | `notes.py unlearn <ID>` | Remove a learning (e.g. `L-2026-3`) |
-| `handoff-sessions` | `notes.py handoff-sessions` | List sessions with handoffs |
-| `migrate` | `notes.py migrate` | Run data migrations |
 | `drop` | `notes.py drop <ID>` | Close a note without marking it done (status → dropped) |
 | `unarchive` | `notes.py unarchive <ID>` | Move a note back from its year's archive to active |
 | `show` | `notes.py show <ID>` | Alias of `get` |
@@ -43,7 +41,7 @@ Core note and learning management.
 | `repair` | `notes.py repair [--dry-run]` | Repair index/data inconsistencies |
 | `backfill-brief` | `notes.py backfill-brief [--dry-run] [--force]` | Populate `brief_summary` on entries that lack one |
 
-> **Note IDs** use TYPE-YEAR-seq format (e.g. `T-2026-1`, `L-2026-3`). Legacy bare integers are accepted via migration lookup. See `scribe/CLAUDE.md` for the full prefix table.
+> **Note IDs** use TYPE-YEAR-seq format (e.g. `T-2026-1`, `L-2026-3`) — the only accepted form. See `scribe/CLAUDE.md` for the full prefix table.
 
 ### Common flags
 
@@ -98,7 +96,7 @@ python scribe/backup_indexes.py --project other-project
 | `--retain N` | no | Number of dated backups to keep (default 30; `0` keeps only the newest) |
 | `--project KEY` | no | Project key override (defaults to the current repo's scribe state dir) |
 
-Copies `index.jsonl` files and the global `next_id` counter — the `.md` bodies are not backed up, since they are append-only and tracked separately. Intended to run on a daily cron; exits 0 even when no state dir exists (the first `/apiary-context` call will create one).
+Copies `index.jsonl` files only — the `.md` bodies and the per-year `next_seq` counters are not backed up. Not scheduled anywhere today; exits 0 even when no state dir exists (the first `/apiary-context` call will create one).
 
 ## core/startup.py
 
@@ -342,27 +340,6 @@ Exit codes: `0` all checks pass; `2` no such directory; `6` one or more checks f
 
 `spawn` runs the same checks before reporting success, so it also exits `6` when a freshly-created repo fails them.
 
-## refiner/round_counter.py
-
-Track refinement round counts per session. Used by the `/refine` skill to enforce the 15-round soft limit.
-
-### Subcommands
-
-| Subcommand | Usage | Description |
-|------------|-------|-------------|
-| `start` | `round_counter.py start --session-id ID` | Initialize counter at 0 for this session |
-| `tick` | `round_counter.py tick --session-id ID` | Increment by 1, print new count |
-| `reset` | `round_counter.py reset --session-id ID` | Reset to 0 |
-| `status` | `round_counter.py status --session-id ID` | Print current count without incrementing |
-
-### Flags
-
-| Flag | Required | Description |
-|------|----------|-------------|
-| `--session-id ID` | yes | Session ID used to scope the counter file |
-
-State is stored at `refiner/tmp/round_<session-id>.json`. Directory is auto-created on first write.
-
 ## researcher/cli.py
 
 Manage structured research findings per repo. Entries live at `<state-dir>/research/<topic>/<slug>.md` with a YAML-subset frontmatter (title, topic, tags, dates, sources) and a standard body (Summary / Context / Findings / Code / Caveats). A controlled tag vocabulary lives at `<state-dir>/research/tags.yaml`. See [File Storage](file-storage.md) for the per-target state-dir resolver.
@@ -542,7 +519,7 @@ Exit 0 + validated JSON on success. Exit 1 + error details on failure.
 
 ## harden/round_counter.py
 
-Track harden round counts per session. Same interface as `refiner/round_counter.py`.
+Track harden round counts per session. Also used by `/refine`, which scopes its own counter with a `refine-` prefix on `--session-id`.
 
 ### Subcommands
 

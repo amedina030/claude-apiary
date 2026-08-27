@@ -259,9 +259,8 @@ claude-apiary/
 │   └── test_notes.py            # Tests for notes.py
 │
 ├── refiner/                     # Idea-to-spec refinement tool
-│   ├── commands/
-│   │   └── refine.md            # /refine slash command definition
-│   └── round_counter.py         # Round tracking for refinement loops
+│   └── commands/
+│       └── refine.md            # /refine slash command definition
 │
 ├── harden/                      # Adversarial code hardening tool
 │   ├── agents/
@@ -277,7 +276,7 @@ claude-apiary/
 │   ├── validate_consolidation.py # Validates Consolidator output + degrade fallback
 │   ├── validate_response.py     # Validates Defender output structure
 │   ├── validate_and_assign.py   # Combined validate + assign-IDs step (findings/response/consolidation)
-│   ├── round_counter.py         # Round tracking for harden loops
+│   ├── round_counter.py         # Round tracking for harden and refine loops
 │   └── tmp/                     # Runtime — round state files (git-ignored)
 │
 ├── compass/                     # Personality profile and behavioral read

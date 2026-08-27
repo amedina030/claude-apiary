@@ -39,7 +39,7 @@ Each Python file follows this order:
 | Constants | `UPPER_SNAKE` | `CLAUDE_DIR`, `VALID_TYPES` |
 | Classes | `PascalCase` | `SessionId`, `FileLock` |
 | Private functions | `_leading_underscore` | `_file_lock()`, `_flag_path()` |
-| CLI subcommands | `kebab-case` (argparse) | `handoff-sessions` |
+| CLI subcommands | `kebab-case` (argparse) | `archive-learning`, `backfill-brief` |
 
 ## Imports
 

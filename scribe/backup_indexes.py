@@ -46,10 +46,6 @@ def create_backup(state_dir: Path, backups_root: Path, date_str: str) -> tuple[P
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src, dst)
                     count += 1
-    map_src = state_dir / 'migration_id_map.json'
-    if map_src.exists():
-        shutil.copy2(map_src, target / 'migration_id_map.json')
-        count += 1
     return (target, count)
 
 

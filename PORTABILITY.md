@@ -63,7 +63,6 @@ Per-target state lives under the apiary checkout, not inside each target repo. T
 - `<state-dir>/scribe/<type>/<year>/<seq>.md` — per-note body files
 - `<state-dir>/scribe/<type>/<year>/archive/` — auto-archived old notes (moved after 30 days)
 - `<state-dir>/scribe/learnings/<year>/` — accumulated project learnings (same typed-year layout)
-- `<state-dir>/scribe/migration_id_map.json` — legacy bare-int to typed-year ID map for CLI lookups
 - `<state-dir>/scribe/memory/` — long-lived memory facts loaded at session start
 - `<state-dir>/compass/` — personality observations + synthesized profile
 - `<state-dir>/research/` — researcher entries + tag vocabulary
