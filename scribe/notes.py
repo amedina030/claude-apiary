@@ -30,7 +30,7 @@ from pathlib import Path as _PathImport
 sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
 from core.session import SessionId
 from core.utils.timeutil import parse_iso
-from scribe import maintenance, policy
+from scribe import infer, maintenance, policy
 from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME, BRIEF_SUMMARY_MAX, derive_brief_summary, derive_summary
 
 from pathlib import Path
@@ -853,10 +853,7 @@ def cmd_learn(args):
     areas = [a for a in (getattr(args, 'area', None) or []) if a]
     supersedes = (getattr(args, 'supersedes', '') or '').strip() or None
 
-    if not tags and not areas:
-        inferred = _infer_learning_tags_areas(content, store)
-        tags = inferred.get('tags') or []
-        areas = inferred.get('areas') or []
+    tags, areas = _maybe_infer(args, content, store, tags, areas)
 
     entry = store.add_learning(
         content=content,
@@ -870,82 +867,19 @@ def cmd_learn(args):
     print(f"Learned {_format_id(entry)}")
 
 
-def _infer_learning_tags_areas(content: str, store) -> dict:
-    """Call `claude -p` to infer tags and areas for a new learning.
+def _maybe_infer(args, content: str, store, tags: list, areas: list) -> tuple:
+    """Return the tags/areas to store, asking a model only if allowed to.
 
-    Fail-open: any subprocess error, timeout, or parse failure returns
-    ``{}`` so the learn command still succeeds with empty lists rather
-    than blocking a user mid-task. Inherits runner's subprocess hygiene
-    (no shell, restricted env, stdin prompt).
+    Supplied tags always win — inference is a fallback for the untagged case,
+    never an override. And it is off unless `--infer` or APIARY_SCRIBE_INFER
+    asks for it, so `/wrapup` writing a learning costs no model call.
     """
-    try:
-        sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
-        from runner.claude_subprocess import run_claude  # lazy — avoids hot-path import cost
-    except Exception:
-        return {}
-
-    try:
-        vocab = sorted({
-            t for l in store.list_learnings()
-            for t in (l.get('tags') or [])
-        })
-    except Exception:
-        vocab = []
-
-    prompt = _build_inference_prompt(content, vocab)
-    rc, stdout, stderr = run_claude(prompt, timeout=10)
-    if rc != 0 or not stdout.strip():
-        if stderr:
-            print(f'warning: tag/area inference failed ({stderr[:200]})', file=sys.stderr)
-        else:
-            print('warning: tag/area inference failed (empty output)', file=sys.stderr)
-        return {}
-    parsed = _parse_inference_response(stdout)
-    if parsed is None:
-        print('warning: tag/area inference returned unparseable JSON', file=sys.stderr)
-        return {}
-    return {
-        'tags': [str(t).strip() for t in parsed.get('tags', []) if str(t).strip()],
-        'areas': [str(a).strip() for a in parsed.get('areas', []) if str(a).strip()],
-    }
-
-
-def _build_inference_prompt(content: str, vocab: list[str]) -> str:
-    """Return the single-turn prompt sent to `claude -p` for tag/area inference."""
-    vocab_line = ', '.join(vocab) if vocab else '(none yet)'
-    return (
-        "You are tagging a project learning so it can be auto-surfaced when I later\n"
-        "edit related files. Respond with a JSON object only — no prose, no markdown fence.\n\n"
-        f"Existing tag vocabulary: {vocab_line}\n\n"
-        'Return {"tags": [...], "areas": [...]} where:\n'
-        '- tags: 1-3 short lowercase tokens (prefer existing vocabulary; invent only if needed).\n'
-        '- areas: glob patterns matching file paths the learning applies to (e.g. "gui/**",\n'
-        '  "scribe/notes.py", "core/hooks/*.py"). Empty list if not path-specific.\n\n'
-        f"Learning content:\n{content}"
-    )
-
-
-def _parse_inference_response(stdout: str) -> dict | None:
-    """Extract the inner JSON payload from a `claude -p --output-format json`
-    envelope. Returns None when parsing fails so callers can fall back."""
-    try:
-        envelope = json.loads(stdout)
-        inner = envelope.get('result', stdout) if isinstance(envelope, dict) else stdout
-    except json.JSONDecodeError:
-        inner = stdout
-    if not isinstance(inner, str):
-        return None
-    text = inner.strip()
-    fence = re.search(r'```(?:json)?\s*\n([\s\S]*?)```', text)
-    if fence:
-        text = fence.group(1).strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    return data
+    if tags or areas:
+        return tags, areas
+    if not infer.inference_enabled(args):
+        return tags, areas
+    inferred = infer.infer_tags_areas(content, store)
+    return (inferred.get('tags') or [], inferred.get('areas') or [])
 
 
 def cmd_learnings(args):
@@ -1070,10 +1004,7 @@ def cmd_supersede(args):
     tags_csv = (getattr(args, 'tags', '') or '').strip()
     tags = [t.strip() for t in tags_csv.split(',') if t.strip()] if tags_csv else []
     areas = [a for a in (getattr(args, 'area', None) or []) if a]
-    if not tags and not areas:
-        inferred = _infer_learning_tags_areas(content, store)
-        tags = inferred.get('tags') or []
-        areas = inferred.get('areas') or []
+    tags, areas = _maybe_infer(args, content, store, tags, areas)
 
     old_display_id = _format_id(existing)
     archived = store.archive_learning(year, seq)
@@ -1127,6 +1058,30 @@ def cmd_repair(args):
     )
     for line in report.lines:
         print(line)
+
+
+def cmd_retrotag(args):
+    """Infer tags and areas for every learning that has neither.
+
+    The one scribe command whose whole point is a model call, so it ignores
+    the `--infer` switch the write commands consult. Skips anything already
+    tagged, which makes a half-finished run cheap to resume.
+    """
+    report = maintenance.retrotag(
+        args.store,
+        dry_run=bool(getattr(args, 'dry_run', False)),
+        model=getattr(args, 'model', None),
+        limit=getattr(args, 'limit', None),
+    )
+    prefix = '(dry-run) ' if getattr(args, 'dry_run', False) else ''
+    print(f'Retrotag {prefix}complete: {report.processed} tagged, '
+          f'{report.already_tagged} already tagged, {len(report.errors)} error(s) '
+          f'of {report.total} learning(s).')
+    _print_capped(report.lines)
+    for err in report.errors[:20]:
+        print(f'  - {err}', file=sys.stderr)
+    if len(report.errors) > 20:
+        print(f'  ... and {len(report.errors) - 20} more', file=sys.stderr)
 
 
 def cmd_backup(args):
@@ -1210,6 +1165,21 @@ def cmd_template(args):
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
+def _add_infer_flags(parser) -> None:
+    """Attach the tag-inference opt-in pair to a write subcommand.
+
+    Off by default so a `/wrapup` handoff never spawns a model call; see
+    :mod:`scribe.infer` for the precedence.
+    """
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--infer", action="store_true",
+                       help=f"Infer --tags/--area via claude -p when neither is given. "
+                            f"Off by default; {infer.INFER_ENV_VAR}=1 turns it on "
+                            f"for a whole session.")
+    group.add_argument("--no-infer", dest="no_infer", action="store_true",
+                       help=f"Never infer, even with {infer.INFER_ENV_VAR} set.")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Scribe — structured note management")
@@ -1335,11 +1305,12 @@ def main():
     p_learn.add_argument("--role", default="", help="Session role")
     p_learn.add_argument("--mission", default="", help="Session mission")
     p_learn.add_argument("--tags", default="",
-                          help="Comma-separated tag list. Omit to infer via claude -p.")
+                          help="Comma-separated tag list.")
     p_learn.add_argument("--area", action="append", default=[],
-                          help="Area glob pattern (repeatable). Omit to infer via claude -p.")
+                          help="Area glob pattern (repeatable).")
     p_learn.add_argument("--supersedes", default="",
                           help="ID of a prior learning this one replaces (e.g. L-2026-5).")
+    _add_infer_flags(p_learn)
 
     # learnings
     p_learnings = sub.add_parser("learnings")
@@ -1370,11 +1341,22 @@ def main():
                              help="Read the body from a file")
     p_supersede.add_argument("--session-id", default="")
     p_supersede.add_argument("--tags", default="",
-                              help="Comma-separated tag list. Omit to infer via claude -p.")
+                              help="Comma-separated tag list.")
     p_supersede.add_argument("--area", action="append", default=[],
-                              help="Area glob pattern (repeatable). Omit to infer via claude -p.")
+                              help="Area glob pattern (repeatable).")
     p_supersede.add_argument("--role", default="")
     p_supersede.add_argument("--mission", default="")
+    _add_infer_flags(p_supersede)
+
+    # retrotag — batch-infer tags for learnings that have none
+    p_retrotag = sub.add_parser("retrotag",
+                                help="Infer tags and areas for learnings that have neither")
+    p_retrotag.add_argument("--dry-run", action="store_true",
+                            help="Print what would be tagged without writing")
+    p_retrotag.add_argument("--model", default=None,
+                            help="Override the claude model used for inference")
+    p_retrotag.add_argument("--limit", type=int, default=None,
+                            help="Process only the first N learnings (useful for spot-checks)")
 
     p_repair = sub.add_parser("repair")
     p_repair.add_argument("--dry-run", action="store_true", help="Report what would be fixed without modifying files")
@@ -1443,6 +1425,7 @@ def main():
         'repair': cmd_repair,
         'backfill-brief': cmd_backfill_brief,
         'backup': cmd_backup, 'restore': cmd_restore,
+        'retrotag': cmd_retrotag,
         'template': cmd_template,
     }
     handler = commands.get(args.command)

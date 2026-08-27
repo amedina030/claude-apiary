@@ -338,6 +338,78 @@ def prune_backups(root: Path, retain: int) -> list:
     return to_delete
 
 
+# --------------------------------------------------------------------------- #
+# retrotag
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class RetrotagReport:
+    """What a retrotag pass tagged, skipped, and failed on."""
+    total: int = 0
+    processed: int = 0
+    already_tagged: int = 0
+    lines: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+
+def retrotag(store: ScribeStore, *, dry_run: bool = False,
+             model: "str | None" = None, limit: "int | None" = None,
+             timeout: "int | None" = None) -> RetrotagReport:
+    """Infer tags and areas for every learning that has neither.
+
+    Idempotent by construction: an entry with any tag or any area is left
+    alone, so a run that dies halfway costs only the calls it already made.
+    Walks in display-ID order and feeds each newly invented tag back into the
+    vocabulary, so later learnings reuse what earlier ones just established.
+
+    Unlike ``learn``, this never consults the inference switch — inference is
+    the whole command.
+    """
+    from scribe import infer  # local: pulls the runner subprocess wrapper
+
+    report = RetrotagReport()
+    learnings = sorted(store.list_learnings(),
+                       key=lambda e: (e.get('year', 0), e.get('seq', 0)))
+    if limit:
+        learnings = learnings[:limit]
+    report.total = len(learnings)
+    vocab = infer.collect_vocab(store)
+
+    for entry in learnings:
+        display_id = entry.get('display_id', f"L-{entry.get('year')}-{entry.get('seq')}")
+        if (entry.get('tags') or []) or (entry.get('areas') or []):
+            report.already_tagged += 1
+            continue
+
+        full = store.get_learning(entry['year'], entry['seq'])
+        body = (full.get('content') if full else '') or ''
+        if not body.strip():
+            report.errors.append(f'{display_id}: empty body, skipping')
+            continue
+
+        inferred = infer.infer_tags_areas(
+            body, store, model=model, vocab=vocab,
+            timeout=timeout or infer.RETROTAG_TIMEOUT,
+            warn=lambda msg, _id=display_id: report.errors.append(f'{_id}: {msg}'))
+        if not inferred:
+            continue
+
+        tags, areas = inferred['tags'], inferred['areas']
+        report.lines.append(f'  {display_id}: tags={tags} areas={areas}')
+        if not dry_run:
+            try:
+                store.update_learning(entry['year'], entry['seq'], tags=tags, areas=areas)
+            except OSError as exc:
+                report.errors.append(f'{display_id}: write failed: {exc}')
+                continue
+            for tag in tags:
+                if tag not in vocab:
+                    vocab.append(tag)
+        report.processed += 1
+
+    return report
+
+
 @dataclass
 class RestoreReport:
     """What a restore copied back, and from where."""

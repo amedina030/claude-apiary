@@ -40,6 +40,7 @@ Core note and learning management.
 | `archive-learning` | `notes.py archive-learning <ID>` | Archive a learning by ID (e.g. `L-2026-5`) |
 | `repair` | `notes.py repair [--dry-run]` | Repair index/data inconsistencies |
 | `backfill-brief` | `notes.py backfill-brief [--dry-run] [--force]` | Populate `brief_summary` on entries that lack one |
+| `retrotag` | `notes.py retrotag [--dry-run] [--model NAME] [--limit N]` | Infer tags and areas for every learning that has neither. One `claude -p` call per untagged learning; skips anything already tagged, so a half-finished run is cheap to resume |
 | `backup` | `notes.py backup [--retain N]` | Snapshot every `index.jsonl` to `<state-dir>/backups/<YYYY-MM-DD>/`, then prune old snapshots. Same operation as `scribe/backup_indexes.py` |
 | `restore` | `notes.py restore [DATE] [--list] [--dry-run]` | Restore the indexes from a dated snapshot (default: the newest). Run `repair` afterwards — a body written after the snapshot has no index row until it is rebuilt |
 
@@ -73,13 +74,29 @@ Core note and learning management.
 | `--session SESSION` | list | Filter by session ID |
 | `--index` | learnings | Compact tag-grouped output for startup injection |
 | `--tag TAG` | learnings | Filter learnings by tag (substring, case-insensitive) |
-| `--tags LIST` | add, learn, supersede | Comma-separated tag list. Stored verbatim on `add`; on `learn`/`supersede`, omit to infer via `claude -p` |
+| `--tags LIST` | add, learn, supersede | Comma-separated tag list, stored verbatim |
 | `--area GLOB` | learn, supersede, learnings | Area glob — repeatable on `learn`/`supersede`; exact-match filter on `learnings` |
 | `--supersedes ID` | learn | ID of a prior learning this one replaces (e.g. `L-2026-5`) |
-| `--dry-run` | repair, backfill-brief, restore | Report what would change without writing |
+| `--infer` | learn, supersede | Infer `--tags`/`--area` via `claude -p` when neither is given. **Off by default** — see Tag inference below |
+| `--no-infer` | learn, supersede | Never infer, even with `APIARY_SCRIBE_INFER` set |
+| `--model NAME` | retrotag | Override the claude model used for inference |
+| `--limit N` | retrotag | Process only the first N learnings (spot-checks) |
+| `--dry-run` | repair, backfill-brief, restore, retrotag | Report what would change without writing |
 | `--force` | add, backfill-brief | On `add`, bypass the template gate's required-section check (logs to stderr what was missing); on `backfill-brief`, re-derive `brief_summary` even for entries that already have one |
 | `--retain N` | backup | Dated snapshots to keep (default 30; `0` keeps only the newest) |
 | `--list` | restore | List available snapshot dates and exit |
+
+### Tag inference
+
+`learn` and `supersede` can ask a model for a learning's `--tags` and `--area` when you supply neither. **This is off by default.** It used to be on, which meant `/wrapup` paid for one `claude -p` call (10-second budget) per captured learning, on the critical path of ending a session. Three ways to ask for it, most specific first:
+
+| | Effect |
+|---|---|
+| `--infer` | Infer for this one command |
+| `--no-infer` | Never infer, whatever the environment says |
+| `APIARY_SCRIBE_INFER=1` | Infer for every `learn`/`supersede` in this session (also `true`/`yes`/`on`) |
+
+Supplied tags always win — inference is a fallback for the untagged case, never an override. Failure is soft: a timeout or an unparseable reply writes the learning untagged rather than failing the command. `notes.py retrotag` fills those in later and ignores the switch entirely, because inference is the whole command.
 
 ### Note templates
 

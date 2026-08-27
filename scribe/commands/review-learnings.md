@@ -45,16 +45,17 @@ Walk the user through the project's learning corpus, one tag group at a time, so
         python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py supersede <old-ID> --content "<new content>"
         ```
 
-        (Omit `--tags` and `--area` — they'll be inferred via `claude -p`, same as a regular learn.)
+        (Add `--infer` if you want `--tags`/`--area` inferred via `claude -p`; without it the replacement is written untagged and `retrotag` can pick it up later.)
 
       - **Merge** — combine two related learnings into one. Two step flow:
         1. Write a new learning that captures both insights: `notes.py learn --content "<merged content>"`.
         2. Archive the two originals: `notes.py archive-learning <old-ID-1>` and `notes.py archive-learning <old-ID-2>`.
 
-4. Handle the `untagged` group specially — prompt the user whether to auto-tag it via the retrotag script instead of walking one-by-one:
+4. Handle the `untagged` group specially — prompt the user whether to auto-tag it in one pass instead of walking one-by-one. `retrotag` calls a model once per untagged learning, so offer `--dry-run` first if the group is large:
 
    ```bash
-   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scripts/retrotag_learnings.py
+   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py retrotag --dry-run
+   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py retrotag
    ```
 
 5. When every tag group has been processed, stamp the review timestamp so the startup nudge quiets down:

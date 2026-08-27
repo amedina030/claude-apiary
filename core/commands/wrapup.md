@@ -22,6 +22,8 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.
 
 Write a learning when you hit an error and found a workaround, found a better approach mid-task, a tool/API behaved unexpectedly and you figured out why, or you found a non-obvious project-specific pattern or constraint. Do **not** write one when the fix was obvious from the error message, it's general programming knowledge, it's already documented in the codebase/`docs/`/`CLAUDE.md`, or it duplicates an existing learning (update that one instead).
 
+Pass `--tags` when you already know the right ones; otherwise leave the learning untagged. Wrapup must stay fast, so `learn` never calls a model on its own — `/review-learnings` runs `notes.py retrotag` to fill in the gaps in one batch.
+
 **TODOs** — file any deferred or untracked work (including bugs found but not fixed) as todos:
 
 ```bash

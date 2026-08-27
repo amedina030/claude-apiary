@@ -803,6 +803,41 @@ class ScribeStore:
             result['_warning'] = 'body_file_missing'
         return result
 
+    def update_learning(self, year: int, seq: int, *,
+                        tags: list | None = None,
+                        areas: list | None = None) -> dict | None:
+        """Replace a learning's tags/areas in the index row *and* the .md.
+
+        Both, because ``get_learning`` treats the .md's frontmatter as the
+        source of truth and the index as a mirror — writing only one of them
+        leaves a learning whose listed tags and stored tags disagree. Returns
+        the updated entry, or None when the learning is not in the active
+        index (an archived learning is not retagged).
+        """
+        year_dir = self._learning_dir() / str(year)
+        if not year_dir.exists():
+            return None
+        entries = self._read_index(year_dir)
+        for i, entry in enumerate(entries):
+            if entry.get('seq') != seq:
+                continue
+            updated = {**entry}
+            if tags is not None:
+                updated['tags'] = list(tags)
+            if areas is not None:
+                updated['areas'] = list(areas)
+            raw = self._read_note_file(year_dir, seq)
+            fm, body = _parse_learning_content(raw) if raw is not None else ({}, '')
+            self._write_note_file(year_dir, seq, _format_learning_content(body or '', {
+                'tags': updated.get('tags') or [],
+                'areas': updated.get('areas') or [],
+                'supersedes': updated.get('supersedes') or fm.get('supersedes'),
+            }))
+            entries[i] = updated
+            self._write_index(year_dir, entries)
+            return updated
+        return None
+
     def archive_learning(self, year: int, seq: int) -> dict | None:
         """Move a learning to its year folder's archive.
 
