@@ -11,6 +11,7 @@ exists to close.
 ``write_text_atomic(...)``   ``core.utils.atomic``  — tmp + os.replace
 ``write_json_atomic(...)``   ``core.utils.atomic``
 ``now_iso()``                ``core.utils.timeutil`` — the one format
+``parse_iso(ts)``            ``core.utils.timeutil`` — datetime, or None
 ``FileLock``                 ``core.utils.filelock``
 ``get_project_key(repo)``    ``core.utils.project``
 ``resolve_state_dir(...)``   ``core.utils.state``   — per-target state
@@ -25,13 +26,14 @@ import this package on the tool-call hot path.
 from core.utils.atomic import write_json_atomic, write_text_atomic
 from core.utils.gitutil import git_root, main_worktree_root
 from core.utils.jsonio import read_json_object
-from core.utils.timeutil import ISO_FORMAT, now_iso
+from core.utils.timeutil import ISO_FORMAT, now_iso, parse_iso
 
 __all__ = [
     "ISO_FORMAT",
     "git_root",
     "main_worktree_root",
     "now_iso",
+    "parse_iso",
     "read_json_object",
     "write_json_atomic",
     "write_text_atomic",

@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import scribe.notes as notes
+from scribe import policy
 from scribe.store import ScribeStore
 
 
@@ -109,18 +110,18 @@ class TestScribeNotes(unittest.TestCase):
         old_ts = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
         self.store.update_note('todo', entry['year'], entry['seq'],
                                timestamp=old_ts, status_changed_at=old_ts)
-        count = notes._run_auto_archive_store(self.store)
+        count = policy.run_auto_archive(self.store)
         self.assertGreaterEqual(count, 1)
 
     def test_auto_archive_old_decisions(self):
         entry = self.store.add_note('decision', 'old decision', 'sess1')
         old_ts = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
         self.store.update_note('decision', entry['year'], entry['seq'], timestamp=old_ts)
-        count = notes._run_auto_archive_store(self.store)
+        count = policy.run_auto_archive(self.store)
         self.assertGreaterEqual(count, 1)
         # Recent decision should NOT be archived
         fresh = self.store.add_note('decision', 'recent decision', 'sess1')
-        notes._run_auto_archive_store(self.store)
+        policy.run_auto_archive(self.store)
         got = self.store.get_note('decision', fresh['year'], fresh['seq'])
         self.assertFalse(got.get('_from_archive'))
 
@@ -575,7 +576,7 @@ class TestAutoArchivePolicy(unittest.TestCase):
         self.store.update_note('todo', entry['year'], entry['seq'], timestamp=old_ts)
         # Marked done just now — status_changed_at is fresh.
         self.store.update_note('todo', entry['year'], entry['seq'], status='done')
-        self.assertEqual(notes._run_auto_archive_store(self.store), 0)
+        self.assertEqual(policy.run_auto_archive(self.store), 0)
         self.assertFalse(self._is_archived(entry))
 
     def test_note_done_two_days_ago_is_archived(self):
@@ -584,7 +585,7 @@ class TestAutoArchivePolicy(unittest.TestCase):
         stale = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
         self.store.update_note('todo', entry['year'], entry['seq'],
                                status_changed_at=stale)
-        self.assertEqual(notes._run_auto_archive_store(self.store), 1)
+        self.assertEqual(policy.run_auto_archive(self.store), 1)
         self.assertTrue(self._is_archived(entry))
 
     def test_legacy_done_row_without_status_changed_at_uses_timestamp(self):
@@ -598,7 +599,7 @@ class TestAutoArchivePolicy(unittest.TestCase):
             r['timestamp'] = old_ts
             r.pop('status_changed_at', None)
         ScribeStore._write_index(year_dir, rows)
-        self.assertEqual(notes._run_auto_archive_store(self.store), 1)
+        self.assertEqual(policy.run_auto_archive(self.store), 1)
         self.assertTrue(self._is_archived(entry))
 
 

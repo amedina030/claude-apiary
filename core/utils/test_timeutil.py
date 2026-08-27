@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from core.utils.timeutil import ISO_FORMAT, now_iso
+from core.utils.timeutil import ISO_FORMAT, now_iso, parse_iso
 
 _SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
@@ -36,6 +36,28 @@ class NowIsoTests(unittest.TestCase):
         early = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc).strftime(ISO_FORMAT)
         late = datetime(2026, 11, 2, 3, 4, 5, tzinfo=timezone.utc).strftime(ISO_FORMAT)
         self.assertLess(early, late)
+
+
+class ParseIsoTests(unittest.TestCase):
+    def test_round_trips_now_iso(self) -> None:
+        stamp = now_iso()
+        parsed = parse_iso(stamp)
+        self.assertEqual(parsed.tzinfo, timezone.utc)
+        self.assertEqual(parsed.strftime(ISO_FORMAT), stamp)
+
+    def test_accepts_an_offset_form(self) -> None:
+        self.assertEqual(parse_iso("2026-08-26T12:00:00+00:00"),
+                         datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc))
+
+    def test_accepts_microseconds(self) -> None:
+        # datetime.isoformat() — what scribe's index rows actually carry.
+        written = datetime(2026, 8, 26, 12, 0, 0, 123456, tzinfo=timezone.utc).isoformat()
+        self.assertEqual(parse_iso(written).microsecond, 123456)
+
+    def test_returns_none_for_junk(self) -> None:
+        for value in ("", "not a date", None, 17, [], "2026-13-45T99:99:99Z"):
+            with self.subTest(value=value):
+                self.assertIsNone(parse_iso(value))
 
 
 if __name__ == "__main__":

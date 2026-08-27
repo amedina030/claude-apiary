@@ -20,9 +20,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from core.session import SessionId, load_history, sessions_dir
 from core.utils.project import get_project_key
 from scribe.notes import (
-    format_age, run_auto_archive, scribe_state_dir,
+    format_age, scribe_state_dir,
     PROJECTS_DIR, _format_id,
 )
+from scribe.policy import run_auto_archive
 from scribe.store import ScribeStore, TYPE_FOLDERS
 
 
@@ -173,14 +174,16 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
     if sd is None:
         sd = PROJECTS_DIR / project_key
 
-    # Prune stale notes before loading
-    archived_count = run_auto_archive(project_key, start=start)
+    store = ScribeStore(sd)
+
+    # Prune stale notes before loading. The rules live in scribe/policy.py —
+    # the same ones `notes.py add` and `notes.py tidy` apply.
+    archived_count = run_auto_archive(store)
 
     lines = []
     if archived_count:
         lines.append(f"[auto-archived {archived_count} notes]")
 
-    store = ScribeStore(sd)
 
     active_entries = store.list_notes(status="active")
     filtered_active = [

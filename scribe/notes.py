@@ -29,6 +29,8 @@ from pathlib import Path as _PathImport
 # Add project root to path for core.utils import
 sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
 from core.session import SessionId
+from core.utils.timeutil import parse_iso
+from scribe import policy
 from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME, BRIEF_SUMMARY_MAX, derive_brief_summary, derive_summary
 
 from pathlib import Path
@@ -66,7 +68,6 @@ _PREFIX_TO_TYPE: dict[str, str] = {
     'R': 'reference', 'B': 'blocker', 'C': 'context', 'G': 'general', 'L': 'learning',
 }
 
-AUTO_ARCHIVE_DAYS = 30
 MAX_CONTENT_LENGTH = 100_000  # bytes; prevents runaway JSONL file growth
 MAX_SUMMARY_LENGTH = 300  # chars; keeps index.jsonl lines small and startup injection cheap
 MAX_LAST = 10_000  # upper bound for --last to prevent misleading output
@@ -232,16 +233,9 @@ def scaffold_default_templates(state_dir: Path) -> list:
     return sorted(written)
 
 
-def _parse_timestamp(ts):
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except (ValueError, AttributeError):
-        return None
-
-
 def format_age(ts):
     """Return human-readable relative age string from an ISO timestamp."""
-    dt = _parse_timestamp(ts)
+    dt = parse_iso(ts)
     if dt is None:
         return "unknown"
     now = datetime.now(timezone.utc)
@@ -294,75 +288,6 @@ def _color_status_tag(label: str) -> str:
     key = label.strip()
     code = _STATUS_TAG_COLORS.get(key)
     return f' {_c(key, code)}' if code else label
-
-
-def _run_auto_archive_store(store) -> int:
-    """Run auto-archive using ScribeStore. Returns count of archived notes.
-
-    Retention rules by type:
-      handoff  - keep only the latest per role/mission, archive the rest
-      context  - archive after 3 days (mid-session checkpoints decay fast)
-      decision - archive after 30 days (historical record, not live state)
-      done     - archive 1 day after the note was *marked* done
-      todo/wishlist/blocker - keep until done
-
-    The "done" clock reads ``status_changed_at`` (stamped by update_note on
-    every status transition) and only falls back to ``timestamp`` for legacy
-    rows written before that field existed. Measuring from creation instead
-    archived notes the moment they were closed, which is what made them
-    vanish out from under a follow-up ``update``.
-    """
-    now = datetime.now(timezone.utc)
-    context_cutoff = now - timedelta(days=3)
-    decision_cutoff = now - timedelta(days=30)
-    done_cutoff = now - timedelta(days=1)
-
-    all_notes = store.list_notes(status='active')
-
-    # Find the latest handoff per role/mission
-    latest_handoff = {}  # (role, mission) -> newest timestamp
-    for n in all_notes:
-        if n.get('type') == 'handoff':
-            key = (n.get('role', 'user'), n.get('mission', 'general'))
-            ts = _parse_timestamp(n.get('timestamp', ''))
-            if ts is not None:
-                if key not in latest_handoff or ts > latest_handoff[key]:
-                    latest_handoff[key] = ts
-
-    to_archive_ids = []
-    for n in all_notes:
-        ts = _parse_timestamp(n.get('timestamp', ''))
-        ntype = n.get('type', '')
-        if ts is None:
-            continue
-        # Done notes age out from when they were marked done, not when they
-        # were created (falling back to creation only for pre-status_changed_at
-        # rows). The rest of the chain is unchanged, so a done note that is not
-        # yet 1 day old can still be archived by its type's own rule.
-        done_ts = _parse_timestamp(n.get('status_changed_at', '')) or ts
-        if n.get('status') == 'done' and done_ts < done_cutoff:
-            to_archive_ids.append((n['type'], n['year'], n['seq']))
-        elif ntype == 'handoff':
-            key = (n.get('role', 'user'), n.get('mission', 'general'))
-            if ts < latest_handoff.get(key, ts):
-                to_archive_ids.append((n['type'], n['year'], n['seq']))
-        elif ntype == 'context' and ts < context_cutoff:
-            to_archive_ids.append((n['type'], n['year'], n['seq']))
-        elif ntype == 'decision' and ts < decision_cutoff:
-            to_archive_ids.append((n['type'], n['year'], n['seq']))
-
-    for ntype, nyear, nseq in to_archive_ids:
-        store.archive_note(ntype, nyear, nseq)
-    return len(to_archive_ids)
-
-
-def run_auto_archive(project_key: str, *, start: Path | None = None) -> int:
-    """Run auto-archive for a project. Returns count of archived notes."""
-    sd = scribe_state_dir(start)
-    if sd is None:
-        sd = PROJECTS_DIR / project_key
-    store = ScribeStore(sd)
-    return _run_auto_archive_store(store)
 
 
 # ---------------------------------------------------------------------------
@@ -506,8 +431,8 @@ def cmd_add(args):
     )
     print(f"Added {_format_id(entry)} ({entry['type']})")
 
-    # Run auto-archive after add
-    _run_auto_archive_store(store)
+    # Run the retention sweep after add
+    policy.run_auto_archive(store)
 
 
 def cmd_list(args):
@@ -844,30 +769,25 @@ def cmd_archive(args):
             print(f"Error: --before must be in YYYY-MM-DD format, got {args.before!r}", file=sys.stderr)
             sys.exit(1)
     else:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=AUTO_ARCHIVE_DAYS)
+        cutoff = policy.default_archive_cutoff()
 
-    all_notes = store.list_notes(status='active')
-    archived_count = 0
-    for n in all_notes:
-        ts = _parse_timestamp(n.get('timestamp', ''))
-        archivable = (n.get('status') == 'done') or (n.get('type') == 'handoff')
-        if ts is not None and ts < cutoff and archivable:
-            store.archive_note(n['type'], n['year'], n['seq'])
-            archived_count += 1
-    if not archived_count:
+    keys = policy.select_archivable_before(store.list_notes(status='active'), cutoff)
+    for note_type, year, seq in keys:
+        store.archive_note(note_type, year, seq)
+    if not keys:
         print('Nothing to archive.')
         return
-    print(f"Archived {archived_count} notes (before {cutoff.strftime('%Y-%m-%d')}).")
+    print(f"Archived {len(keys)} notes (before {cutoff.strftime('%Y-%m-%d')}).")
 
 
 def cmd_tidy(args):
-    """Run the auto-archive sweep explicitly.
+    """Run the retention sweep explicitly.
 
     The same policy `add` and session startup apply, exposed as a verb so a
     read command (`list`) never has to mutate state to keep the active view
     tidy. Safe to run any time; prints what it moved.
     """
-    archived = _run_auto_archive_store(args.store)
+    archived = policy.run_auto_archive(args.store)
     if not archived:
         print('Nothing to tidy.')
         return

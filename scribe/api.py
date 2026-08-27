@@ -26,6 +26,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from core.utils.state import resolve_apiary_repo, repos_dir, registry_path, find_state_dir
+from core.utils.timeutil import parse_iso
 from scribe.store import ScribeStore
 
 __all__ = [
@@ -60,13 +61,11 @@ def parse_ts(ts: str) -> "datetime | None":
     Returns a timezone-aware ``datetime`` or ``None`` on any failure. The
     Asana tool uses this to compare scribe timestamps against Asana's
     ``...Z`` timestamps.
+
+    The name is frozen (it is in ``__all__``); the implementation is
+    ``core.utils.timeutil.parse_iso``, the one copy in the tree.
     """
-    if not isinstance(ts, str) or not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+    return parse_iso(ts)
 
 
 def parse_display_id(display_id: str) -> "tuple[str, int, int]":
