@@ -19,6 +19,10 @@
 #
 # Anything 3 or 4 reports is fixed by re-running the same command with --write.
 #
+# 5 waives on APIARY_DOCS_UNCHANGED=1 here rather than on the `docs: unchanged`
+# trailer, because git has not written this commit's message yet at pre-commit
+# time — the trailer route lives in `docs/hooks/commit-msg`.
+#
 # Installed by: python scripts/install_repo_hooks.py
 # Source: docs/hooks/pre-commit
 
@@ -62,6 +66,7 @@ STATUS=0
 "${PY[@]}" "$REPO_ROOT/docs/check_cli_claims.py"             || STATUS=1
 "${PY[@]}" "$REPO_ROOT/docs/generate_cli_docs.py"  --check   || STATUS=1
 "${PY[@]}" "$REPO_ROOT/docs/generate_reference.py" --check   || STATUS=1
+"${PY[@]}" "$REPO_ROOT/docs/change_map.py"         --staged  || STATUS=1
 "${PY[@]}" "$REPO_ROOT/scripts/secret_scan.py" --staged --quiet || STATUS=1
 
 # Lint only the staged .py files — a whole-tree `ruff check` is still fast, but

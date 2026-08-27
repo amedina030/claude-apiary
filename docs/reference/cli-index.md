@@ -72,6 +72,7 @@ flag — `--check` runs in `docs/hooks/pre-commit` and in CI.
 | `python docs/check.py` | Documentation framework conformance checker | --strict |
 | `python docs/generate_cli_docs.py` | Generate the CLI reference tables from each tool's argparse | --check, --diff, --write |
 | `python docs/generate_reference.py` | Generate the non-argparse reference tables from code | --check, --diff, --write |
+| `python docs/change_map.py` | Fail a commit that changes mapped code without its doc | --list, --message, --paths, --staged |
 | `python docs/check_cli_claims.py` | Reconcile cli-tools.md claims against real argparse | --only |
 | `python scripts/secret_scan.py` | Commit-time secret scanner (stdlib only, no external binaries). | --entropy, --path, --quiet, --staged |
 | `python scripts/check_duplicates.py` | AST near-duplicate report for Python function bodies (report-only) | --fail-on-identical, --min-statements, --path, --quiet, --threshold, --top |

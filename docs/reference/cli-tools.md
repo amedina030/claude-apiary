@@ -1466,6 +1466,37 @@ the one part that rots — the parser.
 
 Put `<!-- no-run -->` on the line before a fence to skip that block.
 
+## docs/change_map.py
+
+Enforces `docs/change_map.json`: a commit that stages a mapped code file must
+also stage the document that describes it. Also fails when a staged doc's
+`last_verified` is not today — `docs/check.py` compares against the file's last
+*commit*, which cannot see the change you are about to make.
+
+Waived by a `docs: unchanged` trailer in the commit message, or
+`APIARY_DOCS_UNCHANGED=1` in the environment. The trailer only works from
+`docs/hooks/commit-msg`: at pre-commit time git has not written this commit's
+message yet, so `.git/COMMIT_EDITMSG` still holds the *previous* one.
+
+```bash
+python docs/change_map.py --list
+python docs/change_map.py --staged
+python docs/change_map.py --paths core/hooks/dispatch.py
+```
+
+<!-- generated:start: cli:docs/change_map.py:flag -->
+| Flag | Description |
+|------|-------------|
+| `--staged` | Check the staged changeset (pre-commit mode) |
+| `--paths PATH [PATH ...]` | Check an explicit list of paths instead of the staged set |
+| `--message FILE` | Read the commit message from FILE when looking for a `docs: unchanged` trailer (commit-msg hook: pass `$1`) |
+| `--list` | Print the mapping and exit |
+<!-- generated:end: cli:docs/change_map.py:flag -->
+
+Exit codes: `0` clean or waived; `1` a mapped code file changed without its doc, or a staged doc is stale; `2` the map is missing or malformed.
+
+Keep the map small — every entry is friction on every commit. `docs/test_change_map.py` fails when an entry's globs stop matching anything, when a mapped doc does not exist, or when an entry has no `why`.
+
 ## docs/check_cli_claims.py
 
 Reconcile the CLI claims in `cli-tools.md` against each tool's real argparse — reports drift when a documented subcommand/flag no longer exists, or a real one is undocumented. Sibling to `docs/check.py`; report-only, never rewrites the doc. Shells out to each tool's `--help`. Mark intentional omissions with an inline `<!-- cli-claims: ignore: --some-flag, somesubcmd -->` anywhere in a tool's section.
