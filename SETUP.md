@@ -268,7 +268,7 @@ poetry run apiary self-bootstrap                       # refresh main-apiary
 poetry run apiary doctor
 ```
 
-If main-apiary's pinned version (`<main-apiary>/VERSION`) advanced past a repo's pinned version (`<repo>/.claude/apiary/version.json`), `apiary doctor versions` flags it. The versioned migration runner under `<main-apiary>/migrations/` chains the upgrade scripts.
+If main-apiary's pinned version (`<main-apiary>/VERSION`) advanced past a repo's pinned version (`<repo>/.claude/apiary/version.json`), `apiary doctor versions` flags it, and `poetry run apiary update` chains the pending scripts under `<main-apiary>/migrations/` and re-pins each repo. `--dry-run` prints what would run; `--target <repo>` limits it to one.
 
 ---
 

@@ -38,6 +38,14 @@ jobs:
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # docs/check.py compares each doc's `last_verified` against that
+          # file's last commit date. The default depth-1 checkout has one
+          # commit, so every file's "last change" would be the tip and every
+          # doc would read as stale. (check.py also skips the rule outright on
+          # a shallow clone, so this is belt and braces — but the belt is what
+          # makes the check actually run in CI.)
+          fetch-depth: 0
 
       # Poetry first: setup-python's `cache: poetry` shells out to it to find
       # the lockfile and the venv path.

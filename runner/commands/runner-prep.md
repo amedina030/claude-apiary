@@ -6,7 +6,7 @@ user-invocable: true
 
 # /runner-prep — Stage todos for runner execution
 
-Look at the active scribe todos and prepare runner intake files for the ones that are ready to be automated. The goal is to land well-scoped intake JSONs in `runner/intake/` with a safety read per ticket and explicit dependency ordering, without promoting anything to the backlog (that is the user's call).
+Look at the active scribe todos and prepare runner intake files for the ones that are ready to be automated. The goal is to land well-scoped intake JSONs in `<state-dir>/runner/intake/` with a safety read per ticket and explicit dependency ordering, without promoting anything to the backlog (that is the user's call).
 
 ## Arguments
 
@@ -20,7 +20,7 @@ Look at the active scribe todos and prepare runner intake files for the ones tha
 - Only touch **active** scribe todos (skip deferred, done, archived).
 - Skip todos that are **design-heavy or fuzzy** — key decisions not yet made, shape not yet concrete. Flag those separately so the user knows what still needs their input before it can be specced.
 - Skip todos explicitly marked as "idea only" or intentionally parked for later revisit.
-- Do not promote anything to `runner/backlog/`. Promotion is the user's call.
+- Do not promote anything to `<state-dir>/runner/backlog/`. Promotion is the user's call.
 
 ---
 
@@ -65,7 +65,7 @@ For the ready-to-prep set:
 
 ## Step 4: Write one intake JSON per ready-to-prep todo
 
-For each todo in the ready-to-prep bucket, write a file to `runner/intake/<uuid>.json` with the schema used by `refine_to_intake.py`:
+For each todo in the ready-to-prep bucket, write a file to `<state-dir>/runner/intake/<uuid>.json` with the schema used by `refine_to_intake.py`:
 
 ```json
 {
@@ -95,7 +95,7 @@ This is descriptive only; it does not gate promotion. It is metadata for the use
 After writing each intake, validate it:
 
 ```bash
-python -m runner.validate_intake runner/intake/<uuid>.json
+python -m runner.validate_intake <state-dir>/runner/intake/<uuid>.json
 ```
 
 If validation fails, delete the file and record the failure in the final report rather than asking the user mid-pass.
@@ -111,7 +111,7 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.
   --content "<original body>
 
 ---
-PREPPED 2026-MM-DD — intake: runner/intake/<uuid>.json (SAFETY: <tag>)"
+PREPPED 2026-MM-DD — intake: <state-dir>/runner/intake/<uuid>.json (SAFETY: <tag>)"
 ```
 
 The original body must be preserved verbatim; only append.
@@ -128,7 +128,7 @@ Produce one markdown report for the user at the end. Do not present partial resu
 ### Prepped (N)
 | Todo | Intake | Safety |
 |---|---|---|
-| T-YYYY-NN | runner/intake/<uuid>.json | safe-for-unattended |
+| T-YYYY-NN | <state-dir>/runner/intake/<uuid>.json | safe-for-unattended |
 | ... |
 
 ### Needs your input (N)
@@ -148,7 +148,7 @@ Produce one markdown report for the user at the end. Do not present partial resu
 - ...
 
 ### Validation failures (if any)
-- runner/intake/<uuid>.json — <error>
+- <state-dir>/runner/intake/<uuid>.json — <error>
 ```
 
 Each bucket that is empty can be omitted.

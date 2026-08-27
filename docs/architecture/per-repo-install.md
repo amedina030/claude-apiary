@@ -4,7 +4,7 @@ title: Per-Repo Install Model
 scope: project
 description: How apiary is installed, where state lives, and how drift is detected after the per-repo migration (2026-05)
 framework_version: "1.0"
-last_verified: 2026-08-26
+last_verified: "2026-08-27"
 ---
 
 # Per-Repo Install Model
@@ -52,7 +52,6 @@ where it lives, and how the parts coordinate.
   CLAUDE.md                                      # apiary-managed zone + project rules
   .apiary/                                       # main-apiary-specific
     gui/apiary_gui[_profile]/                    # GUI state files
-    legacy/orphan-*.json                         # phase-3 migration leftovers (one-time review)
   .repos/                                        # the registry
     registry.json                                # uid → {name, real_path, version, ...}
     next_id                                      # monotonic counter
@@ -224,6 +223,7 @@ other code path is read-only with respect to bootstrapped repos.
 | `orphans` | `.repos/<slug>/` folders whose UID has no registry entry | Report only |
 | `duplicates` | Two registry entries sharing a `real_path` | Report only |
 | `unreachable` | Registry entries pointing at non-existent paths | Report only |
+| `compass` | Personality-profile health: age, active observation count, last synthesis, the cached `evaluate offline` headline | Report only |
 | (no arg) | All of the above in read-only mode | n/a |
 
 Exit code is 0 when all checks pass and 1 when any reports an issue. Notes
@@ -244,6 +244,7 @@ The `apiary` console_script (registered by `pyproject.toml`, source at
 | `apiary doctor [check]` | Consistency checks |
 | `apiary cascade-fix` | Manually run cascade-fix |
 | `apiary version` | Print main-apiary's pinned version |
+| `apiary update` | Run the pending scripts in `migrations/` against every bootstrapped repo and re-pin it (`--target`, `--dry-run`) |
 
 `scripts/install_repo_hooks.py` installs main-apiary's own
 `.git/hooks/{pre-commit, post-merge}` (repo-local — unrelated to Claude

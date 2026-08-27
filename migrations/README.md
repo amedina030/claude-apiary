@@ -9,11 +9,12 @@ from one apiary version to the next. `apiary update` chains them in order.
 
 `v<from>_to_v<to>.py` — full 3-part semver, dots replaced with underscores.
 
+Patch bumps get a file too when they need migration logic
+(`v0_3_5_to_v0_3_6.py` would be legal). What is actually here:
+
 | File | Migrates |
 |---|---|
-| `v0_0_0_to_v0_1_0.py` | 0.0.0 → 0.1.0 |
-| `v0_1_0_to_v0_2_0.py` | 0.1.0 → 0.2.0 |
-| `v0_3_5_to_v0_3_6.py` | 0.3.5 → 0.3.6 (patch bumps still get a file when they need migration logic) |
+| `v0_0_0_to_v0_1_0.py` | 0.0.0 → 0.1.0 (no-op; the shape reference) |
 
 ## Required module attributes
 
@@ -78,9 +79,9 @@ main-apiary checkout. Migrations are tiny and tracked — never moved to
 A future `migrations/_lib.py` will host shared helpers for migrations
 (snapshot-before-mutate, etc.). Still an open question.
 
-## Phase-0 status
+## Status
 
-This directory is being created during phase 0 of the per-repo migration.
-The single file currently here is `v0_0_0_to_v0_1_0.py` — a no-op example
-serving as a shape reference. The first real migration will be added when
-main-apiary's version is bumped to 0.2.0.
+`v0_0_0_to_v0_1_0.py` is a no-op that exists as a shape reference; there has
+been no layout change needing a real migration yet. The first one lands with
+the bump to 0.2.0 — see [`RELEASING.md`](../RELEASING.md) for the release
+sequence `apiary update` fits into.

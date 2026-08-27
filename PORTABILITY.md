@@ -6,7 +6,7 @@ claude-apiary is designed to run on Windows, macOS, and Linux without per-OS bra
 
 - **Python ≥ 3.11** on `PATH` as `python` (or `python3`).
 - **git** on `PATH`.
-- A POSIX-style shell (bash on macOS/Linux, Git Bash on Windows). The hooks and scripts use Unix shell syntax — `cmd.exe` and PowerShell are not supported.
+- A POSIX-style shell (bash on macOS/Linux, Git Bash on Windows) for anything apiary *runs for you*: the repo-local git hooks (`docs/hooks/*`, `runner/hooks/*`) and `scripts/*.sh` are Unix shell and are not `cmd.exe`/PowerShell scripts. What you type yourself is not restricted — `scripts/install.ps1` and `scripts/update.ps1` are the Windows install path, and the launcher idiom (`$(git rev-parse --show-toplevel)`) resolves identically in bash and PowerShell.
 - Write access to the directory you cloned `claude-apiary` into, plus any repo you bootstrap apiary into. Apiary writes nothing to `~/.claude/` post-migration.
 
 That's it — no system services, no daemons, no compiled extensions.
@@ -79,13 +79,13 @@ If you have a specific reason to move a single artifact (e.g. one decision note 
 
 ## Portability rules for contributors
 
-If you're writing or editing hooks, skills, scripts, or settings in this repo, you must follow these rules so the codebase stays portable. The full canonical list lives in the user's global `CLAUDE.md`; the load-bearing items are reproduced here.
+If you're writing or editing hooks, skills, scripts, or settings in this repo, you must follow these rules so the codebase stays portable. This is the canonical list: it lives here, in the repo, so a contributor who is not this machine's owner can read it.
 
 - **No absolute paths.** Never hard-code `C:\Users\…`, `/Users/…`, `/home/…`, or interpreter paths like `python.exe`. In Python, derive from `pathlib.Path(__file__).resolve().parent`. For user home, use `Path.home()`.
 - **Hook commands use the per-repo launcher.** Hook commands in a bootstrapped repo's `<repo>/.claude/settings.json` must use `python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" <relative-path>`. Claude Code expands `$CLAUDE_PROJECT_DIR` at hook-fire time so the launcher resolves to the bootstrapped repo's own copy. The launcher reads `<repo>/.claude/apiary/main-apiary-pointer.json` to find main-apiary; hooks fail-safe (exit 0 with stderr warning) when main-apiary is unreachable.
 - **Skill CLI invocations use the per-repo launcher via `$(git rev-parse --show-toplevel)`.** Skill templates (`.md` files in `*/commands/`) must invoke apiary CLI tools via `python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" <relative-path> [args...]` — never `<repo_dir>` placeholders or bare relative paths. Do **not** use `$CLAUDE_PROJECT_DIR` in skill templates: it is a hooks-only variable that the harness injects into hook command environments, but it is **empty** in the general Bash/PowerShell tool shell where skills run (the path then collapses to `/.claude/apiary/launch.py` and fails). `$(...)` command substitution works identically in Bash and PowerShell and resolves from any cwd, since the session's working dir is always inside a git repo. The launcher finds main-apiary, sets `APIARY_MAIN_REPO`, and forwards all arguments. This eliminates LLM-dependent path resolution and makes skills work in any bootstrapped repo. (Hook commands are the exception — see the rule above — because the harness sets `$CLAUDE_PROJECT_DIR` at hook-fire time.)
 - **Skill Read-tool paths use `--print-repo-path`.** When a skill template needs Claude to Read a file from main-apiary (not invoke a CLI tool), resolve the path first: `python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" --print-repo-path`. Use the output as the prefix for Read tool paths. Never use `<repo_dir>` placeholders for this — they depend on LLM substitution which is fragile and non-portable.
-- **No external binaries for core checks.** Tooling that runs on every commit must be stdlib Python. The secret scanner (`scripts/secret_scan.py`) is deliberately hand-rolled rather than wrapping `gitleaks` or `trufflehog`: those need a per-machine binary install, so a fresh clone on a new OS would silently skip the check. An external scanner may be used as *optional escalation* when it's already on `PATH`, never as a dependency.
+- **No external binaries for core checks.** Tooling that runs on every commit must be stdlib Python. The secret scanner (`scripts/secret_scan.py`) is deliberately hand-rolled rather than wrapping `gitleaks` or `trufflehog`. The binding constraint is not "Go binary" — a pure-Python scanner like `detect-secrets` would not help either — it is that **git hooks resolve `py -3`/`python3`/`python`, not the Poetry virtualenv**, so nothing outside the standard library is importable on the hook path. There is no optional-escalation mode; if one is ever added it must stay opt-in and must never be the only check.
 - **Git hooks resolve Python by probe, not by name.** `docs/hooks/*` must use the `py -3` / `python3` / `python` probe with an `$APIARY_PYTHON` override, since no single interpreter name exists on all three platforms. Git runs hooks through its bundled `sh` on Windows, so hook scripts follow the same shell-hygiene rules as everything else.
 - **Null device:** use `os.devnull` or `subprocess.DEVNULL`. Never write the OS-specific literal — it differs by platform.
 - **Subprocess:** list-form (`["git", "status"]`), never `shell=True`, never `.exe` suffixes.
@@ -93,7 +93,7 @@ If you're writing or editing hooks, skills, scripts, or settings in this repo, y
 - **File I/O:** explicit `encoding='utf-8'` on every `open()`, `read_text()`, `write_text()`.
 - **Shell hygiene:** scripts that shell out must work under bash on Windows, macOS, and Linux. Use `/dev/null` not `NUL`; forward slashes in paths; no PowerShell or `cmd.exe` builtins.
 
-If you spot a violation while doing other work, file a follow-up rather than fixing it inline — the portability epic landed in coordinated phases (T5a–T5d) and ad-hoc patches tend to leak.
+If you spot a violation while doing other work, file a scribe todo rather than fixing it inline: portability changes land as coordinated sweeps (one rule at a time, across every caller), and ad-hoc patches leave half the tree on the old pattern.
 
 ## Troubleshooting
 
@@ -110,10 +110,10 @@ Claude Code sets this automatically when invoking hooks. If you're running a hoo
 The per-repo launcher at `<repo>/.claude/apiary/launch.py` reads `main-apiary-pointer.json` to find main-apiary. If main-apiary moved (or the pointer is stale), re-run `poetry run apiary install --target <repo>` from inside main-apiary, or open a Claude session in main-apiary first to trigger cascade-fix. If `<repo>/.claude/apiary/launch.py` doesn't exist, the repo isn't bootstrapped — run `apiary install --target <repo>`.
 
 **Bootstrap refuses to seed and tells me to migrate first.**
-You have scribe state under a legacy `~/.claude/projects/<key>/` location and the centralized `<state-dir>/scribe/` is empty. Migrate the legacy data into the centralized layout before re-running bootstrap.
+You have scribe state at a legacy location — either `<repo-root>/.apiary/scribe/` (the pre-centralisation in-repo layout) or Claude Code's `~/.claude/projects/<key>/` — while the centralized `<state-dir>/scribe/` is empty. Move the legacy data into the centralized layout before re-running bootstrap. There is no `APIARY_STATE_LAYOUT=legacy` escape hatch any more; it was removed with the global tree.
 
 **Hook scripts work on macOS/Linux but fail on Windows.**
-Make sure you're running them through Git Bash (or WSL), not PowerShell or `cmd.exe`. Claude Code on Windows expects bash for hook commands.
+Make sure they run through Git Bash (or WSL), not PowerShell or `cmd.exe` — Claude Code on Windows expects bash for hook commands. A `bad interpreter` error usually means CRLF line endings: `.gitattributes` pins `docs/hooks/*`, `runner/hooks/*` and `*.sh` to LF, and CI rejects a CRLF shebang in any of them.
 
 **Notes from another machine I copied over look broken.**
 Per the state-locality section, scribe state is intentionally not portable. Don't copy `<apiary>/.repos/` (or the legacy `<repo-root>/.apiary/` and `~/.claude/projects/<key>/` paths) between machines.

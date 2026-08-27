@@ -4,12 +4,20 @@ title: Hook Lifecycle
 scope: budgeter
 description: PRE-to-PRE delta pattern, the Agent special case, task attribution, baselines and the session-length nudge
 framework_version: "1.0"
-last_verified: 2026-08-26
+last_verified: "2026-08-27"
 ---
 
 # Hook Lifecycle
 
 How budgeter measures token cost without spending tokens.
+
+**Where these run.** Budgeter's three hooks are rows in the dispatcher's
+registry, not settings.json entries of their own: `core/hooks/dispatch.py`
+reads the payload once per event and calls each hook's `run(payload)`
+in-process, matching `budgeter/config.json`'s `monitored_tools` against the
+tool name before importing anything. The registry, the ordering and the
+failure log are in [Hooks](../reference/hooks.md); this document is only about
+what the budgeter hooks *do* once they are called.
 
 ## The PRE-to-PRE delta pattern
 

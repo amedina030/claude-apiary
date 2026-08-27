@@ -7,13 +7,13 @@ How to get the runner executing tickets automatically. Two paths exist:
 ## Ticket lifecycle
 
 ```
-draft_ticket.py  -->  runner/backlog/<slug>.json   (has UUID from draft time)
+draft_ticket.py  -->  <state-dir>/runner/backlog/<slug>.json   (has UUID from draft time)
                           |
               +-----------+-----------+
               |                       |
         [detached picks it]     [promote.py <slug>]
         run.py --detached         |
-              |              runner/intake/<uuid>.json
+              |              <state-dir>/runner/intake/<uuid>.json
               |                   |
               |             [interactive run]
               |             run.py <intake-path>

@@ -801,14 +801,14 @@ Exit codes: `0` no hard blockers (warnings allowed; install can proceed), `1` a 
 End-to-end runner orchestrator. Sequences all 6 stages, passes artifact paths via UUID convention, stops on any stage failure.
 
 ```bash
-python -m runner.run runner/intake/<uuid>.json
-python -m runner.run runner/intake/<uuid>.json --target-repo /path/to/other/repo
+python -m runner.run <state-dir>/runner/intake/<uuid>.json
+python -m runner.run <state-dir>/runner/intake/<uuid>.json --target-repo /path/to/other/repo
 ```
 
 <!-- generated:start: cli:runner/run.py:flag -->
 | Argument / Flag | Required | Description |
 |-----------------|----------|-------------|
-| `intake_path` | yes | Path to intake JSON file (`runner/intake/<uuid>.json`) |
+| `intake_path` | yes | Path to intake JSON file (`<state-dir>/runner/intake/<uuid>.json`) |
 | `--target-repo PATH` | no | Run against a non-apiary git repo. Precedence: CLI flag > intake `target_repo` field > config `runner.target_repo` > apiary fallback. Path must exist and contain a `.git` entry. |
 | `--resume-from STAGE` | no | Resume from a specific stage (skip earlier stages) |
 | `--detached` | no | Detached (cron) mode: pick from backlog, branch, commit, log |
@@ -878,7 +878,7 @@ python -m runner.ticket validate <path-to-intake.json>
 
 ## runner/create_intake.py
 
-Create an intake file for the autonomous runner. Generates a UUID-keyed JSON at `runner/intake/<uuid>.json`. **Shim** for `python -m runner.ticket create-intake`.
+Create an intake file for the autonomous runner. Generates a UUID-keyed JSON at `<state-dir>/runner/intake/<uuid>.json`. **Shim** for `python -m runner.ticket create-intake`.
 
 ```bash
 python -m runner.create_intake --title "Add caching" --problem "Repeated DB queries" --description "Add Redis cache layer" --scope "api/cache.py"
@@ -914,7 +914,7 @@ python -m runner.refine_to_intake --note C-2026-5 --title "Add caching" --explor
 |------|----------|-------------|
 | `--note ID` | yes | Scribe note ID containing the refiner handoff |
 | `--title TEXT` | yes | Short title (refiner handoffs have no title field) |
-| `--backlog` | no | Write to `runner/backlog/<slug>.json` instead of `runner/intake/<uuid>.json` |
+| `--backlog` | no | Write to `<state-dir>/runner/backlog/<slug>.json` instead of `<state-dir>/runner/intake/<uuid>.json` |
 | `--explore-hints CSV` | no | Comma-separated repo-relative paths for the auto-refiner |
 <!-- generated:end: cli:runner/refine_to_intake.py:flag -->
 
@@ -925,7 +925,7 @@ Mapping: `Goal > **Problem:**` → `problem`; `Shape` + `Behavior` → `descript
 Validate an intake JSON file. Checks required fields, types, minimum content thresholds, and ISO date format.
 
 ```bash
-python -m runner.validate_intake runner/intake/<uuid>.json
+python -m runner.validate_intake <state-dir>/runner/intake/<uuid>.json
 ```
 
 <!-- generated:start: cli:runner/validate_intake.py:arg -->
@@ -941,7 +941,7 @@ Exit 0 on valid. Exit 1 with error details on invalid.
 Autonomous refiner — Stage 2. Reads a validated intake JSON, launches a Claude Code subprocess to explore the codebase and produce a structured spec.
 
 ```bash
-python -m runner.auto_refine runner/intake/<uuid>.json
+python -m runner.auto_refine <state-dir>/runner/intake/<uuid>.json
 ```
 
 <!-- generated:start: cli:runner/auto_refine.py:arg -->
@@ -950,14 +950,14 @@ python -m runner.auto_refine runner/intake/<uuid>.json
 | `intake` | yes | Path to intake JSON file |
 <!-- generated:end: cli:runner/auto_refine.py:arg -->
 
-Output: `runner/specs/<uuid>.json`. Model and retries configurable via `runner/config.json` under `refine`.
+Output: `<state-dir>/runner/specs/<uuid>.json`. Model and retries configurable via `runner/config.json` under `refine`.
 
 ## runner/validate_spec.py
 
 Validate a spec JSON file against the 8 handoff validation rules.
 
 ```bash
-python -m runner.validate_spec runner/specs/<uuid>.json
+python -m runner.validate_spec <state-dir>/runner/specs/<uuid>.json
 ```
 
 <!-- generated:start: cli:runner/validate_spec.py:arg -->
@@ -973,7 +973,7 @@ Exit 0 on valid. Exit 1 with error details on invalid.
 Autonomous planner — Stage 3. Reads a validated spec JSON, launches a Claude Code subprocess to produce a step-by-step implementation plan.
 
 ```bash
-python -m runner.auto_plan runner/specs/<uuid>.json
+python -m runner.auto_plan <state-dir>/runner/specs/<uuid>.json
 ```
 
 <!-- generated:start: cli:runner/auto_plan.py:arg -->
@@ -982,14 +982,14 @@ python -m runner.auto_plan runner/specs/<uuid>.json
 | `spec` | yes | Path to spec JSON file |
 <!-- generated:end: cli:runner/auto_plan.py:arg -->
 
-Output: `runner/plans/<uuid>.json`. Model and retries configurable via `runner/config.json` under `plan`.
+Output: `<state-dir>/runner/plans/<uuid>.json`. Model and retries configurable via `runner/config.json` under `plan`.
 
 ## runner/validate_plan.py
 
 Validate a plan JSON file for the autonomous runner.
 
 ```bash
-python -m runner.validate_plan runner/plans/<uuid>.json
+python -m runner.validate_plan <state-dir>/runner/plans/<uuid>.json
 ```
 
 <!-- generated:start: cli:runner/validate_plan.py:arg -->
@@ -1005,7 +1005,7 @@ Exit 0 on valid. Exit 1 with error details on invalid.
 Executor — Stage 4. Reads a validated plan JSON, works on the run's branch, and executes each step via a Claude Code subprocess, committing per step.
 
 ```bash
-python -m runner.executor runner/plans/<uuid>.json
+python -m runner.executor <state-dir>/runner/plans/<uuid>.json
 ```
 
 <!-- generated:start: cli:runner/executor.py:arg -->
@@ -1025,7 +1025,7 @@ Output: the execution log under `<state>/runner/executions/<uuid>.json`. Model a
 Autonomous hardener — Stage 5. Runs attack-defend rounds against the executor's code changes using the existing `harden/` infrastructure.
 
 ```bash
-python -m runner.auto_harden runner/executions/<uuid>.json
+python -m runner.auto_harden <state-dir>/runner/executions/<uuid>.json
 ```
 
 <!-- generated:start: cli:runner/auto_harden.py:arg -->
@@ -1034,7 +1034,7 @@ python -m runner.auto_harden runner/executions/<uuid>.json
 | `execution_log` | yes | Path to execution log JSON |
 <!-- generated:end: cli:runner/auto_harden.py:arg -->
 
-Output: `runner/hardens/<uuid>.json`. Rounds, models, and timeout configurable via `runner/config.json` under `harden` (default: 1 round).
+Output: `<state-dir>/runner/hardens/<uuid>.json`. Rounds, models, and timeout configurable via `runner/config.json` under `harden` (default: 1 round).
 
 Verdicts written to the artifact:
 - `all_resolved` — every finding fixed/refactored (or no findings).
@@ -1046,7 +1046,7 @@ Verdicts written to the artifact:
 Approval — Stage 6. Reads the harden verdict and either squash-merges to master **locally** (all resolved — it never pushes; a todo asks the operator to review and push), flags for review (unresolved findings), or halts on `defender_failed` without merging or writing a note. Includes a deferral review sub-step that uses Claude to evaluate deferred findings on the `has_unresolved` path.
 
 ```bash
-python -m runner.approval runner/hardens/<uuid>.json
+python -m runner.approval <state-dir>/runner/hardens/<uuid>.json
 ```
 
 <!-- generated:start: cli:runner/approval.py:arg -->
@@ -1055,11 +1055,11 @@ python -m runner.approval runner/hardens/<uuid>.json
 | `harden_result` | yes | Path to harden result JSON |
 <!-- generated:end: cli:runner/approval.py:arg -->
 
-Output: `runner/reports/<uuid>.json`. Path taken: `merged-locally`, `pending-review`, `defender-failed`, or a merge error. Exits non-zero on `defender_failed` so `run_history.jsonl` records the failure.
+Output: `<state-dir>/runner/reports/<uuid>.json`. Path taken: `merged-locally`, `pending-review`, `defender-failed`, or a merge error. Exits non-zero on `defender_failed` so `run_history.jsonl` records the failure.
 
 ## runner/draft_ticket.py
 
-Create a backlog draft ticket. Writes a JSON to `runner/backlog/<slug>.json`. Slug is derived from the title.
+Create a backlog draft ticket. Writes a JSON to `<state-dir>/runner/backlog/<slug>.json`. Slug is derived from the title.
 
 ```bash
 python -m runner.draft_ticket --title "..." --problem "..." --description "..." --scope "..."
@@ -1083,7 +1083,7 @@ python -m runner.draft_ticket --from-todo T-2026-42 --title "..." --problem "...
 
 ## runner/promote.py
 
-Promote a backlog draft to a runner intake file. Validates against the intake schema, assigns a UUID, copies to `runner/intake/<uuid>.json`, and removes the backlog file.
+Promote a backlog draft to a runner intake file. Validates against the intake schema, assigns a UUID, copies to `<state-dir>/runner/intake/<uuid>.json`, and removes the backlog file.
 
 ```bash
 python -m runner.promote <slug>
@@ -1095,11 +1095,11 @@ python -m runner.promote <slug>
 | `slug` | yes | Backlog ticket slug — the filename **without** directory or `.json` extension |
 <!-- generated:end: cli:runner/promote.py:arg -->
 
-**Gotcha:** Pass the slug only (e.g. `my-feature`), not a path (e.g. `runner/backlog/my-feature.json`). Path separators are rejected to prevent traversal. The script always looks in `runner/backlog/<slug>.json`.
+**Gotcha:** Pass the slug only (e.g. `my-feature`), not a path (e.g. `<state-dir>/runner/backlog/my-feature.json`). Path separators are rejected to prevent traversal. The script always looks in `<state-dir>/runner/backlog/<slug>.json`.
 
 ## runner/mark_done.py
 
-**Deprecated entry point.** A thin shim over `python -m runner.ticket mark-done`, kept for one release so existing scripts keep working. Same arguments, same behaviour — see [runner/ticket.py](#runnerticketpy).
+Mark a backlog ticket as done **without** running it through the runner. For tickets small enough to fix by hand. Deletes `<state-dir>/runner/backlog/<slug>.json`.
 
 ```bash
 python -m runner.mark_done <slug> [--note "explanation"]

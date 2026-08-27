@@ -68,8 +68,8 @@ Claude Code sessions are isolated — each one starts fresh with no memory of wh
 **What it does:**
 - **Notes** — typed operational state (TODOs, handoffs, blockers, decisions, wishlists, context) stored under the per-target state dir at `<state-dir>/scribe/` (the registry-allocated folder under `<apiary>/.repos/<name>-<id>/`)
 - **Learnings** — project-specific knowledge Claude discovers during task execution (workarounds, better approaches, platform quirks). Stored separately in `learnings/`, no auto-archive
-- **Handoffs** — structured session summaries generated automatically on startup from the previous session's transcript, so the next session knows what happened
-- **Auto-archive** — notes older than 30 days are moved to an archive folder. Learnings persist indefinitely
+- **Handoffs** — structured session summaries written by `/wrapup` at the end of a session; the startup hook injects the newest one for your `(role, mission)` so the next session knows where things stopped
+- **Auto-archive** — a per-type retention sweep (`scribe/policy.py`): context after 3 days, decisions after 30, anything closed 1 day after it was marked done, all but the newest handoff per `(role, mission)`. Todos, wishlists and blockers never age out, and learnings never auto-archive. The table is in [`scribe/CLAUDE.md`](scribe/CLAUDE.md)
 
 **Commands:**
 ```
@@ -77,10 +77,9 @@ Claude Code sessions are isolated — each one starts fresh with no memory of wh
 /note done <N>    # mark note N as done
 /notes            # list active notes
 /notes search X   # search notes
-/startup          # session init — generates handoff + loads notes and learnings
 ```
 
-**Storage:** `<state-dir>/scribe/` — typed-year folder layout (`todos/2026/`, `handoffs/2026/`, …, each with `index.jsonl` and per-note `<seq>.md` files). Per-target state lives under `<apiary>/.repos/<name>-<id>/`, resolved automatically by the launcher. Set `APIARY_STATE_LAYOUT=legacy` only as an escape hatch to read the pre-migration `~/.claude/projects/<project-key>/` path. See [`PORTABILITY.md`](PORTABILITY.md) for the full state map.
+**Storage:** `<state-dir>/scribe/` — typed-year folder layout (`todos/2026/`, `handoffs/2026/`, …, each with `index.jsonl` and per-note `<seq>.md` files). Per-target state lives under `<apiary>/.repos/<name>-<id>/`, resolved automatically by the launcher. See [`PORTABILITY.md`](PORTABILITY.md) for the full state map.
 
 ---
 
@@ -169,21 +168,21 @@ Where the other tools extend an in-session Claude Code loop, Runner *replaces* t
 5. **auto_harden** — runs the attack-defend loop on the resulting branch
 6. **approval** — final gate; auto-merges clean runs or flags for review
 
-**Artifacts** flow through per-stage directories keyed by UUID: `intake/ → specs/ → plans/ → executions/ → hardens/ → reports/`.
+**Artifacts** flow through per-stage directories keyed by UUID, all under the per-target state dir: `<state-dir>/runner/{intake,specs,plans,executions,hardens,reports}/`. Nothing is written into `runner/` in the checkout. The one exception is live git worktrees, which have to sit next to the repo they were cut from (`<target-repo>/.runner-worktrees/`).
 
 **Ticket lifecycle:**
 ```
-python -m runner.ticket draft --title "..." --problem "..." --scope "..."    # creates backlog JSON
-python -m runner.ticket promote <slug>                                       # backlog → ready (intake)
-python -m runner.run runner/intake/<uuid>.json                               # runs all 6 stages
-python -m runner.ticket mark-done <slug>                                     # close a ticket hand-fixed outside the runner
+python -m runner.draft_ticket --title "..." --problem "..." --scope "..."   # creates backlog JSON
+python -m runner.promote <slug>                                              # backlog → ready (intake)
+python -m runner.run <state-dir>/runner/intake/<uuid>.json                               # runs all 6 stages
+python -m runner.mark_done <slug>                                            # close a ticket hand-fixed outside the runner
 ```
 
 **Cost accounting:** every stage's `<usage>` XML is piped to `budgeter/log_agent_cost.py` with the run UUID as both `session_id` and `request_id`, so `budgeter/report.py --by-request` sums the entire run as one line.
 
 **Safety:** `NO_USAGE_STAGES` whitelists stages that legitimately make no Claude calls; any other zero-usage stage aborts the run so token caps can't be bypassed. Each handoff is gated by a validator (`validate_intake.py`, `validate_spec.py`, `validate_plan.py`).
 
-**Overnight / detached mode:** `detached_lib.py` handles branch creation, claim-based backlog picking, hygiene prechecks, and appends to an overnight log. Cron setup is in [`runner/scheduling.md`](runner/scheduling.md). To detect and fix drift in the registered scheduled task (after repo moves, renames, or bootstrap runs), use `python -m runner.cron_health check` or `... repair --apply`; the canonical state lives in `runner/cron_registry.json`.
+**Overnight / detached mode:** `detached_lib.py` handles branch creation, claim-based backlog picking, hygiene prechecks, and appends to an overnight log. Cron setup is in [`runner/scheduling.md`](runner/scheduling.md). To detect and fix drift in the registered scheduled task (after repo moves, renames, or bootstrap runs), use `python -m runner.cron_health check` or `... repair --apply`; the canonical state lives in `cron_registry/<hostname>.json` (one file per machine, so a git-synced multi-machine setup does not collide).
 
 ---
 
@@ -226,7 +225,7 @@ Full details: [`gui/README.md`](gui/README.md).
 For detailed architecture documentation, see [`docs/architecture/`](docs/architecture/):
 
 - **[System Overview](docs/architecture/system-overview.md)** — component map, data flow, shared core, and design rationale
-- **[Hook Lifecycle](docs/architecture/hook-lifecycle.md)** — PRE-to-PRE delta pattern, agent special case, CONT task chaining, scope detection
+- **[Hook Lifecycle](docs/architecture/hook-lifecycle.md)** — PRE-to-PRE delta pattern, the Agent special case, baselines, the session-length nudge
 
 Additional reference documentation lives in [`docs/`](docs/_index.md):
 
@@ -244,11 +243,9 @@ Additional reference documentation lives in [`docs/`](docs/_index.md):
 
 Edit `budgeter/config.json` (global) or `.claude/budgeter.json` (per-project):
 
-| Field | Default | Description |
-|---|---|---|
-| `monitored_tools` | `["Agent", "Bash", "Read", "Write"]` | Tool types the PreToolUse hook fires for |
-| `session_warn_soft_tokens` | `600000` | Prompt size at which the nudge suggests wrapping up |
-| `session_warn_hard_tokens` | `800000` | Prompt size at which it suggests starting a new session now |
+Every key, its type and its shipped default is generated from the JSON files
+themselves in [Config Files](docs/reference/config-files.md) — that table cannot
+drift from the code; a copy here would.
 
 ---
 
@@ -271,5 +268,12 @@ python budgeter/report.py --weighted         # price-weight the token counts
 ## Testing
 
 ```bash
-python budgeter/test_hooks.py      # unit + integration tests for budgeter
+poetry run pytest -q                       # the whole suite (~1,700 tests)
+poetry run pytest budgeter -q              # one tool
+poetry run pytest --cov                    # + a coverage report (never gated)
+poetry run python docs/check.py            # doc frontmatter, index, last_verified
+poetry run python docs/check_cli_claims.py # cli-tools.md vs each tool's argparse
 ```
+
+Every test file is a `unittest` module executed by pytest. CI runs the suite on
+ubuntu/windows/macos x Python 3.11/3.12 (`.github/workflows/ci.yml`).

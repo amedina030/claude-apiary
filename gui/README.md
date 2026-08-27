@@ -104,13 +104,20 @@ build answered).
 tracked files — the commit alone does not describe it. A build with no git
 available reports `0.1.0+unknown` rather than guessing.
 
-## Config files
+## State and config files
 
-Auto-created on first run under `<main-apiary>/.apiary/gui/apiary_gui/`:
+Everything lives under `<main-apiary>/.apiary/gui/apiary_gui[_<profile>]/`,
+resolved by `gui/paths.py`. Auto-created on first run:
 
-- `theme.json` — CSS variable values (hot-reloads)
-- `launch.json` — Claude Code spawn args + cwd
-- `captures/` — raw pty-output captures (only populated when capture mode is on)
+- `theme.json` — CSS variable values (hot-reloads via watchdog)
+- `launch.json` — Claude Code spawn config: `command`, `args`, `cwd`, `rows`, `cols`, `permission_mcp` (defaults in `gui/theme.py::DEFAULT_LAUNCH`; unknown keys are dropped on load)
+
+Written as you use it: `tabs.json`, `sidebar_state.json`, `composer_state.json`,
+`file_refs/<session_id>.json`, `pasted/<session_id>/`, `captures/`,
+`permission_mcp_config.json`, `permission_mcp.log`. Each one is described in
+[File Storage](../docs/reference/file-storage.md#gui-data), and `launch.json`'s
+schema in [Config Files](../docs/reference/config-files.md) — both generated or
+tested against the code, so this README does not repeat them.
 
 The list of repos whose scribe notes the sidebar can aggregate is *not* a GUI
 config file — it comes from `<main-apiary>/.repos/registry.json`, the same
@@ -132,6 +139,9 @@ poetry run python -m gui.capture_session --label tool_permission
 
 # List existing captures
 poetry run python -m gui.capture_session list
+
+# Print one capture's tail with ANSI stripped
+poetry run python -m gui.capture_session show <path-to-.bin> --tail 4000
 ```
 
 Capture is controlled by the `APIARY_GUI_CAPTURE_LABEL` env var — the CLI is

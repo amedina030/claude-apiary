@@ -56,7 +56,7 @@ When extracting observations during `/wrapup`, **err on the side of fewer high-q
 
 `compass/synthesize.py` reads active observations + previous `personality.md` + `corrections.md` and asks headless `claude -p` to produce a new `personality.md`. Two trigger paths:
 
-- **Weekly cron**: `runner/cron_registry.json` has `compass-weekly-synthesis` running daily at 03:00 with `--cron`, which self-throttles to 7 days (skips if `personality.md` was updated within the last week).
+- **Weekly cron**: `cron_registry/<hostname>.json` (one file per machine) has `compass-weekly-synthesis` running daily at 03:00 with `--cron`, which self-throttles to 7 days (skips if `personality.md` was updated within the last week).
 - **Manual**: `/compass-sync` slash command for "I had a big shift, sync now."
 
 The Windows Task Scheduler backend only supports `daily`, which is why the daily-with-throttle pattern is used instead of a true weekly schedule.
