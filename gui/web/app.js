@@ -29,6 +29,16 @@
   const sidebarSearchEl = document.getElementById("sidebar-search");
   const sidebarListEl = document.getElementById("sidebar-list");
 
+  // --- extracted pure modules ------------------------------------------------
+  // Loaded as plain <script> tags before this file (see index.html) and picked
+  // up off `window` here, the same way prompt_detector/bubble_monitor already
+  // are. Each is Node-tested (gui/web/test_*.js); app.js keeps the DOM and
+  // asks these for every decision. Destructured without a fallback on purpose:
+  // if a script tag goes missing the page must fail at load, loudly, rather
+  // than render a chat that silently mis-orders messages.
+  const { planMessageInsert, stripFileManifest } = window.apiaryMessageReconcile;
+  const thinkingState = window.apiaryThinkingState;
+
   // --- tab bar --------------------------------------------------------------
   // Backend sends onSessions(list) whenever tabs open/close/switch. We render
   // a chip per session plus a "+" button that opens a folder picker.
@@ -494,13 +504,9 @@
   // chat bubble — strip it from any USER message before display, and before
   // tentative-match reconciliation so the optimistic (manifest-free) render
   // still matches the JSONL record. Marker mirrors file_refs.manifest_and_mark.
-  const FILE_MANIFEST_MARKER = "[attached files — read these with the Read tool:]";
-  function stripFileManifest(text) {
-    if (!text) return text;
-    const i = text.indexOf(FILE_MANIFEST_MARKER);
-    if (i === -1) return text;
-    return text.slice(0, i).replace(/\n+$/, "");
-  }
+  // (marker + stripFileManifest live in message_reconcile.js — the manifest
+  //  has to be stripped for display AND for tentative matching, so the two
+  //  cannot be allowed to drift.)
 
   function renderBody(text) {
     const fence = /```([\w-]*)\n([\s\S]*?)```/g;
@@ -590,7 +596,10 @@
     messagesEl.innerHTML = "";
     // innerHTML="" detaches the bubble node; null the ref so a stale detached
     // node isn't carried around, and record the teardown for the monitor.
-    if (thinkingEl) { thinkingEl = null; activeTab().lastHideReason = "clear"; }
+    if (thinkingEl) {
+      thinkingEl = null;
+      thinkingState.applyHide(activeTab(), false, thinkingState.HIDE_REASONS.CLEAR);
+    }
     seen.clear();
     resetTotals();
     sticky = true;
@@ -628,42 +637,18 @@
       });
       if (anomaly) reportBubbleAnomaly(anomaly, msg, t, targetSid);
 
-      t.lastAsstMsgAt = Date.now();
-      if (msg.stop_reason === "end_turn") {
-        hideThinkingBubbleFor(targetSid, true, "end_turn");
-        flashWindowIfBackground();
-      } else {
-        hideThinkingBubbleFor(targetSid, false, "transient");
-        // A live, non-end_turn assistant message is definitive proof claude is
-        // mid-turn. Turns NOT started via the composer (slash commands, terminal-
-        // pane typing, wakeups/continuations) never set waitingForAssistant, so
-        // ensureThinkingBubble() would bail on its guard and the bubble would
-        // silently never appear — the 'arming_gap' anomaly the monitor flagged.
-        // Arm the turn here so the bubble can show; seed the elapsed counter if
-        // this is the first we knew of the turn.
-        if (!t.waitingForAssistant) {
-          t.waitingForAssistant = true;
-          if (!t.thinkingStartTs) t.thinkingStartTs = Date.now();
-        }
-        if (targetSid === activeSessionId) ensureThinkingBubble();
-      }
+      // Transitions live in thinking_state.js; what comes back is the DOM
+      // work this record implies.
+      const act = thinkingState.noteAssistantRecord(t, msg, Date.now());
+      hideThinkingBubbleFor(targetSid, act.hide.endTurn, act.hide.reason);
+      if (act.flash) flashWindowIfBackground();
+      if (act.ensureBubble && targetSid === activeSessionId) ensureThinkingBubble();
     } else if (!isReplay && msg.role === "user") {
       // Turn start for non-composer turns (terminal-typed input, slash
       // commands, wakeups). The composer path resets via startThinkingCounter;
-      // here we only reset when NOT already mid-turn, so a late-arriving user
-      // record for a composer turn doesn't clobber an in-progress turn's state.
-      const t = getTab(targetSid);
-      if (!t.waitingForAssistant) {
-        t.shownThisTurn = false;
-        t.lastHideReason = "";
-        // Arm the turn at its start so the bubble can show as soon as claude's
-        // pty output flows. Composer turns arm via startThinkingCounter, but
-        // terminal-typed / slash / wakeup turns have no composer send, so without
-        // this they stay unarmed until the first assistant message — the window
-        // the monitor flagged as 'arming_gap'. thinkingStartTs seeds the counter.
-        t.waitingForAssistant = true;
-        t.thinkingStartTs = Date.now();
-      }
+      // noteUserRecord only resets when NOT already mid-turn, so a late-
+      // arriving user record for a composer turn doesn't clobber it.
+      thinkingState.noteUserRecord(getTab(targetSid), Date.now());
     }
 
     // Inactive-tab messages stop here. They'll re-render from backend
@@ -678,56 +663,34 @@
       if (msg.model) setModel(msg.model);
     }
 
-    // Optimistic-render reconciliation: when a real user message arrives with
-    // text that matches an outstanding tentative, replace the tentative in
-    // place so the chronology holds. Previously we removed the tentative and
-    // appended the real message at the end — but if an assistant message had
-    // already landed between the tentative and the reconciliation, the real
-    // user message would drop *below* the assistant reply.
-    let insertAnchor = null;
-    let inheritedQueued = false;
-    if (msg.role === "user" && msg.text) {
-      const tentatives = messagesEl.querySelectorAll("li.msg.user.tentative");
-      const matchText = stripFileManifest(msg.text);
-      let matched = null;
-      for (const el of tentatives) {
-        if (el.dataset.text === matchText) {
-          matched = el;
-          break;
-        }
+    // Where does this bubble go? The decision (tentative reconciliation for
+    // user records, queued-reply ordering for assistant ones) is pure and
+    // lives in message_reconcile.js; here we read the list into plain data,
+    // ask for a plan, and apply it to the real elements.
+    const tentativeEls = Array.from(
+      messagesEl.querySelectorAll("li.msg.user.tentative")
+    );
+    const firstQueuedEl = messagesEl.querySelector("li.msg.user.queued");
+    const plan = planMessageInsert(
+      { role: msg.role, text: msg.text, matchText: stripFileManifest(msg.text) },
+      {
+        tentatives: tentativeEls.map(el => ({
+          text: el.dataset.text,
+          queued: el.classList.contains("queued"),
+        })),
+        hasQueuedUser: !!firstQueuedEl,
       }
-      if (matched) {
-        insertAnchor = matched.nextSibling;
-        inheritedQueued = matched.classList.contains("queued");
-        matched.remove();
-      } else if (tentatives.length > 0) {
-        // No exact text match but outstanding tentatives exist. Something is
-        // out of sync (content normalized between optimistic render and JSONL
-        // write, or a stale tentative from a prior turn). Sweep them so we
-        // don't leave duplicates on screen. Warn so the root cause can be
-        // chased next recurrence.
-        console.warn("[apiary] tentative reconcile fallback", {
-          tentativeTexts: Array.from(tentatives, el => el.dataset.text),
-          msgText: msg.text,
-        });
-        const last = tentatives[tentatives.length - 1];
-        insertAnchor = last.nextSibling;
-        inheritedQueued = Array.from(tentatives).some(el => el.classList.contains("queued"));
-        tentatives.forEach(el => el.remove());
-      }
-    } else if (msg.role === "assistant") {
-      // Queued-message ordering: if the user sent follow-up messages while
-      // claude was still working on a prior turn, those messages are marked
-      // .queued. Insert this reply BEFORE the first queued user message so
-      // the chronology stays [user1][reply1][user2][reply2] instead of
-      // [user1][user2][reply1][reply2]. Then un-mark that user message —
-      // it's now the "current" turn, not a queued one, and the next
-      // assistant reply should land after it (before the next queued msg).
-      const firstQueued = messagesEl.querySelector("li.msg.user.queued");
-      if (firstQueued) {
-        insertAnchor = firstQueued;
-        firstQueued.classList.remove("queued");
-      }
+    );
+    if (plan.warn) console.warn("[apiary] tentative reconcile fallback", plan.warn);
+    // Resolve the anchor BEFORE removing anything — nextSibling of a detached
+    // node is null, which would send the message to the end of the list.
+    let insertAnchor =
+      plan.anchorIndex >= 0 ? tentativeEls[plan.anchorIndex].nextSibling : null;
+    const inheritedQueued = plan.inheritQueued;
+    for (const i of plan.removeIndexes) tentativeEls[i].remove();
+    if (plan.unqueueFirstQueued && firstQueuedEl) {
+      insertAnchor = firstQueuedEl;
+      firstQueuedEl.classList.remove("queued");
     }
 
     const li = document.createElement("li");
@@ -1535,11 +1498,10 @@
   // repaints, and spinner redraws work correctly instead of leaving visible
   // garbage like the previous "stripAnsi-then-show-last-N-lines" approach.
   //
-  // After an assistant message lands, claude repaints its status line, spinner
-  // cleanup, tool result boxes, footer hints, etc. Don't treat those chunks as
-  // real pty activity for purposes of the 15s thinking-idle timeout — otherwise
-  // turn-end detection gets extended by trailing repaints.
-  const PTY_POST_MSG_GRACE_MS = 3000;
+  // (After an assistant message lands, claude repaints its status line, spinner
+  // cleanup, tool result boxes, footer hints, etc. Those chunks must not count
+  // as pty activity for the thinking-idle timeout — see the post-message grace
+  // window in thinking_state.js.)
 
   // Read back CSS vars for xterm theme so a theme.json change propagates.
   function themeVar(name, fallback) {
@@ -1677,42 +1639,22 @@
   }
 
   function inPostMessageGrace() {
-    const last = activeTab().lastAsstMsgAt;
-    return last > 0 && Date.now() - last < PTY_POST_MSG_GRACE_MS;
+    return thinkingState.inPostMessageGrace(activeTab(), Date.now());
   }
 
   // --- per-tab state --------------------------------------------------------
-  // Each session owns a TabState. Module-level singletons used to live here
-  // (waitingForAssistant, thinkingStartTs, lastPtyChunkAt, lastAsstMsgAt)
-  // representing only the active tab's state, requiring a hand-rolled save/
-  // restore on every switch. Now they're per-tab and live forever (until the
-  // session closes), so live events for inactive tabs still update the right
-  // state and tab switches just re-render the active tab's truth.
-  function newTabState() {
-    return {
-      waitingForAssistant: false,
-      thinkingStartTs: 0,
-      lastPtyChunkAt: 0,
-      lastAsstMsgAt: 0,
-      // Bubble-anomaly monitor (see bubble_monitor.js). shownThisTurn tracks
-      // whether the thinking bubble has appeared since the current turn began;
-      // lastHideReason records how it most recently went down. Both reset at
-      // turn start, so a missing-bubble event can be classified by cause.
-      shownThisTurn: false,
-      lastHideReason: "",
-      // Unsent composer text (#T-2026-249). Unlike the fields above this one
-      // does need a hand-rolled save/restore on switch, because the composer
-      // is a single shared <textarea> rather than per-tab JS state — see
-      // setActiveSession. Dropped with the rest of the TabState when the
-      // session closes (the tabs.delete sweep in onSessions).
-      draft: "",
-      // Same deal for the sidebar quick-capture box (#T-2026-251). This one
-      // matters more than the composer's: the note is filed to the ACTIVE
-      // tab's repo, so text left over from another tab would land silently in
-      // the wrong project.
-      captureDraft: "",
-    };
-  }
+  // Each session owns a TabState (shape + transitions: thinking_state.js).
+  // Module-level singletons used to live here (waitingForAssistant,
+  // thinkingStartTs, lastPtyChunkAt, lastAsstMsgAt) representing only the
+  // active tab's state, requiring a hand-rolled save/restore on every switch.
+  // Now they're per-tab and live forever (until the session closes), so live
+  // events for inactive tabs still update the right state and tab switches
+  // just re-render the active tab's truth.
+  //
+  // `draft` / `captureDraft` are the exception to "no hand-rolled save/
+  // restore": the composer and the quick-capture box are single shared
+  // <textarea>s, so setActiveSession has to park and swap them by hand.
+  const newTabState = thinkingState.newTabState;
   const tabs = new Map();
   function getTab(sid) {
     if (!sid) return newTabState();   // safe default for code that runs pre-activation
@@ -1725,17 +1667,14 @@
   // --- thinking bubble ------------------------------------------------------
   // Inline 3-dot bubble while claude is working. Dots pulse in place when
   // idle (no recent pty activity → waiting on API) and switch to a wave
-  // cascade when pty chunks arrive within PTY_ACTIVE_MS (mid tool-call).
-  // Motion quality alone signals the state — no text label. Bubble lives
-  // at the tail of the message list in natural flow, so it scrolls off
-  // when the user scrolls up (iMessage-style: the typing indicator is
-  // part of the thread, not pinned to the viewport).
+  // cascade when pty chunks arrive recently (mid tool-call). Motion quality
+  // alone signals the state — no text label. Bubble lives at the tail of the
+  // message list in natural flow, so it scrolls off when the user scrolls up
+  // (iMessage-style: the typing indicator is part of the thread, not pinned
+  // to the viewport).
   //
-  // Turn stays "active" (activeTab().waitingForAssistant=true) from the
-  // user-sent Enter until stop_reason=end_turn or THINKING_IDLE_MS of pty
-  // silence. State is per-tab so background tabs keep their turn alive.
-  const THINKING_IDLE_MS = 15000;
-  const PTY_ACTIVE_MS = 2000;
+  // Everything below is the DOM half; when the turn starts and ends, and what
+  // the dots should be doing, is decided by thinking_state.js.
   let thinkingEl = null;   // single shared DOM node — the active tab's bubble
 
   // --- bubble anomaly monitor ----------------------------------------------
@@ -1771,26 +1710,23 @@
     } catch (_) {}
   }
 
+  // Repaint the seconds badge + bubble from the active tab's state. Called
+  // after any DOM teardown (tab switch, transcript replay) — the state is
+  // already correct, this just re-attaches what was torn down.
   function syncThinkingChrome() {
-    const t = activeTab();
-    if (t.waitingForAssistant && t.thinkingStartTs > 0) {
-      const secs = Math.floor((Date.now() - t.thinkingStartTs) / 1000);
-      thinkingSecondsEl.textContent = secs + "s";
-      thinkingSecondsEl.classList.remove("hidden");
-    } else {
+    const secs = thinkingState.elapsedSeconds(activeTab(), Date.now());
+    if (secs === null) {
       thinkingSecondsEl.classList.add("hidden");
       thinkingSecondsEl.textContent = "";
+    } else {
+      thinkingSecondsEl.textContent = secs + "s";
+      thinkingSecondsEl.classList.remove("hidden");
     }
-    if (t.waitingForAssistant) ensureThinkingBubble();
+    if (activeTab().waitingForAssistant) ensureThinkingBubble();
   }
 
   function startThinkingCounter() {
-    const t = activeTab();
-    t.thinkingStartTs = Date.now();
-    // Fresh composer-initiated turn — reset the monitor's per-turn state so a
-    // later missing bubble is attributed to this turn, not a stale prior one.
-    t.shownThisTurn = false;
-    t.lastHideReason = "";
+    thinkingState.startTurn(activeTab(), Date.now());
     thinkingSecondsEl.textContent = "0s";
     thinkingSecondsEl.classList.remove("hidden");
   }
@@ -1799,9 +1735,7 @@
     if (!thinkingEl) return;
     const body = thinkingEl.querySelector(".thinking-body");
     if (!body) return;
-    const last = activeTab().lastPtyChunkAt;
-    const ptyActive = last > 0 && (Date.now() - last) < PTY_ACTIVE_MS;
-    body.classList.toggle("working", ptyActive);
+    body.classList.toggle("working", thinkingState.isPtyActive(activeTab(), Date.now()));
   }
 
   function ensureThinkingBubble() {
@@ -1816,24 +1750,18 @@
         '<span class="dot"></span>' +
       '</div>';
     messagesEl.appendChild(thinkingEl);
-    activeTab().shownThisTurn = true;   // monitor: the bubble appeared this turn
+    thinkingState.noteBubbleShown(activeTab());   // monitor: it appeared this turn
     updateThinkingState();
     maybeScroll();
   }
 
   // Tear down the bubble for a specific tab. When that tab is the active
-  // one, also remove the DOM node. `endTurn=true` clears the waitingForAssistant
-  // flag (real end_turn or 15s idle); `false` is a transient hide between
+  // one, also remove the DOM node. `endTurn=true` ends the turn (real
+  // end_turn or the idle timeout); `false` is a transient hide between
   // chained assistant messages within the same turn.
   function hideThinkingBubbleFor(sid, endTurn, reason) {
     const t = getTab(sid);
-    // Record WHY the bubble went down (monitor); not cleared until turn start,
-    // so a later missing-bubble event can be attributed to this teardown.
-    if (reason) t.lastHideReason = reason;
-    if (endTurn) {
-      t.waitingForAssistant = false;
-      t.thinkingStartTs = 0;
-    }
+    thinkingState.applyHide(t, endTurn, reason);
     if (sid === activeSessionId) {
       if (endTurn) {
         thinkingSecondsEl.classList.add("hidden");
@@ -1848,10 +1776,9 @@
   setInterval(() => {
     const t = activeTab();
     if (!t.waitingForAssistant) return;
-    if (t.thinkingStartTs > 0) {
-      const secs = Math.floor((Date.now() - t.thinkingStartTs) / 1000);
-      thinkingSecondsEl.textContent = secs + "s";
-    }
+    const now = Date.now();
+    const secs = thinkingState.elapsedSeconds(t, now);
+    if (secs !== null) thinkingSecondsEl.textContent = secs + "s";
     updateThinkingState();
     // Keep the bubble at the end of the list. Covers the switch-back case
     // where history re-render from the backend can deposit late messages
@@ -1859,8 +1786,8 @@
     if (thinkingEl && thinkingEl.isConnected && thinkingEl !== messagesEl.lastElementChild) {
       messagesEl.appendChild(thinkingEl);
     }
-    if (Date.now() - t.lastPtyChunkAt > THINKING_IDLE_MS) {
-      hideThinkingBubble(true, "idle_timeout");
+    if (thinkingState.shouldIdleTimeout(t, now)) {
+      hideThinkingBubble(true, thinkingState.HIDE_REASONS.IDLE_TIMEOUT);
     }
   }, 1000);
 
@@ -1874,8 +1801,9 @@
     // prompt, the fallback should fire anew (not dedup against the stale
     // signature from the last stationary state).
     unknownPromptNotifiedSig = null;
-    if (inPostMessageGrace()) return;
-    activeTab().lastPtyChunkAt = Date.now();
+    // No-op inside the post-message grace window (claude echoing its own
+    // output must not extend the idle deadline) — see thinking_state.js.
+    thinkingState.notePtyChunk(activeTab(), Date.now());
   }
 
   // Fallback auto-expand: if the pty has been stationary for a while AND the
@@ -2895,7 +2823,10 @@
       try { clearMessages(); } catch (_) {}
       try { term.reset(); } catch (_) {}
       if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
-      getTab(activeSessionId).lastHideReason = "tab_teardown";  // monitor: distinguish switch from /clear
+      // monitor: distinguish a switch teardown from a /clear one
+      thinkingState.applyHide(
+        getTab(activeSessionId), false, thinkingState.HIDE_REASONS.TAB_TEARDOWN
+      );
       if (typeof hidePromptBanner === "function") hidePromptBanner();
       // Drop any active MCP prompt from the outgoing tab. The bridge will
       // time out and deny; a fresh request from the new tab will re-banner.
@@ -2904,10 +2835,9 @@
       try { resetAgentsStripState(); } catch (_) {}
       // The pty buffer is dropped while the tab was inactive (no per-tab
       // xterm yet — that's a separate refactor), so the 15s idle-kill
-      // timer would falsely fire on switch-back. Re-baseline lastPtyChunkAt
+      // timer would falsely fire on switch-back. Re-baseline the pty clock
       // so the timer waits 15s of real silence, not 15s since switch-out.
-      const t = getTab(nextSid);
-      if (t.waitingForAssistant) t.lastPtyChunkAt = Date.now();
+      thinkingState.rebaselinePtyClock(getTab(nextSid), Date.now());
       // Sync the bubble + seconds counter from the new active tab. State
       // is already correct (per-tab, maintained by live events); this is
       // just a re-attach after the DOM teardown above. onMessages replay
@@ -3142,7 +3072,7 @@
         // From here until the assistant message lands, the thinking bubble
         // may spawn on pty chunks. Slash commands and feedback submissions
         // don't get a normal assistant reply, so we don't arm for them.
-        t.waitingForAssistant = true;
+        thinkingState.armTurn(t, Date.now());
       }
       // Build the drag-dropped-file manifest server-side, the moment we send:
       // Python re-checks each path's existence NOW and drops any that vanished

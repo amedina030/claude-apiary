@@ -191,8 +191,12 @@
     </div>
     <script src="vendor/xterm/xterm.min.js"></script>
     <script src="vendor/xterm/addon-fit.min.js"></script>
+    <!-- Pure, Node-tested modules (gui/web/test_*.js). Each attaches itself to
+         window and must load BEFORE app.js, which reads them at startup. -->
     <script src="prompt_detector.js"></script>
     <script src="bubble_monitor.js"></script>
+    <script src="message_reconcile.js"></script>
+    <script src="thinking_state.js"></script>
     <script src="file_drop.js"></script>
     <script src="app.js"></script>
   </body>
