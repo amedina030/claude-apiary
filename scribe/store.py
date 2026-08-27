@@ -7,14 +7,14 @@ index.jsonl for fast listing.
 import json
 import re
 import sys
-import time
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 # Repo-root import for core.utils
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core import frontmatter as fm_lib
-from core.utils.atomic import write_text_atomic
+from core.utils.atomic import replace_atomic, write_text_atomic
 from core.utils.filelock import FileLock
 
 # --- Constants ---
@@ -156,17 +156,86 @@ def derive_summary(content: str) -> str:
     return ''
 
 
+#: State dirs whose layout this process has already confirmed, keyed by
+#: ``(path, year)`` — the year because a new one needs new subfolders.
+_LAYOUT_CHECKED: set = set()
+
+
+def reset_layout_cache() -> None:
+    """Forget which layouts this process has confirmed.
+
+    Only tests need this: a store built on a path, then that path deleted,
+    then a store built on it again would otherwise skip the rebuild.
+    """
+    _LAYOUT_CHECKED.clear()
+
+
+class _IndexTxn:
+    """A folder's index rows, read under the lock that will write them back.
+
+    Mutate :attr:`entries` and call :meth:`commit` to have the list written
+    before the lock is released. Not committing writes nothing — which is
+    what a lookup that found no matching row wants.
+    """
+
+    __slots__ = ('folder', 'entries', 'committed')
+
+    def __init__(self, folder: Path, entries: list) -> None:
+        self.folder = folder
+        self.entries = entries
+        self.committed = False
+
+    def commit(self) -> None:
+        self.committed = True
+
+    def index_of(self, seq: int) -> "int | None":
+        """Position of the row with *seq*, or None."""
+        for i, entry in enumerate(self.entries):
+            if entry.get('seq') == seq:
+                return i
+        return None
+
+
 class ScribeStore:
     """Folder-per-type storage engine for notes and learnings.
 
     Initialized with a state_dir (Path). Manages folder layout,
     per-folder index.jsonl files, individual .md note files, and
     per-(type,year) sequence counters.
+
+    **Concurrency contract.** Every read-modify-write of an index happens
+    inside one :meth:`_locked_index` hold, so a whole-list rewrite cannot
+    clobber a row another process appended in between (review §3 bug 4). A
+    note's body is always written *before* its index row, so a crash between
+    the two leaves an entry ``repair`` can rebuild rather than a row
+    ``repair`` would delete.
     """
 
     def __init__(self, state_dir: Path) -> None:
-        self.state_dir = state_dir
-        self.ensure_layout()
+        self.state_dir = Path(state_dir)
+        self._ensure_layout_lazily()
+
+    # --- Layout ---
+
+    def _layout_is_current(self) -> bool:
+        """True when this year's folders already exist for every note type.
+
+        Nine ``is_dir`` calls, against ``ensure_layout``'s ~45 mkdir/exists/
+        write calls. It matters because ``core/hooks/learnings_inject_hook``
+        builds a store on every Edit, Write and Bash (review §3 bug 11).
+        """
+        year = str(datetime.now(timezone.utc).year)
+        return all((self.state_dir / name / year / ARCHIVE_DIRNAME).is_dir()
+                   for name in _ALL_FOLDERS)
+
+    def _ensure_layout_lazily(self) -> None:
+        """Build the layout only when something is actually missing, once."""
+        key = (str(self.state_dir), datetime.now(timezone.utc).year)
+        if key in _LAYOUT_CHECKED:
+            return
+        if not self._layout_is_current():
+            self.ensure_layout()
+        _LAYOUT_CHECKED.add(key)
 
     def ensure_layout(self) -> None:
         """Create all type folders, year subfolders, and counters if missing."""
@@ -224,15 +293,72 @@ class ScribeStore:
         return entries
 
     @staticmethod
+    @contextmanager
+    def _index_locks(*folders: Path):
+        """Hold the FileLock on each folder's index.jsonl for the block.
+
+        Locks are taken in path order, and duplicates collapse, so a move
+        that goes active → archive and one that goes archive → active cannot
+        take them in opposite orders and deadlock.
+        """
+        paths: list = []
+        for folder in folders:
+            path = Path(folder) / INDEX_FILENAME
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path not in paths:
+                paths.append(path)
+        with ExitStack() as stack:
+            for path in sorted(paths, key=str):
+                stack.enter_context(FileLock(path))
+            yield
+
+    @staticmethod
+    @contextmanager
+    def _locked_index(folder: Path):
+        """Read one index under its lock, and write it back under the same hold.
+
+        This is the fix for the lost-update race: every mutation used to read
+        the index, decide, and only *then* take the lock to write the whole
+        list back, so an append that landed in between was silently dropped.
+        """
+        folder = Path(folder)
+        with ScribeStore._index_locks(folder):
+            txn = _IndexTxn(folder, ScribeStore._read_index(folder))
+            yield txn
+            if txn.committed:
+                ScribeStore._write_index_unlocked(folder, txn.entries)
+
+    @staticmethod
+    def _write_index_unlocked(type_dir: Path, entries: list[dict]) -> None:
+        """Atomically overwrite a folder's index.jsonl. **Caller holds the lock.**"""
+        lines = [json.dumps(e, separators=(',', ':')) for e in entries]
+        write_text_atomic(type_dir / INDEX_FILENAME,
+                          '\n'.join(lines) + ('\n' if lines else ''))
+
+    @staticmethod
     def _write_index(type_dir: Path, entries: list[dict]) -> None:
         """Overwrite a folder's index.jsonl with the given entries.
 
-        Atomic (temp + os.replace) under a FileLock for concurrent safety.
+        Atomic (temp + os.replace) under a FileLock. Safe on its own only
+        when *entries* did not come from a read this caller has to defend —
+        for read-modify-write, use :meth:`_locked_index`.
+        """
+        with ScribeStore._index_locks(type_dir):
+            ScribeStore._write_index_unlocked(type_dir, entries)
+
+    @staticmethod
+    def _append_index_unlocked(type_dir: Path, entry: dict) -> None:
+        """Append one entry to a folder's index.jsonl. **Caller holds the lock.**
+
+        Appends to the file's existing *text* rather than to parsed rows, so
+        a line this reader would have skipped as malformed is preserved
+        instead of being dropped by the rewrite.
         """
         idx_path = type_dir / INDEX_FILENAME
-        with FileLock(idx_path):
-            lines = [json.dumps(e, separators=(',', ':')) for e in entries]
-            write_text_atomic(idx_path, '\n'.join(lines) + ('\n' if lines else ''))
+        existing = idx_path.read_text(encoding='utf-8') if idx_path.exists() else ''
+        if existing and not existing.endswith('\n'):
+            existing += '\n'
+        write_text_atomic(idx_path, existing + json.dumps(entry, separators=(',', ':')) + '\n')
 
     @staticmethod
     def _append_index(type_dir: Path, entry: dict) -> None:
@@ -241,12 +367,8 @@ class ScribeStore:
         Read-modify-write under a FileLock, flushed atomically (temp +
         os.replace) so a crash mid-append cannot leave a partial line.
         """
-        idx_path = type_dir / INDEX_FILENAME
-        with FileLock(idx_path):
-            existing = idx_path.read_text(encoding='utf-8') if idx_path.exists() else ''
-            if existing and not existing.endswith('\n'):
-                existing += '\n'
-            write_text_atomic(idx_path, existing + json.dumps(entry, separators=(',', ':')) + '\n')
+        with ScribeStore._index_locks(type_dir):
+            ScribeStore._append_index_unlocked(type_dir, entry)
 
     # --- Per-(type,year) sequence counter ---
 
@@ -405,8 +527,11 @@ class ScribeStore:
         }
         if tags:
             entry['tags'] = list(tags)
-        self._append_index(year_dir, entry)
+        # Body first, then the row. A crash in between leaves a <seq>.md with
+        # no index entry, which `repair` rebuilds; the old order left a row
+        # with no body, which `repair` deletes (review §3 bug 6).
         self._write_note_file(year_dir, seq, content)
+        self._append_index(year_dir, entry)
         return entry
 
     def get_note(self, note_type: str, year: int, seq: int) -> dict | None:
@@ -558,38 +683,41 @@ class ScribeStore:
         *folder* is either a year dir or that year's ``archive/`` dir — the
         body file lives beside the index in both cases. Returns the updated
         entry, or None when *folder* holds no such entry.
+
+        The whole read-decide-write runs inside one lock hold, so a row
+        appended by another process between the read and the write survives.
         """
-        entries = self._read_index(folder)
-        for i, entry in enumerate(entries):
-            if entry.get('seq') != seq:
-                continue
-            entries[i] = {**entry, **kwargs}
+        with self._locked_index(folder) as txn:
+            i = txn.index_of(seq)
+            if i is None:
+                return None
+            entry = {**txn.entries[i], **kwargs}
             # Stamp status_changed_at on any status transition (done/drop/
             # defer/resume), but never on a content-only edit. Mirrors the
             # source scribe oracle (spec §5.6).
             if 'status' in kwargs:
-                entries[i]['status_changed_at'] = datetime.now(timezone.utc).isoformat()
+                entry['status_changed_at'] = datetime.now(timezone.utc).isoformat()
             # Tag mutation: remove-all-occurrences then add-if-absent, so
             # the result is a dedup'd, order-preserving list (spec §5.14).
             if add_tags or remove_tags:
-                tags = list(entries[i].get('tags') or [])
+                tags = list(entry.get('tags') or [])
                 if remove_tags:
                     rm = set(remove_tags)
                     tags = [t for t in tags if t not in rm]
                 for t in (add_tags or []):
                     if t not in tags:
                         tags.append(t)
-                entries[i]['tags'] = tags
+                entry['tags'] = tags
             if content_update is not None:
                 self._write_note_file(folder, seq, content_update)
-                entries[i]['has_body'] = bool(content_update)
+                entry['has_body'] = bool(content_update)
                 if 'brief_summary' not in kwargs:
-                    entries[i]['brief_summary'] = derive_brief_summary(content_update)
-            if 'brief_summary' in kwargs and len(entries[i].get('brief_summary', '')) > BRIEF_SUMMARY_MAX:
-                entries[i]['brief_summary'] = entries[i]['brief_summary'][:BRIEF_SUMMARY_MAX].rstrip()
-            self._write_index(folder, entries)
-            return entries[i]
-        return None
+                    entry['brief_summary'] = derive_brief_summary(content_update)
+            if 'brief_summary' in kwargs and len(entry.get('brief_summary', '')) > BRIEF_SUMMARY_MAX:
+                entry['brief_summary'] = entry['brief_summary'][:BRIEF_SUMMARY_MAX].rstrip()
+            txn.entries[i] = entry
+            txn.commit()
+            return entry
 
     def archive_note(self, note_type: str, year: int, seq: int) -> dict | None:
         """Move a note to its year folder's archive.
@@ -601,35 +729,48 @@ class ScribeStore:
         the move. Archived-ness is indicated by folder location and the
         added ``archived_at`` timestamp, not by the status field.
         Returns the archived entry dict, or None if not found.
+
+        Both indexes are locked for the whole move, and the destination row
+        is written first: a crash mid-move then leaves the note listed in
+        both indexes (which ``repair`` reconciles) rather than in neither.
+        The body moves with ``os.replace``, not copy-then-delete, so it
+        cannot exist twice.
         """
         type_dir = self._type_dir(note_type)
         year_dir = type_dir / str(year)
         if not year_dir.exists():
             return None
-        entries = self._read_index(year_dir)
-        target_entry = None
-        remaining = []
-        for entry in entries:
-            if entry.get('seq') == seq:
-                target_entry = entry
-            else:
-                remaining.append(entry)
-        if target_entry is not None:
-            # Remove from active index
-            self._write_index(year_dir, remaining)
-            # Add to archive index — preserve status, stamp archived_at
-            archive_dir = year_dir / ARCHIVE_DIRNAME
-            archive_dir.mkdir(parents=True, exist_ok=True)
-            target_entry['archived_at'] = datetime.now(timezone.utc).isoformat()
-            self._append_index(archive_dir, target_entry)
-            # Move .md file
-            src_md = year_dir / f"{seq}.md"
-            dst_md = archive_dir / f"{seq}.md"
+        archive_dir = year_dir / ARCHIVE_DIRNAME
+        return self._move_between_indexes(
+            year_dir, archive_dir, seq,
+            stamp={'archived_at': datetime.now(timezone.utc).isoformat()})
+
+    def _move_between_indexes(self, src_dir: Path, dst_dir: Path, seq: int, *,
+                              stamp: dict | None = None,
+                              drop: tuple = ()) -> dict | None:
+        """Move one note's row and body from *src_dir* to *dst_dir*.
+
+        Shared by archive/unarchive for notes and learnings — four copies of
+        this eleven-line dance existed, and three of them read the source
+        index outside the lock. *stamp* is merged into the row, *drop* names
+        keys to remove from it.
+        """
+        with self._index_locks(src_dir, dst_dir):
+            entries = self._read_index(src_dir)
+            target = next((e for e in entries if e.get('seq') == seq), None)
+            if target is None:
+                return None
+            for key in drop:
+                target.pop(key, None)
+            target.update(stamp or {})
+            # Destination row, then body, then remove the source row.
+            self._append_index_unlocked(dst_dir, target)
+            src_md = src_dir / f'{seq}.md'
             if src_md.exists():
-                dst_md.write_text(src_md.read_text(encoding='utf-8'), encoding='utf-8')
-                src_md.unlink()
-            return target_entry
-        return None
+                replace_atomic(src_md, dst_dir / f'{seq}.md')
+            self._write_index_unlocked(
+                src_dir, [e for e in entries if e.get('seq') != seq])
+            return target
 
     def unarchive_note(self, note_type: str, year: int, seq: int) -> dict | None:
         """Move a note from the archive back into the active index.
@@ -644,27 +785,8 @@ class ScribeStore:
         archive_dir = year_dir / ARCHIVE_DIRNAME
         if not archive_dir.exists():
             return None
-        entries = self._read_index(archive_dir)
-        target_entry = None
-        remaining = []
-        for entry in entries:
-            if entry.get('seq') == seq:
-                target_entry = entry
-            else:
-                remaining.append(entry)
-        if target_entry is None:
-            return None
-        # Strip archived_at; preserve status as-is
-        target_entry.pop('archived_at', None)
-        self._write_index(archive_dir, remaining)
-        year_dir.mkdir(parents=True, exist_ok=True)
-        self._append_index(year_dir, target_entry)
-        src_md = archive_dir / f"{seq}.md"
-        dst_md = year_dir / f"{seq}.md"
-        if src_md.exists():
-            dst_md.write_text(src_md.read_text(encoding='utf-8'), encoding='utf-8')
-            src_md.unlink()
-        return target_entry
+        return self._move_between_indexes(archive_dir, year_dir, seq,
+                                          drop=('archived_at',))
 
     # --- CRUD operations: Learnings ---
 
@@ -716,8 +838,9 @@ class ScribeStore:
             'areas': areas_list,
             'supersedes': supersedes,
         }
-        self._append_index(year_dir, entry)
+        # Body before row, as in add_note.
         self._write_note_file(year_dir, seq, _format_learning_content(content, frontmatter))
+        self._append_index(year_dir, entry)
         return entry
 
     def list_learnings(self, search: str | None = None, *,
@@ -817,11 +940,11 @@ class ScribeStore:
         year_dir = self._learning_dir() / str(year)
         if not year_dir.exists():
             return None
-        entries = self._read_index(year_dir)
-        for i, entry in enumerate(entries):
-            if entry.get('seq') != seq:
-                continue
-            updated = {**entry}
+        with self._locked_index(year_dir) as txn:
+            i = txn.index_of(seq)
+            if i is None:
+                return None
+            updated = {**txn.entries[i]}
             if tags is not None:
                 updated['tags'] = list(tags)
             if areas is not None:
@@ -833,10 +956,9 @@ class ScribeStore:
                 'areas': updated.get('areas') or [],
                 'supersedes': updated.get('supersedes') or fm.get('supersedes'),
             }))
-            entries[i] = updated
-            self._write_index(year_dir, entries)
+            txn.entries[i] = updated
+            txn.commit()
             return updated
-        return None
 
     def archive_learning(self, year: int, seq: int) -> dict | None:
         """Move a learning to its year folder's archive.
@@ -846,50 +968,30 @@ class ScribeStore:
         ``learnings/<year>/archive/``, stamping ``archived_at``. Returns the
         archived entry dict, or None if the learning was not found.
         """
-        learn_dir = self._learning_dir()
-        year_dir = learn_dir / str(year)
+        year_dir = self._learning_dir() / str(year)
         if not year_dir.exists():
             return None
-        entries = self._read_index(year_dir)
-        target_entry = None
-        remaining: list[dict] = []
-        for entry in entries:
-            if entry.get('seq') == seq:
-                target_entry = entry
-            else:
-                remaining.append(entry)
-        if target_entry is None:
-            return None
-        self._write_index(year_dir, remaining)
-        archive_dir = year_dir / ARCHIVE_DIRNAME
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        target_entry['archived_at'] = datetime.now(timezone.utc).isoformat()
-        self._append_index(archive_dir, target_entry)
-        src_md = year_dir / f"{seq}.md"
-        dst_md = archive_dir / f"{seq}.md"
-        if src_md.exists():
-            dst_md.write_text(src_md.read_text(encoding='utf-8'), encoding='utf-8')
-            src_md.unlink()
-        return target_entry
+        return self._move_between_indexes(
+            year_dir, year_dir / ARCHIVE_DIRNAME, seq,
+            stamp={'archived_at': datetime.now(timezone.utc).isoformat()})
 
     def remove_learning(self, year: int, seq: int) -> dict | None:
-        """Remove a learning by year and seq. Returns the removed entry or None."""
-        learn_dir = self._learning_dir()
-        year_dir = learn_dir / str(year)
+        """Remove a learning by year and seq. Returns the removed entry or None.
+
+        The row goes before the body, so a crash between them leaves an
+        orphaned ``<seq>.md`` that ``repair`` restores — for a hard delete,
+        coming back is the more recoverable failure.
+        """
+        year_dir = self._learning_dir() / str(year)
         if not year_dir.exists():
             return None
-        entries = self._read_index(year_dir)
-        target = None
-        remaining = []
-        for entry in entries:
-            if entry.get('seq') == seq:
-                target = entry
-            else:
-                remaining.append(entry)
-        if target is not None:
-            self._write_index(year_dir, remaining)
-            md_path = year_dir / f"{seq}.md"
-            if md_path.exists():
-                md_path.unlink()
-            return target
-        return None
+        with self._locked_index(year_dir) as txn:
+            i = txn.index_of(seq)
+            if i is None:
+                return None
+            target = txn.entries.pop(i)
+            txn.commit()
+        md_path = year_dir / f"{seq}.md"
+        if md_path.exists():
+            md_path.unlink()
+        return target

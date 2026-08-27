@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Unit tests for scribe.store — folder-per-type storage engine."""
 import json
+import shutil
 import sys
 import tempfile
 import threading
 import unittest
+import unittest.mock
 from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME, BRIEF_SUMMARY_MAX, derive_brief_summary
+from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME, BRIEF_SUMMARY_MAX, derive_brief_summary, reset_layout_cache
 
 
 class TestEnsureLayout(unittest.TestCase):
@@ -39,6 +41,75 @@ class TestEnsureLayout(unittest.TestCase):
                 self.assertFalse((folder / ARCHIVE_DIRNAME).exists(), f"{folder_name}/archive (flat) should not exist")
             # next_id file must NOT be created (legacy removed)
             self.assertFalse((state_dir / 'next_id').exists())
+
+
+class TestLazyLayout(unittest.TestCase):
+    """The layout is built when it is missing, and not re-checked after that.
+
+    ScribeStore is constructed on the PreToolUse hot path (the learnings
+    inject hook builds one per Edit/Write/Bash), where ~45 mkdir/exists/write
+    calls per construction were pure waste (review §3 bug 11).
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.state_dir = Path(self._tmp.name) / 'scribe_state'
+        reset_layout_cache()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+        reset_layout_cache()
+
+    def test_a_fresh_dir_still_gets_the_full_layout(self):
+        ScribeStore(self.state_dir)
+        year = str(datetime.now(timezone.utc).year)
+        for folder_name in list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]:
+            self.assertTrue((self.state_dir / folder_name / year / ARCHIVE_DIRNAME).is_dir())
+
+    def test_second_construction_does_not_rebuild(self):
+        ScribeStore(self.state_dir)
+        with unittest.mock.patch.object(ScribeStore, 'ensure_layout') as rebuild:
+            ScribeStore(self.state_dir)
+        rebuild.assert_not_called()
+
+    def test_a_missing_folder_is_rebuilt(self):
+        ScribeStore(self.state_dir)
+        reset_layout_cache()  # a later process, not this one's cache
+        shutil.rmtree(self.state_dir / 'todos')
+        ScribeStore(self.state_dir)
+        year = str(datetime.now(timezone.utc).year)
+        self.assertTrue((self.state_dir / 'todos' / year / ARCHIVE_DIRNAME).is_dir())
+
+    def test_a_string_state_dir_is_accepted(self):
+        store = ScribeStore(str(self.state_dir))
+        self.assertIsInstance(store.state_dir, Path)
+
+
+class TestWriteOrder(unittest.TestCase):
+    """A body is written before its index row (review §3 bug 6).
+
+    The old order left, on a crash between the two, an index row with no
+    body — which `repair` resolves by deleting the row. The new order leaves
+    a body with no row, which `repair` rebuilds.
+    """
+
+    def test_add_note_writes_the_body_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ScribeStore(Path(tmp))
+            order = []
+            real_body = ScribeStore._write_note_file
+            real_index = ScribeStore._append_index
+
+            with unittest.mock.patch.object(
+                    ScribeStore, '_write_note_file',
+                    side_effect=lambda *a: (order.append('body'), real_body(*a))[1]), \
+                 unittest.mock.patch.object(
+                    ScribeStore, '_append_index',
+                    side_effect=lambda *a: (order.append('index'), real_index(*a))[1]):
+                store.add_note('todo', 'body first', 's1')
+                store.add_learning('body first', 's1')
+
+            self.assertEqual(order, ['body', 'index', 'body', 'index'])
 
 
 class TestAddNote(unittest.TestCase):

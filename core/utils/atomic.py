@@ -54,6 +54,19 @@ def _match_mode(tmp_path: str, target: Path) -> None:
         pass
 
 
+def replace_atomic(src: Path | str, dst: Path | str) -> None:
+    """Move *src* onto *dst* atomically, creating ``dst``'s parent.
+
+    The move half of this module: same ``os.replace``, same Windows retry as
+    :func:`write_text_atomic`. Use it instead of copy-then-unlink when the
+    file is *moving* (scribe archiving a note body) — a copy that dies
+    between the two steps leaves two files, a replace cannot.
+    """
+    target = Path(dst)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _replace_with_retry(str(src), target)
+
+
 def write_text_atomic(path: Path | str, text: str, *, encoding: str = "utf-8") -> None:
     """Write *text* to *path* atomically, creating parent directories."""
     target = Path(path)
