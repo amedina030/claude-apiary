@@ -51,19 +51,14 @@ from .config_loader import get as cfg
 from .stage_lib import check_uuid_safe, run_claude as _spawn_claude
 from .executor import (
     EXECUTIONS_DIR,
+    _ensure_on_branch,
     snapshot_worktree_state,
     _porcelain_path,
     _norm_rel,
     verify_post_conditions,
     persist_execution_log,
 )
-from .git_lib import (
-    branch_exists,
-    create_branch,
-    current_branch as get_current_branch,
-    format_git_error as _format_git_error,
-    git,
-)
+from .git_lib import git, run_branch_from_env
 from .schema_versions import (
     EXECUTION_SCHEMA_VERSION,
     PLAN_SCHEMA_VERSION,
@@ -351,22 +346,10 @@ def main():
         print(str(e), file=sys.stderr)
         sys.exit(1)
 
-    branch = f"runner/{uuid}"
-    original_branch = get_current_branch()
-
-    if branch_exists(branch):
-        print(f"Branch {branch} already exists, checking out", file=sys.stderr)
-        r = git("checkout", branch)
-        if r.returncode != 0:
-            print(_format_git_error(
-                f"checking out branch '{branch}'", r), file=sys.stderr)
-            sys.exit(1)
-    else:
-        try:
-            create_branch(branch)
-        except RuntimeError as e:
-            print(str(e), file=sys.stderr)
-            sys.exit(1)
+    # One branch per run, named by the orchestrator — see executor._ensure_on_branch
+    # and review runner Bug 3.
+    branch = run_branch_from_env(uuid)
+    original_branch, switched = _ensure_on_branch(branch)
 
     # Remember the branch's base commit so we can diff and log-walk later.
     head_before = git("rev-parse", "HEAD").stdout.strip()
@@ -418,7 +401,8 @@ def main():
         )
         persist_execution_log(log_path, execution_log)
         print(f"Runner aborted. Log: {log_path}", file=sys.stderr)
-        git("checkout", original_branch)
+        if switched:
+            git("checkout", original_branch)
         sys.exit(1)
 
     # Reconstruct per-step results from git history + post_conditions.
@@ -438,7 +422,8 @@ def main():
               f"Log: {log_path}", file=sys.stderr)
         if unexpected:
             print(f"Unexpected writes: {unexpected}", file=sys.stderr)
-        git("checkout", original_branch)
+        if switched:
+            git("checkout", original_branch)
         sys.exit(1)
 
     print(f"Branch: {branch}")

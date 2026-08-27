@@ -37,7 +37,7 @@ NOTES_SCRIPT = REPO_DIR / "scribe" / "notes.py"
 
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
-from .git_lib import checkout, current_branch as get_current_branch, git
+from .git_lib import checkout, git
 from .schema_versions import (
     EXECUTION_SCHEMA_VERSION,
     HARDEN_SCHEMA_VERSION,
@@ -279,7 +279,6 @@ def main():
             print(f"Worktree mode: deferring merge of {branch} to master (manual merge required)", file=sys.stderr)
         else:
             # Checkout master and squash merge
-            original_branch = get_current_branch()
             try:
                 checkout("master")
             except RuntimeError as e:
@@ -349,7 +348,6 @@ def main():
                 path_taken = "worktree-deferred"
                 print(f"Worktree mode: deferring merge of {branch} to master (manual merge required)", file=sys.stderr)
             else:
-                original_branch = get_current_branch()
                 try:
                     checkout("master")
                 except RuntimeError as e:

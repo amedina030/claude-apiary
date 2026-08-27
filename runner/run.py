@@ -26,6 +26,7 @@ from .config_loader import get as cfg
 from . import run_lock
 from . import run_tracker
 from . import abort as abort_mod
+from .git_lib import RUNNER_BRANCH_ENV
 from .usher import assess as usher_assess
 from .stage_lib import is_uuid_safe
 from .run_history import append_entry as history_append
@@ -780,7 +781,10 @@ def _run_detached_impl(cli_args) -> int:
             run_lock.update(uuid, stage=name, step_number=stage_idx)
             input_path = artifacts[input_key]
 
-            ok, stdout_text, stderr_text, _elapsed = run_stage(name, module_name, input_path, cwd=wt_path)
+            ok, stdout_text, stderr_text, _elapsed = run_stage(
+                name, module_name, input_path, cwd=wt_path,
+                extra_env={RUNNER_BRANCH_ENV: branch},
+            )
             record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
 
             # Append stage output to per-run debug log
@@ -894,12 +898,22 @@ def _run_detached_impl(cli_args) -> int:
     return 0 if exit_status == 'ok' else 1
 
 
-def run_stage(name: str, module_name: str, input_path: Path, cwd: Path | None = None) -> tuple[bool, str, str, float]:
+def run_stage(
+    name: str,
+    module_name: str,
+    input_path: Path,
+    cwd: Path | None = None,
+    extra_env: dict | None = None,
+) -> tuple[bool, str, str, float]:
     """Run a stage subprocess. Returns (success, stdout, stderr, elapsed_seconds).
 
     `cwd` defaults to the main repo root (interactive mode). Detached mode
     passes its isolated worktree path so stages mutate worktree state, never
     the operator's main checkout.
+
+    `extra_env` carries the per-run values the orchestrator owns and every
+    stage must agree on — above all APIARY_RUNNER_BRANCH, the one branch this
+    run works on.
 
     PYTHONPATH is set to the apiary repo root so the subprocess loads the
     `runner` package from apiary regardless of cwd. Without this, a worktree
@@ -923,6 +937,8 @@ def run_stage(name: str, module_name: str, input_path: Path, cwd: Path | None = 
     stage_env["PYTHONPATH"] = (
         apiary_path if not existing else apiary_path + os.pathsep + existing
     )
+    if extra_env:
+        stage_env.update({k: str(v) for k, v in extra_env.items()})
     start = time.time()
     try:
         proc = subprocess.Popen(
@@ -1349,6 +1365,13 @@ def main():
     print(f"Runner: {intake.get('title', 'Untitled')} [{uuid}]")
     print(f"{'=' * 60}")
 
+    # One branch per run, named by the orchestrator and published to every
+    # stage. Interactive mode keeps the historical `runner/<uuid>` name; what
+    # changed is that the executor no longer picks it unilaterally, so stages
+    # 4/5/6, run_history and queue.py all agree on which branch a run owns.
+    run_branch = f"runner/{uuid}"
+    stage_env = {RUNNER_BRANCH_ENV: run_branch}
+
     run_lock.write(uuid, stage=STAGES[0][0])
 
     total_start = time.time()
@@ -1379,7 +1402,10 @@ def main():
 
                 print(f"\n[{i}/6] {name}...", flush=True)
 
-                ok, stdout_text, stderr_text, elapsed = run_stage(name, module_name, input_path, cwd=target_repo_path)
+                ok, stdout_text, stderr_text, elapsed = run_stage(
+                    name, module_name, input_path, cwd=target_repo_path,
+                    extra_env=stage_env,
+                )
                 record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
                 output = stdout_text.strip() if ok else stderr_text.strip()
 

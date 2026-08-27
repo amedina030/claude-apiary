@@ -68,6 +68,7 @@ from .git_lib import (
     current_branch as get_current_branch,
     format_git_error as _format_git_error,
     git,
+    run_branch_from_env,
 )
 
 
@@ -280,6 +281,38 @@ def commit_files(files: list, message: str, action: str = ""):
             result,
             extra=f"staged files: {', '.join(files)}",
         ))
+
+
+def _ensure_on_branch(branch: str) -> tuple[str, bool]:
+    """Put the working tree on *branch*. Returns (previous branch, switched).
+
+    Three cases, in order of how the runner actually reaches them:
+      * already on it (detached mode — the orchestrator created the worktree
+        on this branch): do nothing, so there is no second branch and no
+        branch to restore on abort;
+      * it exists (a resumed run): check it out;
+      * it does not exist (interactive first run): create it.
+
+    Exits the process on a git failure, since nothing downstream is safe once
+    the working tree is on the wrong branch.
+    """
+    original_branch = get_current_branch()
+    if original_branch == branch:
+        return original_branch, False
+    if branch_exists(branch):
+        print(f"Branch {branch} already exists, checking out", file=sys.stderr)
+        result = git("checkout", branch)
+        if result.returncode != 0:
+            print(_format_git_error(f"checking out branch '{branch}'", result),
+                  file=sys.stderr)
+            sys.exit(1)
+    else:
+        try:
+            create_branch(branch)
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(1)
+    return original_branch, True
 
 
 _NON_COMMITTING_ACTIONS = frozenset({"test", "verify"})
@@ -787,24 +820,17 @@ def main():
     default_model = plan.get("executor_model", "sonnet")
     spec = plan.get("spec", {})
     steps = plan.get("steps", [])
-    branch = f"runner/{uuid}"
 
-    # Remember original branch to return to on error
-    original_branch = get_current_branch()
-
-    # Check out existing branch or create new one
-    if branch_exists(branch):
-        print(f"Branch {branch} already exists, checking out", file=sys.stderr)
-        result = git("checkout", branch)
-        if result.returncode != 0:
-            print(_format_git_error(f"checking out branch '{branch}'", result), file=sys.stderr)
-            sys.exit(1)
-    else:
-        try:
-            create_branch(branch)
-        except RuntimeError as e:
-            print(str(e), file=sys.stderr)
-            sys.exit(1)
+    # One branch per run. The orchestrator names it (APIARY_RUNNER_BRANCH) and,
+    # in detached mode, has already created the worktree on it; this stage used
+    # to `checkout -b runner/<uuid>` regardless, producing a second branch that
+    # nothing else in the pipeline knew about — the worktree branch was left
+    # pointing at master, the morning queue table joined on the wrong name, and
+    # each failed run consumed two max_unreviewed slots (review runner Bug 3).
+    # A standalone `python -m runner.executor <plan>` falls back to
+    # runner/<uuid>, which is what it always was.
+    branch = run_branch_from_env(uuid)
+    original_branch, switched = _ensure_on_branch(branch)
 
     # Sort steps by dependency order
     sorted_steps = topo_sort(steps)
@@ -1112,8 +1138,12 @@ def main():
 
     if aborted:
         print(f"Runner aborted. Log: {log_path}", file=sys.stderr)
-        # Return to original branch
-        git("checkout", original_branch)
+        # Return to the branch we were on — but only if we actually left it.
+        # In detached mode the worktree was already on the run branch, and
+        # checking "back" to it here is what stranded the failed run's commits
+        # on a branch nobody named.
+        if switched:
+            git("checkout", original_branch)
         sys.exit(1)
 
     print(f"Branch: {branch}")

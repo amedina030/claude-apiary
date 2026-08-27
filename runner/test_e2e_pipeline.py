@@ -36,6 +36,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from runner import queue
+
 APIARY_ROOT = Path(__file__).resolve().parent.parent
 
 # --------------------------------------------------------------------------- #
@@ -589,26 +591,31 @@ class DetachedRunTest(E2EPipelineBase):
         self.assertEqual(list(backlog.glob("*.json")), [])
 
         # -- branch shape -------------------------------------------------- #
+        # One branch per run (review runner Bug 3): the executor works on the
+        # branch the worktree is already on instead of creating a second
+        # `runner/<uuid>` beside it, so the execution log, run_history,
+        # queue.py and max_unreviewed all name the same branch.
         branches = runner_branches(self.target)
         run_branch = f"runner/add-a-greeter-module-{uuid}"
-        self.assertIn(run_branch, branches)
-        # CURRENT BEHAVIOUR (review runner Bug 3): the run also leaves the
-        # executor's own `runner/<uuid>`, because stage 4 does its own
-        # `checkout -b` instead of using the branch the worktree is on. The
-        # next commit makes it one branch per run and tightens this to
-        # `assertEqual(branches, [run_branch])`.
-        self.assertEqual(sorted(branches), sorted([run_branch, f"runner/{uuid}"]))
-        executor_branch = f"runner/{uuid}"
-        subjects = commit_subjects(self.target, executor_branch, "master")
+        self.assertEqual(
+            branches, [run_branch],
+            "a run must leave exactly one runner/* branch behind",
+        )
+        self.assertEqual(execution["branch"], run_branch)
+        subjects = commit_subjects(self.target, run_branch, "master")
         self.assertTrue(
             any(s.startswith(f"runner/{uuid} step 1:") for s in subjects),
-            f"the executor's step commit is missing: {subjects}",
+            f"the executor's step commit is not on the run branch: {subjects}",
         )
         self.assertIn(f"runner/{uuid}: Add a greeter module", subjects)
         self.assertIn(
             "app/greeter.py",
-            git_ok(self.target, "ls-tree", "--name-only", "-r", executor_branch),
+            git_ok(self.target, "ls-tree", "--name-only", "-r", run_branch),
         )
+
+        # The morning review table joins run_history to the live branch.
+        row_uuid = queue.uuid_for_branch(run_branch, {uuid: {"uuid": uuid}})
+        self.assertEqual(row_uuid, uuid)
 
         # The operator's checkout was never touched.
         self.assertEqual(git_ok(self.target, "rev-parse", "--abbrev-ref", "HEAD"), "master")

@@ -25,7 +25,14 @@ def load_harden_verdict(uuid: str) -> str:
         return 'unknown'
 
 def load_run_history_entries() -> dict:
-    """Return dict mapping branch_name -> latest entry dict. Missing file -> {}."""
+    """Return dict mapping run uuid -> latest entry dict. Missing file -> {}.
+
+    Keyed by uuid, not by branch string (T-2026-278c). The old branch join
+    silently produced a table of `unknown` in every column whenever the
+    recorded branch name and the live branch name differed by so much as a
+    slug — which, before one-branch-per-run, was every single detached run
+    (review runner Bug 3). The uuid is in both, so it is the stable key.
+    """
     if not RUN_HISTORY_FILE.exists():
         return {}
     result = {}
@@ -38,12 +45,29 @@ def load_run_history_entries() -> dict:
                 entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            b = entry.get('branch')
-            if b:
-                result[b] = entry  # later entries overwrite earlier
+            uid = entry.get('uuid')
+            if uid:
+                result[uid] = entry  # later entries overwrite earlier
     except OSError:
         return {}
     return result
+
+
+def uuid_for_branch(branch: str, entries: dict) -> str:
+    """Find the run uuid a `runner/*` branch belongs to.
+
+    Both naming conventions the runner has produced embed the uuid —
+    `runner/<uuid>` and `runner/<slug>-<uuid>` — so a suffix match against
+    the known uuids identifies the run without needing the branch string to
+    round-trip exactly.
+    """
+    if not branch:
+        return ''
+    tail = branch[len('runner/'):] if branch.startswith('runner/') else branch
+    for uid in entries:
+        if tail == uid or tail.endswith(f'-{uid}'):
+            return uid
+    return ''
 
 def load_ticket_summary(uuid: str) -> tuple:
     """Return (title, summary_line). Look in intake/<uuid>.json, then backlog/<uuid>.json. Defaults to ('unknown','')."""
@@ -72,8 +96,8 @@ def main() -> int:
     header = ['BRANCH', 'TICKET', 'STAGES', 'TOKENS', 'STATUS', 'HARDEN', 'SUMMARY']
     rows = []
     for b in sorted(branches):
-        entry = entries.get(b, {})
-        uuid = entry.get('uuid') or ''
+        uuid = uuid_for_branch(b, entries)
+        entry = entries.get(uuid, {})
         title, summary = load_ticket_summary(uuid) if uuid else ('unknown', '')
         stages = str(entry.get('stages_completed', 'unknown'))
         tokens = str(entry.get('total_tokens', 'unknown'))

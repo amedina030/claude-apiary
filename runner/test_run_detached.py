@@ -198,7 +198,8 @@ class TestDetachedRun(unittest.TestCase):
 
             captured_input_paths = []
 
-            def _capture_stage(name, module_name, input_path, cwd=None):
+            def _capture_stage(name, module_name, input_path, cwd=None,
+                               extra_env=None):
                 captured_input_paths.append(Path(input_path))
                 return (True, _make_fake_usage(50), '', 0.1)
 

@@ -1293,5 +1293,72 @@ class TestValidateResumeState(unittest.TestCase):
         self.assertEqual(len(errors), 2)
 
 
+class TestEnsureOnBranch(unittest.TestCase):
+    """One branch per run (review runner Bug 3).
+
+    The executor used to `checkout -b runner/<uuid>` unconditionally. In
+    detached mode the worktree was already on `runner/<slug>-<uuid>`, so the
+    run ended up with two branches: the executor's commits on one, the name
+    everything else used on the other.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = Path(self._tmp.name).resolve() / "repo"
+        self.repo.mkdir()
+        for args in (
+            ["init", "--initial-branch=master"],
+            ["config", "user.email", "t@e.com"],
+            ["config", "user.name", "T"],
+        ):
+            subprocess.run(["git", "-C", str(self.repo), *args],
+                           check=True, capture_output=True)
+        (self.repo / "README.md").write_text("seed\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.repo), "add", "README.md"],
+                       check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.repo), "commit", "-m", "init"],
+                       check=True, capture_output=True)
+        self._cwd = os.getcwd()
+        os.chdir(self.repo)
+        self.addCleanup(os.chdir, self._cwd)
+
+    def _branches(self):
+        out = subprocess.run(
+            ["git", "-C", str(self.repo), "for-each-ref",
+             "--format=%(refname:short)", "refs/heads/"],
+            capture_output=True, text=True, encoding="utf-8", check=True,
+        ).stdout
+        return sorted(line.strip() for line in out.splitlines() if line.strip())
+
+    def test_creates_the_branch_when_absent(self):
+        prev, switched = executor._ensure_on_branch("runner/abc")
+        self.assertEqual(prev, "master")
+        self.assertTrue(switched)
+        self.assertEqual(self._branches(), ["master", "runner/abc"])
+
+    def test_already_on_the_branch_is_a_no_op(self):
+        subprocess.run(["git", "-C", str(self.repo), "checkout", "-b", "runner/slug-abc"],
+                       check=True, capture_output=True)
+        prev, switched = executor._ensure_on_branch("runner/slug-abc")
+        self.assertEqual(prev, "runner/slug-abc")
+        self.assertFalse(switched)
+        # No second branch: this is the whole point.
+        self.assertEqual(self._branches(), ["master", "runner/slug-abc"])
+
+    def test_existing_branch_is_checked_out_not_recreated(self):
+        subprocess.run(["git", "-C", str(self.repo), "branch", "runner/abc"],
+                       check=True, capture_output=True)
+        prev, switched = executor._ensure_on_branch("runner/abc")
+        self.assertEqual(prev, "master")
+        self.assertTrue(switched)
+        self.assertEqual(self._branches(), ["master", "runner/abc"])
+
+    def test_branch_name_comes_from_the_orchestrator(self):
+        from runner.git_lib import RUNNER_BRANCH_ENV, run_branch_from_env
+        with mock.patch.dict(os.environ, {RUNNER_BRANCH_ENV: "runner/slug-abc"}):
+            self.assertEqual(run_branch_from_env("abc"), "runner/slug-abc")
+
+
 if __name__ == "__main__":
     unittest.main()

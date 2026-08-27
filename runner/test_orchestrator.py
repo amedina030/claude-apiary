@@ -439,7 +439,7 @@ class TestMainHappyPath(_RunnerTestCase):
         'unknown' fallback."""
         intake_file, _ = self.make_intake_file()
 
-        def side_effect(name, script, input_path, cwd=None):
+        def side_effect(name, script, input_path, cwd=None, extra_env=None):
             if name == "approval":
                 return (True, "", "", 1.0)
             return (True, "ok", "", 0.5)
@@ -461,7 +461,7 @@ class TestMainFailurePropagation(_RunnerTestCase):
     def test_stage3_failure_stops_runner(self, mock_run_stage):
         intake_file, _ = self.make_intake_file()
 
-        def side_effect(name, script, input_path, cwd=None):
+        def side_effect(name, script, input_path, cwd=None, extra_env=None):
             if name == "auto_plan":
                 return (False, "", "plan error", 2.0)
             return (True, "ok", "", 0.5)
@@ -505,7 +505,7 @@ class TestMainKeyboardInterrupt(_RunnerTestCase):
     def test_interrupt_during_stage4(self, mock_run_stage):
         intake_file, _ = self.make_intake_file()
 
-        def side_effect(name, script, input_path, cwd=None):
+        def side_effect(name, script, input_path, cwd=None, extra_env=None):
             if name == "executor":  # stage 4
                 raise KeyboardInterrupt()
             return (True, "ok", "", 0.5)
