@@ -198,10 +198,13 @@ def run_history_path(target: Optional[Path] = None) -> Path:
 
 
 def worktrees_dir(target: Optional[Path] = None) -> Path:
-    """Live git worktrees under the target repo.
+    """Live git worktrees under the target repo: ``<target>/.runner-worktrees/``.
 
-    Note the path is ``<target>/.apiary/runner-worktrees/`` (sibling to
-    ``.apiary/runner/``) so live checkouts don't collide with state
-    artifacts.
+    This used to return ``<target>/.apiary/runner-worktrees/`` while
+    ``detached_lib`` created worktrees under ``<target>/.runner-worktrees/``,
+    so ``prune_stale_worktrees`` scanned a directory nothing ever wrote to and
+    could never recover a hard-killed run (review runner Bug 4). One
+    definition now, and it is the path that is actually used —
+    ``.runner-worktrees/`` is what apiary's own ``.gitignore`` covers.
     """
-    return _default_target(target) / ".apiary" / "runner-worktrees"
+    return _default_target(target) / ".runner-worktrees"

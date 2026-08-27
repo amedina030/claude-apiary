@@ -14,15 +14,30 @@ class TestSlug(unittest.TestCase):
     def test_unicode(self):
         self.assertTrue(detached_lib.slugify('A B C').startswith('a-b'))
 
+_REPO = Path('/tmp/some-target-repo')
+
+
 class TestHygiene(unittest.TestCase):
     def test_ok_when_below_max(self):
         with mock.patch.object(detached_lib, 'list_unmerged_runner_branches', return_value=['runner/a-1', 'runner/b-2']):
-            self.assertIsNone(detached_lib.hygiene_precheck(5))
+            self.assertIsNone(detached_lib.hygiene_precheck(5, _REPO))
     def test_full(self):
         with mock.patch.object(detached_lib, 'list_unmerged_runner_branches', return_value=['runner/a','runner/b','runner/c','runner/d','runner/e']):
-            reason = detached_lib.hygiene_precheck(5)
+            reason = detached_lib.hygiene_precheck(5, _REPO)
             self.assertIn('queue full', reason)
             self.assertIn('5/5', reason)
+
+    def test_passes_repo_through(self):
+        """The repo argument reaches the branch listing — a hygiene check
+        against apiary while running against another target is Bug 2."""
+        seen = []
+        with mock.patch.object(
+            detached_lib, 'list_unmerged_runner_branches',
+            side_effect=lambda repo, base='master': seen.append(repo) or [],
+        ):
+            detached_lib.hygiene_precheck(5, _REPO)
+        self.assertEqual(seen, [_REPO])
+
 
 class TestPickBacklog(unittest.TestCase):
     def test_picks_oldest_not_claimed(self):
@@ -39,17 +54,49 @@ class TestPickBacklog(unittest.TestCase):
             os.utime(b, (2000, 2000))
             with mock.patch.object(detached_lib, 'BACKLOG_DIR', bdir):
                 with mock.patch.object(detached_lib, 'list_runner_branches', return_value=[]):
-                    p = detached_lib.pick_backlog_item()
+                    p = detached_lib.pick_backlog_item(_REPO)
                     self.assertEqual(p.name, 'a.json')
                 with mock.patch.object(detached_lib, 'list_runner_branches', return_value=['runner/a-xxxxxxxx-uuid-a']):
-                    p = detached_lib.pick_backlog_item()
+                    p = detached_lib.pick_backlog_item(_REPO)
                     self.assertEqual(p.name, 'b.json')
+
+    def test_item_target_repo_overrides_default(self):
+        """An item that names its own target_repo is checked for an
+        in-flight branch in THAT repo, not the invocation's default."""
+        with tempfile.TemporaryDirectory() as td:
+            bdir = Path(td) / 'backlog'
+            bdir.mkdir()
+            item = bdir / 'a.json'
+            item.write_text(
+                json.dumps({'id': 'uuid-a', 'title': 'A',
+                            'target_repo': '/tmp/other-repo'}),
+                encoding='utf-8',
+            )
+            seen = []
+            with (
+                mock.patch.object(detached_lib, 'BACKLOG_DIR', bdir),
+                mock.patch.object(
+                    detached_lib, 'list_runner_branches',
+                    side_effect=lambda repo: seen.append(repo) or [],
+                ),
+            ):
+                detached_lib.pick_backlog_item(_REPO)
+            self.assertEqual(seen, [Path('/tmp/other-repo')])
+
     def test_empty(self):
         with tempfile.TemporaryDirectory() as td:
             bdir = Path(td) / 'backlog'
             bdir.mkdir()
             with mock.patch.object(detached_lib, 'BACKLOG_DIR', bdir):
-                self.assertIsNone(detached_lib.pick_backlog_item())
+                self.assertIsNone(detached_lib.pick_backlog_item(_REPO))
+
+
+class TestGitRequiresCwd(unittest.TestCase):
+    """_git's cwd is mandatory: an omitted cwd used to mean 'apiary'."""
+
+    def test_git_without_cwd_is_a_type_error(self):
+        with self.assertRaises(TypeError):
+            detached_lib._git(['status'])
 
 class TestGitCommitAllIn(unittest.TestCase):
     """The bundle commit sweeps the worktree with `git add -A`, so
@@ -114,10 +161,19 @@ class TestWorktreesDirFor(unittest.TestCase):
         )
 
     def test_custom_target_returns_target_subdir(self):
-        custom = Path('/tmp/some/scratch_repo')
+        custom = Path('/tmp/some/scratch_repo').resolve()
         self.assertEqual(
             detached_lib.worktrees_dir_for(custom),
             custom / '.runner-worktrees',
+        )
+
+    def test_agrees_with_target_repo_helper(self):
+        """One definition: prune scans exactly what create writes to."""
+        from runner import target_repo as target_repo_mod
+        custom = Path('/tmp/some/scratch_repo').resolve()
+        self.assertEqual(
+            detached_lib.worktrees_dir_for(custom),
+            target_repo_mod.worktrees_dir(custom),
         )
 
 

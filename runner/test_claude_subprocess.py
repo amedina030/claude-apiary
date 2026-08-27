@@ -2,6 +2,7 @@
 """Unit tests for runner/claude_subprocess.py env allowlist."""
 import unittest
 import subprocess
+from pathlib import Path
 from unittest import mock
 
 from runner.claude_subprocess import (
@@ -30,7 +31,12 @@ class TestRunClaudeCommand(unittest.TestCase):
     def test_default_denies_git_push_and_caps_turns(self):
         from runner import claude_subprocess as cs
         cmd = self._argv()
-        self.assertEqual(cmd[:5], ["claude", "-p", "-", "--output-format", "json"])
+        # argv[0] is whatever `which` resolved (a bare "claude" only when the
+        # CLI is not on PATH) — see test_resolve_claude_bin below.
+        self.assertTrue(
+            cmd[0] == "claude" or "claude" in cmd[0].lower(), cmd[0],
+        )
+        self.assertEqual(cmd[1:5], ["-p", "-", "--output-format", "json"])
         i = cmd.index("--disallowedTools")
         self.assertEqual(tuple(cmd[i + 1:i + 1 + len(cs.DEFAULT_DISALLOWED_TOOLS)]),
                          cs.DEFAULT_DISALLOWED_TOOLS)
@@ -197,6 +203,37 @@ class TestBuildSubprocessEnv(unittest.TestCase):
         env = _build_subprocess_env(parent, is_windows=True)
         self.assertNotIn("SHELL", env)
         self.assertEqual(env["SYSTEMROOT"], "C:\\Windows")
+
+
+class TestResolveClaudeBin(unittest.TestCase):
+    """Which executable a stage actually spawns."""
+
+    def test_explicit_override_wins(self):
+        from runner import claude_subprocess as cs
+        env = {cs.CLAUDE_BIN_ENV_VAR: "/opt/bin/claude-next", "PATH": ""}
+        self.assertEqual(cs.resolve_claude_bin(env), "/opt/bin/claude-next")
+
+    def test_falls_back_to_bare_name_when_not_on_path(self):
+        from runner import claude_subprocess as cs
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(cs.resolve_claude_bin({"PATH": td}), "claude")
+
+    def test_resolves_through_pathext(self):
+        """A bare "claude" is resolved by CreateProcess on Windows, which
+        only ever appends .exe — an npm-installed claude.cmd is invisible to
+        it. `which` honours PATHEXT, so both installs launch."""
+        from runner import claude_subprocess as cs
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            name = "claude.bat" if os.name == "nt" else "claude"
+            shim = Path(td) / name
+            shim.write_text("", encoding="utf-8")
+            if os.name != "nt":
+                shim.chmod(0o755)
+            resolved = cs.resolve_claude_bin({"PATH": td})
+            self.assertEqual(Path(resolved).parent.resolve(), Path(td).resolve())
 
 
 if __name__ == "__main__":

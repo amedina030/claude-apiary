@@ -4,7 +4,7 @@ from __future__ import annotations
 import json, sys
 from .detached_lib import list_unmerged_runner_branches
 from .run_history import RUN_HISTORY_FILE
-from .target_repo import backlog_dir, hardens_dir, intake_dir
+from .target_repo import backlog_dir, hardens_dir, intake_dir, resolve_target_repo
 
 INTAKE_DIR = intake_dir()
 BACKLOG_DIR = backlog_dir()
@@ -64,7 +64,7 @@ def load_ticket_summary(uuid: str) -> tuple:
 
 def main() -> int:
     entries = load_run_history_entries()
-    branches = list_unmerged_runner_branches()
+    branches = list_unmerged_runner_branches(resolve_target_repo())
     if not branches:
         print('No runner/* branches ready for review.')
         return 0

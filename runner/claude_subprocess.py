@@ -33,6 +33,7 @@ ALLOW_ALL_ENV_VAR : str
 """
 import os
 import json
+import shutil
 import subprocess
 
 from .config_loader import get as cfg
@@ -40,6 +41,30 @@ from .cost_emit import emit_usage_xml
 
 RUNNER_SUBPROCESS_ENV_VAR = "APIARY_RUNNER_SUBPROCESS"
 ALLOW_ALL_ENV_VAR = "APIARY_RUNNER_ALLOW_ALL_ENV"
+CLAUDE_BIN_ENV_VAR = "APIARY_CLAUDE_BIN"
+
+
+def resolve_claude_bin(env: dict[str, str] | None = None) -> str:
+    """Return the executable to spawn for `claude`.
+
+    Precedence: ``APIARY_CLAUDE_BIN`` (an explicit path, for operators whose
+    CLI is installed under another name), then ``shutil.which`` against the
+    subprocess's own ``PATH``, then the bare name.
+
+    ``which`` rather than a bare ``"claude"`` because on Windows a bare name
+    is resolved by ``CreateProcess``, which only ever appends ``.exe`` — an
+    npm-installed ``claude.cmd`` is invisible to it, and the runner would
+    report ``could not launch claude subprocess`` on a machine where
+    ``claude`` works fine in a shell. ``which`` honours ``PATHEXT``, so both
+    installs work, and the resolution follows the *subprocess's* PATH rather
+    than the parent's.
+    """
+    lookup = env if env is not None else os.environ
+    override = (lookup.get(CLAUDE_BIN_ENV_VAR) or "").strip()
+    if override:
+        return override
+    found = shutil.which("claude", path=lookup.get("PATH"))
+    return found or "claude"
 
 # System-essential vars, named explicitly per platform. Missing any of
 # these from a claude subprocess would typically break basic operation
@@ -220,7 +245,9 @@ def run_claude(
     if permission_mode is _FROM_CONFIG:
         permission_mode = cfg("subprocess", "permission_mode", DEFAULT_PERMISSION_MODE)
 
-    cmd = ["claude", "-p", "-", "--output-format", "json"]
+    env = _build_subprocess_env()
+
+    cmd = [resolve_claude_bin(env), "-p", "-", "--output-format", "json"]
     if model:
         cmd.extend(["--model", model])
     if permission_mode:
@@ -235,8 +262,6 @@ def run_claude(
     rules = [r for r in (disallowed_tools or ()) if r]
     if rules:
         cmd.extend(["--disallowedTools", *rules])
-
-    env = _build_subprocess_env()
 
     try:
         result = subprocess.run(

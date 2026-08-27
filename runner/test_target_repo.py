@@ -259,11 +259,16 @@ class TestArtifactPathHelpers(_EnvIsolation):
         root = target_repo.artifacts_root(t)
         self.assertEqual(target_repo.run_history_path(t), root / "run_history.jsonl")
 
-    def test_worktrees_dir_sibling_of_runner(self):
+    def test_worktrees_dir_is_the_path_detached_lib_uses(self):
+        """One definition of where live worktrees go. This helper used to
+        say `.apiary/runner-worktrees` while detached_lib created them in
+        `.runner-worktrees`, so prune scanned an empty directory forever
+        (review runner Bug 4)."""
+        from runner import detached_lib
         t = Path("/tmp/some-target").resolve()
+        self.assertEqual(target_repo.worktrees_dir(t), t / ".runner-worktrees")
         self.assertEqual(
-            target_repo.worktrees_dir(t),
-            t / ".apiary" / "runner-worktrees",
+            target_repo.worktrees_dir(t), detached_lib.worktrees_dir_for(t),
         )
         self.assertNotEqual(
             target_repo.worktrees_dir(t).parent,

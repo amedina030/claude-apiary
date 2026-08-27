@@ -471,15 +471,40 @@ def _run_detached_impl(cli_args) -> int:
     def _now() -> str:
         return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
 
+    # Resolve the default target repo BEFORE anything git-shaped happens.
+    # Pruning, the hygiene precheck and the claimed-branch scan all inspect
+    # branches and worktrees, and every one of them used to inspect *apiary's*
+    # checkout regardless of --target-repo (review runner Bug 2). The intake
+    # may still name its own target; that is resolved again once it is read.
+    try:
+        default_target = resolve_target_repo(
+            cli_override=getattr(cli_args, 'target_repo', None),
+        )
+    except ValueError as e:
+        print(f'ERROR: target_repo invalid: {e}', file=sys.stderr)
+        history_append({
+            'start_ts': start_ts,
+            'end_ts': _now(),
+            'exit_status': 'target_repo_invalid',
+            'stderr': str(e),
+            'uuid': None,
+            'slug': None,
+            'branch': None,
+            'stages_completed': 0,
+            'total_tokens': 0,
+            'target_repo': None,
+        })
+        return 1
+
     # Clean up any worktrees left behind by a previous hard-killed run
     # (Stop-ScheduledTask / taskkill /F). Worktrees with unmerged commits
     # are preserved so partial work isn't silently dropped.
-    pruned = prune_stale_worktrees()
+    pruned = prune_stale_worktrees(default_target)
     for p, action in pruned:
         print(f'prune_stale_worktrees: {action} {p}', file=sys.stderr)
 
     # Hygiene precheck
-    reason = hygiene_precheck(max_unreviewed)
+    reason = hygiene_precheck(max_unreviewed, default_target)
     if reason:
         history_append({
             'start_ts': start_ts,
@@ -498,11 +523,12 @@ def _run_detached_impl(cli_args) -> int:
         picked_path = Path(cli_args.intake)
         from_backlog = False
     else:
-        picked_path = pick_backlog_item()
+        picked_path = pick_backlog_item(default_target)
         from_backlog = True
 
         if picked_path is None:
-            reason = 'all in progress' if all_backlog_items_claimed() else 'backlog empty'
+            reason = ('all in progress' if all_backlog_items_claimed(default_target)
+                      else 'backlog empty')
             _log_and_return = {
                 'start_ts': start_ts,
                 'end_ts': _now(),
@@ -827,7 +853,7 @@ def _run_detached_impl(cli_args) -> int:
         # Use `python -m runner.run --cleanup <uuid>` to remove it
         # manually once the failure has been diagnosed.
         if exit_status == 'ok':
-            rm_ok, rm_err = git_worktree_remove(wt_path)
+            rm_ok, rm_err = git_worktree_remove(wt_path, target_repo=target_repo_path)
             if not rm_ok:
                 print(f'ERROR: git worktree remove failed: {rm_err}', file=sys.stderr)
                 exit_status = 'worktree_remove_failed'
