@@ -52,6 +52,9 @@ include = [
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0,<9.0"
+# Lint + format, configured in [tool.ruff] below and gated in CI. Dev-group,
+# like pytest: nothing the toolkit ships at runtime imports it.
+ruff = ">=0.16,<0.17"
 # Coverage is reported, never gated — `--cov` is deliberately absent from
 # addopts so the default run stays fast. Ask for it explicitly:
 #   poetry run pytest --cov
@@ -92,6 +95,42 @@ optional = true
 # Python it was cut against, and there is no point building a bundle for an
 # interpreter the GUI's own deps refuse to install on.
 pyinstaller = { version = ">=6.0,<7.0", python = ">=3.11,<3.13" }
+
+# Lint + format. The rule set is the one review §5 Phase 4 asks for, and it is
+# deliberately narrow: pyflakes (`F`) and pycodestyle errors (`E`) for dead
+# code and syntax-adjacent mistakes, isort (`I`) for import order, plus three
+# rules that encode PORTABILITY.md rather than taste —
+#   PLW1514  `open()` with no `encoding=` (cp1252 on the Windows dev box, utf-8
+#            everywhere else: the repo's single most common cross-OS bug class)
+#   S602     `subprocess(..., shell=True)`
+#   S605     `os.system` / starting a process with a shell
+# Style opinions beyond that (naming, docstrings, complexity) stay out: the
+# house style lives in docs/standards/code-style.md and is reviewed, not linted.
+[tool.ruff]
+target-version = "py311"
+# 100, not ruff's default 88. Measured on the tree before this pass: 1,103
+# lines exceed 88 columns and only 268 exceed 100, so 100 keeps `ruff format`
+# a formatting pass instead of a rewrite of every wrapped call site.
+line-length = 100
+# `docs/` is excluded on purpose *for now* — it was mid-rewrite when this
+# landed and gets its own formatting pass. The rest are generated or foreign
+# trees: per-repo install state, centralized target state, scratch dirs.
+exclude = ["docs", ".claude", ".repos", ".apiary", "_tmp_*"]
+
+[tool.ruff.lint]
+# PLW1514 is still a preview rule in ruff 0.16. `explicit-preview-rules` keeps
+# preview mode from dragging in every other unstable rule: only the preview
+# rules named in `select` below are turned on.
+preview = true
+explicit-preview-rules = true
+select = ["E", "F", "I", "PLW1514", "S602", "S605"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests shell out on purpose: the git-repo fixtures, the launcher execution
+# tests and the hook end-to-end tests all drive real subprocesses. S602/S605
+# are about untrusted input reaching a shell; a test's input is the test.
+"**/test_*.py" = ["S602", "S605"]
+"core/testing.py" = ["S602", "S605"]
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
