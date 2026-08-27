@@ -17,6 +17,7 @@ Usage:
     validate_plan.py <path_to_plan.json>
 """
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -26,7 +27,36 @@ from pathlib import Path
 
 from .config_loader import get as cfg
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+# Where apiary itself lives. Fixed, and used only to decide whether a plan
+# targets apiary (which has its own banned-token list).
+_APIARY_ROOT = Path(__file__).resolve().parent.parent
+
+# The repo a plan's file paths are resolved against. Defaults to apiary and is
+# rebound, for the duration of one validate() call, to the plan's target_repo.
+#
+# Before this, every path check resolved against apiary's checkout: a plan with
+# a `modify` step on a file that exists in `--target-repo X` but not in apiary
+# failed with "file not found" on all three attempts, so multi-repo runs could
+# never get past stage 3 (review runner Bug 2). The gitignore check and the
+# symbol-removal git grep looked at apiary too.
+_REPO_ROOT = _APIARY_ROOT
+
+
+@contextlib.contextmanager
+def repo_root_scope(root):
+    """Resolve plan paths against *root* for the duration of the block.
+
+    Scoped rather than assigned, so one validate() call cannot leak its
+    target repo into the next one in the same process.
+    """
+    global _REPO_ROOT
+    previous = _REPO_ROOT
+    if root is not None:
+        _REPO_ROOT = Path(root).resolve()
+    try:
+        yield _REPO_ROOT
+    finally:
+        _REPO_ROOT = previous
 
 VALID_TYPES = {"create", "modify", "delete", "test", "verify"}
 VALID_ACTIONS = {"create", "modify", "delete", "test", "verify"}
@@ -101,7 +131,10 @@ def _resolve_banned_tokens(target_repo: str | None) -> dict:
                     return bt
     # Default: apiary list applies only when target is apiary itself (or
     # unresolved). Non-apiary targets with no explicit override get {}.
-    if target_repo is None or Path(target_repo).resolve() == _REPO_ROOT.resolve():
+    # Compared against _APIARY_ROOT, not _REPO_ROOT: the latter is rebound to
+    # the plan's target inside validate(), which would make every target look
+    # like apiary and hand it apiary's conventions.
+    if target_repo is None or Path(target_repo).resolve() == _APIARY_ROOT.resolve():
         default = cfg("runner", "banned_tokens", {}) or {}
         return default if isinstance(default, dict) else {}
     return {}
@@ -809,16 +842,33 @@ def _check_criteria_coverage(spec: dict, steps: list[dict]) -> list[str]:
     return errors
 
 
-def validate(data: dict, banned_tokens: dict | None = None) -> list[str]:
+def validate(
+    data: dict,
+    banned_tokens: dict | None = None,
+    repo_root=None,
+) -> list[str]:
     """Validate plan data and return list of error strings (empty = valid).
 
-    ``banned_tokens`` defaults to the apiary map resolved from the plan's
-    ``target_repo`` field (or apiary fallback). Callers may pass an explicit
-    map to override — used by tests and by main() once it has read the
-    plan's target_repo.
+    ``banned_tokens`` defaults to the map resolved from the plan's
+    ``target_repo`` field (or the apiary list when the target is apiary).
+    Callers may pass an explicit map to override — used by tests.
+
+    ``repo_root`` is the checkout a plan's file paths are resolved against;
+    it defaults to the plan's own ``target_repo`` field, and to apiary when
+    there is none. Passing it explicitly overrides both.
     """
     if banned_tokens is None:
         banned_tokens = _resolve_banned_tokens(data.get("target_repo"))
+    if repo_root is None and isinstance(data, dict):
+        field = data.get("target_repo")
+        if isinstance(field, str) and field.strip():
+            repo_root = field.strip()
+    with repo_root_scope(repo_root):
+        return _validate(data, banned_tokens)
+
+
+def _validate(data: dict, banned_tokens: dict) -> list[str]:
+    """Body of validate(), run with _REPO_ROOT already pointed at the target."""
     errors = []
 
     if not isinstance(data, dict):

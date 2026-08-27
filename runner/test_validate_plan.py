@@ -762,5 +762,55 @@ class TestPostConditionsSchema(unittest.TestCase):
         )
 
 
+class TestTargetRepoRoot(unittest.TestCase):
+    """review runner Bug 2: paths were resolved against apiary's checkout, so
+    a `modify` step on a file that exists only in --target-repo X failed with
+    'file not found' on every attempt and multi-repo runs never reached
+    stage 4."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.target = Path(self._tmp.name).resolve() / "target"
+        (self.target / "src").mkdir(parents=True)
+        (self.target / "src" / "only_here.py").write_text("x = 1\n", encoding="utf-8")
+
+    def _plan(self, **extra):
+        plan = _base_plan([
+            _step(1, "modify", "Adjust the value.", files=["src/only_here.py"]),
+        ])
+        plan.update(extra)
+        return plan
+
+    def test_file_only_in_the_target_is_found(self):
+        errors = validate(self._plan(target_repo=str(self.target)))
+        self.assertEqual(
+            [e for e in errors if "file not found" in e], [], errors,
+        )
+
+    def test_without_a_target_the_same_plan_is_rejected(self):
+        errors = validate(self._plan())
+        self.assertTrue(
+            any("file not found" in e for e in errors), errors,
+        )
+
+    def test_explicit_repo_root_overrides_the_field(self):
+        errors = validate(self._plan(), repo_root=self.target)
+        self.assertEqual(
+            [e for e in errors if "file not found" in e], [], errors,
+        )
+
+    def test_the_root_is_restored_after_the_call(self):
+        before = validate_plan._REPO_ROOT
+        validate(self._plan(target_repo=str(self.target)))
+        self.assertEqual(validate_plan._REPO_ROOT, before)
+
+    def test_a_non_apiary_target_does_not_inherit_apiary_banned_tokens(self):
+        """The banned-token comparison must use apiary's own root, not the
+        rebound one — otherwise every target looks like apiary."""
+        self.assertEqual(_resolve_banned_tokens(str(self.target)), {})
+        self.assertNotEqual(_resolve_banned_tokens(None), {})
+
+
 if __name__ == "__main__":
     unittest.main()

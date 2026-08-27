@@ -292,14 +292,41 @@ PLAN_STEPS = [
         "depends_on": [1],
         "code_spec": "Read app/greeter.py and confirm greet(name) exists.",
     },
+    {
+        # A modify step on a file that exists ONLY in the target repo. Before
+        # validate_plan took its root from the plan's target_repo, this failed
+        # with "file not found" on all three planner attempts and no
+        # multi-repo run could get past stage 3 (review runner Bug 2).
+        "step_number": 3,
+        "type": "modify",
+        "description": "Wire the greeter into the entry point",
+        "action": "modify",
+        "files": ["app/main.py"],
+        "depends_on": [1],
+        "code_spec": "Import greet from app/greeter.py and call it from main().",
+        "post_conditions": [
+            {"type": "file_contains", "file": "app/main.py", "text": "greet"},
+        ],
+    },
 ]
+
+MAIN_SOURCE = '''from app.greeter import greet
+
+
+def main():
+    print(greet("Ada"))
+    return 0
+'''
 
 
 def scenario() -> dict:
     return {
         "spec": SPEC,
         "plan": {"steps": PLAN_STEPS},
-        "writes": {"1": {"app/greeter.py": GREETER_SOURCE}},
+        "writes": {
+            "1": {"app/greeter.py": GREETER_SOURCE},
+            "3": {"app/main.py": MAIN_SOURCE},
+        },
         "verify": {"passed": True, "explanation": "greet(name) is defined."},
         "findings": [
             {
@@ -511,7 +538,8 @@ class E2EPipelineBase(unittest.TestCase):
             self.artifact("executions", uuid).read_text(encoding="utf-8"))
         self.assertEqual(execution["status"], "completed")
         self.assertEqual(
-            [step["status"] for step in execution["steps"]], ["passed", "passed"],
+            [step["status"] for step in execution["steps"]],
+            ["passed"] * len(PLAN_STEPS),
         )
         report = json.loads(self.artifact("reports", uuid).read_text(encoding="utf-8"))
         self.assertEqual(report["verdict"], "all_resolved")
@@ -607,10 +635,19 @@ class DetachedRunTest(E2EPipelineBase):
             any(s.startswith(f"runner/{uuid} step 1:") for s in subjects),
             f"the executor's step commit is not on the run branch: {subjects}",
         )
+        self.assertTrue(
+            any(s.startswith(f"runner/{uuid} step 3:") for s in subjects),
+            f"the modify step's commit is missing: {subjects}",
+        )
         self.assertIn(f"runner/{uuid}: Add a greeter module", subjects)
         self.assertIn(
             "app/greeter.py",
             git_ok(self.target, "ls-tree", "--name-only", "-r", run_branch),
+        )
+        # The modify step touched a file that exists only in the target repo.
+        self.assertIn(
+            "from app.greeter import greet",
+            git_ok(self.target, "show", f"{run_branch}:app/main.py"),
         )
 
         # The morning review table joins run_history to the live branch.
