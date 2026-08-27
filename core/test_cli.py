@@ -210,6 +210,65 @@ class VersionVerbTests(unittest.TestCase):
         read.assert_called_once_with(Path("main/apiary"))
 
 
+class UserFacingErrorTests(unittest.TestCase):
+    """Bug 10 — a bad target or a bad profile is a message, not a traceback.
+
+    ``install``/``uninstall`` raise typed errors for states the user can fix
+    (target is not a git repo, profile cycle, unsupported ``$schema_version``).
+    Letting them escape ``main`` printed a stack trace and still exited 1, which
+    buried the one line that said what to do.
+    """
+
+    def _run(self, argv: list[str], exc: Exception, target: str) -> tuple[int, str]:
+        err = io.StringIO()
+        with mock.patch(target, side_effect=exc), contextlib.redirect_stderr(err):
+            rc, _ = _main(argv)
+        return rc, err.getvalue()
+
+    def test_install_error_exits_1_with_the_message(self):
+        from core.install import InstallError
+
+        rc, err = self._run(
+            ["install", "--target", "some/repo"],
+            InstallError("target /x is not inside a git repository"),
+            "core.install.install",
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("not inside a git repository", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_uninstall_error_exits_1_with_the_message(self):
+        from core.uninstall import UninstallError
+
+        rc, err = self._run(
+            ["uninstall", "--target", "some/repo"],
+            UninstallError("refusing to uninstall main-apiary itself"),
+            "core.uninstall.uninstall",
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("main-apiary", err)
+
+    def test_profile_errors_exit_1_with_the_message(self):
+        from core.apiary_profiles import ProfileCycleError, ProfileSchemaError
+
+        for exc in (ProfileCycleError(["base", "python", "base"]),
+                    ProfileSchemaError("profiles/base.jsonc: missing '$schema_version'")):
+            with self.subTest(exc=type(exc).__name__):
+                rc, err = self._run(
+                    ["install", "--target", "some/repo"], exc, "core.install.install",
+                )
+                self.assertEqual(rc, 1)
+                self.assertNotIn("Traceback", err)
+                self.assertTrue(err.strip())
+
+    def test_unexpected_errors_are_not_swallowed(self):
+        # A bug in apiary must still surface as a traceback — only the typed
+        # user-facing errors get the friendly treatment.
+        with mock.patch("core.install.install", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                _main(["install", "--target", "some/repo"])
+
+
 class ParserContractTests(unittest.TestCase):
     def test_a_subcommand_is_required(self):
         _expect_usage_error(self, [])

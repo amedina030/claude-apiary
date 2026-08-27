@@ -137,6 +137,7 @@ python core/doctor.py [subcommand] [--fix] [--apiary-repo PATH]
 |------------|-------------|
 | (none) | Run all checks, print a summary |
 | `pointers` | Verify main-apiary's self-pointer matches its actual location |
+| `pins` | Every registered repo's `.claude/apiary/` pins agree with its registry entry — self-pointer `uid`/`name`, main-apiary-pointer path — and uid 1 really is main-apiary |
 | `registry` | Walk every registered repo: path exists; uid/version fields present |
 | `versions` | Compare each repo's pinned version against `<apiary>/VERSION` |
 | `stale` | Registered repos whose installed slash-command files differ from current main-apiary source (skill drift) |
@@ -148,13 +149,15 @@ python core/doctor.py [subcommand] [--fix] [--apiary-repo PATH]
 
 | Flag | Description |
 |------|-------------|
-| `--fix` | Apply the named check's safe fix. Supported for `pointers` (cascade every bootstrapped repo's pointer to the current main-apiary path). Requires a subcommand. |
+| `--fix` | Apply the named check's safe fix. Supported for `pointers` (cascade every bootstrapped repo's pointer to the current main-apiary path) and `pins` (rewrite a repo's self-pointer `uid`/`name` and main-apiary-pointer path from the registry, which is the source of truth). Requires a subcommand. |
 | `--apiary-repo PATH` | Path to main-apiary checkout (default: resolved via launcher / pointer) |
 
 ### Exit code
 
 - `0` — all checks pass (notes are informational and do not fail the run).
-- `1` — any check reported an issue, or a `--fix` run hit an error.
+- `1` — any check reported an issue, or a `--fix` run hit an error or left an
+  issue it cannot repair (e.g. `pins` finding a uid 1 that is not main-apiary —
+  which repo gives up the uid is a decision, not a rewrite).
 - `2` — `--fix` without a subcommand, or on a check that has no fix.
 
 ## core/flags.py
@@ -906,7 +909,7 @@ to a single-purpose module under `core/`.
 | `install` | `apiary install --target <repo> [--profile <name>]` | Bootstrap apiary into a target repo (`core/install.py`). Idempotent. |
 | `uninstall` | `apiary uninstall --target <repo> [--remove-data]` | Reverse of install (`core/uninstall.py`). |
 | `self-bootstrap` | `apiary self-bootstrap` | First-machine setup of main-apiary; equivalent to running `install --target` on main-apiary itself (`core/self_bootstrap.py`). |
-| `doctor` | `apiary doctor [check] [--fix]` | Consistency checks (`core/doctor.py`). Checks: `pointers`, `registry`, `versions`, `stale`, `orphans`, `duplicates`, `unreachable` — name one, or omit to run all. See the `core/doctor.py` section for what each reports. |
+| `doctor` | `apiary doctor [check] [--fix]` | Consistency checks (`core/doctor.py`). Checks: `pointers`, `pins`, `registry`, `versions`, `stale`, `orphans`, `duplicates`, `unreachable` — name one, or omit to run all. See the `core/doctor.py` section for what each reports. |
 | `cascade-fix` | `apiary cascade-fix` | Rewrite every bootstrapped repo's `main-apiary-pointer.json` to the current main-apiary path (`core/cascade.py`). |
 | `version` | `apiary version` | Print main-apiary's pinned version (the contents of `<main-apiary>/VERSION`). |
 
@@ -917,14 +920,14 @@ to a single-purpose module under `core/`.
 | `--target PATH` | install, uninstall | yes | Target repo. |
 | `--profile NAME` | install | no | Profile under `<main-apiary>/profiles/` (default: `base`). |
 | `--remove-data` | uninstall | no | Also delete `<main-apiary>/.repos/<name>-<uid>/` (the centralized per-target state). |
-| `--fix` | doctor | no | Apply the named check's safe fix. Only `pointers` (cascade the pointer rewrite) has one; `--fix` without a check name, or on any other check, exits `2`. |
+| `--fix` | doctor | no | Apply the named check's safe fix. Only `pointers` (cascade the pointer rewrite) and `pins` (rewrite pins from the registry) have one; `--fix` without a check name, or on any other check, exits `2`. |
 | `--apiary-repo PATH` | all | no | Path to main-apiary. Default: resolved via `APIARY_MAIN_REPO`, the running source tree, or `<cwd>/.claude/apiary/main-apiary-pointer.json`. |
 
-`install` walks the profile's `extends` chain, deep-merges parents left-to-right then the child on top (`{"$replace": value}` escape hatch replaces instead of merges), and writes the resolved apiary-owned top-level keys into `<repo>/.claude/settings.json`. It also generates `<repo>/.claude/apiary/{launch.py, main-apiary-pointer.json, self-pointer.json, version.json}`, copies slash commands into `<repo>/.claude/commands/`, writes the apiary-managed zone into `<repo>/CLAUDE.md`, updates `<repo>/.gitignore`, and installs the commit-time secret-scan pre-commit hook (best-effort — a refusal warns instead of failing the install). Centralized state lands at `<main-apiary>/.repos/<name>-<uid>/bootstrap_state.json` (schema v2 — adds the file hashes `apiary doctor stale` compares against to detect slash-command drift).
+`install` walks the profile's `extends` chain, deep-merges parents left-to-right then the child on top (`{"$replace": value}` escape hatch replaces instead of merges), and merges the resolved profile into `<repo>/.claude/settings.json`. `hooks` is the only key apiary owns outright — it is regenerated every install (apiary-marked entries only; the user's own hooks stay). Every other profile key is merged into the user's file: their entries survive, the profile's are added, and an entry a previous install contributed that the profile no longer ships is withdrawn. Keys the profile does not mention are left untouched. It also generates `<repo>/.claude/apiary/{launch.py, main-apiary-pointer.json, self-pointer.json, version.json}`, copies slash commands into `<repo>/.claude/commands/`, writes the apiary-managed zone into `<repo>/CLAUDE.md`, updates `<repo>/.gitignore`, and installs the commit-time secret-scan pre-commit hook (best-effort — a refusal warns instead of failing the install). Centralized state lands at `<main-apiary>/.repos/<name>-<uid>/bootstrap_state.json` (schema v2 — adds the file hashes `apiary doctor stale` compares against to detect slash-command drift).
 
 Exit codes:
 - `0` — success; for `doctor`, every check passed.
-- `1` — `doctor` reported an issue. `install` / `uninstall` failures (target is not a git repo, unknown profile, `extends` cycle, unsupported `$schema_version`, JSONC parse error) currently surface as an unhandled exception traceback, which also exits `1`.
+- `1` — `doctor` reported an issue, or `install` / `uninstall` refused: target is not a git repo, unknown profile, `extends` cycle, unsupported `$schema_version`, JSONC parse error, a tampered `CLAUDE.md` managed zone, an unreadable `bootstrap_state.json`, or `uninstall --target` aimed at main-apiary itself. These print one line naming the fix, not a traceback.
 - `2` — argparse usage error, or `--fix` on a check that has no fix.
 
 See [Bootstrapping a repo](../guides/bootstrapping-a-repo.md) for profile authoring and the full workflow.

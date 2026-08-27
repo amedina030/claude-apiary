@@ -162,6 +162,34 @@ def allocate_next_id(apiary_repo: Path) -> int:
     return new_id
 
 
+def reserve_uid(apiary_repo: Path, uid: int) -> None:
+    """Raise the monotonic counter so *uid* can never be allocated again.
+
+    ``apiary install`` re-adopts the uid recorded in a repo's self-pointer when
+    the registry has lost that repo's entry (see ``install._readoptable_uid``)
+    — usually because ``.repos/`` is gitignored and this is a fresh clone of
+    main-apiary. The ``next_id`` counter is lost in the same breath, so without
+    this the next allocation would hand the re-adopted uid to a different repo
+    and both would share one state directory.
+
+    No-op when the counter is already above *uid*. Caller MUST hold the
+    registry FileLock, like :func:`allocate_next_id`.
+    """
+    p = next_id_path(apiary_repo)
+    current = 0
+    if p.is_file():
+        try:
+            current = int(p.read_text(encoding="utf-8").strip() or 0)
+        except (OSError, ValueError):
+            current = 0
+    if current >= uid:
+        return
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(str(uid) + "\n", encoding="utf-8")
+    tmp.replace(p)
+
+
 def _write_pointer(target_repo: Path, apiary_repo: Path, target_id: str) -> Path:
     """Write ``<target>/.apiary/pointer`` with the registry mapping. Atomic."""
     pointer_dir = Path(target_repo) / POINTER_DIRNAME

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -190,8 +191,12 @@ class MainTests(unittest.TestCase):
     def test_main_returns_zero_on_clean_registry(self):
         repo = self.root / "x"
         repo.mkdir()
+        # main-apiary holds uid 1 — `check_pins` reports it when anything else
+        # does, because the drift handler acts on that convention.
         _write_registry(self.apiary, {
-            "1": {"name": "x", "real_path": str(repo), "uid": 1, "version": "0.1.0"},
+            "1": {"name": "apiary", "real_path": str(self.apiary), "uid": 1,
+                  "version": "0.1.0"},
+            "2": {"name": "x", "real_path": str(repo), "uid": 2, "version": "0.1.0"},
         })
         rc = doctor.main(["--apiary-repo", str(self.apiary)])
         self.assertEqual(rc, 0)
@@ -297,6 +302,165 @@ class CheckStaleTests(unittest.TestCase):
         notes, issues = doctor.check_stale(self.apiary)
         self.assertEqual(issues, [])
         self.assertEqual(notes, [])
+
+
+class CheckPinsTests(unittest.TestCase):
+    """Bug 4/5 — nothing used to compare a repo's pin files to the registry.
+
+    A repo whose ``self-pointer.uid`` disagrees with its registry key sends the
+    launcher looking for ``<name>-<pinned-uid>``, which does not exist, so every
+    tool silently falls back to an in-repo path. It is invisible until someone
+    notices their notes went missing.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.apiary = _make_apiary(self.root)
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        # The healthy shape: main-apiary is uid 1, the bootstrapped repo is
+        # uid 2, and both carry pins that agree with the registry.
+        self._register()
+        self._write_pins(self.apiary, uid=1, name="apiary")
+        self._write_pins(self.repo, uid=2, name="repo")
+
+    def _register(self, repo_uid: int = 2, repo_name: str = "repo",
+                  repo_path: Path | None = None, apiary_uid: int = 1) -> None:
+        _write_registry(self.apiary, {
+            str(apiary_uid): {"name": "apiary", "real_path": str(self.apiary),
+                              "uid": apiary_uid, "version": "0.1.0"},
+            str(repo_uid): {"name": repo_name, "real_path": str(repo_path or self.repo),
+                            "uid": repo_uid, "version": "0.1.0"},
+        })
+
+    def _write_pins(self, repo: Path, uid: int, name: str,
+                    main_apiary: Path | None = None) -> None:
+        state.write_self_pointer(repo, {
+            "uid": uid, "name": name, "real_path": str(repo),
+        })
+        state.write_main_apiary_pointer(repo, {
+            "main_apiary_path": str(main_apiary or self.apiary), "main_apiary_uid": 1,
+        })
+
+    def test_matching_pins_return_clean(self):
+        notes, issues = doctor.check_pins(self.apiary)
+        self.assertEqual(issues, [])
+        self.assertEqual(notes, [])
+
+    def test_uid_mismatch_is_an_issue(self):
+        self._write_pins(self.repo, uid=7, name="repo")
+        _, issues = doctor.check_pins(self.apiary)
+        self.assertTrue(any("uid" in i and "7" in i for i in issues), issues)
+
+    def test_name_mismatch_is_an_issue(self):
+        self._write_pins(self.repo, uid=2, name="renamed")
+        _, issues = doctor.check_pins(self.apiary)
+        self.assertTrue(any("name" in i for i in issues), issues)
+
+    def test_main_apiary_pointer_elsewhere_is_an_issue(self):
+        self._write_pins(self.repo, uid=2, name="repo",
+                         main_apiary=self.root / "some-other-clone")
+        _, issues = doctor.check_pins(self.apiary)
+        self.assertTrue(any("main-apiary-pointer" in i for i in issues), issues)
+
+    def test_missing_pins_are_a_note_not_an_issue(self):
+        # Lazily-registered repos (state.resolve_target_state_dir) have a
+        # registry entry and no pin files; that is a setup step, not drift.
+        shutil.rmtree(state.pin_dir(self.repo))
+        notes, issues = doctor.check_pins(self.apiary)
+        self.assertEqual(issues, [])
+        self.assertTrue(any("self-pointer" in n for n in notes), notes)
+
+    def test_unreachable_repo_is_skipped(self):
+        self._register(repo_path=self.root / "gone")
+        notes, issues = doctor.check_pins(self.apiary)
+        self.assertEqual((notes, issues), ([], []))
+
+    def test_main_apiary_registered_under_another_uid_is_an_issue(self):
+        # Bug 5: `drift`, `cascade` and `install` all hardcode "uid 1 is
+        # main-apiary", and the drift branch it selects rewrites other repos'
+        # pointers — so a uid-1 that is not main-apiary is a live hazard.
+        self._register(apiary_uid=3, repo_uid=1, repo_name="repo")
+        self._write_pins(self.apiary, uid=3, name="apiary")
+        self._write_pins(self.repo, uid=1, name="repo")
+        _, issues = doctor.check_pins(self.apiary)
+        self.assertTrue(any("uid 1" in i for i in issues), issues)
+
+    def test_unregistered_main_apiary_is_a_note(self):
+        _write_registry(self.apiary, {
+            "2": {"name": "repo", "real_path": str(self.repo), "uid": 2, "version": "0.1.0"},
+        })
+        notes, issues = doctor.check_pins(self.apiary)
+        self.assertEqual(issues, [])
+        self.assertTrue(any("self-bootstrap" in n for n in notes), notes)
+
+
+class FixPinsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.apiary = _make_apiary(self.root)
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        _write_registry(self.apiary, {
+            "1": {"name": "apiary", "real_path": str(self.apiary), "uid": 1, "version": "0.1.0"},
+            "2": {"name": "repo", "real_path": str(self.repo), "uid": 2, "version": "0.1.0"},
+        })
+        state.write_self_pointer(self.apiary, {
+            "uid": 1, "name": "apiary", "real_path": str(self.apiary),
+        })
+        state.write_main_apiary_pointer(self.apiary, {
+            "main_apiary_path": str(self.apiary), "main_apiary_uid": 1,
+        })
+
+    def test_fix_rewrites_the_pins_from_the_registry(self):
+        state.write_self_pointer(self.repo, {
+            "uid": 9, "name": "old-name", "real_path": str(self.repo),
+            "last_drift_check": "2020-01-01T00:00:00Z",
+        })
+        state.write_main_apiary_pointer(self.repo, {
+            "main_apiary_path": str(self.root / "elsewhere"), "main_apiary_uid": 1,
+        })
+        rc = doctor.main(["pins", "--fix", "--apiary-repo", str(self.apiary)])
+        self.assertEqual(rc, 0)
+        sp = state.read_self_pointer(self.repo)
+        self.assertEqual(sp["uid"], 2)
+        self.assertEqual(sp["name"], "repo")
+        self.assertEqual(sp["last_drift_check"], "2020-01-01T00:00:00Z")
+        self.assertEqual(
+            Path(state.read_main_apiary_pointer(self.repo)["main_apiary_path"]),
+            self.apiary.resolve(),
+        )
+        self.assertEqual(doctor.check_pins(self.apiary)[1], [])
+
+    def test_fix_is_a_no_op_when_a_repo_has_no_pins(self):
+        # The repair there is `apiary install`, not a rewrite — and a repo
+        # that was never bootstrapped is a note, so the run still passes.
+        rc = doctor.main(["pins", "--fix", "--apiary-repo", str(self.apiary)])
+        self.assertEqual(rc, 0)
+        self.assertIsNone(state.read_self_pointer(self.repo))
+
+    def test_fix_still_fails_on_an_issue_it_cannot_repair(self):
+        # A uid-1 that is not main-apiary needs a human decision (which repo
+        # keeps the uid), so --fix reports it and exits 1.
+        _write_registry(self.apiary, {
+            "1": {"name": "repo", "real_path": str(self.repo), "uid": 1, "version": "0.1.0"},
+            "3": {"name": "apiary", "real_path": str(self.apiary), "uid": 3, "version": "0.1.0"},
+        })
+        state.write_self_pointer(self.apiary, {
+            "uid": 3, "name": "apiary", "real_path": str(self.apiary),
+        })
+        state.write_self_pointer(self.repo, {
+            "uid": 1, "name": "repo", "real_path": str(self.repo),
+        })
+        state.write_main_apiary_pointer(self.repo, {
+            "main_apiary_path": str(self.apiary), "main_apiary_uid": 1,
+        })
+        rc = doctor.main(["pins", "--fix", "--apiary-repo", str(self.apiary)])
+        self.assertEqual(rc, 1)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,11 @@ Run from inside a clone of main-apiary, or from a bootstrapped repo where
 the per-repo launcher resolves main-apiary via the pointer file. Either
 way the script needs to find main-apiary; pass ``--apiary-repo`` to override.
 
+Exit codes: 0 on success, 1 when a check fails or a verb raises one of the
+user-facing errors in :func:`_user_facing_errors` (printed as a single line,
+never a traceback), 2 for an argparse usage error. Anything else is an apiary
+bug and still surfaces as a traceback.
+
 A single CLI replaces the legacy collection of standalone install
 scripts; see ``docs/architecture/per-repo-install.md``.
 """
@@ -29,6 +34,26 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.utils import state
+
+
+def _user_facing_errors() -> tuple[type[BaseException], ...]:
+    """Exception types that mean "the input or the repo state is wrong".
+
+    ``InstallError`` / ``UninstallError`` cover a target that is not a git
+    repo, a tampered CLAUDE.md zone, an unreadable bootstrap_state, and the
+    refusal to uninstall main-apiary itself; ``ProfileError`` covers the whole
+    profile family (not found, ``extends`` cycle, bad ``$schema_version``,
+    JSONC parse error). Each carries a message that says what to fix, and used
+    to reach the user underneath a stack trace instead.
+
+    Imported here rather than at module scope so `apiary version` still pays
+    for nothing but its own import.
+    """
+    from core.apiary_profiles import ProfileError
+    from core.install import InstallError
+    from core.uninstall import UninstallError
+
+    return (InstallError, UninstallError, ProfileError)
 
 
 def _add_apiary_repo_arg(p: argparse.ArgumentParser) -> None:
@@ -163,7 +188,11 @@ def main(argv: list[str] | None = None) -> int:
     p_version.set_defaults(func=_cmd_version)
 
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except _user_facing_errors() as exc:
+        print(f"apiary {args.cmd}: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

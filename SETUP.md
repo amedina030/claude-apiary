@@ -343,6 +343,16 @@ Confirm `<repo>/.claude/apiary/launch.py` exists. If not, run `apiary install --
 **`apiary doctor` reports `pointers` issues**
 Main-apiary's self-pointer drifted. Run `apiary doctor pointers --fix` to update main-apiary's pointers and cascade-fix every bootstrapped repo's reference.
 
+**`apiary doctor` reports `pins` issues**
+A repo's `.claude/apiary/` pins disagree with the registry — usually a
+self-pointer `uid` left over from a registry that was lost or restored, which
+sends every tool's state to a directory nothing else knows about. Run
+`apiary doctor pins --fix` to rewrite the pins from the registry. The one
+finding it cannot fix for you is a uid 1 that is not main-apiary: pick which
+repo keeps the uid (`apiary uninstall` then `apiary install` the other one) —
+the drift handler treats uid 1 as main-apiary and rewrites other repos'
+pointers on its behalf.
+
 **`apiary doctor` reports `unreachable`**
 A registered repo's `real_path` no longer exists on disk. Either restore the repo, or `apiary uninstall --target <real_path>` (the registry entry is removed even if the path is gone, freeing the slug).
 

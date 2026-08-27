@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -132,6 +133,54 @@ class UninstallTests(unittest.TestCase):
         self.assertNotEqual(new.uid, self.install_result.uid)
         self.assertGreater(new.uid, self.install_result.uid)
         self.assertTrue((self.target / ".claude" / "apiary" / "launch.py").is_file())
+
+
+class UninstallOrderingTests(unittest.TestCase):
+    """Bug 6 — the registry entry is the last thing to go.
+
+    Deleting it first meant any later failure (a Windows ``PermissionError``
+    on ``launch.py`` while a hook still has it open, a tampered CLAUDE.md)
+    left a repo with pin files, hooks and commands but no registry entry —
+    which is exactly the Bug 4 state the next session then compounds.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.apiary = _make_fake_apiary(self.root)
+        self.target = self.root / "demo"
+        self.target.mkdir()
+        _git_init(self.target)
+        self.install_result = install_mod.install(self.target, apiary_repo=self.apiary)
+
+    def _registry(self) -> dict:
+        return json.loads(state.registry_path(self.apiary).read_text(encoding="utf-8"))
+
+    def test_a_failed_file_step_leaves_the_registry_entry_intact(self):
+        boom = OSError("hook process still holds launch.py")
+        with mock.patch("core.uninstall.remove_hooks", side_effect=boom):
+            with self.assertRaises(OSError):
+                uninstall_mod.uninstall(self.target, apiary_repo=self.apiary)
+        self.assertIn(str(self.install_result.uid), self._registry())
+
+    def test_a_failed_file_step_leaves_the_repo_re_uninstallable(self):
+        with mock.patch("core.uninstall.remove_hooks", side_effect=OSError("busy")):
+            with self.assertRaises(OSError):
+                uninstall_mod.uninstall(self.target, apiary_repo=self.apiary)
+        result = uninstall_mod.uninstall(self.target, apiary_repo=self.apiary)
+        self.assertTrue(result.registry_entry_removed)
+        self.assertNotIn(str(self.install_result.uid), self._registry())
+
+    def test_refuses_to_uninstall_main_apiary_itself(self):
+        _git_init(self.apiary)
+        own = install_mod.install(self.apiary, apiary_repo=self.apiary)
+        with self.assertRaises(uninstall_mod.UninstallError) as ctx:
+            uninstall_mod.uninstall(self.apiary, apiary_repo=self.apiary)
+        self.assertIn("main-apiary", str(ctx.exception))
+        # Nothing was touched on the way to the refusal.
+        self.assertTrue(state.pin_dir(self.apiary).is_dir())
+        self.assertIn(str(own.uid), self._registry())
 
 
 if __name__ == "__main__":

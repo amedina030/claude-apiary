@@ -34,56 +34,64 @@ def resolve_python() -> Path:
         return Path(override)
     return Path(sys.executable)
 
-# Marker string the retired global installer wrote into absolute-path hook commands so
-# they can be recognized on re-run. Historical marker — entries using
-# the portable $CLAUDE_PROJECT_DIR template do NOT contain it, so
-# callers must use is_apiary_entry() rather than a bare `MARKER in blob`
-# check to avoid missing portable entries.
+# The checkout name that appeared in the absolute paths the retired global
+# installer wrote. Historical only, and NOT ownership on its own — see
+# _LEGACY_HOOK_DIRS. Callers decide what is apiary's through is_apiary_entry().
 APIARY_MARKER = "claude-apiary"
 
-# Path-suffix substrings that identify a hook entry as ours even when its
-# command uses the portable $CLAUDE_PROJECT_DIR template (no absolute
-# path containing APIARY_MARKER). Both forward- and back-slash variants
-# are matched so hand-edited Windows entries are recognized too. (#227)
-APIARY_PATH_SUBSTRINGS: tuple[str, ...] = (
-    "/budgeter/hooks/", "\\budgeter\\hooks\\",
-    "/core/hooks/", "\\core\\hooks\\",
-    "/scribe/", "\\scribe\\",
-    "/docs/hooks/", "\\docs\\hooks\\",
-    "/refiner/", "\\refiner\\",
-    "/harden/", "\\harden\\",
-    "/runner/", "\\runner\\",
+# The ownership mark every generated hook command now ends with. It rides in
+# the command string rather than in a `"_apiary": true` field because a hook
+# object is documented as {type, command, timeout, …} and nothing promises that
+# unknown keys are preserved — a reader that drops them would take our only
+# proof of ownership with them. As a trailing `#` comment it is inert in all
+# three shells Claude Code uses for the shell form (`sh -c` on macOS/Linux,
+# Git Bash on Windows, PowerShell when Git Bash is absent).
+APIARY_HOOK_MARKER = " # claude-apiary"
+
+# The mark as it appears inside a command string, without the separating space
+# the shell needs — this is what entry matching looks for.
+_MARKER_TOKEN = APIARY_HOOK_MARKER.strip()
+
+# Launcher shapes written before the marker existed. Each names a file only an
+# apiary install ever wrote, so they identify an entry on their own.
+_LEGACY_LAUNCHERS: tuple[str, ...] = (
+    "apiary_launch.py",              # retired global $HOME/.claude launcher
+    ".claude/apiary/launch.py",      # per-repo launcher, pre-marker installs
+    ".claude\\\\apiary\\\\launch.py",  # ditto, hand-edited Windows spelling
+)
+
+# The retired global installer wrote absolute paths into a `claude-apiary`
+# checkout instead of a launcher. Recognizing those needs BOTH the checkout
+# name and one of the hook directories below — a repo name on its own is not
+# ownership. The old rule matched either half anywhere in the entry, which is
+# how a user hook running `scripts/runner/lint.py` got deleted on every
+# install (Bug 8); nothing here matches a command that lacks both.
+_LEGACY_HOOK_DIRS: tuple[str, ...] = (
+    "/budgeter/hooks/", "\\\\budgeter\\\\hooks\\\\",
+    "/core/hooks/", "\\\\core\\\\hooks\\\\",
+    "/docs/hooks/", "\\\\docs\\\\hooks\\\\",
+    "/scribe/hooks/", "\\\\scribe\\\\hooks\\\\",
 )
 
 
 def is_apiary_entry(entry: Any) -> bool:
     """Return True if a settings.json hook entry was installed by apiary.
 
-    Recognizes four formats:
-      1. Absolute-path entries written by the retired global installer whose
-         path contains ``APIARY_MARKER`` ("claude-apiary").
-      2. Portable hand-edited entries that use ``$CLAUDE_PROJECT_DIR/<sub>/...``
-         and therefore lack the marker. Detected by known apiary subpath
-         substrings (``/budgeter/hooks/``, ``/core/hooks/``, ``/scribe/``, …).
-      3. Legacy entries that use the retired global ``apiary_launch.py``.
-         ``hook_cmd`` no longer emits these, but repos bootstrapped before
-         the per-repo migration still carry them and re-install /
-         uninstall must still be able to clear them out.
-      4. Per-repo launcher entries (current) whose commands invoke
-         ``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``. Distinct from
-         the global ``apiary_launch.py`` — both substrings are checked.
+    Ownership is the explicit ``APIARY_HOOK_MARKER`` that ``hook_cmd`` appends
+    to every command it generates, plus the two legacy shapes above so repos
+    bootstrapped before the marker existed can still be cleaned up by a
+    re-install or an uninstall. Nothing else counts: an entry the user wrote is
+    never ours, however much its path resembles apiary's layout.
 
-    Shared by the install, drift-check and uninstall paths so they all
-    agree on which entries are ours.
+    Shared by the install and uninstall paths so they agree on which entries
+    are ours.
     """
     blob = json.dumps(entry)
-    if APIARY_MARKER in blob:
+    if _MARKER_TOKEN in blob:
         return True
-    if "apiary_launch.py" in blob:
+    if any(launcher in blob for launcher in _LEGACY_LAUNCHERS):
         return True
-    if ".claude/apiary/launch.py" in blob or ".claude\\\\apiary\\\\launch.py" in blob:
-        return True
-    return any(sub in blob for sub in APIARY_PATH_SUBSTRINGS)
+    return APIARY_MARKER in blob and any(d in blob for d in _LEGACY_HOOK_DIRS)
 
 
 def to_bash_path(p: Path) -> str:
@@ -101,6 +109,10 @@ def hook_cmd(
     args: tuple[str, ...] = (),
 ) -> str:
     """Build a hook command string using bash-compatible paths.
+
+    Every command ends with ``APIARY_HOOK_MARKER`` — a shell comment that marks
+    the entry as apiary's so ``is_apiary_entry`` can recognize it exactly,
+    without guessing from path shapes.
 
     Two modes, selected by the keyword args:
 
@@ -145,13 +157,13 @@ def hook_cmd(
         # always valid on the machine that wrote it. The script path stays
         # portable via $CLAUDE_PROJECT_DIR.
         exe = to_bash_path(python_exe or resolve_python())
-        return f'"{exe}" "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" {rel}{suffix}'
+        return f'"{exe}" "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" {rel}{suffix}' + APIARY_HOOK_MARKER
     if per_repo_launcher:
         raise ValueError("per_repo_launcher=True requires repo_root")
     exe = python_exe or resolve_python()
     # Quote both paths — the interpreter or script can live under a home dir
     # with a space/apostrophe, which would otherwise break the unquoted command.
-    return f'"{to_bash_path(exe)}" "{to_bash_path(script_path)}"{suffix}'
+    return f'"{to_bash_path(exe)}" "{to_bash_path(script_path)}"{suffix}' + APIARY_HOOK_MARKER
 
 
 def load_settings(path: Path) -> Dict[str, Any]:
@@ -172,14 +184,17 @@ def save_settings(path: Path, settings: Dict[str, Any]) -> None:
         json.dump(settings, f, indent=2)
 
 
-def register_hooks(settings_path: Path, new_hooks: Dict[str, List], marker: str, also_strip: List[str] = None) -> None:
+def register_hooks(settings_path: Path, new_hooks: Dict[str, List],
+                   marker: str = APIARY_HOOK_MARKER, also_strip: List[str] = None) -> None:
     """
-    Merge new_hooks into settings_path, replacing any entries that contain
-    marker (or any string in also_strip) in their JSON representation,
-    or that ``is_apiary_entry()`` recognizes as ours.
+    Merge new_hooks into settings_path, replacing any entries that
+    ``is_apiary_entry()`` recognizes as ours (or that contain *marker* / any
+    string in *also_strip* in their JSON representation).
 
     new_hooks: {event_name: [hook_entry, ...]}
-    marker: string identifying this tool's hooks (e.g. "claude-apiary")
+    marker: ownership mark on the entries being replaced. Defaults to
+        ``APIARY_HOOK_MARKER``; do NOT pass a bare repo name here — a
+        substring that broad matches user hooks too (Bug 8).
     also_strip: additional marker strings to remove (e.g. old repo paths)
     """
     strip = [marker] + (also_strip or [])

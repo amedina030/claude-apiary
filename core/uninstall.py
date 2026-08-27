@@ -2,19 +2,28 @@
 
 Inverse of ``core/install.py``. See ``docs/architecture/per-repo-install.md``.
 
-Steps:
+Steps, in order — **files first, registry last**:
 
-1. Hold registry FileLock.
-2. Remove ``<repo>/.claude/apiary/`` (entire dir).
-3. Remove apiary-copied slash commands from ``<repo>/.claude/commands/``,
+1. Refuse outright when the target is main-apiary itself.
+2. Under the registry FileLock: look up the uid/name/state dir. Read-only.
+3. Remove ``<repo>/.claude/apiary/`` (entire dir).
+4. Remove apiary-copied slash commands from ``<repo>/.claude/commands/``,
    identified via ``bootstrap_state.json.commands_dir_hashes``.
-4. Strip apiary-managed hook entries from ``<repo>/.claude/settings.json``
+5. Strip apiary-managed hook entries from ``<repo>/.claude/settings.json``
    (uses ``hooks_lib.remove_hooks``).
-5. Strip the apiary-managed zone from ``<repo>/CLAUDE.md`` (preserve
+6. Strip the apiary-managed zone from ``<repo>/CLAUDE.md`` (preserve
    surrounding user content).
-6. Remove the registry entry.
-7. Optionally remove ``<main-apiary>/.repos/<slug>/`` (per-target state).
+7. Under the registry FileLock again: remove the registry entry.
+8. Optionally remove ``<main-apiary>/.repos/<slug>/`` (per-target state).
    The default keeps the data; pass ``remove_data=True`` to delete.
+
+The ordering is the whole safety property. Deleting the registry entry first
+meant any failure in steps 3-6 — a ``PermissionError`` on ``launch.py`` while a
+hook process still holds it, a tampered CLAUDE.md — left a repo carrying pin
+files, hooks and commands that no registry entry accounted for: the next
+session then sees a self-pointer uid the registry does not know, and every
+tool's state silently reroutes. Failing with the entry still in place instead
+leaves the repo re-uninstallable.
 
 Returns :class:`UninstallResult` summarizing what was touched.
 """
@@ -72,9 +81,22 @@ def uninstall(
         raise UninstallError(f"target {target_root} is not a directory")
     apiary = state.resolve_apiary_repo(apiary_repo).resolve()
 
-    # Resolve via self-pointer first (most accurate), fall back to registry
+    # 1. Never uninstall the toolkit out from under itself. main-apiary's
+    # .claude/apiary/ and registry entry are what every other bootstrapped
+    # repo resolves through, and `--remove-data` would delete apiary's own
+    # scribe notes as a bonus. `git_hooks.install` guards the same case.
+    if target_root == apiary:
+        raise UninstallError(
+            f"refusing to uninstall main-apiary itself ({target_root}). Every "
+            "bootstrapped repo resolves through this checkout's registry and "
+            "pin files. To retire it, uninstall the repos it manages first "
+            "(`apiary doctor registry` lists them), then delete the clone."
+        )
+
+    # 2. Resolve via self-pointer first (most accurate), fall back to registry
     # path-lookup so we still work after a partial install where the
-    # self-pointer was never written.
+    # self-pointer was never written. Read-only: the entry is deleted at
+    # step 7, after every file step has succeeded.
     self_p = state.read_self_pointer(target_root)
     uid: int | None = None
     name: str | None = None
@@ -95,30 +117,37 @@ def uninstall(
                 name = entry.get("name")
         if uid is not None and name is not None:
             state_dir = state.repos_dir(apiary) / f"{name}-{uid}"
-        registry_entry_removed = uid is not None and str(uid) in registry
-        if registry_entry_removed:
-            del registry[str(uid)]
-            state._save_registry(apiary, registry)
 
-    # 2. Per-repo .claude/apiary/ dir
+    # 3. Per-repo .claude/apiary/ dir
     pin = state.pin_dir(target_root)
     pin_removed = False
     if pin.is_dir():
         shutil.rmtree(pin)
         pin_removed = True
 
-    # 3. Slash commands we installed
+    # 4. Slash commands we installed
     commands_removed = _remove_apiary_commands(target_root, state_dir)
 
-    # 4. Hook entries from settings.json
+    # 5. Hook entries from settings.json
     settings_path = target_root / ".claude" / "settings.json"
     report = remove_hooks(settings_path)
     hook_entries_removed = len(report.get("removed", []))
 
-    # 5. CLAUDE.md zone
+    # 6. CLAUDE.md zone
     claude_md_zone_removed = _strip_claude_md_zone(target_root)
 
-    # 7. Per-target state dir (centralized)
+    # 7. Registry entry — last, so a failure above leaves the repo registered
+    # and re-uninstallable rather than half-removed and unaccounted for.
+    registry_entry_removed = False
+    if uid is not None:
+        with FileLock(state.registry_path(apiary)):
+            registry = state._load_registry(apiary)
+            if str(uid) in registry:
+                del registry[str(uid)]
+                state._save_registry(apiary, registry)
+                registry_entry_removed = True
+
+    # 8. Per-target state dir (centralized)
     state_dir_removed = False
     if remove_data and state_dir is not None and state_dir.is_dir():
         shutil.rmtree(state_dir)

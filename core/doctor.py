@@ -3,11 +3,14 @@
 
 Every check is read-only: running a check reports findings and mutates
 nothing. Passing ``--fix`` alongside a check name opts into that check's
-writer, where one exists — see ``FIXES`` below (``pointers``).
+writer, where one exists — see ``FIXES`` below (``pointers``, ``pins``).
 
 Subcommands:
 
 - ``pointers``      — main-apiary's self-pointer matches its actual cwd
+- ``pins``          — every registered repo's ``.claude/apiary/`` pins agree
+                      with the registry (uid, name, main-apiary path), and
+                      uid 1 really is main-apiary
 - ``registry``      — every registry entry: path exists; uid/version present
 - ``versions``      — each registered repo's version vs main-apiary's VERSION
 - ``stale``         — registered repo whose installed slash-command files
@@ -204,6 +207,130 @@ def check_stale(apiary: Path) -> CheckResult:
     return notes, issues
 
 
+# Uid 1 is main-apiary by convention, and `drift`, `cascade` and `install`
+# all act on that assumption — drift's uid-1 branch rewrites OTHER repos'
+# pointers. Nothing enforced it, so check_pins does.
+MAIN_APIARY_UID = 1
+
+
+def _same_dir(raw: str, resolved: Path) -> bool:
+    """True when *raw* names the same directory as the already-resolved
+    *resolved*. An empty or unresolvable value is never a match (``Path("")``
+    resolves to the cwd, which would silently pass)."""
+    if not raw:
+        return False
+    try:
+        return Path(raw).resolve() == resolved
+    except OSError:
+        return False
+
+
+def _pin_findings(apiary: Path, uid_str: str, entry: dict) -> CheckResult:
+    """Compare one registered repo's pin files against its registry entry."""
+    notes: list[str] = []
+    issues: list[str] = []
+    name = entry.get("name", "?")
+    repo = Path(entry.get("real_path", ""))
+    label = f"{name} (uid={uid_str})"
+
+    self_p = state.read_self_pointer(repo)
+    if self_p is None:
+        notes.append(
+            f"{label}: no self-pointer at {state.self_pointer_path(repo)} — "
+            f"registered but not bootstrapped; run `apiary install --target \"{repo}\"`."
+        )
+    else:
+        pinned_uid = self_p.get("uid")
+        if str(pinned_uid) != uid_str:
+            issues.append(
+                f"{label}: self-pointer uid={pinned_uid} disagrees with the registry "
+                f"({uid_str}). Its launcher looks for .repos/{self_p.get('name', name)}-"
+                f"{pinned_uid}/, so every tool's state silently falls back. "
+                "Run `apiary doctor pins --fix`."
+            )
+        elif self_p.get("name") != name:
+            issues.append(
+                f"{label}: self-pointer name={self_p.get('name')!r} disagrees with the "
+                f"registry ({name!r}); its state dir resolves to the wrong slug. "
+                "Run `apiary doctor pins --fix`."
+            )
+
+    main_p = state.read_main_apiary_pointer(repo)
+    if main_p is None:
+        if self_p is not None:
+            issues.append(
+                f"{label}: no main-apiary-pointer at "
+                f"{state.main_apiary_pointer_path(repo)} — the repo cannot find "
+                f"main-apiary. Run `apiary install --target \"{repo}\"`."
+            )
+    else:
+        recorded = main_p.get("main_apiary_path", "")
+        if not _same_dir(recorded, apiary):
+            issues.append(
+                f"{label}: main-apiary-pointer says {recorded or '<unset>'}, this "
+                f"checkout is {apiary}. Run `apiary doctor pins --fix`."
+            )
+    return notes, issues
+
+
+def check_pins(apiary: Path) -> CheckResult:
+    """Every registered repo's pin files agree with its registry entry.
+
+    The pin model's whole promise is that ``<repo>/.claude/apiary/`` and
+    ``.repos/registry.json`` say the same thing. Nothing checked it, so the
+    states that break it were invisible: a self-pointer uid left over from a
+    lost registry entry (the launcher then derives a state dir nothing else
+    knows about), a main-apiary-pointer aimed at an old checkout, or a uid 1
+    that is not main-apiary at all.
+
+    Unreachable repos are skipped — ``check_unreachable`` reports those, and
+    there are no pins to read at a path that does not exist.
+    """
+    apiary = Path(apiary).resolve()
+    notes: list[str] = []
+    issues: list[str] = []
+    registry = state._load_registry(apiary)
+
+    for uid_str, entry in registry.items():
+        if not isinstance(entry, dict):
+            continue  # check_registry reports the shape
+        real = entry.get("real_path", "")
+        if not real or not Path(real).is_dir():
+            continue
+        entry_notes, entry_issues = _pin_findings(apiary, uid_str, entry)
+        notes.extend(entry_notes)
+        issues.extend(entry_issues)
+
+    uid_notes, uid_issues = _main_apiary_uid_findings(apiary, registry)
+    return notes + uid_notes, issues + uid_issues
+
+
+def _main_apiary_uid_findings(apiary: Path, registry: dict) -> CheckResult:
+    """The uid-1-is-main-apiary invariant, checked in both directions."""
+    notes: list[str] = []
+    issues: list[str] = []
+    match = state._find_entry_by_path(registry, apiary)
+    if match is None:
+        notes.append(
+            f"main-apiary ({apiary}) is not in its own registry — "
+            "run `apiary self-bootstrap`."
+        )
+    elif match[0] != str(MAIN_APIARY_UID):
+        issues.append(
+            f"main-apiary is registered as uid {match[0]}, but the drift handler, "
+            f"cascade-fix and install all treat uid {MAIN_APIARY_UID} as main-apiary."
+        )
+    entry = registry.get(str(MAIN_APIARY_UID))
+    if isinstance(entry, dict) and not _same_dir(entry.get("real_path", ""), apiary):
+        issues.append(
+            f"uid {MAIN_APIARY_UID} is {entry.get('name', '?')} "
+            f"({entry.get('real_path', '') or '<unset>'}), not main-apiary ({apiary}). "
+            "If that repo ever moves, the drift handler takes main-apiary's branch "
+            "for it and rewrites other repos' pointers."
+        )
+    return notes, issues
+
+
 def check_orphans(apiary: Path) -> CheckResult:
     """Folders under ``.repos/<slug>/`` whose UID has no registry entry."""
     notes: list[str] = []
@@ -268,6 +395,7 @@ def check_unreachable(apiary: Path) -> CheckResult:
 
 CHECKS = {
     "pointers": check_pointers,
+    "pins": check_pins,
     "registry": check_registry,
     "versions": check_versions,
     "stale": check_stale,
@@ -319,8 +447,54 @@ def _fix_pointers(apiary: Path) -> int:
     return 0
 
 
+def _fix_pins(apiary: Path) -> int:
+    """Rewrite each registered repo's pin files from the registry.
+
+    The registry is the source of truth: it is what allocated the uid and what
+    ``.repos/<name>-<uid>/`` is named after. Only the two fields that can
+    disagree are rewritten — everything else in the pin (notably
+    ``last_drift_check``) is carried over untouched.
+
+    Repos with no pin files at all are left alone: the repair there is
+    ``apiary install``, which writes the launcher and hooks too. Returns 1 if
+    any issue survives the pass (e.g. a uid 1 that is not main-apiary, which
+    needs a human to decide which repo keeps the uid).
+    """
+    apiary = Path(apiary).resolve()
+    registry = state._load_registry(apiary)
+    fixed = 0
+    for uid_str, entry in registry.items():
+        if not isinstance(entry, dict):
+            continue
+        real = entry.get("real_path", "")
+        if not real or not Path(real).is_dir():
+            continue
+        repo = Path(real)
+        name = entry.get("name", "")
+        self_p = state.read_self_pointer(repo)
+        if self_p is not None and (str(self_p.get("uid")) != uid_str
+                                   or self_p.get("name") != name):
+            state.write_self_pointer(repo, {**self_p, "uid": int(uid_str), "name": name})
+            print(f"  rewrote self-pointer for {name} (uid={uid_str}) at {repo}")
+            fixed += 1
+        main_p = state.read_main_apiary_pointer(repo)
+        if main_p is not None and not _same_dir(main_p.get("main_apiary_path", ""), apiary):
+            state.write_main_apiary_pointer(repo, {**main_p, "main_apiary_path": str(apiary)})
+            print(f"  rewrote main-apiary-pointer for {name} (uid={uid_str}) at {repo}")
+            fixed += 1
+
+    print(f"[pins --fix] rewrote {fixed} pin file(s)")
+    notes, issues = check_pins(apiary)
+    for n in notes:
+        print(f"  - note: {n}")
+    for i in issues:
+        print(f"  - issue (not auto-fixable): {i}")
+    return 1 if issues else 0
+
+
 FIXES = {
     "pointers": _fix_pointers,
+    "pins": _fix_pins,
 }
 
 

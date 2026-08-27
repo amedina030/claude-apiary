@@ -217,6 +217,7 @@ other code path is read-only with respect to bootstrapped repos.
 | Subcommand | Check | `--fix` action |
 |---|---|---|
 | `pointers` | Main-apiary's self-pointer matches its actual location | Cascade-fix all repos |
+| `pins` | Each repo's `.claude/apiary/` pins agree with its registry entry (uid, name, main-apiary path), and uid 1 is main-apiary | Rewrite the disagreeing pins from the registry |
 | `registry` | Every entry has uid + version; `real_path` exists | Report only |
 | `versions` | Each repo's pinned version vs main-apiary's | Report which need `apiary update` |
 | `stale` | Installed slash-command files differ from main-apiary source | Report only |
@@ -226,7 +227,9 @@ other code path is read-only with respect to bootstrapped repos.
 | (no arg) | All of the above in read-only mode | n/a |
 
 Exit code is 0 when all checks pass and 1 when any reports an issue. Notes
-(informational status) don't fail a run; only issues do.
+(informational status) don't fail a run; only issues do. A `--fix` run exits 1
+when an issue survives it — `pins` cannot decide, for instance, which repo
+should keep uid 1.
 
 ## CLI surface
 
@@ -258,9 +261,29 @@ Code hooks).
   check fires.
 - **Per-repo CLAUDE.md preserves user-owned content** around the apiary
   zone. `apiary install` only writes/updates the bounded zone.
+- **`settings.json` has exactly one apiary-owned key: `hooks`.** Install
+  regenerates the apiary-marked hook entries there and leaves the user's own
+  alone. Every other key the profile carries is *merged* into the file — user
+  entries survive, the profile's are added, and an entry the previous install
+  contributed that the profile no longer ships is withdrawn (tracked in
+  `bootstrap_state.json.profile_settings`). Keys the profile never mentions
+  are never touched.
+- **Apiary's hook entries carry an explicit mark.** Every generated command
+  ends with the shell comment `# claude-apiary`, and that mark — not a guess
+  from the path — is what install and uninstall use to tell their entries from
+  the user's. Two pre-marker shapes are still recognized for cleanup: commands
+  naming `apiary_launch.py` or `.claude/apiary/launch.py`, and absolute paths
+  into a `claude-apiary` checkout that also name one of its hook directories.
+- **Uninstall removes files first and the registry entry last**, and refuses
+  outright when the target is main-apiary itself. A failure mid-way therefore
+  leaves a repo that is still registered and still uninstallable, rather than
+  one carrying pins and hooks that no registry entry accounts for.
 - **Allocator is single source of truth.** `core.utils.state.allocate_next_id`
   is the sole UID allocator. Bootstrap and the drift handler's copy branch
-  both use it under the registry FileLock.
+  both use it under the registry FileLock. The one exception is deliberate:
+  when the registry has lost a repo's entry but the repo still carries a
+  self-pointer, `apiary install` re-adopts that uid (so `.repos/<name>-<uid>/`
+  is not orphaned) and calls `state.reserve_uid` to push the counter past it.
 - **`~/.claude/projects/<project-key>/`** is read-only from apiary's POV.
   Compass reads transcripts from there. Apiary never writes there — that's
   Claude Code's directory.

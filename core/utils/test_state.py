@@ -196,6 +196,31 @@ class StateResolverTests(unittest.TestCase):
         self.assertEqual(state._safe_name("ok-name_v2"), "ok-name_v2")
 
 
+class ReserveUidTests(unittest.TestCase):
+    """``reserve_uid`` keeps the monotonic contract when a uid is re-adopted.
+
+    ``apiary install`` re-adopts the uid in a repo's self-pointer when the
+    registry entry has been lost (Bug 4). The counter is usually lost with it,
+    so without raising it the next allocation would hand the same uid to a
+    different repo — two repos, one state dir.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.apiary = Path(self._tmp.name)
+
+    def test_raises_a_lost_counter_above_the_reserved_uid(self):
+        state.reserve_uid(self.apiary, 7)
+        self.assertEqual(state.allocate_next_id(self.apiary), 8)
+
+    def test_never_lowers_the_counter(self):
+        for _ in range(9):
+            state.allocate_next_id(self.apiary)
+        state.reserve_uid(self.apiary, 2)
+        self.assertEqual(state.allocate_next_id(self.apiary), 10)
+
+
 class EnvHelperTests(unittest.TestCase):
     def test_state_dir_from_env_returns_path_when_set(self):
         os.environ[state.TARGET_STATE_DIR_ENV] = "/some/path"
