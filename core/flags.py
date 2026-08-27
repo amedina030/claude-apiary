@@ -18,7 +18,7 @@ When none of those resolve to a directory, the helpers raise
 CLI::
 
     python core/flags.py toggle budgeter-log     # -> "ON" / "OFF"
-    python core/flags.py status budgeter-warn
+    python core/flags.py status budgeter-session-warn
 
 Exit 0 on success, 1 when no bootstrapped repo is in scope or the flag
 name is malformed.
@@ -143,7 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
         sub = subparsers.add_parser(verb, help=help_text, description=help_text)
         sub.add_argument(
             "name",
-            help="Flag name, e.g. budgeter-log, budgeter-warn, budgeter-session-warn",
+            help="Flag name, e.g. budgeter-log, budgeter-session-warn, auto-startup",
         )
     return parser
 

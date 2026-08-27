@@ -132,7 +132,6 @@ def main():
         "net_tokens_delta": tokens,
         "turn_number": 0,
         "task_turn": 0,
-        "scope_flags": [],
         "project": args.cwd,
     }
     if request_id:

@@ -164,11 +164,11 @@ class FlagsCliTests(unittest.TestCase):
         self.assertTrue(flags.is_enabled("budgeter-log"))
 
     def test_disable_prints_off_and_removes_file(self):
-        flags.enable("budgeter-warn")
-        code, out = self._run(["disable", "budgeter-warn"])
+        flags.enable("auto-startup")
+        code, out = self._run(["disable", "auto-startup"])
         self.assertEqual(code, 0)
         self.assertEqual(out, "OFF")
-        self.assertFalse(self._flag_file("budgeter-warn").exists())
+        self.assertFalse(self._flag_file("auto-startup").exists())
 
     def test_disable_is_idempotent(self):
         code, out = self._run(["disable", "never-set"])

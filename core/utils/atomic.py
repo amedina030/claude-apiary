@@ -11,10 +11,10 @@ so the replace cannot fail with ``EXDEV`` — and is named
 recognisable (``budgeter.lib.logger.cleanup_session`` sweeps them by that
 glob). It is unlinked if anything fails before the replace.
 
-This is the one copy: ``compass/synthesize.py``, ``budgeter/lib/logger.py``
-and ``budgeter/tune.py`` all call it. Other tmp+replace blocks still live
-in ``scribe/store.py``, ``core/utils/state.py``, ``runner/executor.py`` and
-``gui/permission_mcp.py`` — folding those in is review Phase 3.2.
+This is the one copy: ``compass/synthesize.py`` and
+``budgeter/lib/logger.py`` both call it. Other tmp+replace blocks still
+live in ``scribe/store.py``, ``core/utils/state.py``, ``runner/executor.py``
+and ``gui/permission_mcp.py`` — folding those in is review Phase 3.2.
 """
 from __future__ import annotations
 

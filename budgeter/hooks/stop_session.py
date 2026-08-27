@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Stop hook — logs the final tool call's cost, writes feedback for the last task,
-and cleans up temp files.
+Stop hook — logs the final tool call's cost and cleans up temp files.
 
 The last tool in a session has no subsequent PRE hook to capture its cost.
 This hook reads the final transcript, computes the delta against the last
@@ -10,11 +9,10 @@ PRE's baseline, and logs it before cleaning up.
 import sys
 import json
 from pathlib import Path
-from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apiary root
 
-from budgeter.lib import logger, estimator
+from budgeter.lib import logger
 from core import flags
 
 
@@ -46,7 +44,6 @@ def _log_final_call(payload, session_id):
     cwd = payload.get("cwd", "")
 
     logger.configure_for_project(cwd)
-    config = logger.load_config()
 
     if session_id and flags.is_enabled("budgeter-log"):
         baseline = logger.load_baseline(session_id)
@@ -63,25 +60,6 @@ def _log_final_call(payload, session_id):
                     last_input, last_cache, last_create, last_output,
                 )
                 logger.append_entry(entry)
-
-        # Write feedback for the last task in the session, but only if
-        # pre_tool_use hasn't already written a record for the same task
-        # (pre_tool_use writes at task boundaries; stop_session covers the
-        # final task which has no subsequent PRE hook).
-        # Use the atomic read-check-write helper to avoid the TOCTOU race
-        # where two concurrent processes both pass the "already written" check.
-        if baseline is not None:
-            task_turn_val = baseline.get("task_turn", baseline.get("turn_number", 0))
-            feedback_entry = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "session_id": session_id,
-                "task_turn": task_turn_val,
-                "scope_flags": baseline.get("scope_flags", []),
-                "score": estimator.score_flags(baseline.get("scope_flags", []), config),
-                "predicted_cost": baseline.get("predicted_cost", 0),
-                "warning_fired": baseline.get("warning_fired", False),
-            }
-            logger.append_feedback_if_not_present(feedback_entry, session_id, task_turn_val)
 
 
 if __name__ == "__main__":

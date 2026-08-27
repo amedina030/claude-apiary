@@ -16,12 +16,10 @@ _globals_lock = threading.Lock()
 
 BUDGETER_DIR = Path(__file__).parent.parent
 LOG_PATH = BUDGETER_DIR / "data" / "usage_log.jsonl"
-FEEDBACK_PATH = BUDGETER_DIR / "data" / "feedback.jsonl"
 TMP_DIR = BUDGETER_DIR / "tmp"
 CONFIG_PATH = BUDGETER_DIR / "config.json"
 
 _DEFAULT_LOG_PATH = LOG_PATH
-_DEFAULT_FEEDBACK_PATH = FEEDBACK_PATH
 _DEFAULT_TMP_DIR = TMP_DIR
 
 
@@ -35,7 +33,6 @@ def _assert_isolated_in_test_mode(path, kind):
         return
     defaults = {
         "log": _DEFAULT_LOG_PATH,
-        "feedback": _DEFAULT_FEEDBACK_PATH,
         "tmp": _DEFAULT_TMP_DIR,
     }
     default = defaults[kind]
@@ -107,13 +104,13 @@ def configure_for_project(cwd):
     The globals are updated as a single assignment under _globals_lock so
     concurrent calls for different projects cannot interleave partial state.
 
-    NOTE: Readers of LOG_PATH, FEEDBACK_PATH, TMP_DIR, and CONFIG_PATH do not
-    hold _globals_lock. This is an intentional known gap — the globals are Path
+    NOTE: Readers of LOG_PATH, TMP_DIR, and CONFIG_PATH do not hold
+    _globals_lock. This is an intentional known gap — the globals are Path
     objects (reference assignment is atomic in CPython) and the practical
     concurrent-write window is extremely narrow (hook startup). A full reader
     lock would require threading.local() copies and is deferred.
     """
-    global LOG_PATH, FEEDBACK_PATH, TMP_DIR, CONFIG_PATH
+    global LOG_PATH, TMP_DIR, CONFIG_PATH
     if not cwd:
         return False
     try:
@@ -125,12 +122,10 @@ def configure_for_project(cwd):
         return False
     new_config = project_config
     new_log = root / ".claude" / "budgeter-log.jsonl"
-    new_feedback = root / ".claude" / "budgeter-feedback.jsonl"
     new_tmp = root / ".claude" / "budgeter-tmp"
     with _globals_lock:
         CONFIG_PATH = new_config
         LOG_PATH = new_log
-        FEEDBACK_PATH = new_feedback
         TMP_DIR = new_tmp
     return True
 
@@ -161,10 +156,6 @@ def read_log():
     return entries
 
 
-def count_entries():
-    return len(read_log())
-
-
 def count_tasks():
     """Count unique (session_id, task_turn) pairs in the log."""
     entries = read_log()
@@ -188,64 +179,6 @@ def append_entry(entry):
     with _file_lock(LOG_PATH):
         with open(LOG_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(persisted) + "\n")
-
-
-def append_feedback(entry):
-    _assert_isolated_in_test_mode(FEEDBACK_PATH, "feedback")
-    FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with _file_lock(FEEDBACK_PATH):
-        with open(FEEDBACK_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
-
-
-def append_feedback_if_not_present(entry, session_id, task_turn):
-    """
-    Atomically check whether a feedback record for (session_id, task_turn)
-    already exists and, if not, append entry — all under a single lock
-    acquisition.  This closes the TOCTOU window that exists when read_feedback()
-    and append_feedback() are called separately (ATK-005).
-
-    Returns True if the entry was written, False if it was already present.
-    """
-    _assert_isolated_in_test_mode(FEEDBACK_PATH, "feedback")
-    FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with _file_lock(FEEDBACK_PATH):
-        # Read existing records while holding the lock
-        existing_entries = []
-        if FEEDBACK_PATH.exists():
-            with open(FEEDBACK_PATH, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            existing_entries.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            pass
-        already_written = any(
-            f.get("session_id") == session_id and f.get("task_turn") == task_turn
-            for f in existing_entries
-        )
-        if already_written:
-            return False
-        with open(FEEDBACK_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
-        return True
-
-
-def read_feedback():
-    if not FEEDBACK_PATH.exists():
-        return []
-    entries = []
-    with _file_lock(FEEDBACK_PATH):
-        with open(FEEDBACK_PATH, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        entries.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        pass
-    return entries
 
 
 _MAX_TRANSCRIPT_BYTES = 50 * 1024 * 1024  # 50 MB — transcripts beyond this are unusually large
@@ -438,36 +371,13 @@ def build_cost_entry(baseline, session_id, transcript_path, tokens_now,
         "output_tokens_delta": last_output,
         "turn_number": baseline.get("turn_number", 0),
         "task_turn": baseline.get("task_turn", baseline.get("turn_number", 0)),
-        "scope_flags": baseline.get("scope_flags", []),
         "project": str(Path(transcript_path).parent) if transcript_path else "",
     }
-
-
-def save_snapshot(session_id, snapshot):
-    _assert_isolated_in_test_mode(TMP_DIR, "tmp")
-    TMP_DIR.mkdir(parents=True, exist_ok=True)
-    path = _sid(session_id).tmp_path("pending.json", TMP_DIR)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(snapshot, f)
 
 
 def _sid(session_id):
     """Coerce raw string to SessionId if needed."""
     return session_id if isinstance(session_id, SessionId) else SessionId(session_id)
-
-
-def load_snapshot(session_id):
-    path = _sid(session_id).tmp_path("pending.json", TMP_DIR)
-    if not path.exists():
-        return None
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def delete_snapshot(session_id):
-    path = _sid(session_id).tmp_path("pending.json", TMP_DIR)
-    if path.exists():
-        path.unlink()
 
 
 # Bump when the meaning of a baseline's numbers changes. Schema 2 (2026-08):
@@ -508,7 +418,7 @@ def load_baseline(session_id):
     return data if isinstance(data, dict) and "tokens" in data else None
 
 
-def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message="", scope_flags=None, predicted_cost=0, warning_fired=False, baseline_input=0, baseline_cache=0, baseline_output=0, agent_description="", baseline_cache_creation=0):
+def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_assistant_message="", turn_number=0, task_turn=None, user_message="", baseline_input=0, baseline_cache=0, baseline_output=0, agent_description="", baseline_cache_creation=0):
     _assert_isolated_in_test_mode(TMP_DIR, "tmp")
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     path = _sid(session_id).tmp_path("baseline.json", TMP_DIR)
@@ -528,15 +438,14 @@ def save_baseline(session_id, tokens, context_tokens=0, prev_tool_name="", prev_
                 "turn_number": turn_number,
                 "task_turn": task_turn if task_turn is not None else turn_number,
                 "user_message": user_message,
-                "scope_flags": scope_flags if scope_flags is not None else [],
-                "predicted_cost": predicted_cost,
-                "warning_fired": warning_fired,
                 "agent_description": agent_description,
         })
 
 
 def cleanup_session(session_id):
     sid = _sid(session_id)
+    # "pending.json" is a snapshot file the deleted warning feature wrote;
+    # keep sweeping it so an upgrade does not strand one per old session.
     for suffix in ["pending.json", "baseline.json"]:
         p = sid.tmp_path(suffix, TMP_DIR)
         if p.exists():
