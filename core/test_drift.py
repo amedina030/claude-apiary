@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,45 +11,24 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from core import drift
+from core import testing
 from core.utils import state
-
-_APIARY_ITEMS = (
-    "VERSION", "core", "profiles", "context-rules", "migrations",
-    "budgeter", "scribe", "docs", "refiner", "harden",
-    "compass", "researcher", "runner", "incubator",
-)
-
-
-def _git_init(path: Path) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
-         "commit", "--allow-empty", "-q", "-m", "init"],
-        cwd=path, check=True,
-    )
 
 
 def _make_main_apiary(root: Path) -> Path:
-    """Build a minimal main-apiary checkout that can pass §7.1 verification."""
-    apiary = root / "main-apiary"
-    apiary.mkdir()
-    for item in _APIARY_ITEMS:
-        src = REPO_ROOT / item
-        if src.is_dir():
-            shutil.copytree(src, apiary / item, dirs_exist_ok=True)
-        elif src.is_file():
-            shutil.copy2(src, apiary / item)
-    _git_init(apiary)
-    (apiary / ".repos").mkdir(exist_ok=True)
-    # Self-bootstrap so main-apiary's self-pointer + registry exist.
-    from core import self_bootstrap
-    self_bootstrap.self_bootstrap(apiary)
-    return apiary
+    """A fake main-apiary that has been self-bootstrapped, at *root*/main-apiary.
+
+    Drift refuses to act unless main-apiary is a git repo carrying its own
+    self-pointer, so both are on (see core/drift.py::_verify_main_apiary).
+    """
+    return testing.make_fake_apiary(
+        root, name="main-apiary", git=True, self_bootstrap=True,
+    )
 
 
 def _bootstrap_target(target: Path, apiary: Path) -> int:
     """Install apiary into *target* and return its uid."""
-    _git_init(target)
+    testing.init_git_repo(target)
     from core import install as install_mod
     return install_mod.install(target, apiary_repo=apiary).uid
 

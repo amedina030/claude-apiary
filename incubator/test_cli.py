@@ -21,6 +21,7 @@ from incubator import cli
 from core import install as install_mod
 # Reuse the throwaway-apiary fixture from the install tests so the end-to-end
 # spawn test never touches the real registry under <apiary>/.repos.
+from core import testing
 from core.test_install import _make_fake_apiary, _git_init
 from scripts import install_git_hooks
 
@@ -524,8 +525,12 @@ class SpawnEndToEndTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name).resolve()
-        self.apiary = _make_fake_apiary(self.root)
-        _git_init(self.apiary)
+        # This one really runs `launch.py scribe/notes.py` out of the fake
+        # apiary, so it needs the actual core/ and scribe/ trees there —
+        # the default fake carries only what install *reads*.
+        self.apiary = testing.make_fake_apiary(
+            self.root, git=True, extra_trees=("core", "scribe"),
+        )
         # Self-install so apiary has its own launcher + scribe state dir.
         install_mod.install(self.apiary, apiary_repo=self.apiary)
         self.launcher = self.apiary / ".claude" / "apiary" / "launch.py"

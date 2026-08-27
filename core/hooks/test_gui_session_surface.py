@@ -10,12 +10,17 @@ cwd is pointed at the temp HOME (not a git repo) so the hook skips notes /
 learnings injection and stays fast and isolated from real scribe state.
 """
 import json
-import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent.parent
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from core.testing import hermetic_env  # noqa: E402
 
 HOOKS_DIR = Path(__file__).resolve().parent
 PYTHON = sys.executable
@@ -28,9 +33,6 @@ NO_MULTICHOICE_MARKER = "AskUserQuestion"
 
 
 def _run_hook(home: Path, *, gui_session: bool) -> subprocess.CompletedProcess:
-    env = os.environ.copy()
-    env["HOME"] = str(home)
-    env["USERPROFILE"] = str(home)
     # Per-repo session state (review S1): flags under <repo>/.claude/apiary/
     # session-tmp, identity/history under <state-dir>/sessions. Point both at
     # temp dirs so the hook never touches this checkout's own state.
@@ -38,14 +40,17 @@ def _run_hook(home: Path, *, gui_session: bool) -> subprocess.CompletedProcess:
     (repo / ".claude" / "apiary" / "session-tmp").mkdir(parents=True, exist_ok=True)
     (repo / ".claude" / "apiary" / "self-pointer.json").write_text(
         json.dumps({"schema_version": 1, "name": "repo", "uid": 1, "real_path": str(repo)}), encoding="utf-8")
-    env["APIARY_TARGET_REPO"] = str(repo)
-    env["APIARY_TARGET_STATE_DIR"] = str(home / "state")
-    env.pop("CLAUDE_PROJECT_DIR", None)
     # A fresh first message; cwd at home keeps it out of any git repo.
-    if gui_session:
-        env["APIARY_GUI_SESSION"] = "1"
-    else:
-        env.pop("APIARY_GUI_SESSION", None)
+    # hermetic_env clears the inherited APIARY_* — including a real
+    # APIARY_GUI_SESSION when this suite is run from inside the GUI, which
+    # would make the negative case pass for the wrong reason.
+    env = hermetic_env(
+        HOME=str(home),
+        USERPROFILE=str(home),
+        APIARY_TARGET_REPO=str(repo),
+        APIARY_TARGET_STATE_DIR=str(home / "state"),
+        APIARY_GUI_SESSION="1" if gui_session else "",
+    )
     payload = {"session_id": SAMPLE_SID, "message": "hi", "cwd": str(home)}
     return subprocess.run(
         [PYTHON, str(HOOKS_DIR / "startup_prompt_hook.py")],

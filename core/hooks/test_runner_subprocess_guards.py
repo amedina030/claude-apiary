@@ -10,12 +10,17 @@ These tests complement test_save_transcript.py, which covers the
 save_transcript hook's own subprocess guard from #223.
 """
 import json
-import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent.parent
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from core.testing import hermetic_env  # noqa: E402
 
 HOOKS_DIR = Path(__file__).resolve().parent
 PYTHON = sys.executable
@@ -23,9 +28,6 @@ SAMPLE_SID = "abcd1234-1111-2222-3333-444444444444"
 
 
 def _run_hook(hook_name: str, payload: dict, home: Path, *, runner_subprocess: bool) -> subprocess.CompletedProcess:
-    env = os.environ.copy()
-    env["HOME"] = str(home)
-    env["USERPROFILE"] = str(home)
     # Per-repo session state (review S1): flags under <repo>/.claude/apiary/
     # session-tmp, identity/history under <state-dir>/sessions. Point both at
     # temp dirs so the hook never touches this checkout's own state.
@@ -33,13 +35,16 @@ def _run_hook(hook_name: str, payload: dict, home: Path, *, runner_subprocess: b
     (repo / ".claude" / "apiary" / "session-tmp").mkdir(parents=True, exist_ok=True)
     (repo / ".claude" / "apiary" / "self-pointer.json").write_text(
         json.dumps({"schema_version": 1, "name": "repo", "uid": 1, "real_path": str(repo)}), encoding="utf-8")
-    env["APIARY_TARGET_REPO"] = str(repo)
-    env["APIARY_TARGET_STATE_DIR"] = str(home / "state")
-    env.pop("CLAUDE_PROJECT_DIR", None)
-    if runner_subprocess:
-        env["APIARY_RUNNER_SUBPROCESS"] = "1"
-    else:
-        env.pop("APIARY_RUNNER_SUBPROCESS", None)
+    # hermetic_env drops every inherited APIARY_* / CLAUDE_PROJECT_DIR before
+    # the overrides go on, so a live session cannot point the hook at the real
+    # checkout.
+    env = hermetic_env(
+        HOME=str(home),
+        USERPROFILE=str(home),
+        APIARY_TARGET_REPO=str(repo),
+        APIARY_TARGET_STATE_DIR=str(home / "state"),
+        APIARY_RUNNER_SUBPROCESS="1" if runner_subprocess else "",
+    )
     return subprocess.run(
         [PYTHON, str(HOOKS_DIR / hook_name)],
         input=json.dumps(payload),

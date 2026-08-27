@@ -9,28 +9,32 @@ state dir (APIARY_TARGET_STATE_DIR) and asserts that:
   - Nothing is written under ~/.claude (review S1)
 """
 import json
-import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+REPO = Path(__file__).resolve().parent.parent.parent
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from core.testing import hermetic_env  # noqa: E402
+
 HOOK = Path(__file__).resolve().parent / "save_transcript.py"
 PYTHON = sys.executable
 
 
 def _run_hook(payload: dict, home: Path, *, runner_subprocess: bool = False) -> subprocess.CompletedProcess:
-    env = os.environ.copy()
-    env["HOME"] = str(home)
-    env["USERPROFILE"] = str(home)
-    env["APIARY_TARGET_STATE_DIR"] = str(home / "state")
-    for var in ("CLAUDE_PROJECT_DIR", "APIARY_TARGET_REPO"):
-        env.pop(var, None)
-    if runner_subprocess:
-        env["APIARY_RUNNER_SUBPROCESS"] = "1"
-    else:
-        env.pop("APIARY_RUNNER_SUBPROCESS", None)
+    # hermetic_env, not os.environ.copy(): a live session exports
+    # CLAUDE_PROJECT_DIR and APIARY_* pointing at the real checkout, and the
+    # hook under test would resolve those instead of this tmpdir.
+    env = hermetic_env(
+        HOME=str(home),
+        USERPROFILE=str(home),
+        APIARY_TARGET_STATE_DIR=str(home / "state"),
+        APIARY_RUNNER_SUBPROCESS="1" if runner_subprocess else "",
+    )
     return subprocess.run(
         [PYTHON, str(HOOK)],
         input=json.dumps(payload),

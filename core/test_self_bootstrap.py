@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import sys
 import tempfile
 import unittest
@@ -12,33 +11,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from core import self_bootstrap as sb
+from core import testing
 from core.utils import state
-
-_APIARY_ITEMS = (
-    "VERSION", "core", "profiles", "context-rules", "migrations",
-    "budgeter", "scribe", "docs", "refiner", "harden",
-    "compass", "researcher", "runner", "incubator",
-)
 
 
 def _make_fake_apiary(root: Path) -> Path:
-    fake = root / "fake-apiary"
-    fake.mkdir()
-    for item in _APIARY_ITEMS:
-        src = REPO_ROOT / item
-        if src.is_dir():
-            shutil.copytree(src, fake / item, dirs_exist_ok=True)
-        elif src.is_file():
-            shutil.copy2(src, fake / item)
-    # Give it a git repo so install's git-root check passes.
-    import subprocess
-    subprocess.run(["git", "init", "-q"], cwd=fake, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
-         "commit", "--allow-empty", "-q", "-m", "init"],
-        cwd=fake, check=True,
-    )
-    return fake
+    """A fake main-apiary that has NOT been self-bootstrapped yet — that is
+    the thing under test here. It is a git repo, because install's git-root
+    check runs before anything else."""
+    return testing.make_fake_apiary(root, name="fake-apiary", git=True)
 
 
 class SelfBootstrapTests(unittest.TestCase):

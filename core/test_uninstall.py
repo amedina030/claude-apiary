@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,36 +13,9 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from core import install as install_mod
 from core import uninstall as uninstall_mod
+from core.testing import init_git_repo as _git_init
+from core.testing import make_fake_apiary as _make_fake_apiary
 from core.utils import state
-
-# Mirror the test_install fixture set so a single tmpdir can host both.
-_APIARY_ITEMS = (
-    "VERSION", "core", "profiles", "context-rules", "migrations",
-    "budgeter", "scribe", "docs", "refiner", "harden",
-    "compass", "researcher", "runner", "incubator",
-)
-
-
-def _git_init(path: Path) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
-         "commit", "--allow-empty", "-q", "-m", "init"],
-        cwd=path, check=True,
-    )
-
-
-def _make_fake_apiary(root: Path) -> Path:
-    fake = root / "apiary_copy"
-    fake.mkdir()
-    for item in _APIARY_ITEMS:
-        src = REPO_ROOT / item
-        if src.is_dir():
-            shutil.copytree(src, fake / item, dirs_exist_ok=True)
-        elif src.is_file():
-            shutil.copy2(src, fake / item)
-    (fake / ".repos").mkdir()
-    return fake
 
 
 class UninstallTests(unittest.TestCase):
@@ -53,9 +24,7 @@ class UninstallTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         self.apiary = _make_fake_apiary(self.root)
-        self.target = self.root / "demo"
-        self.target.mkdir()
-        _git_init(self.target)
+        self.target = _git_init(self.root / "demo")
         self.install_result = install_mod.install(self.target, apiary_repo=self.apiary)
 
     def test_pin_dir_is_removed(self):
@@ -149,9 +118,7 @@ class UninstallOrderingTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         self.apiary = _make_fake_apiary(self.root)
-        self.target = self.root / "demo"
-        self.target.mkdir()
-        _git_init(self.target)
+        self.target = _git_init(self.root / "demo")
         self.install_result = install_mod.install(self.target, apiary_repo=self.apiary)
 
     def _registry(self) -> dict:

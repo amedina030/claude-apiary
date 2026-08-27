@@ -12,20 +12,14 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from core import testing
 from core.utils import state
 
 
-def _git_init(path: Path) -> None:
-    """Initialize a fresh git repo at *path* with a single empty commit so
-    ``git rev-parse --show-toplevel`` resolves to it. Tests rely on the
-    resolver detecting a real git repo, not a directory that happens to
-    have a .git folder."""
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
-         "commit", "--allow-empty", "-q", "-m", "init"],
-        cwd=path, check=True,
-    )
+# A fresh git repo with a single empty commit, so
+# ``git rev-parse --show-toplevel`` resolves to it — the resolver has to see a
+# real repo, not a directory that happens to hold a .git folder.
+_git_init = testing.init_git_repo
 
 
 class StateResolverTests(unittest.TestCase):

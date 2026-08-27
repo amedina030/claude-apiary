@@ -14,41 +14,11 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from core import git_hooks
 from core import install as install_mod
+# The fake main-apiary and the throwaway git repos come from one place now —
+# see core/testing.py for why they are built the way they are.
+from core.testing import init_git_repo as _git_init
+from core.testing import make_fake_apiary as _make_fake_apiary
 from core.utils import state
-
-
-# Items the install needs to find under main-apiary. Tests copy the real
-# files into a tmpdir "fake apiary" so each test gets an isolated install
-# target without touching the real registry under ``D:\Professional\claude-apiary\.repos``.
-_APIARY_ITEMS = (
-    "VERSION", "core", "profiles", "context-rules",
-    "budgeter", "scribe", "docs", "refiner", "harden",
-    "compass", "researcher", "runner", "incubator",
-)
-
-
-def _git_init(path: Path) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
-         "commit", "--allow-empty", "-q", "-m", "init"],
-        cwd=path, check=True,
-    )
-
-
-def _make_fake_apiary(root: Path) -> Path:
-    """Copy enough of the real apiary into *root*/apiary_copy that install
-    can run against it. Returns the fake apiary path."""
-    fake = root / "apiary_copy"
-    fake.mkdir()
-    for item in _APIARY_ITEMS:
-        src = REPO_ROOT / item
-        if src.is_dir():
-            shutil.copytree(src, fake / item, dirs_exist_ok=True)
-        elif src.is_file():
-            shutil.copy2(src, fake / item)
-    (fake / ".repos").mkdir()
-    return fake
 
 
 class InstallTests(unittest.TestCase):
@@ -57,9 +27,7 @@ class InstallTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         self.apiary = _make_fake_apiary(self.root)
-        self.target = self.root / "demo"
-        self.target.mkdir()
-        _git_init(self.target)
+        self.target = _git_init(self.root / "demo")
 
     def test_first_install_writes_all_pin_files(self):
         result = install_mod.install(self.target, apiary_repo=self.apiary)
@@ -177,9 +145,7 @@ class ScribeTemplateScaffoldTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         self.apiary = _make_fake_apiary(self.root)
-        self.target = self.root / "demo"
-        self.target.mkdir()
-        _git_init(self.target)
+        self.target = _git_init(self.root / "demo")
 
     def _templates_dir(self, result) -> Path:
         return result.state_dir / "scribe" / "templates"
@@ -233,9 +199,7 @@ class GeneratedLauncherTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         self.apiary = _make_fake_apiary(self.root)
-        self.target = self.root / "demo"
-        self.target.mkdir()
-        _git_init(self.target)
+        self.target = _git_init(self.root / "demo")
         install_mod.install(self.target, apiary_repo=self.apiary)
         self.launcher = self.target / ".claude" / "apiary" / "launch.py"
 
@@ -392,9 +356,7 @@ class _InstalledRepoCase(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         self.apiary = _make_fake_apiary(self.root)
-        self.target = self.root / "demo"
-        self.target.mkdir()
-        _git_init(self.target)
+        self.target = _git_init(self.root / "demo")
         self.first = install_mod.install(self.target, apiary_repo=self.apiary)
         self.settings_path = self.target / ".claude" / "settings.json"
 
@@ -495,7 +457,6 @@ class SelfPointerReconciliationTests(_InstalledRepoCase):
 
     def _second_repo(self, name: str) -> Path:
         repo = self.root / name
-        repo.mkdir()
         _git_init(repo)
         return repo
 

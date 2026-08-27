@@ -8,7 +8,6 @@ module still has a ``run``, and the dispatcher never emits a permission vote.
 """
 import io
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -22,6 +21,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from core.hook_context import HookResult  # noqa: E402
+from core.testing import hermetic_env  # noqa: E402
 from core.hooks import dispatch  # noqa: E402
 
 
@@ -329,12 +329,12 @@ class EndToEndTest(unittest.TestCase):
                         "real_path": str(self.repo)}), encoding="utf-8")
 
     def _run(self, verb, payload):
-        env = os.environ.copy()
-        env["HOME"] = env["USERPROFILE"] = str(self.home)
-        env["APIARY_TARGET_REPO"] = str(self.repo)
-        env["APIARY_TARGET_STATE_DIR"] = str(self.home / "state")
-        env.pop("CLAUDE_PROJECT_DIR", None)
-        env.pop("APIARY_RUNNER_SUBPROCESS", None)
+        env = hermetic_env(
+            HOME=str(self.home),
+            USERPROFILE=str(self.home),
+            APIARY_TARGET_REPO=str(self.repo),
+            APIARY_TARGET_STATE_DIR=str(self.home / "state"),
+        )
         return subprocess.run(
             [sys.executable, str(REPO / "core" / "hooks" / "dispatch.py"), verb],
             input=json.dumps(payload), text=True, capture_output=True,
