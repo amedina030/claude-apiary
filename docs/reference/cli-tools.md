@@ -769,6 +769,7 @@ One CLI for the runner's ticket lifecycle: draft a backlog ticket, promote it to
 python -m runner.ticket draft --title "Add caching" --problem "..." --description "..." --scope "api/cache.py"
 python -m runner.ticket promote add-caching
 python -m runner.ticket create-intake --title "Add caching" --problem "..." --description "..." --scope "api/cache.py"
+python -m runner.ticket mark-done add-caching
 python -m runner.ticket from-note --note C-2026-5 --title "Add caching"
 python -m runner.ticket validate <path-to-intake.json>
 ```
@@ -780,12 +781,15 @@ python -m runner.ticket validate <path-to-intake.json>
 | `draft` | Create a backlog draft ticket at `backlog/<slug>.json` |
 | `create-intake` | Create a validated intake file at `intake/<uuid>.json` |
 | `promote` | Move a backlog draft into intake, validating on the way |
+| `mark-done` | Delete a backlog draft that was fixed by hand instead of by the runner |
 | `from-note` | Bridge a `/refine` handoff scribe note into intake (or `--backlog`) |
 | `validate` | Validate an intake JSON file already on disk |
 
+`mark-done` is safe by construction: `promote` removes the backlog file the moment a ticket enters intake, so a backlog file that still exists is guaranteed not to be in flight. Use `promote` first if you actually want the ticket to run through the runner.
+
 | Argument / Flag | Applies to | Required | Description |
 |-----------------|------------|----------|-------------|
-| `slug` | `promote` | yes | Backlog ticket slug — the filename **without** directory or `.json` extension |
+| `slug` | `promote`, `mark-done` | yes | Backlog ticket slug — the filename **without** directory or `.json` extension |
 | `file` | `validate` | yes | Path to intake JSON file |
 | `--title TEXT` | draft, create-intake, from-note | yes | Short title for the task (also the backlog slug) |
 | `--problem TEXT` | draft, create-intake | yes* | Problem statement (min 20 chars) |
@@ -795,11 +799,12 @@ python -m runner.ticket validate <path-to-intake.json>
 | `--from-todo ID` | draft, create-intake | no | Scribe note ID — seeds `--description` only |
 | `--explore-hints CSV` | create-intake, from-note | no | Comma-separated repo-relative paths the refiner should start with |
 | `--note ID` | `from-note` | yes | Scribe note ID containing the refiner handoff |
+| `--note TEXT` | `mark-done` | no | Note describing the manual completion (informational only) |
 | `--backlog` | `from-note` | no | Write to `backlog/<slug>.json` instead of `intake/<uuid>.json` |
 
 \* Required unless `--from-todo` fills it.
 
-**Deprecated entry points, kept for one release:** `runner/create_intake.py` → `ticket create-intake`, `runner/draft_ticket.py` → `ticket draft`, `runner/promote.py` → `ticket promote`, `runner/refine_to_intake.py` → `ticket from-note`. They are thin shims with identical flags; the sections below document them until they are removed.
+**Deprecated entry points, kept for one release:** `runner/create_intake.py` → `ticket create-intake`, `runner/draft_ticket.py` → `ticket draft`, `runner/promote.py` → `ticket promote`, `runner/refine_to_intake.py` → `ticket from-note`, `runner/mark_done.py` → `ticket mark-done`. They are thin shims with identical flags; the sections below document them until they are removed.
 
 ## runner/create_intake.py
 
@@ -1000,7 +1005,7 @@ python -m runner.promote <slug>
 
 ## runner/mark_done.py
 
-Mark a backlog ticket as done **without** running it through the runner. For tickets small enough to fix by hand. Deletes `runner/backlog/<slug>.json`.
+**Deprecated entry point.** A thin shim over `python -m runner.ticket mark-done`, kept for one release so existing scripts keep working. Same arguments, same behaviour — see [runner/ticket.py](#runnerticketpy).
 
 ```bash
 python -m runner.mark_done <slug> [--note "explanation"]
@@ -1009,9 +1014,7 @@ python -m runner.mark_done <slug> [--note "explanation"]
 | Argument / Flag | Required | Description |
 |-----------------|----------|-------------|
 | `slug` | yes | Backlog ticket slug — the filename **without** directory or `.json` extension |
-| `--note TEXT` | no | Optional note describing the manual completion (currently informational only) |
-
-The presence of the backlog file is itself the safety check — `promote.py` removes the backlog file when a ticket enters intake, so a backlog file that still exists is guaranteed not to be in flight. Use `promote.py` first if you actually want the ticket to run through the runner.
+| `--note TEXT` | no | Optional note describing the manual completion (informational only) |
 
 ## runner/cost_emit.py
 

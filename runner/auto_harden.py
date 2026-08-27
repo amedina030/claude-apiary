@@ -34,7 +34,7 @@ VALIDATE_FINDINGS = HARDEN_DIR / "validate_findings.py"
 VALIDATE_RESPONSE = HARDEN_DIR / "validate_response.py"
 ASSIGN_IDS = HARDEN_DIR / "assign_ids.py"
 
-MAX_ROUNDS = cfg("harden", "max_rounds", 3)
+MAX_ROUNDS = cfg("harden", "max_rounds", 1)
 
 
 # -- Git helpers (#253: shared via runner/git_lib.py) --

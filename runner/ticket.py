@@ -13,13 +13,14 @@ Usage:
     python -m runner.ticket draft --title "..." --problem "..." --description "..." --scope "..."
     python -m runner.ticket create-intake --title "..." --problem "..." --description "..." --scope "..."
     python -m runner.ticket promote <slug>
+    python -m runner.ticket mark-done <slug> [--note "..."]
     python -m runner.ticket from-note --note <id> --title "..."
     python -m runner.ticket validate <path>
 
 The old module entry points (`runner.create_intake`, `runner.draft_ticket`,
-`runner.promote`, `runner.refine_to_intake`) still work: they are thin shims
-over these handlers, kept for one release so scripts and muscle memory don't
-break mid-flight.
+`runner.promote`, `runner.refine_to_intake`, `runner.mark_done`) still work:
+they are thin shims over these handlers, kept for one release so scripts and
+muscle memory don't break mid-flight.
 """
 
 from __future__ import annotations
@@ -329,6 +330,28 @@ def cmd_promote(args, parser=None) -> int:
     return 0
 
 
+def cmd_mark_done(args, parser=None) -> int:
+    """Delete a backlog draft that was fixed by hand instead of by the runner.
+
+    The presence of the backlog file *is* the safety check: ``promote`` removes
+    it the moment a ticket enters intake, so a backlog file that still exists
+    is guaranteed not to be in flight.
+    """
+    slug = args.slug
+    if "/" in slug or not is_uuid_safe(slug):
+        print("Error: invalid slug (path separators not allowed)", file=sys.stderr)
+        return 1
+
+    backlog_path = BACKLOG_DIR / f"{slug}.json"
+    if not backlog_path.exists():
+        print(f"Error: backlog ticket {slug}.json not found", file=sys.stderr)
+        return 1
+
+    backlog_path.unlink()
+    print(f"Marked {slug} as done.")
+    return 0
+
+
 def cmd_from_note(args, parser=None) -> int:
     """Bridge a `/refine` handoff scribe note into an intake or backlog file."""
     body = read_note(args.note)
@@ -425,6 +448,18 @@ def add_promote_args(parser) -> None:
     )
 
 
+def add_mark_done_args(parser) -> None:
+    parser.add_argument(
+        "slug",
+        help="Backlog ticket slug — the filename without directory or .json extension",
+    )
+    parser.add_argument(
+        "--note",
+        default="",
+        help="Optional note describing the manual completion (informational only)",
+    )
+
+
 def add_from_note_args(parser) -> None:
     parser.add_argument(
         "--note", required=True, help="Scribe note ID containing the refiner handoff"
@@ -466,6 +501,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_promote = subs.add_parser("promote", help="Promote a backlog draft to intake")
     add_promote_args(p_promote)
     p_promote.set_defaults(handler=cmd_promote)
+
+    p_done = subs.add_parser("mark-done", help="Delete a backlog draft that was fixed by hand")
+    add_mark_done_args(p_done)
+    p_done.set_defaults(handler=cmd_mark_done)
 
     p_note = subs.add_parser(
         "from-note", help="Bridge a /refine handoff note into intake or backlog"

@@ -167,7 +167,9 @@ def build_prompt(intake: dict, previous_errors: list[str] | None = None) -> str:
 
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
-    return _spawn(prompt, timeout=cfg("refine", "timeout", 300), model=cfg("refine", "model", None))
+    return _spawn(
+        prompt, timeout=cfg("refine", "timeout", 900), model=cfg("refine", "model", "opus")
+    )
 
 
 def extract_spec(raw_output: str) -> dict:

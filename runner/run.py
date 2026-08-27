@@ -814,7 +814,7 @@ def _run_detached_impl(cli_args) -> int:
     token_cap = (
         cli_args.token_cap
         if cli_args.token_cap is not None
-        else cfg("detached", "token_cap", 2000000)
+        else cfg("detached", "token_cap", 10000000)
     )
     max_unreviewed = (
         cli_args.max_unreviewed

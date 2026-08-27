@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from runner import run as orchestrator
+from runner import run_lock
 from runner.run import REPO_ROOT
 
 # ---------------------------------------------------------------------------
@@ -62,6 +63,16 @@ class _RunnerTestCase(unittest.TestCase):
         # it leak across test methods or between test classes.
         self._prior_active_target = os.environ.pop("APIARY_TARGET_REPO", None)
         self.addCleanup(self._restore_active_target)
+        # `run_lock.LOCKS_DIR` is frozen at import from `locks_dir()`, and
+        # `main()` calls `run_lock.scan_stale()` + `run_lock.write()` against
+        # it. Unpatched, these tests wrote lockfiles into the developer's real
+        # `.apiary/runner/locks/` and a single stale lock left on that machine
+        # failed every `main()` test (review subsystems/runner.md §"Interactive
+        # main()"). Same patch the other three lock-touching suites use.
+        self.locks_dir = self.tmp_path / "locks"
+        locks_patcher = patch.object(run_lock, "LOCKS_DIR", self.locks_dir)
+        locks_patcher.start()
+        self.addCleanup(locks_patcher.stop)
 
     def _restore_active_target(self):
         import os
@@ -332,6 +343,21 @@ class TestMainHappyPath(_RunnerTestCase):
         self.assertIn("COMPLETE", out)
         self.assertIn("Stages completed: 6/6", out)
         self.assertEqual(mock_run_stage.call_count, 6)
+
+    @patch("runner.run.run_stage")
+    def test_lockfile_lands_in_the_patched_locks_dir(self, mock_run_stage):
+        """Hermeticity guard: main() must not touch the real .apiary locks dir."""
+        real_locks = run_lock.locks_dir()
+        before = set(real_locks.glob("*.lock")) if real_locks.exists() else set()
+        intake_file, intake_data = self.make_intake_file()
+        mock_run_stage.return_value = (True, "ok", "", 0.5)
+        code, _, _ = self._run_main_capture(["run.py", str(intake_file)])
+        self.assertIn(code, (None, 0))
+        # The lock is released on a clean exit, so assert on the directory the
+        # run created rather than on a surviving file.
+        self.assertTrue(self.locks_dir.exists())
+        after = set(real_locks.glob("*.lock")) if real_locks.exists() else set()
+        self.assertEqual(before, after)
 
     @patch("runner.run.run_stage")
     def test_stage_call_order(self, mock_run_stage):

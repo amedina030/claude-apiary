@@ -674,7 +674,7 @@ def parse_verify_output(stdout: str) -> dict:
 
 def run_claude(prompt: str, model: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess with the specified model."""
-    return _spawn_claude(prompt, timeout=cfg("executor", "timeout", 300), model=model)
+    return _spawn_claude(prompt, timeout=cfg("executor", "timeout", 900), model=model)
 
 
 def run_test_command(code_spec: str) -> tuple[bool, str]:

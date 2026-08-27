@@ -358,7 +358,7 @@ def build_prompt(
 
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
-    return _spawn(prompt, timeout=cfg("plan", "timeout", 300), model=cfg("plan", "model", None))
+    return _spawn(prompt, timeout=cfg("plan", "timeout", 900), model=cfg("plan", "model", "opus"))
 
 
 def extract_plan(raw_output: str) -> dict:

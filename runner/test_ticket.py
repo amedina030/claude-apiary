@@ -233,6 +233,45 @@ class TestDraftAndPromote(TicketDirsMixin, unittest.TestCase):
         self.assertEqual(written["target_repo"], str(REPO_ROOT))
 
 
+class TestMarkDone(TicketDirsMixin, unittest.TestCase):
+    def _draft(self, title="Add caching"):
+        return self._run(
+            "draft",
+            "--title",
+            title,
+            "--problem",
+            _LONG,
+            "--description",
+            _LONG,
+            "--scope",
+            "api/cache.py",
+        )
+
+    def test_deletes_the_backlog_file(self):
+        self.assertEqual(self._draft(), 0)
+        self.assertEqual(self._run("mark-done", "add-caching"), 0)
+        self.assertFalse((self.backlog / "add-caching.json").exists())
+
+    def test_note_is_accepted_and_ignored(self):
+        self.assertEqual(self._draft(), 0)
+        self.assertEqual(self._run("mark-done", "add-caching", "--note", "fixed by hand"), 0)
+        self.assertFalse((self.backlog / "add-caching.json").exists())
+
+    def test_rejects_a_path_separator_slug(self):
+        self.assertEqual(self._run("mark-done", "foo/bar"), 1)
+        self.assertEqual(self._run("mark-done", "..\\escape"), 1)
+
+    def test_reports_a_missing_ticket(self):
+        self.assertEqual(self._run("mark-done", "nope"), 1)
+
+    def test_leaves_intake_alone(self):
+        """A promoted ticket has no backlog file, so mark-done cannot touch it."""
+        self.assertEqual(self._draft(), 0)
+        self.assertEqual(self._run("promote", "add-caching"), 0)
+        self.assertEqual(self._run("mark-done", "add-caching"), 1)
+        self.assertEqual(len(list(self.intake.glob("*.json"))), 1)
+
+
 class TestCreateIntake(TicketDirsMixin, unittest.TestCase):
     def test_writes_and_validates(self):
         rc = self._run(
@@ -331,7 +370,7 @@ class TestValidateSubcommand(TicketDirsMixin, unittest.TestCase):
 
 
 class TestShimParity(unittest.TestCase):
-    """The four deprecated entry points still parse the same flags.
+    """The five deprecated entry points still parse the same flags.
 
     They are kept for one release; `check_cli_claims` reconciles their
     documented flags against these parsers, so a drift here is a doc failure
@@ -383,13 +422,19 @@ class TestShimParity(unittest.TestCase):
         for flag in ("--note", "--title", "--backlog", "--explore-hints"):
             self.assertIn(flag, text)
 
+    def test_mark_done_shim_flags(self):
+        text = self._help("runner.mark_done")
+        self.assertIn("slug", text)
+        self.assertIn("--note", text)
+
     def test_shims_forward_to_the_ticket_handlers(self):
-        from runner import create_intake, draft_ticket, promote, refine_to_intake
+        from runner import create_intake, draft_ticket, mark_done, promote, refine_to_intake
 
         self.assertIs(create_intake.cmd_create_intake, ticket.cmd_create_intake)
         self.assertIs(draft_ticket.cmd_draft, ticket.cmd_draft)
         self.assertIs(promote.cmd_promote, ticket.cmd_promote)
         self.assertIs(refine_to_intake.cmd_from_note, ticket.cmd_from_note)
+        self.assertIs(mark_done.cmd_mark_done, ticket.cmd_mark_done)
 
 
 if __name__ == "__main__":
