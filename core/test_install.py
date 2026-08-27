@@ -220,6 +220,77 @@ class ScribeTemplateScaffoldTests(unittest.TestCase):
             self.assertTrue((tpl_dir / f"{note_type}.md").is_file(), f"missing {note_type}.md")
 
 
+class GeneratedLauncherTests(unittest.TestCase):
+    """Execute the generated ``.claude/apiary/launch.py``.
+
+    Every other test only asserts the file exists, so the launcher — the
+    single process every hook in every bootstrapped repo goes through — has
+    never actually been run by the suite.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.apiary = _make_fake_apiary(self.root)
+        self.target = self.root / "demo"
+        self.target.mkdir()
+        _git_init(self.target)
+        install_mod.install(self.target, apiary_repo=self.apiary)
+        self.launcher = self.target / ".claude" / "apiary" / "launch.py"
+
+    def _run(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(self.launcher), *args],
+            capture_output=True, text=True, encoding="utf-8", timeout=60,
+        )
+
+    def test_print_repo_path_reports_main_apiary(self):
+        result = self._run("--print-repo-path")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(Path(result.stdout.strip()), self.apiary.resolve())
+
+    def test_dispatch_sets_main_repo_and_state_dir_env(self):
+        probe = self.apiary / "probe_env.py"
+        probe.write_text(
+            "import json, os, sys\n"
+            "print(json.dumps({k: os.environ.get(k)\n"
+            "                  for k in ('APIARY_MAIN_REPO', 'APIARY_TARGET_STATE_DIR')}))\n",
+            encoding="utf-8",
+        )
+        result = self._run("probe_env.py")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        env = json.loads(result.stdout)
+        self.assertEqual(Path(env["APIARY_MAIN_REPO"]), self.apiary.resolve())
+        self.assertEqual(
+            Path(env["APIARY_TARGET_STATE_DIR"]),
+            state.repos_dir(self.apiary) / "demo-1",
+        )
+
+    def test_a_removed_hook_script_degrades_quietly(self):
+        # Existing repos carry settings.json entries for hooks apiary has
+        # since deleted. Until they are re-bootstrapped the launcher is what
+        # Claude Code runs, so it must exit 0 with one actionable line and no
+        # traceback — anything else surfaces as a hook error every tool call.
+        result = self._run("core/hooks/deleted_in_a_later_release.py")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("hook script removed", result.stderr)
+        self.assertIn("re-run apiary install", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1)
+
+    def test_unreachable_main_apiary_never_blocks(self):
+        state.write_main_apiary_pointer(self.target, {
+            "main_apiary_path": str(self.root / "gone"),
+            "main_apiary_uid": 1,
+            "registered_at": "2026-08-26T00:00:00Z",
+        })
+        result = self._run("core/hooks/inject_session.py")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("running as vanilla Claude session", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
 

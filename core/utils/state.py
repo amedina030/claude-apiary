@@ -501,7 +501,7 @@ if __name__ == "__main__":
     # Print the per-target state dir for the cwd. Used by skill templates
     # and shell snippets that need the path without re-implementing the
     # registry lookup. Invoked via:
-    #   python ~/.claude/apiary_launch.py core/utils/state.py
+    #   python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" core/utils/state.py
     try:
         print(resolve_target_state_dir())
     except RuntimeError as exc:

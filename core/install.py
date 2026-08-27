@@ -5,8 +5,6 @@ pointers, version, flags/, session-tmp/), writes a ``settings.json`` whose
 hooks dispatch through the per-repo launcher, copies slash commands, and
 updates the registry. Idempotent — re-running refreshes generated files
 without disturbing user-owned content.
-
-See MIGRATION-PLAN.md §7.8 for the full step list.
 """
 from __future__ import annotations
 
@@ -27,10 +25,6 @@ from core import launcher_template
 from core.hooks_lib import load_settings, register_hooks, save_settings
 from core.utils import state
 from core.utils.filelock import FileLock
-
-# Apiary-managed top-level keys in <repo>/.claude/settings.json. Anything
-# outside this set is preserved as-is on re-run.
-_APIARY_OWNED_KEYS = ("hooks",)
 
 # bootstrap_state.json schema — bumped to v2 by the per-repo migration to
 # carry hash fields used by ``apiary doctor registry`` for drift detection.

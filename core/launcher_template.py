@@ -3,8 +3,7 @@
 The launcher is a tiny shim copied into ``<repo>/.claude/apiary/launch.py``
 by ``apiary install --target <repo>``. It reads the repo's
 ``main-apiary-pointer.json`` to find main-apiary, then dispatches to the
-named script under main-apiary with the caller's cwd intact. See
-MIGRATION-PLAN.md §7.7 for the full contract.
+named script under main-apiary with the caller's cwd intact.
 
 This template is rendered to a file rather than imported because each
 bootstrapped repo carries its own copy under ``.claude/apiary/``. The
@@ -76,8 +75,8 @@ def _resolve_state_dir(main_apiary: Path) -> Path | None:
 def main() -> int:
     main_apiary = _resolve_main_apiary()
     if main_apiary is None or not main_apiary.is_dir():
-        # Loud-warn-and-skip per MIGRATION-PLAN.md §7.1 / D32. Hooks must
-        # always exit 0 — a non-zero exit here would block tool calls.
+        # Loud-warn-and-skip. Hooks must always exit 0 — a non-zero exit
+        # here would block tool calls.
         print(
             f"[apiary] main-apiary not reachable via {MAIN_POINTER}; "
             "running as vanilla Claude session.",
@@ -99,7 +98,14 @@ def main() -> int:
 
     script = main_apiary / sys.argv[1]
     if not script.is_file():
-        print(f"[apiary] script not found: {script}", file=sys.stderr)
+        # A settings.json entry outlived the script it points at — normally
+        # a hook apiary deleted, in a repo that has not been re-bootstrapped.
+        # Say so once, on stderr, and exit 0: a non-zero exit or a traceback
+        # here would surface as a hook error on every tool call.
+        print(
+            f"[apiary] hook script removed: {script} — re-run apiary install",
+            file=sys.stderr,
+        )
         return 0  # do not block
 
     env = os.environ.copy()
@@ -116,9 +122,3 @@ def main() -> int:
 if __name__ == "__main__":
     raise SystemExit(main())
 '''
-
-
-def render() -> str:
-    """Return the launcher source as a string. One-liner today; here so
-    callers don't depend on the module-level constant name."""
-    return LAUNCHER_PY

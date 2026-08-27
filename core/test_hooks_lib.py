@@ -42,24 +42,15 @@ class HookCmdQuotingTests(unittest.TestCase):
             msg=f"path with space/apostrophe was not preserved as single tokens: {cmd!r}",
         )
 
-    def test_global_launcher_mode_embeds_quoted_interpreter_and_home(self) -> None:
-        """Global launcher mode embeds the resolved interpreter (quoted) and
-        expands $HOME inside quotes, not a bare ~."""
+    def test_repo_root_without_per_repo_launcher_is_rejected(self) -> None:
+        """The retired global mode (`$HOME/.claude/apiary_launch.py`) must
+        not come back by accident: that launcher no longer exists, so a
+        command naming it would install a silently broken hook."""
         apiary = HOSTILE_HOME / "claude-apiary"
         script = apiary / "budgeter" / "hooks" / "pre.py"
-        exe = HOSTILE_HOME / "py" / "python.exe"
 
-        cmd = hook_cmd(Path(script), python_exe=Path(exe), repo_root=Path(apiary))
-        tokens = shlex.split(cmd)
-
-        # The interpreter is a quoted, bash-converted absolute path — never a
-        # bare `python` (absent on macOS Homebrew) nor `python3` (absent on a
-        # stock Windows install). Survives the space/apostrophe in the path.
-        self.assertEqual(tokens[0], to_bash_path(Path(exe)))
-        # A single, unbroken token — quoting protected it. A bare ~ also could
-        # not carry a space/apostrophe, hence $HOME.
-        self.assertEqual(tokens[1], "$HOME/.claude/apiary_launch.py")
-        self.assertNotIn("~", cmd)
+        with self.assertRaises(ValueError):
+            hook_cmd(Path(script), repo_root=Path(apiary))
 
     def test_per_repo_launcher_never_embeds_the_repo_path(self) -> None:
         """Per-repo mode references $CLAUDE_PROJECT_DIR, so a hostile repo

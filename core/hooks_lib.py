@@ -1,8 +1,9 @@
 """
 Hook registration utilities for claude-apiary tools.
 
-Used by setup.py to install/update hooks in Claude Code settings.json files
-and by scripts/uninstall_hooks.py (todo #261) to take them back out again.
+Used by ``core/install.py`` (via ``core/hooks_factory.py``) to install or
+update hooks in a bootstrapped repo's ``.claude/settings.json``, and by
+``core/uninstall.py`` / ``scripts/uninstall_hooks.py`` to take them out again.
 """
 import json
 import os
@@ -65,14 +66,16 @@ def is_apiary_entry(entry: Any) -> bool:
       2. Portable hand-edited entries that use ``$CLAUDE_PROJECT_DIR/<sub>/...``
          and therefore lack the marker. Detected by known apiary subpath
          substrings (``/budgeter/hooks/``, ``/core/hooks/``, ``/scribe/``, …).
-      3. Launcher-based entries that use ``apiary_launch.py`` to locate
-         the apiary repo via the pointer file.
-      4. Per-repo launcher entries (post-migration) whose commands invoke
+      3. Legacy entries that use the retired global ``apiary_launch.py``.
+         ``hook_cmd`` no longer emits these, but repos bootstrapped before
+         the per-repo migration still carry them and re-install /
+         uninstall must still be able to clear them out.
+      4. Per-repo launcher entries (current) whose commands invoke
          ``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``. Distinct from
          the global ``apiary_launch.py`` — both substrings are checked.
 
-    Shared with setup.py's drift check and scripts/uninstall_hooks.py so
-    the install and uninstall paths agree on which entries are ours.
+    Shared by ``register_hooks`` and ``remove_hooks`` so the install and
+    uninstall paths agree on which entries are ours.
     """
     blob = json.dumps(entry)
     if APIARY_MARKER in blob:
@@ -99,23 +102,31 @@ def hook_cmd(
 ) -> str:
     """Build a hook command string using bash-compatible paths.
 
-    Three modes, selected by the keyword args:
+    Two modes, selected by the keyword args:
 
     - ``per_repo_launcher=True`` (requires ``repo_root``): emits
       ``python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" <rel>``.
       The launcher is the per-repo shim written by ``apiary install``;
-      Claude Code expands ``$CLAUDE_PROJECT_DIR`` at hook-fire time.
-      Used by phase-1+ installs.
-    - ``repo_root`` only: emits ``python ~/.claude/apiary_launch.py <rel>``.
-      The historical global launcher mode (used by ``setup.py --global``).
-    - Neither: legacy absolute-path format suitable for ``--project-path``
-      installs where the session cwd matches the hook repo.
+      Claude Code expands ``$CLAUDE_PROJECT_DIR`` at hook-fire time. This
+      is the only mode ``hooks_factory`` uses.
+    - Neither arg: legacy absolute-path format suitable for
+      ``--project-path`` installs where the session cwd matches the hook
+      repo.
 
-    *repo_root* in the launcher modes is **main-apiary's** root, not the
-    bootstrapped repo's — the path is made relative so the launcher can
-    re-resolve it against main-apiary at runtime.
+    *repo_root* is **main-apiary's** root, not the bootstrapped repo's —
+    the path is made relative so the launcher can re-resolve it against
+    main-apiary at runtime.
     """
     if repo_root is not None:
+        if not per_repo_launcher:
+            # The third mode (`python "$HOME/.claude/apiary_launch.py" <rel>`)
+            # belonged to the retired global install; that launcher no longer
+            # exists on disk, so emitting a command for it would silently
+            # install a broken hook.
+            raise ValueError(
+                "repo_root requires per_repo_launcher=True; the global "
+                "~/.claude/apiary_launch.py mode was removed"
+            )
         rel = script_path.relative_to(repo_root).as_posix()
         # Embed the resolved interpreter (bash-converted absolute path) rather
         # than a bare `python`. `python` is absent on a stock macOS Homebrew box
@@ -123,14 +134,9 @@ def hook_cmd(
         # (only `python`), so no single bare command is portable. settings.json
         # is regenerated per-machine by `apiary install`, so the absolute path is
         # always valid on the machine that wrote it. The script path stays
-        # portable via $CLAUDE_PROJECT_DIR / $HOME.
+        # portable via $CLAUDE_PROJECT_DIR.
         exe = to_bash_path(python_exe or resolve_python())
-        if per_repo_launcher:
-            return f'"{exe}" "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" {rel}'
-        # $HOME (double-quoted) rather than a bare ~ so a home dir with a space
-        # or apostrophe (e.g. C:\Users\Nelson's PC) survives shell word-splitting.
-        # A bare ~ cannot be quoted without suppressing its expansion.
-        return f'"{exe}" "$HOME/.claude/apiary_launch.py" {rel}'
+        return f'"{exe}" "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" {rel}'
     if per_repo_launcher:
         raise ValueError("per_repo_launcher=True requires repo_root")
     exe = python_exe or resolve_python()
