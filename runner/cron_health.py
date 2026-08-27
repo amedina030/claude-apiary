@@ -1,8 +1,9 @@
 """Cron-job health check and repair tool.
 
 Detects drift between apiary's canonical scheduled-entry registry
-(``runner/cron_registry.json``) and what the host's OS scheduler has
-actually registered, and optionally repairs it.
+(``cron_registry/<hostname>.json`` at the repo root — one file per host, so
+two machines scheduling the same repo don't overwrite each other) and what
+the host's OS scheduler has actually registered, and optionally repairs it.
 
 Trigger case this addresses: the ``pipeline/`` → ``runner/`` rename
 silently broke the registered overnight cron because it still pointed

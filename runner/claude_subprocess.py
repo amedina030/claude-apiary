@@ -285,11 +285,16 @@ def run_claude(
         # stage log says "stderr: " and the reason is lost.
         stderr = describe_failure(stdout, result.returncode)
 
-    if result.returncode == 0:
-        try:
-            emit_usage_xml(stdout)
-        except Exception:
-            # Cost emission failure must never discard a successful result.
-            pass
+    # Emitted regardless of exit code. `<usage>` used to be emitted only on
+    # success, so a call that hit --max-turns, was stopped by the API, or
+    # failed after real spend reported zero tokens: the budgeter never saw
+    # them and the runner's cumulative cap was never decremented by them
+    # (review runner Bug 8). emit_usage_xml is a no-op when stdout carries no
+    # envelope, which is the timeout / could-not-launch case.
+    try:
+        emit_usage_xml(stdout)
+    except Exception:
+        # Cost emission failure must never discard a result, good or bad.
+        pass
 
     return result.returncode, stdout, stderr

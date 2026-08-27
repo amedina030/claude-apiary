@@ -502,6 +502,46 @@ class TestDetachedRun(unittest.TestCase):
             self.assertEqual(entries[0]['exit_status'], 'git_setup_failed')
             self.assertEqual(entries[0]['stages_completed'], 0)
 
+    def test_git_setup_failure_is_counted_against_max_restarts(self):
+        """review runner Bug 4: the git_setup_failed early return skipped
+        run_tracker, so a preserved worktree made every subsequent night fail
+        identically with attempt_count stuck at 1 — max_restarts never
+        tripped and the ticket was re-picked forever."""
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            (td / 'backlog').mkdir()
+            (td / 'intake').mkdir()
+            intake_file = self._make_intake_file(td / 'backlog')
+            uuid = json.loads(intake_file.read_text(encoding='utf-8'))['id']
+
+            patches = (
+                mock.patch('runner.run.SCRIPT_DIR', td),
+                mock.patch('runner.run.hygiene_precheck', return_value=None),
+                mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
+                mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
+                mock.patch('runner.run.git_worktree_create',
+                           return_value=(False, None, 'worktree path already exists')),
+            )
+            for _ in range(2):
+                with patches[0], patches[1], patches[2], patches[3], patches[4]:
+                    rc = run.run_detached(_make_cli_args())
+                self.assertEqual(rc, 1)
+
+            tracker = run_tracker_module.load(uuid)
+            self.assertEqual(tracker['attempt_count'], 2)
+            self.assertEqual(tracker['last_exit_status'], 'git_setup_failed')
+
+            # A third night with max_restarts=2 gives up instead of retrying.
+            with patches[0], patches[1], patches[2], patches[3], patches[4]:
+                with mock.patch('runner.run.cfg', side_effect=(
+                    lambda section, key, default=None:
+                    2 if (section, key) == ('detached', 'max_restarts') else default
+                )):
+                    rc = run.run_detached(_make_cli_args())
+            self.assertEqual(rc, 1)
+            entries = self._read_log(self._history_path)
+            self.assertEqual(entries[-1]['exit_status'], 'max_restarts_exceeded')
+
     def test_path_traversal_uuid_rejected(self):
         """ATK-008: intake uuid containing path separators is rejected before any worktree is created."""
         with tempfile.TemporaryDirectory() as td_str:

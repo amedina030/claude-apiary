@@ -205,6 +205,47 @@ class TestBuildSubprocessEnv(unittest.TestCase):
         self.assertEqual(env["SYSTEMROOT"], "C:\\Windows")
 
 
+class TestUsageEmission(unittest.TestCase):
+    """review runner Bug 8: `<usage>` used to be emitted only on a zero exit,
+    so a call that hit --max-turns or was stopped by the API after real spend
+    reported zero tokens — invisible to the budgeter and to the run's cap."""
+
+    def _run(self, returncode, stdout_bytes):
+        from runner import claude_subprocess as cs
+        emitted = []
+
+        def fake_run(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, returncode,
+                                               stdout=stdout_bytes, stderr=b"")
+
+        with (
+            mock.patch.object(cs.subprocess, "run", fake_run),
+            mock.patch.object(cs, "emit_usage_xml", emitted.append),
+        ):
+            cs.run_claude("hello")
+        return emitted
+
+    def _envelope(self):
+        import json as _json
+        return _json.dumps({
+            "result": "stopped",
+            "subtype": "error_max_turns",
+            "usage": {"input_tokens": 900, "output_tokens": 10},
+        }).encode("utf-8")
+
+    def test_usage_emitted_on_success(self):
+        self.assertEqual(len(self._run(0, self._envelope())), 1)
+
+    def test_usage_emitted_on_non_zero_exit(self):
+        emitted = self._run(1, self._envelope())
+        self.assertEqual(len(emitted), 1)
+        self.assertIn("input_tokens", emitted[0])
+
+    def test_no_envelope_is_still_a_single_no_op_call(self):
+        emitted = self._run(1, b"")
+        self.assertEqual(emitted, [""])
+
+
 class TestResolveClaudeBin(unittest.TestCase):
     """Which executable a stage actually spawns."""
 

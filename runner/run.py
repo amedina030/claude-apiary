@@ -686,6 +686,16 @@ def _run_detached_impl(cli_args) -> int:
     ok, wt_path, err = git_worktree_create(branch, target_repo=target_repo_path)
     if not ok:
         print(f'ERROR: git worktree setup failed: {err}', file=sys.stderr)
+        # Record the attempt BEFORE returning. This early return skipped
+        # run_tracker entirely, so a failure that preserves the worktree —
+        # which every failure does — made the next night's git_worktree_create
+        # fail identically, forever: attempt_count never grew past 1,
+        # max_restarts never tripped, and the same ticket was re-picked every
+        # night (review runner Bug 4). Recording here makes the tracker's
+        # give-up path reachable.
+        run_tracker.record_attempt(uuid, 0, 0, 'git_setup_failed')
+        print(f'  To clear the stale worktree: {_PY_HINT} -m runner.run --cleanup {uuid}',
+              file=sys.stderr)
         history_append({
             'start_ts': start_ts,
             'end_ts': _now(),

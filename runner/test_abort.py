@@ -16,15 +16,15 @@ class ArchiveArtifactsTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.tmp = Path(self.tmpdir.name)
-        self._orig_script = abort_mod.SCRIPT_DIR
+        self._orig_root = abort_mod.ARTIFACTS_ROOT
         self._orig_crashes = abort_mod.CRASHES_DIR
         self._orig_locks = run_lock.LOCKS_DIR
-        abort_mod.SCRIPT_DIR = self.tmp
+        abort_mod.ARTIFACTS_ROOT = self.tmp
         abort_mod.CRASHES_DIR = self.tmp / "crashes"
         run_lock.LOCKS_DIR = self.tmp / "locks"
 
     def tearDown(self):
-        abort_mod.SCRIPT_DIR = self._orig_script
+        abort_mod.ARTIFACTS_ROOT = self._orig_root
         abort_mod.CRASHES_DIR = self._orig_crashes
         run_lock.LOCKS_DIR = self._orig_locks
         self.tmpdir.cleanup()
@@ -53,20 +53,35 @@ class ArchiveArtifactsTests(unittest.TestCase):
         self.assertTrue(dest.exists())
         self.assertEqual(list(dest.iterdir()), [])
 
+    def test_reads_the_state_dir_not_the_source_tree(self):
+        """review runner Bug 11 / T-2026-278a: _archive_artifacts used to read
+        `runner/<dir>/<uuid>.json` inside the checkout — the pre-migration
+        location — so every abort archived nothing."""
+        from runner.target_repo import artifacts_root
+        self.assertEqual(Path(self._orig_root), artifacts_root())
+        self.assertNotEqual(
+            Path(self._orig_root).resolve(),
+            Path(abort_mod.__file__).resolve().parent,
+            "artifacts must not be read out of the source tree",
+        )
+        self.assertEqual(
+            Path(abort_mod.CRASHES_DIR).name, "crashes",
+        )
+
 
 class AbortRunTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.tmp = Path(self.tmpdir.name)
-        self._orig_script = abort_mod.SCRIPT_DIR
+        self._orig_root = abort_mod.ARTIFACTS_ROOT
         self._orig_crashes = abort_mod.CRASHES_DIR
         self._orig_locks = run_lock.LOCKS_DIR
-        abort_mod.SCRIPT_DIR = self.tmp
+        abort_mod.ARTIFACTS_ROOT = self.tmp
         abort_mod.CRASHES_DIR = self.tmp / "crashes"
         run_lock.LOCKS_DIR = self.tmp / "locks"
 
     def tearDown(self):
-        abort_mod.SCRIPT_DIR = self._orig_script
+        abort_mod.ARTIFACTS_ROOT = self._orig_root
         abort_mod.CRASHES_DIR = self._orig_crashes
         run_lock.LOCKS_DIR = self._orig_locks
         self.tmpdir.cleanup()
@@ -113,15 +128,15 @@ class AbortAllTests(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.tmp = Path(self.tmpdir.name)
         self._orig_locks = run_lock.LOCKS_DIR
-        self._orig_script = abort_mod.SCRIPT_DIR
+        self._orig_root = abort_mod.ARTIFACTS_ROOT
         self._orig_crashes = abort_mod.CRASHES_DIR
         run_lock.LOCKS_DIR = self.tmp / "locks"
-        abort_mod.SCRIPT_DIR = self.tmp
+        abort_mod.ARTIFACTS_ROOT = self.tmp
         abort_mod.CRASHES_DIR = self.tmp / "crashes"
 
     def tearDown(self):
         run_lock.LOCKS_DIR = self._orig_locks
-        abort_mod.SCRIPT_DIR = self._orig_script
+        abort_mod.ARTIFACTS_ROOT = self._orig_root
         abort_mod.CRASHES_DIR = self._orig_crashes
         self.tmpdir.cleanup()
 
