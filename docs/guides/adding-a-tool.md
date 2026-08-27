@@ -25,7 +25,7 @@ mkdir -p <tool>/hooks <tool>/commands <tool>/lib
 
 - Main Python module(s) under `<tool>/`
 - Use `core/` utilities for flags, config, file locking, hook registration
-- Stdlib only — no external dependencies
+- Stdlib only at runtime — a hook or git hook runs under the system interpreter, not the Poetry venv
 - See [Code Style](../standards/code-style.md) for conventions
 
 ### 3. Add hooks (if applicable)
@@ -46,7 +46,7 @@ See [Adding a Command](adding-a-command.md).
 
 ### 6. Write tests
 
-- `<tool>/test_<module>.py` using `unittest`
+- `<tool>/test_<module>.py`, unittest-style classes run by pytest (no pytest-only API)
 - Isolate from real user data with `tempfile.TemporaryDirectory()`
 - Cover core logic and edge cases
 

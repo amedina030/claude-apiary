@@ -23,7 +23,7 @@ Full prerequisites, the desktop GUI, and troubleshooting live in [`SETUP.md`](SE
 ## Requirements
 
 - **Python >= 3.11** (declared minimum supported version)
-- **Standard library only** by default; the only third-party dependency is `pytest` (for the test suites). All deps are pinned to version ranges in `requirements.txt`.
+- **Standard library only** at runtime; the third-party dependencies are `pytest` + `pytest-cov` (test suites, `dev` group) and the optional `gui` group nothing outside `gui/` imports. All are pinned to version ranges in `pyproject.toml`, with `requirements.txt` as a pip-only fallback for the test deps.
 - See [`docs/standards/code-style.md`](docs/standards/code-style.md) for the stdlib-only rule and [`PORTABILITY.md`](PORTABILITY.md) for prereqs, bootstrap, state locations, and portability rules.
 
 ---

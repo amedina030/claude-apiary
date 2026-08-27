@@ -1260,15 +1260,13 @@ Exit codes: `0` every file agrees (or every rewrite succeeded); `1` at least one
 
 ## Test scripts
 
-All tests use `unittest` and are run directly:
+The canonical runner is pytest — that is what CI runs and what the suite is configured for in `pyproject.toml`:
 
 ```bash
-python budgeter/test_hooks.py
-python scribe/test_notes.py
-python docs/test_check_cli_claims.py
-python harden/test_validators.py
-python harden/test_assign_ids.py
-python harden/test_validate_consolidation.py
-python harden/test_validate_and_assign.py
-python -m runner.test_orchestrator
+poetry run pytest -q                    # everything
+poetry run pytest -q core scribe        # a subtree
+poetry run pytest -q core/test_cli.py   # one file
+poetry run pytest --cov                 # + coverage report (report-only)
 ```
+
+The test files themselves are unittest-style classes and use no pytest-only API, so a single file still runs standalone (`python scribe/test_notes.py`, `python -m runner.test_orchestrator`) when you want it without the plugin machinery. See [code-style.md](../standards/code-style.md#testing).

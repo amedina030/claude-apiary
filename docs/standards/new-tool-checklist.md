@@ -32,7 +32,7 @@ When adding a new top-level tool to the project (like budgeter, scribe, or harde
 ### 1. Core functionality
 - [ ] Main Python module(s) under `<tool>/`
 - [ ] Use `core/` utilities — don't reinvent flags, config, file locking, or hook registration
-- [ ] Stdlib only — no external dependencies
+- [ ] Stdlib only at runtime — a hook or git hook runs under the system interpreter, not the Poetry venv
 
 ### 2. Hooks (if applicable)
 - [ ] Hook modules under `<tool>/hooks/`, each exposing `run(payload) -> HookResult | None`
@@ -51,7 +51,7 @@ When adding a new top-level tool to the project (like budgeter, scribe, or harde
 
 ### 5. Tests
 - [ ] Test file: `<tool>/test_<module>.py`
-- [ ] Uses `unittest` and `tempfile.TemporaryDirectory()`
+- [ ] Unittest-style classes run by pytest (no pytest-only API), isolated with `tempfile.TemporaryDirectory()`
 - [ ] Isolated from real user data
 - [ ] Covers core logic and edge cases
 
