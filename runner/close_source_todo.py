@@ -41,7 +41,7 @@ _RUNNER_SUBJECT_RE = re.compile(
 
 def _git(*args) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", *args], capture_output=True, text=True, cwd=str(SCRIPT_DIR.parent),
+        ["git", *args], capture_output=True, text=True, encoding="utf-8", cwd=str(SCRIPT_DIR.parent),
     )
 
 
@@ -116,7 +116,7 @@ def close_todo(todo_id: str) -> bool:
     try:
         result = subprocess.run(
             [sys.executable, str(NOTES_SCRIPT), "done", todo_id],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False

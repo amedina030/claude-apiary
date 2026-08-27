@@ -14,7 +14,6 @@ Usage:
 import argparse
 import json
 import re
-import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -24,6 +23,14 @@ from .schema_versions import (
     PLAN_SCHEMA_VERSION,
     SPEC_SCHEMA_VERSION,
     assert_schema_version,
+)
+from .stage_lib import (
+    ClaudeMissingError,
+    extract_json,
+    retry_until_valid,
+    run_claude as _spawn,
+    run_validator,
+    sanitize_json_newlines as _sanitize_json_newlines,
 )
 
 from .target_repo import plans_dir
@@ -339,93 +346,19 @@ def build_prompt(
 
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
-    from .claude_subprocess import run_claude as _spawn
     return _spawn(prompt, timeout=cfg("plan", "timeout", 300), model=cfg("plan", "model", None))
-
-
-def _sanitize_json_newlines(text: str) -> str:
-    """Escape literal newlines inside JSON string values.
-
-    LLMs often produce JSON with unescaped newlines in string fields
-    (especially multi-line code_spec values). This walks the text
-    character-by-character, tracking whether we're inside a JSON string,
-    and replaces literal newlines inside strings with \\n.
-    """
-    result = []
-    in_string = False
-    i = 0
-    while i < len(text):
-        ch = text[i]
-        if ch == '\\' and in_string:
-            # Escaped character — pass through both chars
-            result.append(ch)
-            if i + 1 < len(text):
-                i += 1
-                result.append(text[i])
-            i += 1
-            continue
-        if ch == '"':
-            in_string = not in_string
-        if ch == '\n' and in_string:
-            result.append('\\n')
-        elif ch == '\r' and in_string:
-            pass  # drop \r, the \n that follows will be escaped
-        elif ch == '\t' and in_string:
-            result.append('\\t')
-        else:
-            result.append(ch)
-        i += 1
-    return ''.join(result)
 
 
 def extract_plan(raw_output: str) -> dict:
     """Parse Claude Code output and extract the plan JSON.
 
-    Handles multiple failure modes from LLM-generated JSON:
-    - Response wrapped in Claude JSON envelope (--output-format json)
-    - Prose before/after JSON block
-    - Markdown code fences (possibly nested inside code_spec strings)
-    - Unescaped newlines/tabs inside JSON string values
+    Thin alias over the one shared salvager (``stage_lib.extract_json``), which
+    handles every failure mode LLM-generated JSON has produced here: the Claude
+    envelope, prose before/after the block, markdown fences (possibly nested
+    inside a ``code_spec`` string), and unescaped newlines/tabs inside string
+    values. An object carrying ``steps`` wins over any other object found.
     """
-    # Step 1: unwrap Claude JSON envelope
-    try:
-        envelope = json.loads(raw_output)
-        if isinstance(envelope, dict) and "result" in envelope:
-            text = envelope["result"]
-        elif isinstance(envelope, dict) and "steps" in envelope:
-            return envelope
-        else:
-            text = raw_output
-    except json.JSONDecodeError:
-        text = raw_output
-
-    # Step 2: try raw_decode on sanitized text (skips fence issues entirely)
-    # This is the most reliable path: sanitize newlines, then find the first
-    # valid JSON object by scanning for '{'. Works even with prose and nested
-    # fences because raw_decode uses the JSON parser's own bracket matching.
-    decoder = json.JSONDecoder()
-    for candidate in [_sanitize_json_newlines(text), text]:
-        for i, ch in enumerate(candidate):
-            if ch == '{':
-                try:
-                    obj, _ = decoder.raw_decode(candidate, i)
-                    if isinstance(obj, dict) and "steps" in obj:
-                        return obj
-                except json.JSONDecodeError:
-                    continue
-
-    # Step 3: if raw_decode didn't find a {"steps":...}, try any JSON object
-    for candidate in [_sanitize_json_newlines(text), text]:
-        for i, ch in enumerate(candidate):
-            if ch == '{':
-                try:
-                    obj, _ = decoder.raw_decode(candidate, i)
-                    if isinstance(obj, dict):
-                        return obj
-                except json.JSONDecodeError:
-                    continue
-
-    raise json.JSONDecodeError("No valid JSON found in output", text, 0)
+    return extract_json(raw_output, require_keys=("steps",), allow_list=False)
 
 
 _MERGEABLE_ACTIONS = {"create", "modify"}
@@ -534,13 +467,51 @@ def _merge_subsumed_steps(steps: list[dict]) -> list[dict]:
 
 def validate_plan(plan_path: Path) -> list[str]:
     """Run validate_plan.py and return list of errors (empty = valid)."""
-    result = subprocess.run(
-        [sys.executable, "-m", "runner.validate_plan", str(plan_path)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT),
-    )
-    if result.returncode == 0:
-        return []
-    return [line.strip() for line in result.stderr.splitlines() if line.strip()]
+    return run_validator("runner.validate_plan", plan_path, cwd=REPO_ROOT)
+
+
+def _read_spec(path: Path) -> dict:
+    """Load the spec artifact and enforce the stage's preconditions."""
+    if not path.exists():
+        print(f"Spec file not found: {path}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        spec = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        print(f"Invalid spec JSON: {e}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        assert_schema_version(spec, "spec", SPEC_SCHEMA_VERSION)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+    if not spec.get("valid", False):
+        print("Spec is not valid -- cannot plan from invalid spec", file=sys.stderr)
+        sys.exit(1)
+    return spec
+
+
+def _assemble_plan(plan_data: dict, spec: dict, spec_id: str) -> dict:
+    """Build the plan artifact around the model's raw step list."""
+    # Collapse naturally-atomic consecutive steps (T-2026-127) before
+    # validation so the file-overlap check sees the merged shape.
+    plan = {
+        "schema_version": PLAN_SCHEMA_VERSION,
+        "uuid": spec_id,
+        "executor_model": cfg("executor", "model", "sonnet"),
+        "spec": spec,
+        "steps": _merge_subsumed_steps(plan_data.get("steps", [])),
+    }
+    # Phase 4: propagate target_repo so validate_plan can resolve the
+    # correct banned-tokens list and repo root for this target.
+    spec_target = spec.get("target_repo")
+    if isinstance(spec_target, str) and spec_target.strip():
+        plan["target_repo"] = spec_target.strip()
+    return plan
+
+
+def _write(path: Path, artifact: dict) -> None:
+    path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
 
 
 def main():
@@ -548,116 +519,51 @@ def main():
     parser.add_argument("spec", help="Path to spec JSON file")
     args = parser.parse_args()
 
-    # Read spec
     spec_path = Path(args.spec)
-    if not spec_path.exists():
-        print(f"Spec file not found: {args.spec}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        spec = json.loads(spec_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        print(f"Invalid spec JSON: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        assert_schema_version(spec, "spec", SPEC_SCHEMA_VERSION)
-    except ValueError as e:
-        print(str(e), file=sys.stderr)
-        sys.exit(1)
-
-    if not spec.get("valid", False):
-        print("Spec is not valid -- cannot plan from invalid spec", file=sys.stderr)
-        sys.exit(1)
+    spec = _read_spec(spec_path)
 
     spec_id = spec.get("id", spec_path.stem)
     PLANS_DIR.mkdir(parents=True, exist_ok=True)
     plan_path = PLANS_DIR / f"{spec_id}.json"
-
-    best_plan = None
-    best_errors = None
-    previous_errors = None
 
     # Phase 4: pick the target repo for this run so build_prompt can inject
     # the right CLAUDE.md and banned-tokens section. Spec's target_repo
     # field is propagated from the intake by auto_refine; None = apiary.
     spec_target_repo = spec.get("target_repo")
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        print(f"Attempt {attempt}/{MAX_RETRIES}...", file=sys.stderr)
+    def _report(message: str) -> None:
+        print(message, file=sys.stderr)
 
-        prompt = build_prompt(spec, previous_errors, target_repo=spec_target_repo)
+    try:
+        ok, best_plan, best_errors = retry_until_valid(
+            build_prompt=lambda errors: build_prompt(
+                spec, errors, target_repo=spec_target_repo),
+            call_model=run_claude,
+            parse=extract_plan,
+            assemble=lambda data: _assemble_plan(data, spec, spec_id),
+            persist=lambda plan: _write(plan_path, plan),
+            validate=lambda: validate_plan(plan_path),
+            max_attempts=MAX_RETRIES,
+            report=_report,
+        )
+    except ClaudeMissingError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
 
-        try:
-            returncode, stdout, stderr = run_claude(prompt)
-        except subprocess.TimeoutExpired:
-            print(f"Claude Code error: subprocess timed out (attempt {attempt})", file=sys.stderr)
-            previous_errors = ["Claude Code subprocess timed out"]
-            continue
-        except FileNotFoundError:
-            print("Claude Code error: 'claude' command not found", file=sys.stderr)
-            sys.exit(1)
-
-        if returncode != 0:
-            msg = stderr.strip() or f"exit code {returncode}"
-            print(f"Claude Code error: {msg} (attempt {attempt})", file=sys.stderr)
-            previous_errors = [f"Claude Code failed: {msg}"]
-            continue
-
-        # Parse plan from output
-        try:
-            plan_data = extract_plan(stdout)
-        except (json.JSONDecodeError, ValueError) as e:
-            print(f"Failed to parse plan JSON (attempt {attempt}): {e}", file=sys.stderr)
-            previous_errors = [f"Output was not valid JSON: {e}"]
-            continue
-
-        # Collapse naturally-atomic consecutive steps (T-2026-127) before
-        # validation so the file-overlap check sees the merged shape.
-        merged_steps = _merge_subsumed_steps(plan_data.get("steps", []))
-
-        # Assemble full plan with metadata
-        plan = {
-            "schema_version": PLAN_SCHEMA_VERSION,
-            "uuid": spec_id,
-            "executor_model": cfg("executor", "model", "sonnet"),
-            "spec": spec,
-            "steps": merged_steps,
-        }
-        # Phase 4: propagate target_repo so validate_plan can resolve the
-        # correct banned-tokens list for this target.
-        spec_target = spec.get("target_repo")
-        if isinstance(spec_target, str) and spec_target.strip():
-            plan["target_repo"] = spec_target.strip()
-        plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
-
-        # Validate
-        errors = validate_plan(plan_path)
-        if not errors:
-            plan["valid"] = True
-            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
-            print(str(plan_path))
-            sys.exit(0)
-
-        # Track best attempt
-        if best_errors is None or len(errors) < len(best_errors):
-            best_plan = plan
-            best_errors = errors
-
-        previous_errors = errors
-        print(f"Validation failed (attempt {attempt}): {len(errors)} error(s)", file=sys.stderr)
-        for err in errors:
-            print(f"  {err}", file=sys.stderr)
+    if ok:
+        best_plan["valid"] = True
+        _write(plan_path, best_plan)
+        print(str(plan_path))
+        sys.exit(0)
 
     # All retries exhausted
     if best_plan:
         best_plan["valid"] = False
-        plan_path.write_text(json.dumps(best_plan, indent=2), encoding="utf-8")
+        _write(plan_path, best_plan)
 
     print(f"Failed after {MAX_RETRIES} attempts. Best attempt written to {plan_path}", file=sys.stderr)
-    if best_errors:
-        for err in best_errors:
-            print(f"  {err}", file=sys.stderr)
+    for err in best_errors:
+        print(f"  {err}", file=sys.stderr)
     sys.exit(1)
 
 

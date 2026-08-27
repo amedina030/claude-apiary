@@ -38,7 +38,7 @@ def read_todo(todo_id: str) -> str:
     """Read a scribe TODO by ID and return its content text."""
     result = subprocess.run(
         [sys.executable, str(NOTES_SCRIPT), "get", str(todo_id)],
-        capture_output=True, text=True
+        capture_output=True, text=True, encoding="utf-8"
     )
     if result.returncode != 0:
         print(f"TODO {todo_id} not found", file=sys.stderr)
@@ -136,7 +136,7 @@ def main():
     # Validate
     result = subprocess.run(
         [sys.executable, "-m", "runner.validate_intake", str(file_path)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT),
+        capture_output=True, text=True, encoding="utf-8", cwd=str(REPO_ROOT),
     )
     if result.returncode != 0:
         file_path.unlink(missing_ok=True)

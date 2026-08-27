@@ -16,7 +16,6 @@ Usage:
 """
 import argparse
 import json
-import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -38,7 +37,7 @@ NOTES_SCRIPT = REPO_DIR / "scribe" / "notes.py"
 
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
-from .git_lib import git
+from .git_lib import checkout, current_branch as get_current_branch, git
 from .schema_versions import (
     EXECUTION_SCHEMA_VERSION,
     HARDEN_SCHEMA_VERSION,
@@ -47,16 +46,12 @@ from .schema_versions import (
     SPEC_SCHEMA_VERSION,
     assert_schema_version,
 )
-
-
-def get_current_branch() -> str:
-    return git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-
-
-def checkout(branch: str):
-    result = git("checkout", branch)
-    if result.returncode != 0:
-        raise RuntimeError(f"Git checkout failed: {result.stderr.strip()}")
+from .stage_lib import (
+    extract_json_str as extract_json_from_text,
+    extract_text,
+    iter_unique,
+    run_claude as _spawn,
+)
 
 
 def is_worktree() -> bool:
@@ -112,7 +107,7 @@ def write_scribe_note(note_type: str, content: str):
     """Write a scribe note. Warn on failure but don't abort."""
     result = subprocess.run(
         [sys.executable, str(NOTES_SCRIPT), "add", "--type", note_type, "--content", content],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
     )
     if result.returncode != 0:
         print(f"Warning: failed to write scribe note: {result.stderr.strip()}", file=sys.stderr)
@@ -122,35 +117,7 @@ def write_scribe_note(note_type: str, content: str):
 
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
-    from .claude_subprocess import run_claude as _spawn
     return _spawn(prompt, timeout=120)
-
-
-def extract_text(raw_output: str) -> str:
-    """Extract text content from Claude Code JSON envelope."""
-    try:
-        envelope = json.loads(raw_output)
-        if isinstance(envelope, dict) and "result" in envelope:
-            return envelope["result"]
-    except (json.JSONDecodeError, TypeError):
-        pass
-    return raw_output
-
-
-def extract_json_from_text(text: str) -> str:
-    """Extract JSON from text that may contain prose or markdown fences."""
-    text = text.strip()
-    fence_match = re.search(r"```(?:json)?\s*\n([\s\S]*?)```", text)
-    if fence_match:
-        return fence_match.group(1).strip()
-    for start_char, end_char in [('{', '}'), ('[', ']')]:
-        start = text.find(start_char)
-        if start == -1:
-            continue
-        end = text.rfind(end_char)
-        if end > start:
-            return text[start:end + 1]
-    return text
 
 
 def collect_deferrals(harden: dict) -> list[dict]:
@@ -285,11 +252,9 @@ def main():
     steps = execution.get("steps", [])
     steps_passed = sum(1 for s in steps if s.get("status") == "passed")
     total_steps = len(steps)
-    files_changed = []
-    for s in steps:
-        for f in s.get("files_changed", []):
-            if f and f not in files_changed:
-                files_changed.append(f)
+    files_changed = iter_unique(
+        f for s in steps for f in s.get("files_changed", [])
+    )
 
     total_findings = harden.get("total_findings", 0)
     total_resolved = harden.get("total_resolved", 0)

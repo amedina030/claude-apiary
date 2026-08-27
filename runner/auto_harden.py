@@ -39,24 +39,19 @@ MAX_ROUNDS = cfg("harden", "max_rounds", 3)
 
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
-from .git_lib import git
+from .git_lib import branch_exists, checkout, current_branch as get_current_branch, git
 from .schema_versions import (
     EXECUTION_SCHEMA_VERSION,
     HARDEN_SCHEMA_VERSION,
     PLAN_SCHEMA_VERSION,
     assert_schema_version,
 )
-
-
-def branch_exists(branch: str) -> bool:
-    result = git("rev-parse", "--verify", branch)
-    return result.returncode == 0
-
-
-def checkout(branch: str):
-    result = git("checkout", branch)
-    if result.returncode != 0:
-        raise RuntimeError(f"Git checkout failed: {result.stderr.strip()}")
+from .stage_lib import (
+    extract_json_str as extract_json_from_text,
+    extract_text,
+    iter_unique,
+    run_claude as _spawn,
+)
 
 
 def untracked_files() -> set[str]:
@@ -97,104 +92,57 @@ def commit_all(message: str, paths=(), new_since=None):
         raise RuntimeError(f"Git commit failed: {result.stderr.strip()}")
 
 
-def get_current_branch() -> str:
-    result = git("rev-parse", "--abbrev-ref", "HEAD")
-    return result.stdout.strip()
-
-
 # -- Claude Code helpers --
 
 def run_claude(prompt: str, model: str | None = None) -> tuple[int, str, str]:
-    from .claude_subprocess import run_claude as _spawn
     return _spawn(prompt, timeout=cfg("harden", "timeout", 300), model=model)
-
-
-def extract_text(raw_output: str) -> str:
-    """Extract text content from Claude Code JSON envelope."""
-    try:
-        envelope = json.loads(raw_output)
-        if isinstance(envelope, dict) and "result" in envelope:
-            return envelope["result"]
-    except (json.JSONDecodeError, TypeError):
-        pass
-    return raw_output
-
-
-def extract_json_from_text(text: str) -> str:
-    """Extract JSON array/object from text that may contain markdown fences or prose.
-
-    Uses JSONDecoder.raw_decode to find the first complete JSON value, which
-    tolerates trailing content (prose, additional JSON blocks, explanation, etc.).
-    """
-    text = text.strip()
-
-    # Try to extract from markdown code fences first
-    import re
-    fence_match = re.search(r"```(?:json)?\s*\n([\s\S]*?)```", text)
-    if fence_match:
-        text = fence_match.group(1).strip()
-
-    # Use raw_decode to parse the first complete JSON value, ignoring trailing data.
-    # Scan forward from each candidate '{' or '[' until raw_decode succeeds.
-    decoder = json.JSONDecoder()
-    for i, ch in enumerate(text):
-        if ch in "{[":
-            try:
-                obj, end = decoder.raw_decode(text, i)
-                # Re-serialize to canonical form (drops trailing prose/JSON)
-                return json.dumps(obj)
-            except json.JSONDecodeError:
-                continue
-
-    return text
 
 
 # -- Harden script wrappers --
 
-def validate_findings(findings_json: str, check_files: bool = False) -> tuple[bool, str]:
-    """Run validate_findings.py. Returns (valid, output_or_errors)."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        f.write(findings_json)
+def _run_harden_script(payload: str, argv: list) -> tuple[bool, str]:
+    """Feed *payload* to a harden validator via a temp file. (ok, output).
+
+    ``encoding="utf-8"`` on both the temp file and the subprocess: findings
+    are free text written by a model, and an arrow or an accented name in one
+    of them used to raise UnicodeEncodeError under the Windows ANSI codepage
+    (review runner Bug 7).
+    """
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8",
+    ) as f:
+        f.write(payload)
         f.flush()
         result = subprocess.run(
-            [sys.executable, str(VALIDATE_FINDINGS), "--file", f.name, "--sanitize"],
-            capture_output=True, text=True,
+            [sys.executable, *argv, "--file", f.name],
+            capture_output=True, text=True, encoding="utf-8",
         )
     Path(f.name).unlink(missing_ok=True)
     if result.returncode == 0:
-        return True, result.stdout.strip()
-    return False, result.stderr.strip()
+        return True, (result.stdout or "").strip()
+    return False, (result.stderr or "").strip()
+
+
+def validate_findings(findings_json: str, check_files: bool = False) -> tuple[bool, str]:
+    """Run validate_findings.py. Returns (valid, output_or_errors)."""
+    return _run_harden_script(
+        findings_json, [str(VALIDATE_FINDINGS), "--sanitize"],
+    )
 
 
 def assign_ids(findings_json: str) -> tuple[bool, str]:
     """Run assign_ids.py --prefix ATK. Returns (success, output)."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        f.write(findings_json)
-        f.flush()
-        result = subprocess.run(
-            [sys.executable, str(ASSIGN_IDS), "--prefix", "ATK", "--file", f.name],
-            capture_output=True, text=True,
-        )
-    Path(f.name).unlink(missing_ok=True)
-    if result.returncode == 0:
-        return True, result.stdout.strip()
-    return False, result.stderr.strip()
+    return _run_harden_script(
+        findings_json, [str(ASSIGN_IDS), "--prefix", "ATK"],
+    )
 
 
 def validate_response(response_json: str, expected_ids: list[str]) -> tuple[bool, str]:
     """Run validate_response.py. Returns (valid, output_or_errors)."""
-    ids_str = ",".join(expected_ids)
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        f.write(response_json)
-        f.flush()
-        result = subprocess.run(
-            [sys.executable, str(VALIDATE_RESPONSE), "--expected-ids", ids_str, "--file", f.name],
-            capture_output=True, text=True,
-        )
-    Path(f.name).unlink(missing_ok=True)
-    if result.returncode == 0:
-        return True, result.stdout.strip()
-    return False, result.stderr.strip()
+    return _run_harden_script(
+        response_json,
+        [str(VALIDATE_RESPONSE), "--expected-ids", ",".join(expected_ids)],
+    )
 
 
 # -- Prompt builders --
@@ -385,11 +333,10 @@ def main():
     branch = execution.get("branch", f"runner/{uuid}")
 
     # Collect changed files (skip steps with no files)
-    changed_files = []
-    for step in execution.get("steps", []):
-        for f in step.get("files_changed", []):
-            if f and f not in changed_files:
-                changed_files.append(f)
+    changed_files = iter_unique(
+        f for step in execution.get("steps", [])
+        for f in step.get("files_changed", [])
+    )
 
     if not changed_files:
         print("No changed files to harden", file=sys.stderr)

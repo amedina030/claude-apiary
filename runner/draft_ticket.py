@@ -36,7 +36,7 @@ def slugify(title: str) -> str:
 def read_todo(todo_id: str) -> str:
     result = subprocess.run(
         [sys.executable, str(NOTES_SCRIPT), 'get', str(todo_id)],
-        capture_output=True, text=True
+        capture_output=True, text=True, encoding="utf-8"
     )
     if result.returncode != 0:
         print(f'Error: note {todo_id} not found', file=sys.stderr)

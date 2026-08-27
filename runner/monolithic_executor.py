@@ -48,20 +48,22 @@ import sys
 from pathlib import Path
 
 from .config_loader import get as cfg
-from .claude_subprocess import run_claude as _spawn_claude
+from .stage_lib import check_uuid_safe, run_claude as _spawn_claude
 from .executor import (
     EXECUTIONS_DIR,
-    branch_exists,
-    create_branch,
-    get_current_branch,
-    git,
     snapshot_worktree_state,
     _porcelain_path,
     _norm_rel,
     verify_post_conditions,
     persist_execution_log,
 )
-from .git_lib import format_git_error as _format_git_error
+from .git_lib import (
+    branch_exists,
+    create_branch,
+    current_branch as get_current_branch,
+    format_git_error as _format_git_error,
+    git,
+)
 from .schema_versions import (
     EXECUTION_SCHEMA_VERSION,
     PLAN_SCHEMA_VERSION,
@@ -343,20 +345,10 @@ def main():
         print("Plan is not valid — cannot execute", file=sys.stderr)
         sys.exit(1)
 
-    uuid = plan.get("uuid", plan_path.stem)
-    if not isinstance(uuid, str):
-        print("Plan uuid field is not a string", file=sys.stderr)
-        sys.exit(1)
-    uuid = uuid.strip()
-    if (
-        not uuid
-        or "\\" in uuid
-        or "\x00" in uuid
-        or uuid in (".", "..")
-        or Path(uuid) != Path(Path(uuid).name)
-        or not Path(uuid).name
-    ):
-        print("Plan uuid contains invalid characters", file=sys.stderr)
+    try:
+        uuid = check_uuid_safe(plan.get("uuid", plan_path.stem), "Plan uuid")
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
         sys.exit(1)
 
     branch = f"runner/{uuid}"

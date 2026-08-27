@@ -16,21 +16,26 @@ Usage:
 import argparse
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
 from pathlib import Path
 
 from .config_loader import get as cfg
-# Eager-import claude_subprocess (and transitively cost_emit) at module top.
-# These modules MUST be resolved while the working tree is still on the
-# parent branch (typically master). If we let run_claude() do a deferred
-# import, Python loads the source AFTER executor.main() has done
+# Eager-import stage_lib (and transitively claude_subprocess / cost_emit) at
+# module top. These modules MUST be resolved while the working tree is still
+# on the parent branch (typically master). If we let run_claude() do a
+# deferred import, Python loads the source AFTER executor.main() has done
 # `git checkout runner/<uuid>`, which silently picks up whatever older
 # copies happen to live on the runner branch and shadows every fix we
 # ship on master. Loading them now caches the master versions in
 # sys.modules so all later calls use them regardless of working-tree state.
-from .claude_subprocess import run_claude as _spawn_claude
+from .stage_lib import (
+    check_uuid_safe,
+    extract_json,
+    run_claude as _spawn_claude,
+)
 from .schema_versions import (
     EXECUTION_SCHEMA_VERSION,
     PLAN_SCHEMA_VERSION,
@@ -57,19 +62,13 @@ class NoChangesError(RuntimeError):
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
 from core.utils.atomic import write_json_atomic
-from .git_lib import git, format_git_error as _format_git_error
-
-
-def branch_exists(branch: str) -> bool:
-    # ATK-006: check refs/heads/ explicitly so remote tracking refs don't match
-    result = git("rev-parse", "--verify", f"refs/heads/{branch}")
-    return result.returncode == 0
-
-
-def create_branch(branch: str):
-    result = git("checkout", "-b", branch)
-    if result.returncode != 0:
-        raise RuntimeError(_format_git_error(f"creating branch '{branch}'", result))
+from .git_lib import (
+    branch_exists,
+    create_branch,
+    current_branch as get_current_branch,
+    format_git_error as _format_git_error,
+    git,
+)
 
 
 def assert_files_clean(files: list[str]):
@@ -281,11 +280,6 @@ def commit_files(files: list, message: str, action: str = ""):
             result,
             extra=f"staged files: {', '.join(files)}",
         ))
-
-
-def get_current_branch() -> str:
-    result = git("rev-parse", "--abbrev-ref", "HEAD")
-    return result.stdout.strip()
 
 
 _NON_COMMITTING_ACTIONS = frozenset({"test", "verify"})
@@ -618,67 +612,19 @@ def build_verify_prompt(step: dict, spec: dict) -> str:
 def parse_verify_output(stdout: str) -> dict:
     """Parse a verify step's Claude Code output into a {passed, explanation} dict.
 
-    Handles every envelope shape the runner has actually seen (#252):
-    - Bare JSON object: {"passed": true, "explanation": "..."}
-    - Claude Code envelope: {"result": "<inner text>"} — inner is then parsed
-    - Markdown-fenced JSON: ```json\\n{...}\\n``` or ```\\n{...}\\n```
-    - JSON embedded in prose: "Here's the result: {...}"
-    - Combination: envelope → inner prose → fenced JSON
-    - Anything unparseable falls through to {"passed": False, "explanation": "Unparseable output"}
-
-    Extracted from execute_step for unit testability — the parser used
-    to be inlined, which meant none of its branches had coverage and a
-    silent regression could break every verify step across every plan.
+    Every envelope shape the runner has actually seen (#252) — bare JSON, the
+    Claude Code ``{"result": ...}`` envelope, markdown fences (closed or not),
+    JSON embedded in prose, and combinations — is handled by the one shared
+    salvager in ``stage_lib``. Anything that does not yield an object with a
+    ``passed`` key falls through to a failed verdict rather than guessing.
     """
-    verify = {"passed": False, "explanation": "Unparseable output"}
     try:
-        envelope = json.loads(stdout)
-        if isinstance(envelope, dict) and "result" in envelope:
-            text = envelope["result"].strip()
-        elif isinstance(envelope, dict) and "passed" in envelope:
-            return envelope
-        else:
-            text = stdout.strip()
-
-        # Strip markdown code fences if present.
-        if text.startswith("```"):
-            lines = text.splitlines()
-            if lines and lines[-1].strip() == "```":
-                lines = lines[1:-1]
-            else:
-                lines = lines[1:]
-            text = "\n".join(lines).strip()
-        # Find first { and last } to extract JSON from prose.
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end > start:
-            try:
-                parsed = json.loads(text[start:end + 1])
-                if isinstance(parsed, dict) and "passed" in parsed:
-                    verify = parsed
-            except json.JSONDecodeError:
-                pass
+        parsed = extract_json(stdout, require_keys=("passed",), allow_list=False)
     except (json.JSONDecodeError, TypeError):
-        # stdout is not JSON at all — fall through and try to find a
-        # raw JSON blob in the prose.
-        text = stdout.strip() if isinstance(stdout, str) else ""
-        if text.startswith("```"):
-            lines = text.splitlines()
-            if lines and lines[-1].strip() == "```":
-                lines = lines[1:-1]
-            else:
-                lines = lines[1:]
-            text = "\n".join(lines).strip()
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end > start:
-            try:
-                parsed = json.loads(text[start:end + 1])
-                if isinstance(parsed, dict) and "passed" in parsed:
-                    verify = parsed
-            except json.JSONDecodeError:
-                pass
-    return verify
+        parsed = None
+    if isinstance(parsed, dict) and "passed" in parsed:
+        return parsed
+    return {"passed": False, "explanation": "Unparseable output"}
 
 
 def run_claude(prompt: str, model: str) -> tuple[int, str, str]:
@@ -694,8 +640,7 @@ def run_test_command(code_spec: str) -> tuple[bool, str]:
     # Handle 'cd <dir> && <real_command>' — planners emit this for worktree
     # paths, but we can't use shell=True. Extract cwd and run the rest.
     cwd = None
-    import re as _re
-    cd_match = _re.match(r'^cd\s+(\S+)\s*&&\s*(.+)$', command)
+    cd_match = re.match(r'^cd\s+(\S+)\s*&&\s*(.+)$', command)
     if cd_match:
         cwd = cd_match.group(1)
         command = cd_match.group(2).strip()
@@ -710,6 +655,7 @@ def run_test_command(code_spec: str) -> tuple[bool, str]:
             argv,
             capture_output=True,
             text=True,
+            encoding='utf-8',
             timeout=120,
             cwd=cwd,
         )
@@ -831,22 +777,11 @@ def main():
         print("Plan is not valid -- cannot execute invalid plan", file=sys.stderr)
         sys.exit(1)
 
-    uuid = plan.get("uuid", plan_path.stem)
-
     # ATK-005: validate uuid from plan JSON to prevent path traversal
-    if not isinstance(uuid, str):
-        print("Plan uuid field is not a string", file=sys.stderr)
-        sys.exit(1)
-    uuid = uuid.strip()
-    if (
-        not uuid
-        or "\\" in uuid
-        or "\x00" in uuid
-        or uuid in (".", "..")
-        or Path(uuid) != Path(Path(uuid).name)
-        or not Path(uuid).name
-    ):
-        print("Plan uuid field contains invalid characters (path separators not allowed)", file=sys.stderr)
+    try:
+        uuid = check_uuid_safe(plan.get("uuid", plan_path.stem), "Plan uuid")
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
         sys.exit(1)
 
     default_model = plan.get("executor_model", "sonnet")

@@ -27,6 +27,7 @@ from . import run_lock
 from . import run_tracker
 from . import abort as abort_mod
 from .usher import assess as usher_assess
+from .stage_lib import is_uuid_safe
 from .run_history import append_entry as history_append
 from .detached_lib import (
     slugify, pick_backlog_item, hygiene_precheck,
@@ -234,7 +235,7 @@ def log_stage_cost(stage_name: str, runner_uuid: str, usage_xml: str) -> None:
         '--request-id', runner_uuid,
     ]
     try:
-        result = subprocess.run(cmd, input=usage_xml, text=True, capture_output=True, timeout=30, cwd=str(REPO_ROOT))
+        result = subprocess.run(cmd, input=usage_xml, text=True, encoding="utf-8", capture_output=True, timeout=30, cwd=str(REPO_ROOT))
         if result.returncode != 0:
             print(f'WARN: cost logging failed for {stage_name}: {result.stderr.strip()}', file=sys.stderr)
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -559,12 +560,8 @@ def _run_detached_impl(cli_args) -> int:
         })
         return 1
 
-    uuid = intake.get('id')
-    if not isinstance(uuid, str):
-        uuid = None
-    if uuid:
-        uuid = uuid.strip()
-    if not uuid:
+    raw_uuid = intake.get('id')
+    if not isinstance(raw_uuid, str) or not raw_uuid.strip():
         print('ERROR: intake file missing id field', file=sys.stderr)
         history_append({
             'start_ts': start_ts,
@@ -580,13 +577,7 @@ def _run_detached_impl(cli_args) -> int:
 
     # ATK-008: reject path-traversal characters in uuid before it is interpolated
     # into intake_dest and artifact paths. Mirrors the guard in interactive main().
-    if (
-        '\\' in uuid
-        or '\x00' in uuid
-        or uuid in ('.', '..')
-        or Path(uuid) != Path(Path(uuid).name)
-        or not Path(uuid).name
-    ):
+    if not is_uuid_safe(raw_uuid):
         print('ERROR: intake id field contains invalid characters (path separators not allowed)', file=sys.stderr)
         history_append({
             'start_ts': start_ts,
@@ -599,6 +590,7 @@ def _run_detached_impl(cli_args) -> int:
             'branch': None,
         })
         return 1
+    uuid = raw_uuid.strip()
 
     # Usher sizing gate: reject oversized tickets before committing resources
     usher_verdict, usher_metrics = usher_assess(intake)
@@ -935,7 +927,7 @@ def run_stage(name: str, module_name: str, input_path: Path, cwd: Path | None = 
     try:
         proc = subprocess.Popen(
             [sys.executable, "-m", f"runner.{module_name}", str(input_path)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
             cwd=cwd_str, env=stage_env,
         )
     except OSError as e:
@@ -1096,7 +1088,7 @@ def run_cleanup(uuid: str) -> int:
     # Find matching branches. Use for-each-ref to list runner/ refs.
     result = subprocess.run(
         ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/runner/"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
     )
     if result.returncode != 0:
         print(f"git for-each-ref failed: {result.stderr.strip()}", file=sys.stderr)
@@ -1109,12 +1101,12 @@ def run_cleanup(uuid: str) -> int:
     # If current HEAD is on one of these branches, checkout master first.
     head = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
     )
     current = head.stdout.strip() if head.returncode == 0 else ""
     if current in branches:
         co = subprocess.run(
-            ["git", "checkout", "master"], capture_output=True, text=True,
+            ["git", "checkout", "master"], capture_output=True, text=True, encoding="utf-8",
         )
         if co.returncode != 0:
             print(
@@ -1133,7 +1125,7 @@ def run_cleanup(uuid: str) -> int:
     for branch in branches:
         wt_list = subprocess.run(
             ["git", "worktree", "list", "--porcelain"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8",
         )
         if wt_list.returncode != 0:
             break
@@ -1148,7 +1140,7 @@ def run_cleanup(uuid: str) -> int:
                 if br == branch and cur_path:
                     r = subprocess.run(
                         ["git", "worktree", "remove", "--force", cur_path],
-                        capture_output=True, text=True,
+                        capture_output=True, text=True, encoding="utf-8",
                     )
                     if r.returncode == 0:
                         wt_removed.append(cur_path)
@@ -1167,7 +1159,7 @@ def run_cleanup(uuid: str) -> int:
     for branch in branches:
         d = subprocess.run(
             ["git", "branch", "-D", branch],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8",
         )
         if d.returncode == 0:
             deleted.append(branch)
@@ -1287,30 +1279,19 @@ def main():
         print(f"Invalid intake JSON: {e}", file=sys.stderr)
         sys.exit(1)
 
-    uuid = intake.get("id")
+    raw_uuid = intake.get("id")
     # Reject non-string ids (integers, lists, etc.) — only str is a valid id type
-    if not isinstance(uuid, str):
-        print("Intake file missing id field", file=sys.stderr)
-        sys.exit(1)
-    uuid = uuid.strip()
-    if not uuid:
+    if not isinstance(raw_uuid, str) or not raw_uuid.strip():
         print("Intake file missing id field", file=sys.stderr)
         sys.exit(1)
 
     # Reject ids with path separators, null bytes, or dot-only names to prevent
-    # path traversal in artifact paths.
-    # - backslash: on POSIX, Path("foo\\bar").name == "foo\\bar" so Path comparison alone misses it
-    # - null bytes: truncate filenames on some filesystems
-    # - "." / "..": Path(".").name == "." on POSIX so Path comparison alone misses them
-    if (
-        "\\" in uuid
-        or "\x00" in uuid
-        or uuid in (".", "..")
-        or Path(uuid) != Path(Path(uuid).name)
-        or not Path(uuid).name
-    ):
+    # path traversal in artifact paths (one guard, in stage_lib, for all six
+    # call sites that used to carry their own copy).
+    if not is_uuid_safe(raw_uuid):
         print("Intake id field contains invalid characters (path separators not allowed)", file=sys.stderr)
         sys.exit(1)
+    uuid = raw_uuid.strip()
 
     # Usher sizing advisory (interactive mode: warn only, never block)
     usher_verdict, usher_metrics = usher_assess(intake)

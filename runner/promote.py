@@ -74,7 +74,7 @@ def main():
 
     result = subprocess.run(
         [sys.executable, "-m", "runner.validate_intake", str(intake_path)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT),
+        capture_output=True, text=True, encoding="utf-8", cwd=str(REPO_ROOT),
     )
     if result.returncode != 0:
         intake_path.unlink(missing_ok=True)

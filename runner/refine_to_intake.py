@@ -37,7 +37,7 @@ def read_note(note_id: str) -> str:
     (everything after the `---` metadata separator)."""
     result = subprocess.run(
         [sys.executable, str(NOTES_SCRIPT), "get", str(note_id)],
-        capture_output=True, text=True
+        capture_output=True, text=True, encoding="utf-8"
     )
     if result.returncode != 0:
         print(f"Note {note_id} not found", file=sys.stderr)
@@ -206,7 +206,7 @@ def main():
 
     result = subprocess.run(
         [sys.executable, "-m", "runner.validate_intake", str(file_path)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT),
+        capture_output=True, text=True, encoding="utf-8", cwd=str(REPO_ROOT),
     )
     if result.returncode != 0:
         file_path.unlink(missing_ok=True)

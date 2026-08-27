@@ -13,13 +13,19 @@ Usage:
 """
 import argparse
 import json
-import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
 from .config_loader import get as cfg
 from .schema_versions import SPEC_SCHEMA_VERSION
+from .stage_lib import (
+    ClaudeMissingError,
+    extract_json,
+    retry_until_valid,
+    run_claude as _spawn,
+    run_validator,
+)
 
 from .target_repo import specs_dir
 
@@ -153,78 +159,54 @@ def build_prompt(intake: dict, previous_errors: list[str] | None = None) -> str:
 
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
-    from .claude_subprocess import run_claude as _spawn
     return _spawn(prompt, timeout=cfg("refine", "timeout", 300), model=cfg("refine", "model", None))
 
 
 def extract_spec(raw_output: str) -> dict:
     """Parse Claude Code output and extract the spec JSON.
 
-    The --output-format json wraps the response in a JSON envelope with a
-    "result" field containing the text. The text itself should be the spec JSON,
-    but may be wrapped in markdown code fences.
+    Thin alias over the one shared salvager (``stage_lib.extract_json``): the
+    envelope, markdown fences, prose around the JSON and unescaped newlines
+    inside string values are all handled there, in one place, for every stage.
     """
-    # First try: parse the raw output as the Claude JSON envelope
-    try:
-        envelope = json.loads(raw_output)
-        # If it's the envelope format, extract the result text
-        if isinstance(envelope, dict) and "result" in envelope:
-            text = envelope["result"]
-        elif isinstance(envelope, dict) and all(
-            k in envelope for k in ("goal", "shape", "behavior")
-        ):
-            # Already the spec itself
-            return envelope
-        else:
-            text = raw_output
-    except json.JSONDecodeError:
-        text = raw_output
-
-    # Extract JSON from markdown code fences (may appear after prose)
-    import re
-    fence_match = re.search(r"```(?:json)?\s*\n([\s\S]*?)```", text)
-    if fence_match:
-        text = fence_match.group(1).strip()
-    else:
-        text = text.strip()
-
-    # Try direct parse first
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Sanitize unescaped newlines in strings and retry
-    from .auto_plan import _sanitize_json_newlines
-    sanitized = _sanitize_json_newlines(text)
-    try:
-        return json.loads(sanitized)
-    except json.JSONDecodeError:
-        pass
-
-    # Fall back to raw_decode: scan for first valid JSON object
-    decoder = json.JSONDecoder()
-    for candidate in [sanitized, text]:
-        for i, ch in enumerate(candidate):
-            if ch == '{':
-                try:
-                    obj, _ = decoder.raw_decode(candidate, i)
-                    return obj
-                except json.JSONDecodeError:
-                    continue
-
-    raise json.JSONDecodeError("No valid JSON found in output", text, 0)
+    return extract_json(
+        raw_output, require_keys=("goal", "shape", "behavior"), allow_list=False,
+    )
 
 
 def validate_spec(spec_path: Path) -> list[str]:
     """Run validate_spec.py and return list of errors (empty = valid)."""
-    result = subprocess.run(
-        [sys.executable, "-m", "runner.validate_spec", str(spec_path)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT),
-    )
-    if result.returncode == 0:
-        return []
-    return [line.strip() for line in result.stderr.splitlines() if line.strip()]
+    return run_validator("runner.validate_spec", spec_path, cwd=REPO_ROOT)
+
+
+def _read_intake(path: Path) -> dict:
+    """Load the intake artifact or exit with a message."""
+    if not path.exists():
+        print(f"Intake file not found: {path}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        print(f"Invalid intake JSON: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _assemble_spec(spec: dict, intake: dict, intake_id: str) -> dict:
+    """Stamp the metadata the downstream stages rely on onto a parsed spec."""
+    spec["schema_version"] = SPEC_SCHEMA_VERSION
+    spec["id"] = intake_id
+    spec["intake_id"] = intake_id
+    # Phase 4: propagate target_repo intake field onto the spec so
+    # downstream stages (auto_plan, validate_plan) can use it without
+    # having to walk back to the intake file themselves.
+    intake_target = intake.get("target_repo")
+    if isinstance(intake_target, str) and intake_target.strip():
+        spec["target_repo"] = intake_target.strip()
+    return spec
+
+
+def _write(path: Path, artifact: dict) -> None:
+    path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
 
 
 def main():
@@ -232,94 +214,45 @@ def main():
     parser.add_argument("intake", help="Path to intake JSON file")
     args = parser.parse_args()
 
-    # Read intake
     intake_path = Path(args.intake)
-    if not intake_path.exists():
-        print(f"Intake file not found: {args.intake}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        intake = json.loads(intake_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        print(f"Invalid intake JSON: {e}", file=sys.stderr)
-        sys.exit(1)
+    intake = _read_intake(intake_path)
 
     intake_id = intake.get("id", intake_path.stem)
     SPECS_DIR.mkdir(parents=True, exist_ok=True)
     spec_path = SPECS_DIR / f"{intake_id}.json"
 
-    best_spec = None
-    best_errors = None
-    previous_errors = None
+    def _report(message: str) -> None:
+        print(message, file=sys.stderr)
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        print(f"Attempt {attempt}/{MAX_RETRIES}...", file=sys.stderr)
+    try:
+        ok, best_spec, best_errors = retry_until_valid(
+            build_prompt=lambda errors: build_prompt(intake, errors),
+            call_model=run_claude,
+            parse=extract_spec,
+            assemble=lambda spec: _assemble_spec(spec, intake, intake_id),
+            persist=lambda spec: _write(spec_path, spec),
+            validate=lambda: validate_spec(spec_path),
+            max_attempts=MAX_RETRIES,
+            report=_report,
+        )
+    except ClaudeMissingError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
 
-        prompt = build_prompt(intake, previous_errors)
-
-        try:
-            returncode, stdout, stderr = run_claude(prompt)
-        except subprocess.TimeoutExpired:
-            print(f"Claude Code error: subprocess timed out (attempt {attempt})", file=sys.stderr)
-            previous_errors = ["Claude Code subprocess timed out"]
-            continue
-        except FileNotFoundError:
-            print("Claude Code error: 'claude' command not found", file=sys.stderr)
-            sys.exit(1)
-
-        if returncode != 0:
-            msg = stderr.strip() or f"exit code {returncode}"
-            print(f"Claude Code error: {msg} (attempt {attempt})", file=sys.stderr)
-            previous_errors = [f"Claude Code failed: {msg}"]
-            continue
-
-        # Parse spec from output
-        try:
-            spec = extract_spec(stdout)
-        except (json.JSONDecodeError, ValueError) as e:
-            print(f"Failed to parse spec JSON (attempt {attempt}): {e}", file=sys.stderr)
-            previous_errors = [f"Output was not valid JSON: {e}"]
-            continue
-
-        # Write spec for validation
-        spec["schema_version"] = SPEC_SCHEMA_VERSION
-        spec["id"] = intake_id
-        spec["intake_id"] = intake_id
-        # Phase 4: propagate target_repo intake field onto the spec so
-        # downstream stages (auto_plan, validate_plan) can use it without
-        # having to walk back to the intake file themselves.
-        intake_target = intake.get("target_repo")
-        if isinstance(intake_target, str) and intake_target.strip():
-            spec["target_repo"] = intake_target.strip()
-        spec_path.write_text(json.dumps(spec, indent=2), encoding="utf-8")
-
-        # Validate
-        errors = validate_spec(spec_path)
-        if not errors:
-            spec["valid"] = True
-            spec_path.write_text(json.dumps(spec, indent=2), encoding="utf-8")
-            print(str(spec_path))
-            sys.exit(0)
-
-        # Track best attempt (fewest errors)
-        if best_errors is None or len(errors) < len(best_errors):
-            best_spec = spec
-            best_errors = errors
-
-        previous_errors = errors
-        print(f"Validation failed (attempt {attempt}): {len(errors)} error(s)", file=sys.stderr)
-        for err in errors:
-            print(f"  {err}", file=sys.stderr)
+    if ok:
+        best_spec["valid"] = True
+        _write(spec_path, best_spec)
+        print(str(spec_path))
+        sys.exit(0)
 
     # All retries exhausted — write best attempt with valid: false
     if best_spec:
         best_spec["valid"] = False
-        spec_path.write_text(json.dumps(best_spec, indent=2), encoding="utf-8")
+        _write(spec_path, best_spec)
 
     print(f"Failed after {MAX_RETRIES} attempts. Best attempt written to {spec_path}", file=sys.stderr)
-    if best_errors:
-        for err in best_errors:
-            print(f"  {err}", file=sys.stderr)
+    for err in best_errors:
+        print(f"  {err}", file=sys.stderr)
     sys.exit(1)
 
 

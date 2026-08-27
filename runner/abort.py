@@ -48,7 +48,7 @@ def _remove_worktree(worktree_path: str) -> bool:
         return True
     r = subprocess.run(
         ["git", "worktree", "remove", "--force", str(wt)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
     )
     return r.returncode == 0
 
@@ -58,7 +58,7 @@ def _delete_branches(uuid: str) -> list[str]:
     branch names."""
     result = subprocess.run(
         ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/runner/"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
     )
     if result.returncode != 0:
         return []
@@ -71,7 +71,7 @@ def _delete_branches(uuid: str) -> list[str]:
     for branch in branches:
         d = subprocess.run(
             ["git", "branch", "-D", branch],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8",
         )
         if d.returncode == 0:
             deleted.append(branch)
