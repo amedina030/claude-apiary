@@ -783,43 +783,315 @@ def execute_step(step: dict, spec: dict, model: str, retry_hint: str = "") -> di
     return result
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Executor — runner stage 4")
-    parser.add_argument("plan", help="Path to plan JSON file")
-    args = parser.parse_args()
+def load_plan(plan_path: Path) -> tuple:
+    """Read and gate the plan artifact. Returns ``(plan, uuid)``.
 
-    # Read plan
-    plan_path = Path(args.plan)
+    Exits 1 on a missing file, invalid JSON, a schema-version mismatch, a plan
+    the validator rejected, or a uuid that is not a safe filename component.
+    """
     if not plan_path.exists():
-        print(f"Plan file not found: {args.plan}", file=sys.stderr)
+        print(f"Plan file not found: {plan_path}", file=sys.stderr)
         sys.exit(1)
-
     try:
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         print(f"Invalid plan JSON: {e}", file=sys.stderr)
         sys.exit(1)
-
     try:
         assert_schema_version(plan, "plan", PLAN_SCHEMA_VERSION)
     except ValueError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
-
     if not plan.get("valid", False):
         print("Plan is not valid -- cannot execute invalid plan", file=sys.stderr)
         sys.exit(1)
-
     # ATK-005: validate uuid from plan JSON to prevent path traversal
     try:
         uuid = check_uuid_safe(plan.get("uuid", plan_path.stem), "Plan uuid")
     except ValueError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
+    return plan, uuid
 
-    default_model = plan.get("executor_model", "sonnet")
-    spec = plan.get("spec", {})
-    steps = plan.get("steps", [])
+
+def prepare_resume(uuid: str, sorted_steps: list, log_path: Path) -> tuple:
+    """Reconcile git history with the previous execution log before resuming.
+
+    Returns ``(completed_step_numbers, previous_entries)``. Git is
+    authoritative — it is the record of what landed — and the log is
+    derivative metadata for steps that never commit. Exits 1 when the two
+    disagree (#242): resume behaviour would be undefined, so the operator
+    reconciles by hand.
+    """
+    completed_step_numbers = get_completed_step_numbers(uuid)
+    if completed_step_numbers:
+        print(
+            f"Resume: skipping {len(completed_step_numbers)} already-committed "
+            f"step(s): {sorted(completed_step_numbers)}",
+            file=sys.stderr,
+        )
+    # Read the prior log BEFORE we start writing the new one: it is the only
+    # source for verify/test step status, which git log cannot recover.
+    previous_entries = load_previous_log(log_path)
+    resume_errors = validate_resume_state(
+        completed_step_numbers, previous_entries, sorted_steps,
+    )
+    if resume_errors:
+        print("Resume state inconsistent — refusing to proceed:\n  "
+              + "\n  ".join(resume_errors), file=sys.stderr)
+        sys.exit(1)
+    return completed_step_numbers, previous_entries
+
+
+def _carried_forward_entry(step: dict, previous_entries: dict) -> dict:
+    """The log entry for a step whose commit is already on the branch.
+
+    Prefers the previous run's richer entry (real files_changed, timing) over
+    a bland stub; re-running the step would produce "nothing to commit" and
+    abort the run.
+    """
+    note = "carried forward from previous run (commit on branch)"
+    prior = previous_entries.get(step["step_number"])
+    if isinstance(prior, dict) and prior.get("status") == "passed":
+        return dict(prior, note=note)
+    return {
+        "step_number": step["step_number"],
+        "status": "passed",
+        "files_changed": step.get("files", []),
+        "error": None,
+        "note": note,
+    }
+
+
+def _mark_remaining_skipped(execution_log: dict, sorted_steps: list,
+                            after: int | None = None) -> None:
+    """Append 'Runner aborted' entries for the steps that will never run.
+
+    ``after`` marks everything with a higher step_number; without it, every
+    step that has no entry yet.
+    """
+    if after is None:
+        logged = {s["step_number"] for s in execution_log["steps"]}
+        remaining = [s for s in sorted_steps if s["step_number"] not in logged]
+    else:
+        remaining = [s for s in sorted_steps if s["step_number"] > after]
+    for step in remaining:
+        execution_log["steps"].append({
+            "step_number": step["step_number"],
+            "status": "skipped",
+            "files_changed": step.get("files", []),
+            "error": "Runner aborted",
+        })
+
+
+def run_step_with_commit(step: dict, spec: dict, model: str, uuid: str,
+                         execution_log: dict, log_path: Path) -> tuple:
+    """Execute one step, verify it, and commit it. Returns ``(result, error)``.
+
+    ``error`` is non-None when the commit itself failed and the run must
+    abort. The loop exists for T-2026-119: when commit_files finds no diff
+    (the subprocess succeeded but made no edits) the step is retried with an
+    augmented prompt up to MAX_NO_CHANGE_RETRIES times, because the
+    subprocess is the only thing that can actually write the files.
+
+    The log entry is rewritten and persisted after every state change (#243)
+    so a crash leaves the log honest about what the step produced.
+    """
+    step_num = step["step_number"]
+    retry_hint = ""
+    no_change_attempts = 0
+
+    while True:
+        # #236: snapshot worktree state before the step so we can detect
+        # writes to paths the step didn't declare in step.files.
+        pre_state = snapshot_worktree_state()
+        step_result = execute_step(step, spec, model, retry_hint=retry_hint)
+        # Unexpected-write check on any non-test/verify step that succeeded —
+        # test/verify steps shell out and shouldn't write files at all, and
+        # they aren't subject to the step.files contract.
+        if (step_result["status"] == "passed"
+                and step.get("action") not in ("test", "verify")):
+            try:
+                assert_no_unexpected_writes(
+                    pre_state, snapshot_worktree_state(), step.get("files", []),
+                )
+            except RuntimeError as e:
+                step_result["status"] = "failed"
+                step_result["error"] = str(e)
+        # #244: overwrite the 'started' stub with the real result. It is the
+        # last appended entry — nothing else appends in between.
+        execution_log["steps"][-1] = step_result
+        persist_execution_log(log_path, execution_log)
+
+        if step_result["status"] != "passed":
+            return step_result, None
+
+        # Post-conditions (#T-2026-122 phase 2) run BEFORE the commit, so a
+        # step whose declared post-state is wrong is never committed. They
+        # read the live filesystem, so a condition a prior step already
+        # satisfied counts as met.
+        pc_failures = verify_post_conditions(step, Path.cwd())
+        if pc_failures:
+            step_result["status"] = "failed"
+            step_result["error"] = ("Post-condition(s) not satisfied after step: "
+                                    + "; ".join(pc_failures))
+            execution_log["steps"][-1] = step_result
+            persist_execution_log(log_path, execution_log)
+            return step_result, None
+
+        files = step.get("files", [])
+        if not files or step.get("action") in ("test", "verify"):
+            return step_result, None
+
+        try:
+            commit_files(
+                files,
+                f"runner/{uuid} step {step_num}: {step.get('description', '')}",
+                action=step.get("action", ""),
+            )
+            return step_result, None
+        except NoChangesError as e:
+            # Phase-2 path: declared post_conditions are satisfied (they were
+            # checked above), so the end state is correct whoever produced it
+            # — accept as a no-op success without a new commit.
+            if step.get("post_conditions"):
+                print(f"Step {step_num}: no new changes but declared "
+                      f"post-conditions already satisfied — accepting as a "
+                      f"no-op success.", file=sys.stderr)
+                step_result["subsumed_by"] = "post_conditions"
+                execution_log["steps"][-1] = step_result
+                persist_execution_log(log_path, execution_log)
+                return step_result, None
+
+            # Phase-1 fallback (no post_conditions): if prior steps on this
+            # branch already committed every file this step declares, the
+            # subprocess correctly did nothing — the planner over-decomposed
+            # (T-2026-122). status stays 'passed'; subsumed_by is the audit
+            # trail.
+            touched = files_touched_by_prior_steps(uuid, files)
+            if touched and all(touched.get(f) for f in files):
+                subsuming = sorted({n for nums in touched.values() for n in nums})
+                print(f"Step {step_num}: no new changes — target files "
+                      f"({', '.join(files)}) already modified by prior "
+                      f"step(s) {subsuming}. Marking subsumed.", file=sys.stderr)
+                step_result["subsumed_by"] = subsuming
+                execution_log["steps"][-1] = step_result
+                persist_execution_log(log_path, execution_log)
+                return step_result, None
+
+            no_change_attempts += 1
+            if no_change_attempts > MAX_NO_CHANGE_RETRIES:
+                return step_result, str(e)
+            print(f"Step {step_num}: subprocess produced no changes — "
+                  f"retrying ({no_change_attempts}/{MAX_NO_CHANGE_RETRIES}) "
+                  f"with Edit-tool nudge", file=sys.stderr)
+            retry_hint = (
+                "IMPORTANT: A previous attempt made no file changes. "
+                "You MUST use the Edit or Write tool to actually modify "
+                f"the files listed above ({', '.join(files)}). Do not "
+                "just describe or plan the change — execute the tool call."
+            )
+        except RuntimeError as e:
+            return step_result, str(e)
+
+
+def execute_plan(*, sorted_steps, spec, default_model, uuid, branch,
+                 completed_step_numbers, previous_entries, log_path) -> dict:
+    """Run every step in dependency order and return the execution log."""
+    execution_log = {
+        "schema_version": EXECUTION_SCHEMA_VERSION,
+        "uuid": uuid,
+        "branch": branch,
+        "status": "completed",
+        "steps": [],
+    }
+    failed_steps = set()
+
+    for step in sorted_steps:
+        step_num = step["step_number"]
+
+        if step_num in completed_step_numbers:
+            execution_log["steps"].append(
+                _carried_forward_entry(step, previous_entries))
+            persist_execution_log(log_path, execution_log)  # #243
+            continue
+
+        if any(d in failed_steps for d in step.get("depends_on", [])):
+            execution_log["steps"].append({
+                "step_number": step_num,
+                "status": "skipped",
+                "files_changed": step.get("files", []),
+                "error": "Dependency failed or was skipped",
+            })
+            failed_steps.add(step_num)
+            persist_execution_log(log_path, execution_log)  # #243
+            continue
+
+        print(f"Executing step {step_num}: {step.get('description', '')}",
+              file=sys.stderr)
+        # #235: refuse to run if the worktree has pre-existing dirty state in
+        # any of this step's target files — otherwise the operator's
+        # uncommitted work is committed as if the runner authored it.
+        try:
+            if step.get("action") not in ("test", "verify"):
+                assert_files_clean(step.get("files", []))
+        except RuntimeError as e:
+            execution_log["steps"].append({
+                "step_number": step_num,
+                "status": "failed",
+                "files_changed": step.get("files", []),
+                "error": str(e),
+            })
+            failed_steps.add(step_num)
+            _mark_remaining_skipped(execution_log, sorted_steps, after=step_num)
+            execution_log["status"] = "aborted"
+            persist_execution_log(log_path, execution_log)  # #243
+            return execution_log
+
+        # #244: a 'started' stub written and persisted BEFORE the subprocess
+        # call. If the runner is interrupted mid-step it survives, and
+        # validate_resume_state() surfaces it next run so the operator
+        # reconciles instead of silently re-running the step.
+        execution_log["steps"].append({
+            "step_number": step_num,
+            "status": "started",
+            "files_changed": step.get("files", []),
+            "error": None,
+        })
+        persist_execution_log(log_path, execution_log)
+
+        step_result, commit_error = run_step_with_commit(
+            step, spec, step.get("model") or default_model, uuid,
+            execution_log, log_path,
+        )
+
+        if commit_error is not None:
+            print(f"Git error: {commit_error}", file=sys.stderr)
+            step_result["status"] = "failed"
+            step_result["error"] = commit_error
+            execution_log["steps"][-1] = step_result
+            failed_steps.add(step_num)
+            _mark_remaining_skipped(execution_log, sorted_steps, after=step_num)
+            execution_log["status"] = "aborted"
+            persist_execution_log(log_path, execution_log)  # #243
+            return execution_log
+
+        if step_result["status"] != "passed":
+            failed_steps.add(step_num)
+            _mark_remaining_skipped(execution_log, sorted_steps)
+            execution_log["status"] = "aborted"
+            persist_execution_log(log_path, execution_log)  # #243
+            return execution_log
+
+    return execution_log
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Executor — runner stage 4")
+    parser.add_argument("plan", help="Path to plan JSON file")
+    args = parser.parse_args()
+
+    plan, uuid = load_plan(Path(args.plan))
 
     # One branch per run. The orchestrator names it (APIARY_RUNNER_BRANCH) and,
     # in detached mode, has already created the worktree on it; this stage used
@@ -832,311 +1104,29 @@ def main():
     branch = run_branch_from_env(uuid)
     original_branch, switched = _ensure_on_branch(branch)
 
-    # Sort steps by dependency order
-    sorted_steps = topo_sort(steps)
+    sorted_steps = topo_sort(plan.get("steps", []))
 
-    # Detect steps already committed on the branch (resume path). Git is
-    # authoritative because it is the actual record of what landed; the
-    # execution log is derivative and gets overwritten on each run.
-    completed_step_numbers = get_completed_step_numbers(uuid)
-    if completed_step_numbers:
-        print(
-            f"Resume: skipping {len(completed_step_numbers)} already-committed "
-            f"step(s): {sorted(completed_step_numbers)}",
-            file=sys.stderr,
-        )
-
-    # Execute
     EXECUTIONS_DIR.mkdir(parents=True, exist_ok=True)
     log_path = EXECUTIONS_DIR / f"{uuid}.json"
+    completed_step_numbers, previous_entries = prepare_resume(
+        uuid, sorted_steps, log_path)
 
-    # Read prior execution log (if any) BEFORE we start writing the new one.
-    # The map lets us preserve verify/test step status from previous runs,
-    # which git log can't recover because verify/test steps don't commit.
-    previous_entries = load_previous_log(log_path)
-
-    # #242: cross-validate git commits against the previous execution log
-    # before resuming. Disagreement means history was rewritten or a
-    # hand-fix commit landed between runs — either way resume behavior
-    # would be undefined, so abort and ask the operator to reconcile.
-    resume_errors = validate_resume_state(
-        completed_step_numbers, previous_entries, sorted_steps,
+    execution_log = execute_plan(
+        sorted_steps=sorted_steps,
+        spec=plan.get("spec", {}),
+        default_model=plan.get("executor_model", "sonnet"),
+        uuid=uuid,
+        branch=branch,
+        completed_step_numbers=completed_step_numbers,
+        previous_entries=previous_entries,
+        log_path=log_path,
     )
-    if resume_errors:
-        print(
-            "Resume state inconsistent — refusing to proceed:\n  "
-            + "\n  ".join(resume_errors),
-            file=sys.stderr,
-        )
-        sys.exit(1)
 
-    execution_log = {
-        "schema_version": EXECUTION_SCHEMA_VERSION,
-        "uuid": uuid,
-        "branch": branch,
-        "status": "completed",
-        "steps": [],
-    }
-
-    failed_steps = set()
-    aborted = False
-
-    for step in sorted_steps:
-        step_num = step["step_number"]
-        deps = step.get("depends_on", [])
-
-        # Resume: carry forward already-committed steps as passed without
-        # re-running them. Their commit already exists on the branch, so
-        # re-running would produce "nothing to commit" and abort the runner.
-        # If the previous execution log has a richer entry for this step
-        # (real files_changed list, original timing, etc.), prefer that
-        # over the bland stub. Otherwise fall back to the stub.
-        if step_num in completed_step_numbers:
-            prior = previous_entries.get(step_num)
-            if isinstance(prior, dict) and prior.get("status") == "passed":
-                carried = dict(prior)
-                carried["note"] = "carried forward from previous run (commit on branch)"
-                execution_log["steps"].append(carried)
-            else:
-                execution_log["steps"].append({
-                    "step_number": step_num,
-                    "status": "passed",
-                    "files_changed": step.get("files", []),
-                    "error": None,
-                    "note": "carried forward from previous run (commit on branch)",
-                })
-            persist_execution_log(log_path, execution_log)  # #243
-            continue
-
-        # Skip if any dependency failed/skipped
-        if any(d in failed_steps for d in deps):
-            step_result = {
-                "step_number": step_num,
-                "status": "skipped",
-                "files_changed": step.get("files", []),
-                "error": "Dependency failed or was skipped",
-            }
-            execution_log["steps"].append(step_result)
-            failed_steps.add(step_num)
-            persist_execution_log(log_path, execution_log)  # #243
-            continue
-
-        print(f"Executing step {step_num}: {step.get('description', '')}", file=sys.stderr)
-        # #235: refuse to run if the worktree has pre-existing dirty
-        # state in any of this step's target files — otherwise the
-        # user's uncommitted work would be silently committed as if
-        # the runner authored it.
-        try:
-            step_files = step.get("files", [])
-            if step.get("action") not in ("test", "verify"):
-                assert_files_clean(step_files)
-        except RuntimeError as e:
-            step_result = {
-                "step_number": step_num,
-                "status": "failed",
-                "files_changed": step.get("files", []),
-                "error": str(e),
-            }
-            execution_log["steps"].append(step_result)
-            failed_steps.add(step_num)
-            aborted = True
-            for s in sorted_steps:
-                if s["step_number"] > step_num:
-                    execution_log["steps"].append({
-                        "step_number": s["step_number"],
-                        "status": "skipped",
-                        "files_changed": s.get("files", []),
-                        "error": "Runner aborted",
-                    })
-            persist_execution_log(log_path, execution_log)  # #243
-            break
-        resolved_model = step.get("model") or default_model
-        # #244: write a 'started' stub entry BEFORE the subprocess call
-        # and persist it. If the runner is interrupted mid-step, this
-        # marker survives and validate_resume_state() surfaces it on
-        # the next run so the operator can hand-reconcile instead of
-        # silently re-running the step from scratch.
-        started_stub = {
-            "step_number": step_num,
-            "status": "started",
-            "files_changed": step.get("files", []),
-            "error": None,
-        }
-        execution_log["steps"].append(started_stub)
-        persist_execution_log(log_path, execution_log)
-        # Execute-then-commit loop. T-2026-119: when commit_files finds no
-        # diff (subprocess succeeded but made no file edits), retry the step
-        # with an augmented prompt up to MAX_NO_CHANGE_RETRIES times before
-        # aborting. The retry re-runs execute_step because the subprocess is
-        # the only thing that can actually write the files.
-        retry_hint = ""
-        no_change_attempts = 0
-        commit_error = None  # non-None means abort after this iteration
-        while True:
-            # #236: snapshot worktree state before the step so we can detect
-            # writes to paths the step didn't declare in step.files.
-            pre_state = snapshot_worktree_state()
-            step_result = execute_step(step, spec, resolved_model, retry_hint=retry_hint)
-            # Check for unexpected writes on any non-test/verify step that
-            # succeeded — test/verify steps shell out and shouldn't write
-            # files at all, but they're also not subject to the step.files
-            # contract, so we skip the check for them.
-            if (step_result["status"] == "passed"
-                    and step.get("action") not in ("test", "verify")):
-                try:
-                    assert_no_unexpected_writes(
-                        pre_state, snapshot_worktree_state(),
-                        step.get("files", []),
-                    )
-                except RuntimeError as e:
-                    step_result["status"] = "failed"
-                    step_result["error"] = str(e)
-            # #244: overwrite the 'started' stub with the real step result
-            # now that execute_step has returned. We know the stub is the
-            # last appended entry because no other append happens between
-            # the started-stub write and here.
-            execution_log["steps"][-1] = step_result
-            # #243: persist the step result BEFORE the commit attempt, so a
-            # crash during commit_files leaves the log honest about what
-            # execute_step produced. Combined with validate_resume_state,
-            # this closes the drift window between git state and log state.
-            persist_execution_log(log_path, execution_log)
-
-            if step_result["status"] != "passed":
-                break
-
-            # Post-condition verification (#T-2026-122 phase 2).
-            # Runs before commit so we never commit a step whose declared
-            # post-state is wrong. Operates on live filesystem so a
-            # condition already satisfied by a prior step counts as met.
-            pc_failures = verify_post_conditions(step, Path.cwd())
-            if pc_failures:
-                step_result["status"] = "failed"
-                step_result["error"] = (
-                    "Post-condition(s) not satisfied after step: "
-                    + "; ".join(pc_failures)
-                )
-                execution_log["steps"][-1] = step_result
-                persist_execution_log(log_path, execution_log)
-                break
-
-            files = step.get("files", [])
-            if not files or step.get("action") in ("test", "verify"):
-                break
-
-            try:
-                commit_files(
-                    files,
-                    f"runner/{uuid} step {step_num}: {step.get('description', '')}",
-                    action=step.get("action", ""),
-                )
-                break  # success — leave the retry loop
-            except NoChangesError as e:
-                # Phase-2 path: if the step declared post_conditions and
-                # they're satisfied, the end-state is correct regardless
-                # of who produced it — accept as satisfied success without
-                # a new commit. This is the architecturally clean variant
-                # of the phase-1 subsumption heuristic.
-                if step.get("post_conditions"):
-                    # verify_post_conditions already ran above and returned
-                    # empty — we only reach the commit path when PCs pass.
-                    print(
-                        f"Step {step_num}: no new changes but declared "
-                        f"post-conditions already satisfied — accepting "
-                        f"as a no-op success.",
-                        file=sys.stderr,
-                    )
-                    step_result["subsumed_by"] = "post_conditions"
-                    execution_log["steps"][-1] = step_result
-                    persist_execution_log(log_path, execution_log)
-                    break
-                # Phase-1 fallback (no post_conditions declared): check
-                # whether prior steps on this branch already committed
-                # changes covering every file in step.files. If so, the
-                # subprocess correctly did nothing — planner over-decomposed
-                # (T-2026-122).
-                touched = files_touched_by_prior_steps(uuid, files)
-                if touched and all(touched.get(f) for f in files):
-                    subsuming = sorted({
-                        n for nums in touched.values() for n in nums
-                    })
-                    print(
-                        f"Step {step_num}: no new changes — target files "
-                        f"({', '.join(files)}) already modified by prior "
-                        f"step(s) {subsuming}. Marking subsumed.",
-                        file=sys.stderr,
-                    )
-                    step_result["subsumed_by"] = subsuming
-                    # status stays 'passed' so downstream
-                    # (approval, failed_steps) treats it as success; the
-                    # subsumed_by field is the audit trail.
-                    execution_log["steps"][-1] = step_result
-                    persist_execution_log(log_path, execution_log)
-                    break
-                no_change_attempts += 1
-                if no_change_attempts > MAX_NO_CHANGE_RETRIES:
-                    commit_error = str(e)
-                    break
-                print(
-                    f"Step {step_num}: subprocess produced no changes — "
-                    f"retrying ({no_change_attempts}/{MAX_NO_CHANGE_RETRIES}) "
-                    f"with Edit-tool nudge",
-                    file=sys.stderr,
-                )
-                retry_hint = (
-                    "IMPORTANT: A previous attempt made no file changes. "
-                    "You MUST use the Edit or Write tool to actually modify "
-                    f"the files listed above ({', '.join(files)}). Do not "
-                    "just describe or plan the change — execute the tool call."
-                )
-                continue
-            except RuntimeError as e:
-                commit_error = str(e)
-                break
-
-        if commit_error is not None:
-            print(f"Git error: {commit_error}", file=sys.stderr)
-            step_result["status"] = "failed"
-            step_result["error"] = commit_error
-            execution_log["steps"][-1] = step_result
-            failed_steps.add(step_num)
-            aborted = True
-            # Mark remaining as skipped
-            remaining = [s for s in sorted_steps if s["step_number"] > step_num]
-            for r in remaining:
-                execution_log["steps"].append({
-                    "step_number": r["step_number"],
-                    "status": "skipped",
-                    "files_changed": r.get("files", []),
-                    "error": "Runner aborted",
-                })
-            persist_execution_log(log_path, execution_log)  # #243
-            break
-        elif step_result["status"] != "passed":
-            failed_steps.add(step_num)
-            aborted = True
-            # Mark remaining as skipped
-            remaining_nums = {s["step_number"] for s in sorted_steps}
-            logged_nums = {s["step_number"] for s in execution_log["steps"]}
-            for s in sorted_steps:
-                if s["step_number"] not in logged_nums:
-                    execution_log["steps"].append({
-                        "step_number": s["step_number"],
-                        "status": "skipped",
-                        "files_changed": s.get("files", []),
-                        "error": "Runner aborted",
-                    })
-            persist_execution_log(log_path, execution_log)  # #243
-            break
-
-    if aborted:
-        execution_log["status"] = "aborted"
-
-    # Final write — also picks up the top-level status flip above.
-    # Per-step writes happen inside the loop (#243) for durability.
+    # Final write — per-step writes happen inside the loop (#243) for
+    # durability; this one also picks up the top-level status.
     persist_execution_log(log_path, execution_log)
 
-    if aborted:
+    if execution_log["status"] == "aborted":
         print(f"Runner aborted. Log: {log_path}", file=sys.stderr)
         # Return to the branch we were on — but only if we actually left it.
         # In detached mode the worktree was already on the run branch, and

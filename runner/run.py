@@ -463,388 +463,371 @@ def run_detached(cli_args) -> int:
             os.environ[ACTIVE_TARGET_ENV] = _prior_env
 
 
-def _run_detached_impl(cli_args) -> int:
-    """Body of run_detached. Split out so the wrapper can manage signal-handler
-    install/restore symmetrically around the actual work."""
-    token_cap = cli_args.token_cap if cli_args.token_cap is not None else cfg('detached', 'token_cap', 2000000)
-    max_unreviewed = cli_args.max_unreviewed if cli_args.max_unreviewed is not None else cfg('detached', 'max_unreviewed', 5)
-    start_ts = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
+def _now_iso() -> str:
+    """UTC timestamp in the shape run_history entries use."""
+    return datetime.datetime.now(datetime.timezone.utc).strftime(
+        '%Y-%m-%dT%H:%M:%S.%f') + 'Z'
 
-    def _now() -> str:
-        return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
 
-    # Resolve the default target repo BEFORE anything git-shaped happens.
-    # Pruning, the hygiene precheck and the claimed-branch scan all inspect
-    # branches and worktrees, and every one of them used to inspect *apiary's*
-    # checkout regardless of --target-repo (review runner Bug 2). The intake
-    # may still name its own target; that is resolved again once it is read.
+class _DetachedStop(Exception):
+    """End the detached run now, recording one run_history entry.
+
+    The pre-run steps have ten different ways to bail — invalid target,
+    hygiene, empty backlog, unreadable intake, bad id, usher, restarts,
+    cross-run tokens, worktree setup — and each used to carry its own copy of
+    the nine-key "skipped" dict literal (review: `"skipped" history_append
+    dict literal | 10`). Now each raises with its status and the fields that
+    differ, and one handler writes the entry.
+    """
+
+    def __init__(self, code: int, exit_status: str, **fields):
+        super().__init__(exit_status)
+        self.code = code
+        self.exit_status = exit_status
+        self.fields = fields
+
+
+def _detached_resolve_default_target(cli_args) -> Path:
+    """The repo the pre-run git checks operate on.
+
+    Resolved BEFORE anything git-shaped happens: pruning, the hygiene
+    precheck and the claimed-branch scan all inspect branches and worktrees,
+    and every one of them used to inspect *apiary's* checkout regardless of
+    --target-repo (review runner Bug 2). The intake may still name its own
+    target; that is resolved again once it is read.
+    """
     try:
-        default_target = resolve_target_repo(
+        return resolve_target_repo(
             cli_override=getattr(cli_args, 'target_repo', None),
         )
     except ValueError as e:
         print(f'ERROR: target_repo invalid: {e}', file=sys.stderr)
-        history_append({
-            'start_ts': start_ts,
-            'end_ts': _now(),
-            'exit_status': 'target_repo_invalid',
-            'stderr': str(e),
-            'uuid': None,
-            'slug': None,
-            'branch': None,
-            'stages_completed': 0,
-            'total_tokens': 0,
-            'target_repo': None,
-        })
-        return 1
+        raise _DetachedStop(1, 'target_repo_invalid',
+                            stderr=str(e), target_repo=None)
 
-    # Clean up any worktrees left behind by a previous hard-killed run
-    # (Stop-ScheduledTask / taskkill /F). Worktrees with unmerged commits
-    # are preserved so partial work isn't silently dropped.
-    pruned = prune_stale_worktrees(default_target)
-    for p, action in pruned:
-        print(f'prune_stale_worktrees: {action} {p}', file=sys.stderr)
 
-    # Hygiene precheck
+def _detached_precheck(default_target: Path, max_unreviewed: int) -> None:
+    """Prune orphaned worktrees and refuse to start if the queue is full.
+
+    Worktrees left behind by a previous hard kill (Stop-ScheduledTask,
+    taskkill /F) are removed unless their branch has commits beyond master,
+    which would mean partial work awaiting review.
+    """
+    for path, action in prune_stale_worktrees(default_target):
+        print(f'prune_stale_worktrees: {action} {path}', file=sys.stderr)
+
     reason = hygiene_precheck(max_unreviewed, default_target)
     if reason:
-        history_append({
-            'start_ts': start_ts,
-            'end_ts': _now(),
-            'exit_status': f'skipped: {reason}',
-            'stages_completed': 0,
-            'total_tokens': 0,
-            'uuid': None,
-            'slug': None,
-            'branch': None,
-        })
-        return 0
+        raise _DetachedStop(0, f'skipped: {reason}')
 
-    # Resolve intake path — an explicit --intake wins, else pick from backlog/
+
+def _detached_pick_intake(cli_args, default_target: Path) -> tuple:
+    """Choose the ticket to run. Returns ``(path, came_from_backlog)``."""
     if cli_args.intake is not None:
-        picked_path = Path(cli_args.intake)
-        from_backlog = False
-    else:
-        picked_path = pick_backlog_item(default_target)
-        from_backlog = True
+        return Path(cli_args.intake), False
 
-        if picked_path is None:
-            reason = ('all in progress' if all_backlog_items_claimed(default_target)
-                      else 'backlog empty')
-            _log_and_return = {
-                'start_ts': start_ts,
-                'end_ts': _now(),
-                'exit_status': f'skipped: {reason}',
-                'stages_completed': 0,
-                'total_tokens': 0,
-                'uuid': None,
-                'slug': None,
-                'branch': None,
-            }
-            history_append(_log_and_return)
-            return 0
+    picked_path = pick_backlog_item(default_target)
+    if picked_path is None:
+        reason = ('all in progress' if all_backlog_items_claimed(default_target)
+                  else 'backlog empty')
+        raise _DetachedStop(0, f'skipped: {reason}')
+    return picked_path, True
 
-    # Load intake JSON
+
+def _detached_load_intake(picked_path: Path) -> tuple:
+    """Read the ticket and validate its id. Returns ``(intake, uuid)``."""
     try:
         intake = json.loads(picked_path.read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError) as e:
         print(f'ERROR: could not read intake file {picked_path}: {e}', file=sys.stderr)
-        history_append({
-            'start_ts': start_ts,
-            'end_ts': _now(),
-            'exit_status': 'intake_read_failed',
-            'stages_completed': 0,
-            'total_tokens': 0,
-            'uuid': None,
-            'slug': None,
-            'branch': None,
-        })
-        return 1
+        raise _DetachedStop(1, 'intake_read_failed')
 
     raw_uuid = intake.get('id')
     if not isinstance(raw_uuid, str) or not raw_uuid.strip():
         print('ERROR: intake file missing id field', file=sys.stderr)
-        history_append({
-            'start_ts': start_ts,
-            'end_ts': _now(),
-            'exit_status': 'intake_invalid_id',
-            'stages_completed': 0,
-            'total_tokens': 0,
-            'uuid': None,
-            'slug': None,
-            'branch': None,
-        })
-        return 1
+        raise _DetachedStop(1, 'intake_invalid_id')
 
-    # ATK-008: reject path-traversal characters in uuid before it is interpolated
-    # into intake_dest and artifact paths. Mirrors the guard in interactive main().
+    # ATK-008: reject path-traversal characters in uuid before it is
+    # interpolated into intake_dest and artifact paths. Mirrors interactive
+    # main()'s guard; both call the one implementation in stage_lib.
     if not is_uuid_safe(raw_uuid):
-        print('ERROR: intake id field contains invalid characters (path separators not allowed)', file=sys.stderr)
-        history_append({
-            'start_ts': start_ts,
-            'end_ts': _now(),
-            'exit_status': 'intake_invalid_id_path',
-            'stages_completed': 0,
-            'total_tokens': 0,
-            'uuid': None,
-            'slug': None,
-            'branch': None,
-        })
-        return 1
-    uuid = raw_uuid.strip()
+        print('ERROR: intake id field contains invalid characters '
+              '(path separators not allowed)', file=sys.stderr)
+        raise _DetachedStop(1, 'intake_invalid_id_path')
 
-    # Usher sizing gate: reject oversized tickets before committing resources
-    usher_verdict, usher_metrics = usher_assess(intake)
-    if usher_verdict == 'fail':
-        print(f'Usher: ticket rejected — files={usher_metrics["file_count"]}, '
-              f'subsystems={usher_metrics["subsystem_count"]}, '
-              f'desc_chars={usher_metrics["description_chars"]}', file=sys.stderr)
-        history_append({
-            'start_ts': start_ts,
-            'end_ts': _now(),
-            'exit_status': 'usher_rejected',
-            'stages_completed': 0,
-            'total_tokens': 0,
-            'uuid': uuid,
-            'slug': None,
-            'branch': None,
-        })
-        return 0
-    elif usher_verdict == 'warn':
-        print(f'Usher: warn — files={usher_metrics["file_count"]}, '
-              f'subsystems={usher_metrics["subsystem_count"]}, '
-              f'desc_chars={usher_metrics["description_chars"]}', file=sys.stderr)
+    return intake, raw_uuid.strip()
 
-    title = intake.get('title', 'Untitled')
-    slug = slugify(title)
-    # ATK-003/004/005: encode the full intake uuid in the branch name so
-    # _branch_exists_for_uuid's substring match actually works. Without this,
-    # pick_backlog_item / all_backlog_items_claimed could not detect that an
-    # item is already claimed by an in-flight branch.
-    branch = f'runner/{slug}-{uuid}'
 
-    # Cross-invocation guardrails: check tracker for restart and token caps.
+def _detached_usher_gate(intake: dict, uuid: str) -> None:
+    """Reject oversized tickets before committing any resources to them."""
+    verdict, metrics = usher_assess(intake)
+    summary = (f'files={metrics["file_count"]}, '
+               f'subsystems={metrics["subsystem_count"]}, '
+               f'desc_chars={metrics["description_chars"]}')
+    if verdict == 'fail':
+        print(f'Usher: ticket rejected — {summary}', file=sys.stderr)
+        raise _DetachedStop(0, 'usher_rejected', uuid=uuid)
+    if verdict == 'warn':
+        print(f'Usher: warn — {summary}', file=sys.stderr)
+
+
+def _detached_tracker_gate(uuid: str, slug: str, token_cap: int) -> tuple:
+    """Cross-invocation guardrails. Returns ``(prior_attempts, prior_tokens)``."""
     max_restarts = cfg('detached', 'max_restarts', 3)
     tracker = run_tracker.load(uuid)
     prior_attempts = tracker.get('attempt_count', 0)
     prior_tokens = tracker.get('total_tokens', 0)
 
     if prior_attempts >= max_restarts:
-        print(f'Run tracker: {uuid} exhausted {prior_attempts}/{max_restarts} restarts, giving up',
-              file=sys.stderr)
-        history_append({
-            'start_ts': start_ts, 'end_ts': _now(),
-            'exit_status': 'max_restarts_exceeded',
-            'stages_completed': 0, 'total_tokens': 0,
-            'uuid': uuid, 'slug': slug, 'branch': None,
-        })
-        return 1
+        print(f'Run tracker: {uuid} exhausted {prior_attempts}/{max_restarts} '
+              f'restarts, giving up', file=sys.stderr)
+        raise _DetachedStop(1, 'max_restarts_exceeded', uuid=uuid, slug=slug)
 
     if prior_tokens >= token_cap:
-        print(f'Run tracker: {uuid} already spent {prior_tokens} tokens (cap={token_cap}), giving up',
-              file=sys.stderr)
-        history_append({
-            'start_ts': start_ts, 'end_ts': _now(),
-            'exit_status': 'cross_run_token_cap',
-            'stages_completed': 0, 'total_tokens': prior_tokens,
-            'uuid': uuid, 'slug': slug, 'branch': None,
-        })
-        return 1
+        print(f'Run tracker: {uuid} already spent {prior_tokens} tokens '
+              f'(cap={token_cap}), giving up', file=sys.stderr)
+        raise _DetachedStop(1, 'cross_run_token_cap',
+                            uuid=uuid, slug=slug, total_tokens=prior_tokens)
 
-    # Resolve target repo (phase 3): CLI flag > intake field > config > apiary.
-    # Validation ensures the resolved path exists and is a git repo. The
-    # worktree is then created inside THAT repo's git tree, and the resolved
-    # path is published via APIARY_TARGET_REPO so every stage subprocess
-    # this run spawns sees the same target when calling the path helpers.
+    return prior_attempts, prior_tokens
+
+
+def _detached_resolve_target(cli_args, intake: dict, uuid: str, slug: str) -> Path:
+    """Resolve the run's target repo and publish it to the stage subprocesses.
+
+    Precedence: CLI flag > intake field > config > apiary. Validation ensures
+    the path exists and is a git repo; the worktree is created inside THAT
+    repo's git tree, and the resolved path goes into APIARY_TARGET_REPO so
+    every stage this run spawns resolves the same paths.
+    """
     try:
         target_repo_path = resolve_target_repo(
             cli_override=getattr(cli_args, 'target_repo', None),
             intake=intake,
         )
-        set_active_target(target_repo_path)
     except ValueError as e:
         print(f'ERROR: target_repo invalid: {e}', file=sys.stderr)
-        history_append({
-            'start_ts': start_ts,
-            'end_ts': _now(),
-            'exit_status': 'target_repo_invalid',
-            'stderr': str(e),
-            'uuid': uuid,
-            'slug': slug,
-            'branch': None,
-            'stages_completed': 0,
-            'total_tokens': 0,
-            'target_repo': None,
-        })
-        return 1
+        raise _DetachedStop(1, 'target_repo_invalid', stderr=str(e),
+                            uuid=uuid, slug=slug, target_repo=None)
+    set_active_target(target_repo_path)
+    return target_repo_path
 
-    # Create isolated worktree at <target_repo>/.runner-worktrees/<safe-branch>/.
-    # The runner operates entirely inside this directory so the target repo's
-    # main checkout is never disturbed (no rogue branch checkout, no untracked
-    # artifact files bleeding across runs, no collision with an active
-    # interactive session on the same repo).
+
+def _detached_create_worktree(branch: str, target_repo_path: Path,
+                              uuid: str, slug: str) -> Path:
+    """Create the run's isolated worktree at ``<target>/.runner-worktrees/``.
+
+    The runner operates entirely inside this directory so the target repo's
+    main checkout is never disturbed: no rogue branch checkout, no untracked
+    artifact files bleeding across runs, no collision with an interactive
+    session on the same repo.
+    """
     ok, wt_path, err = git_worktree_create(branch, target_repo=target_repo_path)
-    if not ok:
-        print(f'ERROR: git worktree setup failed: {err}', file=sys.stderr)
-        # Record the attempt BEFORE returning. This early return skipped
-        # run_tracker entirely, so a failure that preserves the worktree —
-        # which every failure does — made the next night's git_worktree_create
-        # fail identically, forever: attempt_count never grew past 1,
-        # max_restarts never tripped, and the same ticket was re-picked every
-        # night (review runner Bug 4). Recording here makes the tracker's
-        # give-up path reachable.
-        run_tracker.record_attempt(uuid, 0, 0, 'git_setup_failed')
-        print(f'  To clear the stale worktree: {_PY_HINT} -m runner.run --cleanup {uuid}',
-              file=sys.stderr)
+    if ok:
+        return wt_path
+
+    print(f'ERROR: git worktree setup failed: {err}', file=sys.stderr)
+    # Record the attempt BEFORE raising. This early return skipped run_tracker
+    # entirely, so a failure that preserves the worktree — which every failure
+    # does — made the next night's git_worktree_create fail identically,
+    # forever: attempt_count never grew past 1, max_restarts never tripped,
+    # and the same ticket was re-picked every night (review runner Bug 4).
+    run_tracker.record_attempt(uuid, 0, 0, 'git_setup_failed')
+    print(f'  To clear the stale worktree: {_PY_HINT} -m runner.run --cleanup {uuid}',
+          file=sys.stderr)
+    raise _DetachedStop(1, 'git_setup_failed', stderr=err, uuid=uuid, slug=slug,
+                        target_repo=str(target_repo_path))
+
+
+def _promote_intake(picked_path: Path, from_backlog: bool, uuid: str) -> None:
+    """Copy the picked ticket into the canonical intake location.
+
+    Review artifacts (specs/plans/executions/hardens/reports) live centrally
+    under the apiary state dir, not the worktree, so a single history spans
+    runs against multiple target repos. The worktree carries only the
+    executor's code-change diff.
+    """
+    intake_dest = intake_dir() / f'{uuid}.json'
+    intake_dest.parent.mkdir(parents=True, exist_ok=True)
+    if from_backlog:
+        # picked_path lives in the backlog dir. Copy into intake/ and drop the
+        # backlog entry so it isn't re-picked on the next run.
+        shutil.copy2(str(picked_path), str(intake_dest))
+        try:
+            picked_path.unlink()
+        except OSError as e:
+            print(f'WARN: could not remove backlog file {picked_path}: {e}',
+                  file=sys.stderr)
+    elif picked_path.resolve() != intake_dest.resolve():
+        # --intake with an explicit path outside the canonical location.
+        shutil.copy2(str(picked_path), str(intake_dest))
+
+
+def _append_stage_log(run_log_path: Path, name: str, elapsed: float, ok: bool,
+                      stdout_text: str, stderr_text: str) -> None:
+    """Append one stage's output to the per-run debug log. Never raises."""
+    try:
+        with open(run_log_path, 'a', encoding='utf-8') as handle:
+            handle.write(f'\n===== stage: {name} (elapsed={elapsed:.1f}s, ok={ok}) =====\n')
+            if stdout_text:
+                handle.write(f'--- stdout ---\n{stdout_text}\n')
+            if stderr_text:
+                handle.write(f'--- stderr ---\n{stderr_text}\n')
+    except OSError:
+        pass
+
+
+def _detached_stage_loop(*, uuid, artifacts, wt_path, branch, token_cap,
+                         stage_costs, resume_from, run_log_path) -> tuple:
+    """Drive the six stages inside the worktree.
+
+    Returns ``(stages_completed, exit_status)``. Unlike the interactive loop
+    this never exits the process: the caller still has a worktree to tear
+    down, a tracker to update and a history row to write.
+    """
+    stages_completed = 0
+    exit_status = 'ok'
+    reached_resume = (resume_from is None)
+
+    for stage_idx, (name, module_name, input_key) in enumerate(STAGES, 1):
+        # Skip stages before the resume point (their artifacts already exist).
+        if resume_from is not None and not reached_resume:
+            if name == resume_from:
+                reached_resume = True
+            else:
+                print(f'  [{stage_idx}/6] {name}... SKIPPED (resuming)', file=sys.stderr)
+                continue
+
+        if _interrupt_requested:
+            return stages_completed, 'interrupted'
+        run_lock.update(uuid, stage=name, step_number=stage_idx)
+
+        ok, stdout_text, stderr_text, elapsed = run_stage(
+            name, module_name, artifacts[input_key], cwd=wt_path,
+            extra_env={RUNNER_BRANCH_ENV: branch},
+        )
+        record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
+        _append_stage_log(run_log_path, name, elapsed, ok, stdout_text, stderr_text)
+
+        # If the cleanup handler killed this stage mid-flight, surface
+        # 'interrupted' rather than the downstream stage_failed/no_usage codes
+        # that would otherwise mask the real cause.
+        if _interrupt_requested:
+            return stages_completed, 'interrupted'
+
+        # ATK-010: in detached mode the cap is the only safety against runaway
+        # cost. A stage emitting zero <usage> blocks would leave cumulative
+        # tokens at 0 forever, defeating it. NO_USAGE_STAGES make no Claude
+        # calls by design; for any other stage, no_usage means token
+        # accounting is broken and we abort fail-closed.
+        last = stage_costs[-1] if stage_costs else None
+        if (ok and last is not None and last.get('status') == 'no_usage'
+                and name not in NO_USAGE_STAGES):
+            return stages_completed, f'no_usage_in_stage:{name}'
+
+        if cumulative_tokens(stage_costs) > token_cap:
+            return stages_completed, 'token_cap_exceeded'
+
+        if not ok:
+            return stages_completed, f'stage_failed:{name}'
+
+        stages_completed += 1
+
+    return stages_completed, exit_status
+
+
+def _run_detached_impl(cli_args) -> int:
+    """Body of run_detached. Split out so the wrapper can manage signal-handler
+    install/restore symmetrically around the actual work."""
+    token_cap = (cli_args.token_cap if cli_args.token_cap is not None
+                 else cfg('detached', 'token_cap', 2000000))
+    max_unreviewed = (cli_args.max_unreviewed if cli_args.max_unreviewed is not None
+                      else cfg('detached', 'max_unreviewed', 5))
+    start_ts = _now_iso()
+
+    # Everything up to "we have a worktree" can bail with a recorded reason.
+    try:
+        default_target = _detached_resolve_default_target(cli_args)
+        _detached_precheck(default_target, max_unreviewed)
+        picked_path, from_backlog = _detached_pick_intake(cli_args, default_target)
+        intake, uuid = _detached_load_intake(picked_path)
+        _detached_usher_gate(intake, uuid)
+
+        title = intake.get('title', 'Untitled')
+        slug = slugify(title)
+        # ATK-003/004/005: encode the full intake uuid in the branch name so
+        # _branch_exists_for_uuid's substring match works — without it
+        # pick_backlog_item / all_backlog_items_claimed could not tell that an
+        # item is already claimed by an in-flight branch.
+        branch = f'runner/{slug}-{uuid}'
+
+        prior_attempts, prior_tokens = _detached_tracker_gate(uuid, slug, token_cap)
+        target_repo_path = _detached_resolve_target(cli_args, intake, uuid, slug)
+        wt_path = _detached_create_worktree(branch, target_repo_path, uuid, slug)
+    except _DetachedStop as stop:
         history_append({
             'start_ts': start_ts,
-            'end_ts': _now(),
-            'exit_status': 'git_setup_failed',
-            'stderr': err,
-            'uuid': uuid,
-            'slug': slug,
-            'branch': None,
+            'end_ts': _now_iso(),
+            'exit_status': stop.exit_status,
             'stages_completed': 0,
             'total_tokens': 0,
-            'target_repo': str(target_repo_path),
+            'uuid': None,
+            'slug': None,
+            'branch': None,
+            **stop.fields,
         })
-        return 1
+        return stop.code
 
     run_lock.write(uuid, stage="init", worktree_path=str(wt_path))
 
-    # Open per-run debug log
+    # Per-run debug log
     run_logs_dir = logs_dir()
     run_logs_dir.mkdir(parents=True, exist_ok=True)
-    run_log_name = f'runner_log_{datetime.datetime.now(datetime.timezone.utc).strftime("%Y_%m_%d_%H%M%S")}.log'
-    run_log_path = run_logs_dir / run_log_name
+    run_log_path = run_logs_dir / (
+        'runner_log_'
+        + datetime.datetime.now(datetime.timezone.utc).strftime("%Y_%m_%d_%H%M%S")
+        + '.log'
+    )
 
-    stage_costs: list[dict] = []
     # Seed historical token spend so cumulative_tokens() includes prior
-    # invocations. This makes the per-invocation token_cap check work
-    # across restarts without any changes to the stage loop.
+    # invocations, making the per-invocation cap work across restarts without
+    # any change to the stage loop.
+    stage_costs: list[dict] = []
     if prior_tokens > 0:
         stage_costs.append({
-            'stage': '_prior_runs',
-            'tokens': prior_tokens,
-            'tool_uses': 0,
-            'duration_ms': 0,
-            'status': 'prior',
+            'stage': '_prior_runs', 'tokens': prior_tokens,
+            'tool_uses': 0, 'duration_ms': 0, 'status': 'prior',
         })
 
-    # Detect resumable state: if a previous failed run left artifacts in
-    # the worktree, skip stages that already completed successfully.
+    # Resume: if a previous failed run left artifacts behind, skip the stages
+    # that already produced them.
     resume_from = run_tracker.get_resume_stage(uuid, wt_path)
     if resume_from is not None:
-        print(f'Run tracker: resuming from {resume_from} (attempt {prior_attempts + 1})',
-              file=sys.stderr)
+        print(f'Run tracker: resuming from {resume_from} '
+              f'(attempt {prior_attempts + 1})', file=sys.stderr)
 
     stages_completed = 0
     exit_status = 'ok'
 
     try:
-        # Promote backlog item -> intake in apiary/runner/. Review artifacts
-        # (specs/plans/executions/hardens/reports) live centrally under apiary,
-        # not the worktree, so a single apiary history spans runs against
-        # multiple target repos. The worktree carries only the executor's
-        # code-change diff.
-        intake_dest = intake_dir() / f'{uuid}.json'
-        intake_dest.parent.mkdir(parents=True, exist_ok=True)
-        if from_backlog:
-            # picked_path already lives in apiary/runner/backlog/. Copy into
-            # apiary/runner/intake/ and drop the backlog entry so it isn't
-            # re-picked on the next run.
-            shutil.copy2(str(picked_path), str(intake_dest))
-            try:
-                picked_path.unlink()
-            except OSError as e:
-                print(f'WARN: could not remove backlog file {picked_path}: {e}', file=sys.stderr)
-        else:
-            # --intake explicit path: copy into the canonical apiary location.
-            # Skip the copy if the caller already pointed at it.
-            if picked_path.resolve() != intake_dest.resolve():
-                shutil.copy2(str(picked_path), str(intake_dest))
-
-        # Artifact paths are rooted under the runner-state root so stages
-        # find them regardless of which target repo's worktree is the cwd.
-        artifacts = {
-            'intake':    intake_dir()     / f'{uuid}.json',
-            'spec':      specs_dir()      / f'{uuid}.json',
-            'plan':      plans_dir()      / f'{uuid}.json',
-            'execution': executions_dir() / f'{uuid}.json',
-            'harden':    hardens_dir()    / f'{uuid}.json',
-            'report':    reports_dir()    / f'{uuid}.json',
-        }
-
-        reached_resume = (resume_from is None)
-        for stage_idx, (name, module_name, input_key) in enumerate(STAGES, 1):
-            # Skip stages before the resume point (artifacts already exist)
-            if resume_from is not None and not reached_resume:
-                if name == resume_from:
-                    reached_resume = True
-                else:
-                    print(f'  [{stage_idx}/6] {name}... SKIPPED (resuming)', file=sys.stderr)
-                    continue
-
-            if _interrupt_requested:
-                exit_status = 'interrupted'
-                break
-            run_lock.update(uuid, stage=name, step_number=stage_idx)
-            input_path = artifacts[input_key]
-
-            ok, stdout_text, stderr_text, _elapsed = run_stage(
-                name, module_name, input_path, cwd=wt_path,
-                extra_env={RUNNER_BRANCH_ENV: branch},
-            )
-            record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
-
-            # Append stage output to per-run debug log
-            try:
-                with open(run_log_path, 'a', encoding='utf-8') as _lf:
-                    _lf.write(f'\n===== stage: {name} (elapsed={_elapsed:.1f}s, ok={ok}) =====\n')
-                    if stdout_text:
-                        _lf.write(f'--- stdout ---\n{stdout_text}\n')
-                    if stderr_text:
-                        _lf.write(f'--- stderr ---\n{stderr_text}\n')
-            except OSError:
-                pass
-
-            # If the cleanup-handler killed this stage mid-flight, surface
-            # 'interrupted' rather than the downstream stage_failed/no_usage
-            # codes that would otherwise mask the real cause.
-            if _interrupt_requested:
-                exit_status = 'interrupted'
-                break
-
-            # ATK-010: in detached mode the cap is the only safety against runaway
-            # cost. A stage that emits zero <usage> blocks would leave cumulative
-            # tokens at 0 forever, defeating the cap. Stages in NO_USAGE_STAGES are
-            # known to make no Claude calls; for any other stage, no_usage means
-            # token accounting is broken and we must abort fail-closed.
-            last = stage_costs[-1] if stage_costs else None
-            if (
-                ok
-                and last is not None
-                and last.get('status') == 'no_usage'
-                and name not in NO_USAGE_STAGES
-            ):
-                exit_status = f'no_usage_in_stage:{name}'
-                break
-
-            if cumulative_tokens(stage_costs) > token_cap:
-                exit_status = 'token_cap_exceeded'
-                break
-
-            if not ok:
-                exit_status = f'stage_failed:{name}'
-                break
-
-            stages_completed += 1
+        _promote_intake(picked_path, from_backlog, uuid)
+        # Artifact paths are rooted under the runner-state root so stages find
+        # them regardless of which target repo's worktree is the cwd.
+        stages_completed, exit_status = _detached_stage_loop(
+            uuid=uuid,
+            artifacts=artifact_paths(uuid),
+            wt_path=wt_path,
+            branch=branch,
+            token_cap=token_cap,
+            stage_costs=stage_costs,
+            resume_from=resume_from,
+            run_log_path=run_log_path,
+        )
 
         # Commit work into the worktree (= the runner branch). ATK-001:
         # capture commit failure into exit_status so the log entry does not
         # falsely report 'ok' when no artifacts were committed.
-        commit_msg = f'runner/{uuid}: {title}'
-        commit_ok, commit_err = git_commit_all_in(wt_path, commit_msg)
+        commit_ok, commit_err = git_commit_all_in(wt_path, f'runner/{uuid}: {title}')
         if not commit_ok:
             print(f'WARN: git commit failed: {commit_err}', file=sys.stderr)
             if exit_status == 'ok':
@@ -884,10 +867,9 @@ def _run_detached_impl(cli_args) -> int:
     if exit_status == 'ok':
         run_tracker.delete(uuid)
 
-    end_ts = _now()
     entry = {
         'start_ts': start_ts,
-        'end_ts': end_ts,
+        'end_ts': _now_iso(),
         'uuid': uuid,
         'slug': slug,
         'branch': branch,
@@ -1208,7 +1190,8 @@ def run_cleanup(uuid: str) -> int:
     return 0
 
 
-def main():
+def build_arg_parser() -> argparse.ArgumentParser:
+    """The orchestrator's CLI surface, in one place."""
     parser = argparse.ArgumentParser(description="Runner orchestrator")
     parser.add_argument("intake", nargs='?', default=None, help="Path to intake JSON file")
     parser.add_argument("--resume-from", dest="resume_from", default=None,
@@ -1237,8 +1220,15 @@ def main():
                         help="Run against a non-apiary target repo. Precedence: this flag > "
                              "intake.target_repo > config runner.target_repo > apiary fallback. "
                              "Path must be an existing directory containing a .git entry.")
-    cli_args = parser.parse_args()
+    return parser
 
+
+def _dispatch_maintenance(cli_args) -> None:
+    """Handle the non-run modes, then exit. Returns only for an actual run.
+
+    --abort, the stale-lock gate, --cleanup, --prune-failed and --detached are
+    all terminal: each either exits or hands the whole invocation off.
+    """
     # Abort mode: clean up crashed runs (T-2026-128).
     if cli_args.abort_uuid is not None:
         if cli_args.abort_uuid == "all":
@@ -1283,14 +1273,23 @@ def main():
     if cli_args.detached:
         sys.exit(run_detached(cli_args))
 
-    # Validate --resume-from against known stage names
+
+def _load_interactive_intake(cli_args) -> tuple:
+    """Validate the interactive arguments and load the intake.
+
+    Returns ``(intake_path, intake, uuid)``. Exits with a message on any
+    unusable input: an unknown --resume-from stage, a missing intake path,
+    invalid JSON, or an id that is not a safe filename component.
+    """
     stage_names = [name for name, _, _ in STAGES]
     if cli_args.resume_from is not None and cli_args.resume_from not in stage_names:
-        print(f"Unknown stage: {cli_args.resume_from}. Valid stages: {', '.join(stage_names)}", file=sys.stderr)
+        print(f"Unknown stage: {cli_args.resume_from}. "
+              f"Valid stages: {', '.join(stage_names)}", file=sys.stderr)
         sys.exit(1)
 
     if cli_args.intake is None:
-        print("intake path is required in interactive mode (use --detached for cron mode)", file=sys.stderr)
+        print("intake path is required in interactive mode "
+              "(use --detached for cron mode)", file=sys.stderr)
         sys.exit(1)
 
     intake_path = Path(cli_args.intake)
@@ -1298,7 +1297,6 @@ def main():
         print(f"Intake file not found: {intake_path}", file=sys.stderr)
         sys.exit(1)
 
-    # Read intake to get UUID
     try:
         intake = json.loads(intake_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
@@ -1315,34 +1313,16 @@ def main():
     # path traversal in artifact paths (one guard, in stage_lib, for all six
     # call sites that used to carry their own copy).
     if not is_uuid_safe(raw_uuid):
-        print("Intake id field contains invalid characters (path separators not allowed)", file=sys.stderr)
-        sys.exit(1)
-    uuid = raw_uuid.strip()
-
-    # Usher sizing advisory (interactive mode: warn only, never block)
-    usher_verdict, usher_metrics = usher_assess(intake)
-    if usher_verdict in ('warn', 'fail'):
-        print(f'Usher advisory ({usher_verdict}): files={usher_metrics["file_count"]}, '
-              f'subsystems={usher_metrics["subsystem_count"]}, '
-              f'desc_chars={usher_metrics["description_chars"]}')
-
-    # Resolve target repo. Interactive mode runs stages directly against the
-    # resolved target's checkout (no worktree — that's detached's concern).
-    # When nothing is configured this resolves to apiary REPO_ROOT and matches
-    # the single-repo behavior exactly. set_active_target publishes the path
-    # into APIARY_TARGET_REPO so spawned stage subprocesses see it.
-    try:
-        target_repo_path = resolve_target_repo(
-            cli_override=getattr(cli_args, 'target_repo', None),
-            intake=intake,
-        )
-        set_active_target(target_repo_path)
-    except ValueError as e:
-        print(f'Target repo invalid: {e}', file=sys.stderr)
+        print("Intake id field contains invalid characters "
+              "(path separators not allowed)", file=sys.stderr)
         sys.exit(1)
 
-    # Derive artifact paths
-    artifacts = {
+    return intake_path, intake, raw_uuid.strip()
+
+
+def artifact_paths(uuid: str) -> dict:
+    """The six per-run artifact paths, all under the runner state root."""
+    return {
         "intake":    intake_dir()     / f"{uuid}.json",
         "spec":      specs_dir()      / f"{uuid}.json",
         "plan":      plans_dir()      / f"{uuid}.json",
@@ -1351,26 +1331,168 @@ def main():
         "report":    reports_dir()    / f"{uuid}.json",
     }
 
-    # Verify intake path matches expected
+
+def _assert_resume_prerequisite(resume_from, artifacts: dict) -> None:
+    """Refuse to resume from a stage whose input artifact does not exist."""
+    if resume_from is None:
+        return
+    resume_input_key = None
+    for name, _, input_key in STAGES:
+        if name == resume_from:
+            resume_input_key = input_key
+            break
+    artifact_path = artifacts[resume_input_key]
+    if not artifact_path.exists():
+        print(f"Cannot resume from {resume_from}: missing prerequisite "
+              f"artifact {artifact_path}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _resolve_interactive_target(cli_args, intake: dict) -> Path:
+    """Resolve and publish the target repo for an interactive run.
+
+    Interactive mode runs stages directly against the resolved target's
+    checkout (no worktree — that's detached's concern). When nothing is
+    configured this resolves to apiary's root and matches the single-repo
+    behaviour exactly. set_active_target publishes the path into
+    APIARY_TARGET_REPO so spawned stage subprocesses see it.
+    """
+    try:
+        target_repo_path = resolve_target_repo(
+            cli_override=getattr(cli_args, 'target_repo', None),
+            intake=intake,
+        )
+    except ValueError as e:
+        print(f'Target repo invalid: {e}', file=sys.stderr)
+        sys.exit(1)
+    set_active_target(target_repo_path)
+    return target_repo_path
+
+
+def _abort_interactive(stages_completed: int, stage_costs: list,
+                       intake_path_abs: Path, resume_stage: str,
+                       total_start: float | None = None) -> None:
+    """Print the run's tally, the cost summary and the resume command, exit 1.
+
+    Shared by the three ways an interactive run can stop early — token cap,
+    stage failure, Ctrl-C — which each printed their own near-identical block
+    (ATK-004/ATK-007).
+    """
+    print(f"Stages completed: {stages_completed}/{len(STAGES)}")
+    if total_start is not None:
+        print(f"Total time: {time.time() - total_start:.1f}s")
+    try:
+        print_cost_summary(stage_costs)
+    except Exception:
+        pass
+    print(f"To resume: {_PY_HINT} -m runner.run {intake_path_abs} "
+          f"--resume-from {resume_stage}", file=sys.stderr)
+    sys.exit(1)
+
+
+def _run_interactive_stages(*, uuid, artifacts, target_repo_path, stage_env,
+                            resume_from, token_cap, intake_path_abs,
+                            stage_costs, total_start) -> tuple:
+    """Drive the six stages in the operator's checkout.
+
+    Returns ``(stages_completed, final_output)``; exits 1 on any stage
+    failure, on the token cap, or on Ctrl-C, always printing how to resume.
+    """
+    stages_completed = 0
+    final_output = ""
+    reached_resume = (resume_from is None)
+    # Tracked for the KeyboardInterrupt report, which needs the stage that was
+    # in flight rather than the last one that finished.
+    current_stage_name = STAGES[0][0]
+    current_stage_idx = 1
+
+    try:
+        for i, (name, module_name, input_key) in enumerate(STAGES, 1):
+            # Skip stages before the resume point.
+            if resume_from is not None and not reached_resume:
+                if name == resume_from:
+                    reached_resume = True
+                else:
+                    print(f"\n[{i}/6] {name}... SKIPPED (resuming)")
+                    continue  # ATK-001: skipped stages do not count as completed
+
+            current_stage_name = name
+            current_stage_idx = i
+            run_lock.update(uuid, stage=name, step_number=i)
+
+            print(f"\n[{i}/6] {name}...", flush=True)
+            ok, stdout_text, stderr_text, elapsed = run_stage(
+                name, module_name, artifacts[input_key],
+                cwd=target_repo_path, extra_env=stage_env,
+            )
+            record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
+            output = stdout_text.strip() if ok else stderr_text.strip()
+
+            # #247: interactive-mode token budget. With --token-cap set, abort
+            # as soon as cumulative tokens exceed it so a runaway hardening
+            # loop cannot keep spawning. Detached mode has the same check.
+            if token_cap is not None:
+                used = cumulative_tokens(stage_costs)
+                if used > token_cap:
+                    print(f"\n{'=' * 60}\nABORTED: token cap exceeded at stage "
+                          f"{i} ({name}): {used} > {token_cap}", file=sys.stderr)
+                    _abort_interactive(stages_completed, stage_costs,
+                                       intake_path_abs, name)
+
+            if ok:
+                print(f"  PASSED ({elapsed:.1f}s)")
+                if output:
+                    # Last line is usually the artifact path or the verdict.
+                    print(f"  -> {output.strip().splitlines()[-1]}")
+                stages_completed += 1
+                final_output = output
+                continue
+
+            print(f"  FAILED ({elapsed:.1f}s)")
+            if output:
+                lines = output.strip().splitlines()
+                cap = 500
+                for line in lines[:cap]:
+                    print(f"  ! {line}")
+                if len(lines) > cap:
+                    print(f"  ! ... ({len(lines) - cap} more lines truncated)")
+            print(f"\n{'=' * 60}")
+            print(f"FAILED at stage {i}: {name}")
+            _abort_interactive(stages_completed, stage_costs,
+                               intake_path_abs, name, total_start=total_start)
+
+    except KeyboardInterrupt:
+        print(f"\n\nInterrupted during stage {current_stage_idx}: "
+              f"{current_stage_name}")  # ATK-004
+        _abort_interactive(stages_completed, stage_costs,
+                           intake_path_abs, current_stage_name)
+
+    return stages_completed, final_output
+
+
+def main():
+    cli_args = build_arg_parser().parse_args()
+    _dispatch_maintenance(cli_args)
+
+    intake_path, intake, uuid = _load_interactive_intake(cli_args)
+
+    # Usher sizing advisory (interactive mode: warn only, never block)
+    usher_verdict, usher_metrics = usher_assess(intake)
+    if usher_verdict in ('warn', 'fail'):
+        print(f'Usher advisory ({usher_verdict}): files={usher_metrics["file_count"]}, '
+              f'subsystems={usher_metrics["subsystem_count"]}, '
+              f'desc_chars={usher_metrics["description_chars"]}')
+
+    target_repo_path = _resolve_interactive_target(cli_args, intake)
+
+    artifacts = artifact_paths(uuid)
+    # Verify intake path matches expected: use the provided path for validate,
+    # but derived paths for subsequent stages.
     if intake_path.resolve() != artifacts["intake"].resolve():
-        # Copy or just use the provided path — use provided path for validate,
-        # but derived paths for subsequent stages
         artifacts["intake"] = intake_path.resolve()
 
     resume_from = cli_args.resume_from
-
-    # Validate prerequisite artifact exists when resuming
-    if resume_from is not None:
-        # Find the input_key for the resume stage
-        resume_input_key = None
-        for name, _, input_key in STAGES:
-            if name == resume_from:
-                resume_input_key = input_key
-                break
-        artifact_path = artifacts[resume_input_key]
-        if not artifact_path.exists():
-            print(f"Cannot resume from {resume_from}: missing prerequisite artifact {artifact_path}", file=sys.stderr)
-            sys.exit(1)
+    _assert_resume_prerequisite(resume_from, artifacts)
 
     print(f"Runner: {intake.get('title', 'Untitled')} [{uuid}]")
     print(f"{'=' * 60}")
@@ -1379,116 +1501,35 @@ def main():
     # stage. Interactive mode keeps the historical `runner/<uuid>` name; what
     # changed is that the executor no longer picks it unilaterally, so stages
     # 4/5/6, run_history and queue.py all agree on which branch a run owns.
-    run_branch = f"runner/{uuid}"
-    stage_env = {RUNNER_BRANCH_ENV: run_branch}
+    stage_env = {RUNNER_BRANCH_ENV: f"runner/{uuid}"}
 
     run_lock.write(uuid, stage=STAGES[0][0])
-
     total_start = time.time()
-    stages_completed = 0
-    final_output = ""
-    reached_resume = (resume_from is None)
-    # Track the currently-executing stage for KeyboardInterrupt reporting
-    current_stage_name = STAGES[0][0]
-    current_stage_idx = 1
     intake_path_abs = intake_path.resolve()
-    stage_costs: list[dict] = []  # each entry: {'stage': str, 'tokens': int, 'tool_uses': int, 'status': 'logged'|'no_usage'|'malformed'}
+    # each entry: {'stage': str, 'tokens': int, 'tool_uses': int,
+    #              'status': 'logged'|'no_usage'|'malformed'}
+    stage_costs: list[dict] = []
 
     try:
-        try:
-            for i, (name, module_name, input_key) in enumerate(STAGES, 1):
-                # Skip stages before resume point
-                if resume_from is not None and not reached_resume:
-                    if name == resume_from:
-                        reached_resume = True
-                    else:
-                        print(f"\n[{i}/6] {name}... SKIPPED (resuming)")
-                        continue  # ATK-001: skipped stages do not count as completed
+        stages_completed, final_output = _run_interactive_stages(
+            uuid=uuid,
+            artifacts=artifacts,
+            target_repo_path=target_repo_path,
+            stage_env=stage_env,
+            resume_from=resume_from,
+            token_cap=cli_args.token_cap,
+            intake_path_abs=intake_path_abs,
+            stage_costs=stage_costs,
+            total_start=total_start,
+        )
 
-                current_stage_name = name
-                current_stage_idx = i
-                run_lock.update(uuid, stage=name, step_number=i)
-                input_path = artifacts[input_key]
-
-                print(f"\n[{i}/6] {name}...", flush=True)
-
-                ok, stdout_text, stderr_text, elapsed = run_stage(
-                    name, module_name, input_path, cwd=target_repo_path,
-                    extra_env=stage_env,
-                )
-                record_stage_cost(name, uuid, stdout_text, stderr_text, stage_costs)
-                output = stdout_text.strip() if ok else stderr_text.strip()
-
-                # #247: interactive-mode token budget. If --token-cap is set,
-                # abort the run as soon as cumulative tokens exceed it, so a
-                # runaway hardening loop can't keep spawning forever.
-                # Detached mode already has this check (#423 region); this
-                # brings parity to the interactive path.
-                if cli_args.token_cap is not None:
-                    used = cumulative_tokens(stage_costs)
-                    if used > cli_args.token_cap:
-                        print(
-                            f"\n{'=' * 60}\n"
-                            f"ABORTED: token cap exceeded at stage {i} ({name}): "
-                            f"{used} > {cli_args.token_cap}",
-                            file=sys.stderr,
-                        )
-                        print(f"Stages completed: {stages_completed}/{len(STAGES)}")
-                        try:
-                            print_cost_summary(stage_costs)
-                        except Exception:
-                            pass
-                        print(
-                            f"To resume: {_PY_HINT} -m runner.run {intake_path_abs} "
-                            f"--resume-from {name}",
-                            file=sys.stderr,
-                        )
-                        sys.exit(1)
-
-                if ok:
-                    print(f"  PASSED ({elapsed:.1f}s)")
-                    if output:
-                        # Show last line of output (usually the file path or verdict)
-                        last_line = output.strip().splitlines()[-1]
-                        print(f"  -> {last_line}")
-                    stages_completed += 1
-                    final_output = output
-                else:
-                    print(f"  FAILED ({elapsed:.1f}s)")
-                    if output:
-                        lines = output.strip().splitlines()
-                        cap = 500
-                        for line in lines[:cap]:
-                            print(f"  ! {line}")
-                        if len(lines) > cap:
-                            print(f"  ! ... ({len(lines) - cap} more lines truncated)")
-                    print(f"\n{'=' * 60}")
-                    print(f"FAILED at stage {i}: {name}")
-                    print(f"Stages completed: {stages_completed}/{len(STAGES)}")
-                    print(f"Total time: {time.time() - total_start:.1f}s")
-                    try:
-                        print_cost_summary(stage_costs)
-                    except Exception:
-                        pass
-                    print(f"To resume: {_PY_HINT} -m runner.run {intake_path_abs} --resume-from {name}", file=sys.stderr)  # ATK-007
-                    sys.exit(1)
-
-        except KeyboardInterrupt:
-            print(f"\n\nInterrupted during stage {current_stage_idx}: {current_stage_name}")  # ATK-004
-            print(f"Stages completed: {stages_completed}/{len(STAGES)}")
-            print_cost_summary(stage_costs)
-            print(f"To resume: {_PY_HINT} -m runner.run {intake_path_abs} --resume-from {current_stage_name}", file=sys.stderr)  # ATK-007
-            sys.exit(1)
-
-        # All stages completed
-        total_elapsed = time.time() - total_start
+        # All stages completed. The verdict is approval's first stdout line.
         print(f"\n{'=' * 60}")
-
-        # Parse verdict from approval output
-        verdict_line = final_output.strip().splitlines()[0] if final_output else "unknown"
+        verdict_line = (
+            final_output.strip().splitlines()[0] if final_output else "unknown")
         print(f"COMPLETE: {verdict_line}")
         print(f"Stages completed: {stages_completed}/{len(STAGES)}")
-        print(f"Total time: {total_elapsed:.1f}s")
+        print(f"Total time: {time.time() - total_start:.1f}s")
         print(f"Report: {artifacts['report']}")
         print_cost_summary(stage_costs)
     finally:
