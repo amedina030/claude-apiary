@@ -24,6 +24,7 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 | `compass/capture.py` | Validate + store a /wrapup compass observation payload | dimensions, template, validate, store |
 | `compass/synthesize.py` | Synthesize personality.md from active observations | --dry-run, --model, --cron |
 | `compass/backfill.py` | Extract observations from historical transcripts | --last, --session-ids, --since, --force, --model |
+| `compass/evaluate.py` | Measure whether the personality profile carries signal | offline, ab, labels |
 | `harden/orchestrate.py` | /harden control flow: plan, prompts, worktree, retry policy, budget, todos | plan, prompt, worktree, round, validate, budget, file-todos, save-summary |
 | `harden/validate_and_assign.py` | Validate + assign IDs in one step | findings, response |
 | `harden/assign_ids.py` | Assign sequential IDs to output | --prefix, --file |

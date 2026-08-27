@@ -98,6 +98,35 @@ Archive sweep: `python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.p
 
 ---
 
+## Measurement — compass is an experiment, and it is being scored
+
+Compass is kept on the condition that it is measured (review §5a-H). Three
+instruments exist; the full design, the metric definition, the honesty
+caveats and the **proposed keep/delete rule** live in
+`docs/architecture/compass-measurement.md`.
+
+- **`compass/evaluate.py offline`** — leave-one-out over the observation
+  files: does a profile synthesized from the *other* sessions predict a
+  held-out session's per-dimension labels? Reports accuracy against a
+  majority and a random baseline. **Lift over majority is the number that
+  matters**, and this measures the profile's *internal consistency*, not
+  whether injecting it changes behaviour. Default run uses a deterministic
+  stub and calls no model; `--model` costs one `claude -p` per fold and
+  needs `--yes`.
+- **`compass/evaluate.py ab`** — the real test. Each session is assigned to
+  arm `on` (profile injected) or `off` (not), recorded as `compass_arm` in
+  its identity file, and the arms are compared against budgeter outcome
+  proxies. **Off by default** (`compass/config.json` `ab_enabled: false`), so
+  today every session is in arm `on` and nothing has changed.
+- **`apiary doctor compass`** — observation counts, synthesis age (warns
+  above 14 days), profile size, arm counts, last headline. Report-only.
+
+When touching this subsystem: `label_vocabulary.json` and `config.json` are
+part of a live experiment. Editing the vocabulary changes the metric; editing
+`ab_seed` re-rolls the split. Neither is a routine edit.
+
+---
+
 ## Common mistakes to avoid
 
 - **Adding a new dimension casually.** Edit `dimensions.json` deliberately — the synthesizer only emits sections for configured dimensions, and ad-hoc dimensions in observations get rejected by the validator.

@@ -82,6 +82,20 @@ def validate_registry(role, mission):
         return False
 
 
+def _compass_arm(session_short: str) -> str:
+    """The compass A/B arm to stamp into this session's identity file.
+
+    Imported lazily and failure-tolerantly: session start must not depend on
+    compass being importable, and a broken config must not cost the user a
+    session. Defaults to "on" — the pre-experiment behaviour.
+    """
+    try:
+        from compass import ab
+        return ab.arm_for_new_session(session_short)
+    except Exception:
+        return "on"
+
+
 def run_init(session_id: str, first_message: str, repo_dir: str) -> dict:
     """Run init logic and return result dict with identity."""
     identity = parse_identity(first_message)
@@ -95,6 +109,11 @@ def run_init(session_id: str, first_message: str, repo_dir: str) -> dict:
         "registered": registered,
         "wants_role": identity["wants_role"],
         "wants_mission": identity["wants_mission"],
+        # Which side of the compass A/B this session is on. Recorded here so
+        # a later `ab_seed` change cannot rewrite what already happened; the
+        # value is "on" for every session while the experiment is disabled,
+        # which is the shipped default (compass/config.json).
+        "compass_arm": _compass_arm(sid.short),
     }
     identity_file.parent.mkdir(parents=True, exist_ok=True)
     identity_file.write_text(json.dumps(identity_data), encoding="utf-8")

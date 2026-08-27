@@ -81,8 +81,16 @@ Compass state lives at `<state-dir>/compass/`. All paths are git-ignored (the ap
 | `compass/observations/archive/<iso-year>-<iso-week>/` | Archived observations (moved when active count ≥ 50 AND age ≥ 90 days) |
 | `compass/personality.md` | Synthesized personality profile, regenerated weekly. Read at startup by `/apiary-context` |
 | `compass/corrections.md` | Optional manual high-weight evidence the synthesizer treats above raw observations |
+| `compass/evaluate/last.json` | Cached headline from the last `compass/evaluate.py offline` run, read by `apiary doctor compass` |
 
-The dimensions config (`compass/dimensions.json`) ships in the apiary repo, not under per-target state — it's source code, not state.
+The dimensions config (`compass/dimensions.json`), the measurement label
+vocabulary (`compass/label_vocabulary.json`) and the A/B config
+(`compass/config.json`) ship in the apiary repo, not under per-target
+state — they're source code, not state.
+
+The compass A/B arm for a session is recorded as `compass_arm` inside that
+session's identity file (`<state-dir>/sessions/identity-<sid8>.json`), not
+under `compass/`.
 
 ## Refiner data
 

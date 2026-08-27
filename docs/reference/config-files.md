@@ -111,6 +111,22 @@ List of personality dimensions the compass synthesizer extracts and emits. Locat
 
 Adding a dimension: edit the JSON, then re-run any backfill or wait for the next `/wrapup` and weekly synthesis to start populating it. Removing a dimension: existing observations with that dimension will fail validation; archive or delete them first.
 
+## compass/config.json
+
+Compass runtime config, controlling the live A/B on profile injection. Located at `compass/config.json` (in the repo — source, not state). `$APIARY_COMPASS_CONFIG` points at an alternate file; tests use it.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `ab_enabled` | bool | `false` | When false (shipped default) **nothing changes**: every session is in arm `on` and `personality.md` is injected as always. Set true to start splitting sessions |
+| `ab_seed` | string | `"compass-ab-2026-08"` | Salt for the per-session coin flip. Change it only to start a fresh measurement window — changing it mid-window makes the two halves incomparable |
+| `ab_on_fraction` | float | `0.5` | Share of sessions in the injected arm. `0` sends everyone to `off`, `1` to `on` |
+
+A malformed or missing file reads as the defaults (A/B off) — this is loaded from a startup hook and must never break session start. See [Compass Measurement Programme](../architecture/compass-measurement.md).
+
+## compass/label_vocabulary.json
+
+Target definition for `compass/evaluate.py offline`: `{"labels": {<dimension>: {<label>: [cue, ...]}}}`. The labels are the poles named in that dimension's `description` in `dimensions.json`; the cues are case-insensitive substrings counted over an observation's `observation` text. Editing this file changes the metric — do it before a measurement window, never inside one. `compass/evaluate.py labels` prints the current vocabulary.
+
 ## budgeter/config.json
 
 Global budgeter configuration. Located in the repo at `budgeter/config.json`.

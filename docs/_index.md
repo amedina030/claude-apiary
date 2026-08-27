@@ -17,6 +17,7 @@ Framework version: **1.0** | Last updated: 2026-04-02
 - [System Overview](architecture/system-overview.md) — Component map and data flow
 - [Hook Lifecycle](architecture/hook-lifecycle.md) — PRE-to-PRE delta pattern and agent handling
 - [Per-Repo Install Model](architecture/per-repo-install.md) — Pin model, drift detection, cascade-fix
+- [Compass Measurement Programme](architecture/compass-measurement.md) — Offline predictive validity, the live A/B, the doctor health check, and the proposed keep/delete rule
 
 ## Standards
 

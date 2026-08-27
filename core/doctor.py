@@ -19,6 +19,10 @@ Subcommands:
 - ``orphans``       — folders under ``.repos/<slug>/`` with no registry entry
 - ``duplicates``    — registry entries sharing a ``real_path``
 - ``unreachable``   — registry entries whose ``real_path`` does not exist
+- ``compass``       — compass measurement health: observation count, last
+                      synthesis age, profile size, A/B arm counts and the
+                      last ``compass/evaluate.py offline`` headline
+                      (report-only — always notes, never issues)
 - (no arg)          — run all checks, print a summary
 
 Usage::
@@ -393,6 +397,26 @@ def check_unreachable(apiary: Path) -> CheckResult:
     return notes, issues
 
 
+def check_compass(apiary: Path) -> CheckResult:
+    """Report compass's measurement health for main-apiary's own state dir.
+
+    Report-only on purpose: every finding is a note, never an issue. A stale
+    profile or an A/B that has not been turned on is information the owner
+    asked for (review §5a-H.3), not a broken install, and this check shares
+    the doctor's exit code with checks that gate CI.
+    """
+    notes: list[str] = []
+    try:
+        from compass import health
+        state_dir = state.find_state_dir(apiary)
+        if state_dir is None:
+            return ["compass: no state dir registered for main-apiary"], []
+        notes = health.format_notes(health.collect(state_dir))
+    except Exception as exc:  # never let a report-only check fail a doctor run
+        notes = [f"compass: could not read health facts ({exc})"]
+    return notes, []
+
+
 CHECKS = {
     "pointers": check_pointers,
     "pins": check_pins,
@@ -402,6 +426,7 @@ CHECKS = {
     "orphans": check_orphans,
     "duplicates": check_duplicates,
     "unreachable": check_unreachable,
+    "compass": check_compass,
 }
 
 

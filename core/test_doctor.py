@@ -463,5 +463,41 @@ class FixPinsTests(unittest.TestCase):
         self.assertEqual(rc, 1)
 
 
+class CheckCompassTests(unittest.TestCase):
+    """`doctor compass` is report-only: notes always, issues never."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.apiary = _make_apiary(self.root)
+
+    def test_unregistered_apiary_reports_a_note_not_an_issue(self):
+        notes, issues = doctor.check_compass(self.apiary)
+        self.assertEqual(issues, [])
+        self.assertTrue(any("compass" in n for n in notes))
+
+    def test_reports_the_facts_for_a_registered_state_dir(self):
+        state.write_self_pointer(self.apiary, {
+            "uid": 1, "name": "apiary", "real_path": str(self.apiary),
+        })
+        state.write_main_apiary_pointer(self.apiary, {
+            "main_apiary_path": str(self.apiary), "main_apiary_uid": 1,
+        })
+        state_dir = state.repos_dir(self.apiary) / "apiary-1"
+        (state_dir / "compass" / "observations").mkdir(parents=True)
+        (state_dir / "compass" / "observations" / "aaaa0001.json").write_text(
+            "{}", encoding="utf-8")
+        notes, issues = doctor.check_compass(self.apiary)
+        self.assertEqual(issues, [])
+        joined = " ".join(notes)
+        self.assertIn("observations: 1 active", joined)
+        self.assertIn("A/B:", joined)
+
+    def test_compass_is_in_the_all_checks_run(self):
+        self.assertIn("compass", doctor.CHECKS)
+        self.assertEqual(doctor.main(["compass", "--apiary-repo", str(self.apiary)]), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

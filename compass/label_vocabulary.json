@@ -1,0 +1,60 @@
+{
+  "_comment": [
+    "Target definition for compass/evaluate.py offline.",
+    "",
+    "Compass observations are free text. To score a prediction you need a",
+    "finite target, so each dimension is reduced to ONE label from a fixed",
+    "two-or-three-way vocabulary. The labels are the poles named in that",
+    "dimension's own `description` field in dimensions.json - they are not",
+    "invented for the metric and they are not tuned against the corpus.",
+    "",
+    "Reduction rule (compass/evaluate.py:reduce_label): lowercase the",
+    "`observation` text (never `evidence` - that is a raw session quote and",
+    "carries the user's words, not the claim), count case-insensitive",
+    "substring hits for every cue of every label, take the argmax. Zero hits",
+    "or a tie between the top two labels returns no label; those pairs are",
+    "excluded from accuracy and reported as coverage/abstentions.",
+    "",
+    "Adding cues changes the metric. Do it before a measurement window, never",
+    "in the middle of one, and never to make a number move."
+  ],
+  "labels": {
+    "communication_style": {
+      "terse": ["terse", "brief", "short", "concise", "minimal", "one-word", "single-word", "lowercase", "clipped", "fragment", "shorthand", "ceremony", "few words", "telegraphic", "compressed", "sparse"],
+      "verbose": ["verbose", "detailed", "at length", "long-form", "elaborate", "expansive", "thorough explanation", "paragraphs", "wordy", "full sentences", "narrates"]
+    },
+    "decision_making": {
+      "deliberate": ["tradeoff", "trade-off", "weighs", "deliberate", "alternatives", "defers", "defer", "delay", "more data", "analysis", "evaluates", "compares", "thinks out loud", "park", "explores", "uncertainty", "before committing"],
+      "decisive": ["decisive", "decides quickly", "commits", "immediately", "without hesitation", "snap", "settles", "closes the question", "moves fast", "picks one", "go-ahead", "fast", "quickly", "reverses", "reverse a", "flips", "without hedging", "sunk-cost", "cheap and reversible", "re-scopes", "scope-cut"]
+    },
+    "pushback": {
+      "interrogative": ["why", "question", "asks", "probes", "probe", "challenge", "justification", "clarif", "socratic", "not-simpler", "requests reasoning"],
+      "blunt": ["rejects", "rejection", "refuses", "blunt", "flatly", "hard stop", "overrules", "dismisses", "shuts down", "counterexample", "interrupt", "corrects", "veto", "without softening"]
+    },
+    "engagement": {
+      "directive": ["delegates", "delegation", "directive", "hands off", "orchestrat", "sets priorities", "offloads", "assigns", "top-down", "steers", "without micro", "hands-off"],
+      "collaborative": ["collaborat", "co-design", "in the loop", "involved", "iterates", "discusses", "together", "back-and-forth", "jointly", "pair", "wants to be part", "hands-on", "walks through", "checkpoint", "piece by piece", "confirming the approach", "attentive", "fact-check"]
+    },
+    "autonomy": {
+      "broad": ["broad", "without check-in", "no check-in", "latitude", "unattended", "proceed without", "free rein", "run ahead", "keep going", "uninterrupted", "long stretches", "full autonomy", "grants autonomy", "delegat", "trusts the assistant", "trusts claude", "grants", "high autonomy", "lets the assistant", "without mid-flight", "entire phases"],
+      "gated": ["gate", "check-in", "checks in", "asks before", "approval", "confirm", "permission", "wants to be asked", "authoriz", "authoris", "stop and ask", "pause before", "explicit go-ahead", "intervenes", "steps in", "veto", "surface decision", "retains", "bounded", "boundaries"]
+    },
+    "risk_tolerance": {
+      "tolerant": ["comfortable", "tolerant", "just try", "willing", "accepts the risk", "ships", "greenlight", "destructive", "no review gate", "high tolerance", "unbothered", "routine cleanup"],
+      "cautious": ["cautious", "verify first", "careful", "hesitant", "safeguard", "backup", "dry-run", "defensive", "prefers the safe", "guards against", "risk-averse", "premature", "robust"]
+    },
+    "trust_calibration": {
+      "verifies": ["verif", "check", "skeptic", "sceptic", "proof", "confirm", "evidence", "audits", "double-check", "wants the reasoning", "shown", "empirical", "does not take"],
+      "accepts": ["at face value", "trusts", "without checking", "defers to the assistant", "accepts the recommendation", "unquestion", "takes the assistant"]
+    },
+    "meta_awareness": {
+      "reflective": ["meta", "steps back", "reflect", "working relationship", "the process itself", "the system itself", "notices", "audits the", "session-aware", "collaboration itself", "retrospect", "self-aware", "steps out"],
+      "task_focused": ["stays on the task", "no reflection", "immediate task only", "purely operational", "does not step back", "heads-down", "task-only"]
+    },
+    "mood_tone": {
+      "positive": ["calm", "enthusias", "pleased", "satisfied", "energiz", "curious", "patient", "upbeat", "warm", "encouraging", "good humor", "cheerful", "even-keeled", "content", "approving", "relaxed", "unbothered"],
+      "negative": ["frustrat", "annoyed", "impatient", "tired", "irritat", "exasperat", "fatigue", "low-energy", "low energy", "stressed", "weary", "agitated", "low appetite", "low-appetite"],
+      "neutral": ["neutral", "steady", "matter-of-fact", "businesslike", "workmanlike", "measured", "transactional", "even-tempered"]
+    }
+  }
+}

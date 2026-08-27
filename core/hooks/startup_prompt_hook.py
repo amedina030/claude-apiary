@@ -58,6 +58,21 @@ def _hook_state_dir() -> Path:
     return state_dir_from_env() or (PROJECT_ROOT / ".apiary")
 
 
+def _compass_arm_on(sid: SessionId) -> bool:
+    """Whether this session is in the compass A/B's injection arm.
+
+    True for every session while the experiment is disabled, which is the
+    shipped default — so this is a no-op until the owner turns the A/B on
+    (compass/config.json, docs/compass-measurement.md). Any failure means
+    "inject", so a broken config can never silently strip the profile.
+    """
+    try:
+        from compass.ab import ARM_OFF, arm_for_session
+        return arm_for_session(sid.short) != ARM_OFF
+    except Exception:
+        return True
+
+
 def _log_sanitizer_hits(site: str, hits: dict[str, int], session_id: str) -> None:
     """Append one JSONL line when the sanitizer scrubbed at least one pattern.
 
@@ -227,7 +242,7 @@ def run(payload: dict):
     # the profile that shapes tone/verbosity/autonomy is guaranteed loaded,
     # rather than relying on the skill's cat-if-exists snippet. find_state_dir
     # is read-only (no auto-registration), so it is safe to call from a hook.
-    if not skip_notes_injection:
+    if not skip_notes_injection and _compass_arm_on(sid):
         try:
             state_dir = find_state_dir(session_repo_root)
             if state_dir is not None:

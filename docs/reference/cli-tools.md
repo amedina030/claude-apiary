@@ -144,6 +144,7 @@ python core/doctor.py [subcommand] [--fix] [--apiary-repo PATH]
 | `orphans` | Folders under `.repos/<slug>/` whose UID has no registry entry |
 | `duplicates` | Registry entries sharing a `real_path` |
 | `unreachable` | Registry entries whose `real_path` does not exist on disk |
+| `compass` | Compass measurement health for main-apiary's own state dir: observation counts, `personality.md` size and synthesis age (warns above 14 days), A/B arm counts, and the last `compass/evaluate.py offline` headline. Report-only — always notes, never issues, so it cannot fail a doctor run. See [Compass Measurement Programme](../architecture/compass-measurement.md) |
 
 ### Flags
 
@@ -332,6 +333,42 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/backf
 | `--model MODEL` | no | Override the claude CLI's default model |
 
 Exit codes: `0` at least one file written; `1` no selectors / no matches / nothing written; `2` claude subprocess failed for every selected session.
+
+## compass/evaluate.py
+
+Measure whether the personality profile carries signal (review §5a-H). Design, metric definition, honesty caveats, and the proposed keep/delete rule: [Compass Measurement Programme](../architecture/compass-measurement.md).
+
+```bash
+python compass/evaluate.py offline                                   # stub synthesiser, free
+python compass/evaluate.py offline --model opus --max-folds 20       # prints a cost estimate only
+python compass/evaluate.py offline --model opus --max-folds 20 --yes # spends it
+python compass/evaluate.py ab --since 2026-09-01
+python compass/evaluate.py labels
+```
+
+### Subcommands
+
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `offline` | `evaluate.py offline [--dry-run] [--model M] [--max-folds N] [--yes] [--json] [--no-cache]` | Leave-one-out predictive validity over the observation files: does a profile synthesized from the other sessions predict a held-out session's per-dimension labels? Reports micro/macro accuracy, majority and random baselines, lift, coverage and per-dimension precision, and caches the headline to `<state-dir>/compass/evaluate/last.json` |
+| `ab` | `evaluate.py ab [--since YYYY-MM-DD] [--log PATH] [--json]` | Join the per-session A/B arm against budgeter outcome proxies (tool calls per task, corrections per task, net tokens per task) and print both arms with n |
+| `labels` | `evaluate.py labels [--json]` | Print the per-dimension label vocabulary — the metric's target definition |
+
+### Flags
+
+| Flag | Applies to | Description |
+|------|-----------|-------------|
+| `--state-dir PATH` | all | Evaluate another target's compass state (sets `$APIARY_TARGET_STATE_DIR`) |
+| `--dry-run` | offline | Force the deterministic stub synthesizer. This is already the default when `--model` is absent; no model is ever called |
+| `--model MODEL` | offline | Run the real `synthesize.py` prompt once per fold with this model alias. Costs one `claude -p` call per fold |
+| `--max-folds N` | offline | Stop after N folds — use with `--model` to bound spend |
+| `--yes` | offline | Confirm the printed cost estimate and actually run `--model`. Without it the estimate prints and nothing is spent (exit 2) |
+| `--no-cache` | offline | Do not write the headline to the state dir |
+| `--since YYYY-MM-DD` | ab | Only count budgeter log rows on/after this date |
+| `--log PATH` | ab | Budgeter usage log path (default: budgeter's own) |
+| `--json` | offline, ab, labels | Emit machine-readable output instead of the table |
+
+Exit codes: `0` evaluation ran; `1` not enough data (fewer than two valid observation files, or an empty budgeter log); `2` usage error, or a `--model` run declined for want of `--yes`.
 
 ## incubator/cli.py
 
@@ -1027,7 +1064,7 @@ to a single-purpose module under `core/`.
 | `install` | `apiary install --target <repo> [--profile <name>]` | Bootstrap apiary into a target repo (`core/install.py`). Idempotent. |
 | `uninstall` | `apiary uninstall --target <repo> [--remove-data]` | Reverse of install (`core/uninstall.py`). |
 | `self-bootstrap` | `apiary self-bootstrap` | First-machine setup of main-apiary; equivalent to running `install --target` on main-apiary itself (`core/self_bootstrap.py`). |
-| `doctor` | `apiary doctor [check] [--fix]` | Consistency checks (`core/doctor.py`). Checks: `pointers`, `pins`, `registry`, `versions`, `stale`, `orphans`, `duplicates`, `unreachable` — name one, or omit to run all. See the `core/doctor.py` section for what each reports. |
+| `doctor` | `apiary doctor [check] [--fix]` | Consistency checks (`core/doctor.py`). Checks: `pointers`, `pins`, `registry`, `versions`, `stale`, `orphans`, `duplicates`, `unreachable`, `compass` — name one, or omit to run all. See the `core/doctor.py` section for what each reports. |
 | `cascade-fix` | `apiary cascade-fix` | Rewrite every bootstrapped repo's `main-apiary-pointer.json` to the current main-apiary path (`core/cascade.py`). |
 | `version` | `apiary version` | Print main-apiary's pinned version (the contents of `<main-apiary>/VERSION`). |
 
