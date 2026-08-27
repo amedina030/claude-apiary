@@ -94,4 +94,5 @@ cannot quietly join it.
 | `gui/packaging/make_icon.py` | build script, not an argparse CLI | [cli-tools.md](cli-tools.md#guipackagingmake_iconpy) |
 | `core/hooks/dispatch.py` | one hand-parsed positional verb (argparse would cost an import on the hottest path) | [hooks.md](hooks.md#the-dispatcher) |
 | `docs/docgen.py` | library shared by the doc generators | [cli-tools.md](cli-tools.md#docsdocgenpy) |
+| `docs/test_doc_examples.py` | pytest module, not a CLI | [cli-tools.md](cli-tools.md#docstest_doc_examplespy) |
 | `Test scripts` | prose category, not a tool | [cli-tools.md](cli-tools.md#test-scripts) |

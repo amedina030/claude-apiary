@@ -1370,6 +1370,23 @@ Library shared by both generators: sentinel-block find/replace, markdown table
 parse/render, and the `--check`/`--write` harness. Not a CLI — running it
 prints its own docstring.
 
+## docs/test_doc_examples.py
+
+Not a CLI either: a pytest module that extracts every ```` ```bash ```` block
+in the documentation set (this file, the rest of `docs/`, `README.md`,
+`SETUP.md`, `PORTABILITY.md`, `RELEASING.md`, every `<tool>/commands/*.md` and
+every `<tool>/CLAUDE.md`), finds the apiary invocation behind any launcher
+wrapper, and re-runs it as `<target> [<subcommand>] --help`. A documented
+command that no longer parses, a documented path that does not exist, a
+subcommand or flag argparse dropped — each fails the suite. 214 invocations
+are covered today.
+
+Real arguments are dropped on purpose: a doc example is full of placeholders,
+and several of these commands spawn Claude or write state. `--help` exercises
+the one part that rots — the parser.
+
+Put `<!-- no-run -->` on the line before a fence to skip that block.
+
 ## docs/check_cli_claims.py
 
 Reconcile the CLI claims in `cli-tools.md` against each tool's real argparse — reports drift when a documented subcommand/flag no longer exists, or a real one is undocumented. Sibling to `docs/check.py`; report-only, never rewrites the doc. Shells out to each tool's `--help`. Mark intentional omissions with an inline `<!-- cli-claims: ignore: --some-flag, somesubcmd -->` anywhere in a tool's section.

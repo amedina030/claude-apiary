@@ -59,6 +59,7 @@ SKIP_HEADERS = {
                                     # hand-parsed — argparse would cost an
                                     # import on the hottest path in the toolkit
     "docs/docgen.py",               # library shared by the generators
+    "docs/test_doc_examples.py",    # pytest module, not a CLI
     "Test scripts",                 # prose category, not a tool
 }
 
