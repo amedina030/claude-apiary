@@ -140,9 +140,9 @@ class DoctorVerbTests(unittest.TestCase):
 
     def test_check_fix_and_apiary_repo_are_forwarded_in_order(self):
         _, forwarded = self._forwarded([
-            "doctor", "mailbox", "--fix", "--apiary-repo", "main/apiary",
+            "doctor", "pointers", "--fix", "--apiary-repo", "main/apiary",
         ])
-        self.assertEqual(forwarded, ["mailbox", "--fix", "--apiary-repo", str(Path("main/apiary"))])
+        self.assertEqual(forwarded, ["pointers", "--fix", "--apiary-repo", str(Path("main/apiary"))])
 
     def test_doctor_exit_code_is_propagated(self):
         rc, _ = self._forwarded(["doctor", "registry"], rc_from_doctor=1)
@@ -169,18 +169,6 @@ class DoctorFixSeamTests(unittest.TestCase):
         m.assert_called_once_with(self.apiary)
         self.assertIn("[pointers --fix]", out)
 
-    def test_mailbox_fix_reaches_the_mailbox_writer(self):
-        with mock.patch(
-            "core.mailbox.process_pending",
-            return_value={"processed": 0, "applied": [], "errors": []},
-        ) as m:
-            rc, out = _main([
-                "doctor", "mailbox", "--fix", "--apiary-repo", str(self.apiary),
-            ])
-        self.assertEqual(rc, 0)
-        m.assert_called_once_with(self.apiary)
-        self.assertIn("[mailbox --fix]", out)
-
     def test_fix_on_a_check_without_a_writer_exits_2(self):
         rc, _ = _main([
             "doctor", "registry", "--fix", "--apiary-repo", str(self.apiary),
@@ -190,67 +178,6 @@ class DoctorFixSeamTests(unittest.TestCase):
     def test_fix_without_a_check_exits_2(self):
         rc, _ = _main(["doctor", "--fix", "--apiary-repo", str(self.apiary)])
         self.assertEqual(rc, 2)
-
-
-class MailboxVerbTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.apiary = Path(self._tmp.name)
-        patcher = mock.patch(
-            "core.utils.state.resolve_apiary_repo", return_value=self.apiary,
-        )
-        self.resolve = patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def test_bare_mailbox_drains_the_queue(self):
-        with mock.patch("core.mailbox.process_pending",
-                        return_value={"processed": 1, "applied": [], "errors": []}) as proc, \
-             mock.patch("core.mailbox.list_pending") as listing:
-            rc, out = _main(["mailbox"])
-        self.assertEqual(rc, 0)
-        proc.assert_called_once_with(self.apiary)
-        listing.assert_not_called()
-        self.assertIn("processed 1 message(s)", out)
-
-    def test_process_errors_exit_nonzero(self):
-        with mock.patch(
-            "core.mailbox.process_pending",
-            return_value={"processed": 1, "applied": [],
-                          "errors": [{"file": "a.json", "reason": "bad"}]},
-        ):
-            rc, out = _main(["mailbox"])
-        self.assertEqual(rc, 1)
-        self.assertIn("a.json", out)
-
-    def test_list_inspects_without_draining(self):
-        msg_path = self.apiary / "0001.json"
-        with mock.patch("core.mailbox.list_pending", return_value=[msg_path]) as listing, \
-             mock.patch("core.mailbox.read_message",
-                        return_value={"kind": "update_path", "from_uid": 7,
-                                      "new_path": "/elsewhere"}), \
-             mock.patch("core.mailbox.process_pending") as proc:
-            rc, out = _main(["mailbox", "--list"])
-        self.assertEqual(rc, 0)
-        listing.assert_called_once_with(self.apiary)
-        proc.assert_not_called()
-        self.assertIn("1 pending message(s)", out)
-        self.assertIn("update_path", out)
-
-    def test_list_tolerates_a_malformed_message(self):
-        with mock.patch("core.mailbox.list_pending",
-                        return_value=[self.apiary / "0001.json"]), \
-             mock.patch("core.mailbox.read_message", return_value=None):
-            rc, out = _main(["mailbox", "--list"])
-        self.assertEqual(rc, 0)
-        self.assertIn("<malformed>", out)
-
-    def test_apiary_repo_is_forwarded_to_the_resolver(self):
-        with mock.patch("core.mailbox.process_pending",
-                        return_value={"processed": 0, "applied": [], "errors": []}):
-            rc, _ = _main(["mailbox", "--apiary-repo", "main/apiary"])
-        self.assertEqual(rc, 0)
-        self.resolve.assert_called_once_with(Path("main/apiary"))
 
 
 class CascadeFixVerbTests(unittest.TestCase):
@@ -302,7 +229,7 @@ class ParserContractTests(unittest.TestCase):
         self.assertEqual(
             {s.strip() for s in match.group(1).split(",")},
             {"install", "uninstall", "self-bootstrap", "doctor",
-             "mailbox", "cascade-fix", "version"},
+             "cascade-fix", "version"},
         )
 
 

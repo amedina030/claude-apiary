@@ -4,7 +4,7 @@ title: Per-Repo Install Model
 scope: project
 description: How apiary is installed, where state lives, and how drift is detected after the per-repo migration (2026-05)
 framework_version: "1.0"
-last_verified: 2026-05-06
+last_verified: 2026-08-26
 ---
 
 # Per-Repo Install Model
@@ -51,7 +51,6 @@ where it lives, and how the parts coordinate.
       flags/*-enabled                            # toggle flags
   CLAUDE.md                                      # apiary-managed zone + project rules
   .apiary/                                       # main-apiary-specific
-    forwarding/<uid>.json                        # mailbox messages from bootstrapped repos
     gui/apiary_gui[_profile]/                    # GUI state files
     legacy/orphan-*.json                         # phase-3 migration leftovers (one-time review)
   .repos/                                        # the registry
@@ -95,7 +94,6 @@ where it lives, and how the parts coordinate.
 | Self-location pointer | `<repo>/.claude/apiary/self-pointer.json` | per-repo |
 | Version pin | `<repo>/.claude/apiary/version.json` | per-repo |
 | Registry of all repos | `<main-apiary>/.repos/registry.json` | main-apiary |
-| Drift mailbox | `<main-apiary>/.apiary/forwarding/<uid>.json` | main-apiary |
 | Migrations | `<main-apiary>/migrations/v<from>_to_v<to>.py` | main-apiary |
 | Apiary-managed CLAUDE.md zone | `<repo>/CLAUDE.md` | per-repo |
 | Toggle flags | `<repo>/.claude/apiary/flags/<flag>-enabled` | per-repo |
@@ -166,40 +164,22 @@ On every session open in a bootstrapped repo, the PreToolUse hook
    and skip — sessions still run vanilla.
 3. Compute drift = `self.real_path != cwd`.
 4. No drift → refresh `last_drift_check` and return.
-5. Drift → classify move-vs-copy:
+5. Drift → take `FileLock(<main-apiary>/.repos/registry.json)` and classify
+   move-vs-copy, applying the registry update under that same lock:
    - **Copy**: registry entry's `real_path` exists with a self-pointer
      claiming the same uid → allocate a new uid via
      `core.utils.state.allocate_next_id`, overwrite our self-pointer with
-     the new uid, queue a `register_copy` mailbox message.
+     the new uid, then write a fresh registry entry for it.
    - **Move**: otherwise → update our self-pointer's `real_path` to cwd,
-     queue an `update_path` mailbox message.
+     then rewrite the existing entry's `real_path` + `last_used`. If the
+     registry has no entry for our uid it is left alone and the report
+     names `apiary install --target <repo>` as the repair.
+
+The handler already holds the registry lock for the classification, so
+there is no queue and no second consumer: the registry is correct the
+moment the moved repo's first tool call returns.
 
 Hooks must always exit 0 — a buggy drift handler can never block a tool call.
-
-## Mailbox (`core/mailbox.py`)
-
-Bootstrapped repos drop drift notifications at
-`<main-apiary>/.apiary/forwarding/<uid>.json`. Schema:
-
-```json
-{
-  "schema_version": 1,
-  "from_uid": 7,
-  "kind": "update_path" | "register_copy",
-  "old_path": "/abs/old",
-  "new_path": "/abs/new",
-  "name": "HexWorld",
-  "version": "0.1.0",
-  "ts": "2026-05-05T22:14:33Z"
-}
-```
-
-One file per repo per pending message — duplicate messages from the same
-uid collapse to the latest claim. Main-apiary processes the mailbox under
-the registry FileLock on its own session open and on
-`apiary doctor mailbox --fix`. Mailbox is single-consumer (only main-apiary
-processes it); bootstrapped repos are multiple producers, but each writes
-its own uid-named file so writes don't collide.
 
 ## Cascade-fix (`core/cascade.py`)
 
@@ -237,8 +217,8 @@ other code path is read-only with respect to bootstrapped repos.
 |---|---|---|
 | `pointers` | Main-apiary's self-pointer matches its actual location | Cascade-fix all repos |
 | `registry` | Every entry has uid + version; `real_path` exists | Report only |
-| `mailbox` | Pending forwarding messages | Drain and apply |
 | `versions` | Each repo's pinned version vs main-apiary's | Report which need `apiary update` |
+| `stale` | Installed slash-command files differ from main-apiary source | Report only |
 | `orphans` | `.repos/<slug>/` folders whose UID has no registry entry | Report only |
 | `duplicates` | Two registry entries sharing a `real_path` | Report only |
 | `unreachable` | Registry entries pointing at non-existent paths | Report only |
@@ -258,7 +238,6 @@ The `apiary` console_script (registered by `pyproject.toml`, source at
 | `apiary uninstall --target <repo>` | Reverse install. `--remove-data` also deletes per-target state. |
 | `apiary self-bootstrap` | Bootstrap main-apiary against itself |
 | `apiary doctor [check]` | Consistency checks |
-| `apiary mailbox` | Process pending mailbox messages |
 | `apiary cascade-fix` | Manually run cascade-fix |
 | `apiary version` | Print main-apiary's pinned version |
 
@@ -271,7 +250,6 @@ Code hooks).
 - **Main-apiary IS a bootstrapped repo.** It has its own `.claude/apiary/{...}`
   pin files. Its main-apiary-pointer.json points at itself. UID 1 by
   convention.
-- **The mailbox is single-consumer.** Only main-apiary processes it.
 - **`name` is set at first bootstrap from the basename and doesn't change
   on move.** `myproject-7` stays `myproject-7` even after `mv myproject foo/`.
 - **`version.json` is per-clone state, gitignored.** Different clones can
@@ -280,8 +258,8 @@ Code hooks).
 - **Per-repo CLAUDE.md preserves user-owned content** around the apiary
   zone. `apiary install` only writes/updates the bounded zone.
 - **Allocator is single source of truth.** `core.utils.state.allocate_next_id`
-  is the sole UID allocator. Bootstrap, drift handler's copy branch, and
-  mailbox processor all use it under the registry FileLock.
+  is the sole UID allocator. Bootstrap and the drift handler's copy branch
+  both use it under the registry FileLock.
 - **`~/.claude/projects/<project-key>/`** is read-only from apiary's POV.
   Compass reads transcripts from there. Apiary never writes there — that's
   Claude Code's directory.

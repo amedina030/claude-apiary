@@ -286,7 +286,7 @@ poetry run apiary cascade-fix
 
 ## Moving a bootstrapped repo
 
-Open a Claude session inside the moved repo. The drift handler detects the move, queues an `update_path` message into main-apiary's mailbox at `<main-apiary>/.apiary/forwarding/<uid>.json`. On main-apiary's next session (or `apiary doctor mailbox --fix`), the registry's `real_path` is updated.
+Open a Claude session inside the moved repo. The drift handler detects the move and updates the repo's `self-pointer.json` and its `real_path` in `<main-apiary>/.repos/registry.json` in the same pass — nothing else to run. If the registry has no entry for the repo's uid (registry loss), the handler says so and re-running `apiary install --target <repo>` re-registers it.
 
 ---
 

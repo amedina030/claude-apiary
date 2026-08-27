@@ -16,7 +16,7 @@ Framework version: **1.0** | Last updated: 2026-04-02
 
 - [System Overview](architecture/system-overview.md) — Component map and data flow
 - [Hook Lifecycle](architecture/hook-lifecycle.md) — PRE-to-PRE delta pattern and agent handling
-- [Per-Repo Install Model](architecture/per-repo-install.md) — Pin model, drift detection, mailbox, cascade-fix
+- [Per-Repo Install Model](architecture/per-repo-install.md) — Pin model, drift detection, cascade-fix
 
 ## Standards
 
@@ -30,7 +30,7 @@ Framework version: **1.0** | Last updated: 2026-04-02
 
 - [Deep Review 2026-08 (LLM edition)](review/review-for-llm.md) — Repo-wide assessment with file:line evidence, verdicts, and a phased remediation plan for an LLM executor
 - [Deep Review 2026-08 (plain-language edition)](review/review-for-human.md) — The same assessment for a person: what's good, what's broken, what to keep/drop, what to decide
-- [Core subsystem review](review/subsystems/core.md) — Appendix: install/registry/drift/mailbox/doctor, hooks, shared utilities
+- [Core subsystem review](review/subsystems/core.md) — Appendix: install/registry/drift/doctor, hooks, shared utilities
 - [Runner subsystem review](review/subsystems/runner.md) — Appendix: six-stage orchestrator, detached mode, schedulers
 - [GUI subsystem review](review/subsystems/gui.md) — Appendix: PyWebView wrapper, pty, transcript tail, permission MCP
 - [Knowledge tools review](review/subsystems/knowledge.md) — Appendix: scribe, compass, researcher, captures, refiner

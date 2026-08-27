@@ -8,21 +8,16 @@ tested in isolation:
     apiary uninstall --target <repo>   core/uninstall.py
     apiary self-bootstrap              core/self_bootstrap.py
     apiary doctor [check] [--fix]      core/doctor.py
-    apiary mailbox                     core/mailbox.py
     apiary cascade-fix                 core/cascade.py
     apiary version                     prints <main-apiary>/VERSION
 
 Run from inside a clone of main-apiary, or from a bootstrapped repo where
 the per-repo launcher resolves main-apiary via the pointer file. Either
 way the script needs to find main-apiary; pass ``--apiary-repo`` to override.
-
-See MIGRATION-PLAN.md §14.6 for the design decision behind a single CLI
-versus the legacy collection of standalone scripts.
 """
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -93,29 +88,6 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return doctor.main(forwarded)
 
 
-def _cmd_mailbox(args: argparse.Namespace) -> int:
-    from core import mailbox
-    apiary = state.resolve_apiary_repo(args.apiary_repo)
-    if args.list:
-        pending = mailbox.list_pending(apiary)
-        print(f"{len(pending)} pending message(s)")
-        for p in pending:
-            msg = mailbox.read_message(p)
-            if msg:
-                print(f"  {p.name}: {msg['kind']} from_uid={msg['from_uid']} "
-                      f"new_path={msg.get('new_path')}")
-            else:
-                print(f"  {p.name}: <malformed>")
-        return 0
-    report = mailbox.process_pending(apiary)
-    print(f"processed {report['processed']} message(s)")
-    for entry in report["applied"]:
-        print(f"  applied: uid={entry['uid']} kind={entry['kind']} new_path={entry['new_path']}")
-    for err in report["errors"]:
-        print(f"  error: {err['file']} -> {err['reason']}")
-    return 0 if not report["errors"] else 1
-
-
 def _cmd_cascade(args: argparse.Namespace) -> int:
     from core import cascade as cascade_mod
     apiary = state.resolve_apiary_repo(args.apiary_repo).resolve()
@@ -175,11 +147,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_apiary_repo_arg(p_doctor)
     p_doctor.set_defaults(func=_cmd_doctor)
-
-    p_mailbox = sub.add_parser("mailbox", help="process pending forwarding messages")
-    p_mailbox.add_argument("--list", action="store_true", help="list pending messages without processing")
-    _add_apiary_repo_arg(p_mailbox)
-    p_mailbox.set_defaults(func=_cmd_mailbox)
 
     p_cascade = sub.add_parser(
         "cascade-fix",

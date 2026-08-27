@@ -42,7 +42,6 @@ def _make_main_apiary(root: Path) -> Path:
             shutil.copy2(src, apiary / item)
     _git_init(apiary)
     (apiary / ".repos").mkdir(exist_ok=True)
-    (apiary / ".apiary" / "forwarding").mkdir(parents=True, exist_ok=True)
     from core import self_bootstrap
     self_bootstrap.self_bootstrap(apiary)
     return apiary

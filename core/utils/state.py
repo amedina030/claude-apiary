@@ -138,8 +138,7 @@ def allocate_next_id(apiary_repo: Path) -> int:
     Public API. The single allocator for all UID-needing code paths:
     - ``resolve_target_state_dir`` (lazy auto-registration)
     - ``apiary install --target <repo>`` (per-repo bootstrap, post-migration)
-    - drift handler's copy-detection branch (``register_copy`` mailbox flow)
-    - mailbox processor (``register_copy`` message handling)
+    - drift handler's copy-detection branch (``core/drift.py``)
 
     Never call a parallel ID generator — the monotonic-only contract relies
     on a single source of allocations. New UIDs only ever increase, so they

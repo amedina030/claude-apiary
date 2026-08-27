@@ -43,7 +43,6 @@ def _make_fake_apiary(root: Path) -> Path:
         elif src.is_file():
             shutil.copy2(src, fake / item)
     (fake / ".repos").mkdir()
-    (fake / ".apiary" / "forwarding").mkdir(parents=True)
     return fake
 
 

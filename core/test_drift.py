@@ -1,7 +1,6 @@
 """Tests for ``core/drift.py`` — per-repo drift detection."""
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 import sys
@@ -12,7 +11,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from core import drift, mailbox
+from core import drift
 from core.utils import state
 
 _APIARY_ITEMS = (
@@ -43,7 +42,6 @@ def _make_main_apiary(root: Path) -> Path:
             shutil.copy2(src, apiary / item)
     _git_init(apiary)
     (apiary / ".repos").mkdir(exist_ok=True)
-    (apiary / ".apiary" / "forwarding").mkdir(parents=True, exist_ok=True)
     # Self-bootstrap so main-apiary's self-pointer + registry exist.
     from core import self_bootstrap
     self_bootstrap.self_bootstrap(apiary)
@@ -105,30 +103,50 @@ class CheckAndHandleTests(unittest.TestCase):
         self.assertEqual(report.action, "skip")
         self.assertIn("self-pointer out of sync", report.message)
 
-    def test_move_scenario_writes_update_path_message(self):
+    def test_move_scenario_updates_the_registry_inline(self):
         # Pretend the repo moved by overwriting its self-pointer's recorded path.
         sp = state.read_self_pointer(self.target)
         sp["real_path"] = str(self.root / "old-location")
         state.write_self_pointer(self.target, sp)
+        # ... and by pointing the registry entry at the same stale path, so
+        # the assertion below can only pass if the handler rewrote it.
+        registry = state._load_registry(self.apiary)
+        registry[str(self.uid)]["real_path"] = str(self.root / "old-location")
+        state._save_registry(self.apiary, registry)
 
         report = drift.check_and_handle(self.target)
         self.assertEqual(report.action, "move")
         self.assertEqual(report.old_uid, self.uid)
         self.assertEqual(report.new_uid, self.uid)
 
-        # Mailbox file written
-        msg_path = mailbox.message_path(self.apiary, self.uid)
-        self.assertTrue(msg_path.is_file())
-        msg = json.loads(msg_path.read_text(encoding="utf-8"))
-        self.assertEqual(msg["kind"], mailbox.KIND_UPDATE_PATH)
-        self.assertEqual(msg["from_uid"], self.uid)
-        self.assertEqual(Path(msg["new_path"]).resolve(), self.target.resolve())
+        # Registry updated in place — no second consumer needed.
+        entry = state._load_registry(self.apiary)[str(self.uid)]
+        self.assertEqual(Path(entry["real_path"]).resolve(), self.target.resolve())
+        self.assertIn("last_used", entry)
 
         # Self-pointer real_path now matches actual.
         sp_after = state.read_self_pointer(self.target)
         self.assertEqual(Path(sp_after["real_path"]).resolve(), self.target.resolve())
 
-    def test_copy_scenario_allocates_new_uid_and_writes_register_copy(self):
+    def test_move_with_no_registry_entry_reports_the_repair_step(self):
+        # Registry loss (e.g. a partially failed uninstall) leaves a pin file
+        # with no entry. The handler must not invent one, and must say so.
+        registry = state._load_registry(self.apiary)
+        registry.pop(str(self.uid), None)
+        state._save_registry(self.apiary, registry)
+        sp = state.read_self_pointer(self.target)
+        sp["real_path"] = str(self.root / "old-location")
+        state.write_self_pointer(self.target, sp)
+
+        report = drift.check_and_handle(self.target)
+        self.assertEqual(report.action, "move")
+        self.assertIn("no entry for uid", report.message)
+        self.assertNotIn(str(self.uid), state._load_registry(self.apiary))
+        # The self-pointer is still repaired so the launcher stays consistent.
+        sp_after = state.read_self_pointer(self.target)
+        self.assertEqual(Path(sp_after["real_path"]).resolve(), self.target.resolve())
+
+    def test_copy_scenario_allocates_new_uid_and_registers_it(self):
         # Copy the bootstrapped target to a new path. Since the original is
         # still on disk with the same uid, we should be classified as copy.
         copy_target = self.root / "demo-copy"
@@ -143,12 +161,16 @@ class CheckAndHandleTests(unittest.TestCase):
         copy_sp = state.read_self_pointer(copy_target)
         self.assertEqual(copy_sp["uid"], report.new_uid)
 
-        # Mailbox file written under the NEW uid (per §7.4 register_copy flow).
-        msg_path = mailbox.message_path(self.apiary, report.new_uid)
-        self.assertTrue(msg_path.is_file())
-        msg = json.loads(msg_path.read_text(encoding="utf-8"))
-        self.assertEqual(msg["kind"], mailbox.KIND_REGISTER_COPY)
-        self.assertEqual(msg["from_uid"], report.new_uid)
+        # ... and a registry entry of its own, written under the same lock.
+        registry = state._load_registry(self.apiary)
+        entry = registry[str(report.new_uid)]
+        self.assertEqual(entry["uid"], report.new_uid)
+        self.assertEqual(Path(entry["real_path"]).resolve(), copy_target.resolve())
+        # The original's entry is untouched.
+        self.assertEqual(
+            Path(registry[str(self.uid)]["real_path"]).resolve(),
+            self.target.resolve(),
+        )
 
 
 if __name__ == "__main__":

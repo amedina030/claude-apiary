@@ -238,7 +238,7 @@ def _write_per_repo_settings(
         for event, entries in builder().items():
             hooks.setdefault(event, []).extend(entries)
     # Per-repo-only drift check — runs first on PreToolUse so the rest
-    # of the chain sees an up-to-date self-pointer / mailbox state.
+    # of the chain sees an up-to-date self-pointer and registry entry.
     drift_cmd = hook_cmd(
         apiary / "core" / "hooks" / "per_repo_drift_check.py",
         repo_root=apiary, per_repo_launcher=True,

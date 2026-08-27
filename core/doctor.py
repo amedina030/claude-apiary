@@ -3,13 +3,12 @@
 
 Every check is read-only: running a check reports findings and mutates
 nothing. Passing ``--fix`` alongside a check name opts into that check's
-writer, where one exists — see ``FIXES`` below (``mailbox``, ``pointers``).
+writer, where one exists — see ``FIXES`` below (``pointers``).
 
 Subcommands:
 
 - ``pointers``      — main-apiary's self-pointer matches its actual cwd
 - ``registry``      — every registry entry: path exists; uid/version present
-- ``mailbox``       — count pending forwarding messages
 - ``versions``      — each registered repo's version vs main-apiary's VERSION
 - ``stale``         — registered repo whose installed slash-command files
                       differ from current main-apiary source (skill drift
@@ -23,7 +22,7 @@ Usage::
 
     poetry run apiary doctor
     poetry run apiary doctor registry
-    poetry run apiary doctor mailbox --fix
+    poetry run apiary doctor pointers --fix
 
 Exit code is 0 when all checks pass and 1 when any check reports a problem,
 so the doctor can be wired into CI or a pre-commit hook later.
@@ -108,24 +107,6 @@ def check_registry(apiary: Path) -> CheckResult:
                 f"real_path does not exist: {real_path}"
             )
     return notes, issues
-
-
-def check_mailbox(apiary: Path) -> CheckResult:
-    """Report pending forwarding messages.
-
-    Draining them is a write, so it lives behind ``--fix`` (:func:`_fix_mailbox`)
-    or the standalone ``apiary mailbox`` verb.
-    """
-    forwarding = apiary / ".apiary" / "forwarding"
-    if not forwarding.is_dir():
-        return [f"mailbox dir not yet created at {forwarding}"], []
-    pending = [p for p in forwarding.glob("*.json") if p.is_file()]
-    if not pending:
-        return [], []
-    return [], [
-        f"{len(pending)} pending forwarding message(s) at {forwarding} "
-        "— run `apiary doctor mailbox --fix` to drain them."
-    ]
 
 
 def check_versions(apiary: Path) -> CheckResult:
@@ -288,7 +269,6 @@ def check_unreachable(apiary: Path) -> CheckResult:
 CHECKS = {
     "pointers": check_pointers,
     "registry": check_registry,
-    "mailbox": check_mailbox,
     "versions": check_versions,
     "stale": check_stale,
     "orphans": check_orphans,
@@ -325,19 +305,6 @@ def _run_all(apiary: Path) -> int:
 # fix. Subcommands not in this dict don't have a fix yet — callers that
 # pass --fix to one of them get a clear "not implemented" message.
 
-def _fix_mailbox(apiary: Path) -> int:
-    """Drain the mailbox: apply pending update_path / register_copy messages."""
-    from core import mailbox
-    report = mailbox.process_pending(apiary)
-    print(f"[mailbox --fix] processed {report['processed']} message(s)")
-    for entry in report["applied"]:
-        print(f"  applied: uid={entry['uid']} kind={entry['kind']} "
-              f"new_path={entry['new_path']}")
-    for err in report["errors"]:
-        print(f"  error: {err['file']} -> {err['reason']}")
-    return 0 if not report["errors"] else 1
-
-
 def _fix_pointers(apiary: Path) -> int:
     """Cascade-fix all bootstrapped repos' main-apiary-pointer to the
     current main-apiary location. Idempotent."""
@@ -353,7 +320,6 @@ def _fix_pointers(apiary: Path) -> int:
 
 
 FIXES = {
-    "mailbox": _fix_mailbox,
     "pointers": _fix_pointers,
 }
 
