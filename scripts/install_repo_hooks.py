@@ -6,9 +6,9 @@ checkout itself — not Claude Code hooks, and unrelated to the per-repo
 install model. They live in main-apiary's ``.git/hooks/`` and reference
 sources in ``docs/hooks/`` and ``runner/hooks/``.
 
-Pulled out of ``setup.py`` during the per-repo migration so setup.py
-could be reduced to a thin redirect stub (``--global`` is gone — see
-``MIGRATION-PLAN.md`` §10 phase 5).
+Split out of the old unified installer during the per-repo migration;
+the Claude Code side of the install now lives in ``core/install.py``
+(see ``docs/architecture/per-repo-install.md``).
 
 Usage::
 

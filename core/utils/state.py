@@ -43,12 +43,11 @@ POINTER_DIRNAME = ".apiary"
 POINTER_FILENAME = "pointer"
 
 # main-apiary's own version pin. Single-line semver. Read on every session
-# open in a bootstrapped repo to compare against the repo's own version.json
-# and trigger `apiary update` on mismatch (see MIGRATION-PLAN.md §7.5).
+# open in a bootstrapped repo to compare against the repo's own version.json.
 VERSION_FILE = "VERSION"
 DEFAULT_APIARY_VERSION = "0.1.0"
 
-# Per-repo pin-model files (introduced by per-repo migration; see MIGRATION-PLAN.md §5–§6).
+# Per-repo pin-model files (see docs/architecture/per-repo-install.md).
 # Each bootstrapped repo carries three small JSON files under <repo>/.claude/apiary/
 # identifying main-apiary, recording its own current path, and pinning a version.
 PIN_DIRNAME = ".claude/apiary"
@@ -395,8 +394,8 @@ def read_apiary_version(apiary_repo: Path) -> str:
 
 # --- per-repo pin-model helpers -------------------------------------------------
 # These read/write the three small JSON files that each bootstrapped repo
-# carries under <repo>/.claude/apiary/. See MIGRATION-PLAN.md §5–§6 for
-# schemas. Read helpers tolerate missing/malformed files (return None) so
+# carries under <repo>/.claude/apiary/. See docs/architecture/per-repo-install.md
+# for schemas. Read helpers tolerate missing/malformed files (return None) so
 # callers can branch on "not yet bootstrapped" without try/except. Write
 # helpers are atomic (.tmp + os.replace) and create parent dirs.
 

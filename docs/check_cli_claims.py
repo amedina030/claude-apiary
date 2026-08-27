@@ -39,9 +39,8 @@ CLI_DOC = DOCS_DIR / "reference" / "cli-tools.md"
 HELP_TIMEOUT = 30  # seconds per --help subprocess
 
 # Section headers in cli-tools.md that are not single introspectable argparse CLIs.
-# Libraries, console scripts, GUI (heavy deps), redirect stubs, and prose categories.
+# Libraries, console scripts, GUI (heavy deps), and prose categories.
 SKIP_HEADERS = {
-    "setup.py",                     # redirect stub, no live argparse
     "runner/cost_emit.py",          # library module
     "runner/config_loader.py",      # library module
     "gui/app.py",                   # requires the gui poetry group

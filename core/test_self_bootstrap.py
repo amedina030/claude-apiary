@@ -15,7 +15,7 @@ from core import self_bootstrap as sb
 from core.utils import state
 
 _APIARY_ITEMS = (
-    "setup.py", "VERSION", "core", "profiles", "context-rules", "migrations",
+    "VERSION", "core", "profiles", "context-rules", "migrations",
     "budgeter", "scribe", "docs", "refiner", "harden",
     "compass", "researcher", "runner", "incubator",
 )

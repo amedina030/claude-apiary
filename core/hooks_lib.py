@@ -1,9 +1,8 @@
 """
 Hook registration utilities for claude-apiary tools.
 
-Used by ``core/install.py`` (via ``core/hooks_factory.py``) to install or
-update hooks in a bootstrapped repo's ``.claude/settings.json``, and by
-``core/uninstall.py`` / ``scripts/uninstall_hooks.py`` to take them out again.
+Used by ``core/install.py`` to install/update hooks in Claude Code
+settings.json files and by ``core/uninstall.py`` to take them back out.
 """
 import json
 import os
@@ -74,8 +73,8 @@ def is_apiary_entry(entry: Any) -> bool:
          ``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``. Distinct from
          the global ``apiary_launch.py`` — both substrings are checked.
 
-    Shared by ``register_hooks`` and ``remove_hooks`` so the install and
-    uninstall paths agree on which entries are ours.
+    Shared by the install, drift-check and uninstall paths so they all
+    agree on which entries are ours.
     """
     blob = json.dumps(entry)
     if APIARY_MARKER in blob:

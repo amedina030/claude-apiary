@@ -379,11 +379,14 @@ def run_bootstrap_check(
     apiary_root: Path = APIARY_REPO_ROOT,
     stream=sys.stdout,
 ) -> None:
-    """Entry point for scripts/bootstrap.py.
+    """Informational cron-health report for an install/bootstrap flow.
 
     Prints the current cron health status to ``stream`` but never raises
-    or propagates a non-zero exit — bootstrap's exit semantics must not
-    depend on whether scheduled entries happen to be in sync.
+    or propagates a non-zero exit — the caller's exit semantics must not
+    depend on whether scheduled entries happen to be in sync. Currently
+    exercised only by ``runner/test_cron_health.py``; the historical
+    caller (``scripts/bootstrap.py``) was removed with the per-repo
+    migration cleanup.
     """
     try:
         registry = load_registry(registry_path, apiary_root)

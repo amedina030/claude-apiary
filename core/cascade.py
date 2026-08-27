@@ -1,8 +1,9 @@
 """Cascade-fix — when main-apiary moves, rewrite every bootstrapped repo's
 ``main-apiary-pointer.json`` to the new location.
 
-Per MIGRATION-PLAN.md §7.3, §13.1, §13.2: main-apiary's drift handler is
-the only code path that writes into other repos' files. Every other code
+Main-apiary's drift handler is the only code path that writes into
+other bootstrapped repos' files (see
+``docs/architecture/per-repo-install.md``). Every other code
 path is read-only with respect to bootstrapped repos. The cascade closes
 the loop when main-apiary itself moves — without it, bootstrapped repos
 would point at a stale path forever.

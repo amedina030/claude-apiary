@@ -1,9 +1,12 @@
 """Shared library for the context-rules system (#224).
 
 Loads rule files from `context-rules/<category>/<id>.md`, renders them
-into the managed zone format that gets injected into ~/.claude/CLAUDE.md,
-and parses an existing managed zone back into structured form for drift
-detection.
+into the managed zone format that `core/install.py` injects into a
+bootstrapped repo's `<repo>/CLAUDE.md`, and parses an existing managed
+zone back into structured form for drift detection.
+
+The renderer is path-agnostic — it takes and returns text; the caller
+owns the target file.
 
 Rule file format:
 
@@ -15,7 +18,7 @@ Rule file format:
     ---
     <body markdown>
 
-Managed zone format inside ~/.claude/CLAUDE.md:
+Managed zone format inside `<repo>/CLAUDE.md`:
 
     <!-- apiary-context-rules-start -->
     <!-- apiary-context-rule:<id> hash=<sha256> -->
@@ -91,7 +94,7 @@ class InstalledRule:
 
 @dataclass
 class ManagedZone:
-    """Parsed view of the managed zone in ~/.claude/CLAUDE.md."""
+    """Parsed view of the managed zone in a repo's CLAUDE.md."""
 
     start: int  # char offset of OUTER_START
     end: int  # char offset just after OUTER_END

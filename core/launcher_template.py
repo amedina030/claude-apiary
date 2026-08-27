@@ -3,7 +3,8 @@
 The launcher is a tiny shim copied into ``<repo>/.claude/apiary/launch.py``
 by ``apiary install --target <repo>``. It reads the repo's
 ``main-apiary-pointer.json`` to find main-apiary, then dispatches to the
-named script under main-apiary with the caller's cwd intact.
+named script under main-apiary with the caller's cwd intact. See
+``docs/architecture/per-repo-install.md`` for the full contract.
 
 This template is rendered to a file rather than imported because each
 bootstrapped repo carries its own copy under ``.claude/apiary/``. The

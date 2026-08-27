@@ -19,7 +19,7 @@ python = "^3.11"
 
 [tool.poetry.scripts]
 # `apiary install --target <repo>`, `apiary doctor`, etc. See core/cli.py
-# and MIGRATION-PLAN.md §14.6.
+# and docs/architecture/per-repo-install.md.
 apiary = "core.cli:main"
 
 [tool.poetry.group.dev.dependencies]

@@ -21,7 +21,7 @@ from core.utils import state
 # files into a tmpdir "fake apiary" so each test gets an isolated install
 # target without touching the real registry under ``D:\Professional\claude-apiary\.repos``.
 _APIARY_ITEMS = (
-    "setup.py", "VERSION", "core", "profiles", "context-rules",
+    "VERSION", "core", "profiles", "context-rules",
     "budgeter", "scribe", "docs", "refiner", "harden",
     "compass", "researcher", "runner", "incubator",
 )

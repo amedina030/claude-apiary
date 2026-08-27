@@ -1,7 +1,8 @@
 """Hook entry builders for apiary's per-repo install.
 
 Constructs the per-tool ``hooks`` dicts that ``apiary install`` writes
-into each bootstrapped repo's ``.claude/settings.json``.
+into each bootstrapped repo's ``.claude/settings.json``. See
+``docs/architecture/per-repo-install.md`` for context.
 
 Hook commands always go through the per-repo launcher
 (``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``) post-migration.

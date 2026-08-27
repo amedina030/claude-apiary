@@ -8,6 +8,8 @@ in place so it catches up immediately.
 The handler already takes ``FileLock(registry_path)`` to make the
 move-vs-copy classification atomic, so it applies the registry write
 under that same lock rather than queueing it for a separate consumer.
+See ``docs/architecture/per-repo-install.md`` for the verify, drift
+handling and copy-detection contracts.
 """
 from __future__ import annotations
 

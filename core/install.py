@@ -5,6 +5,8 @@ pointers, version, flags/, session-tmp/), writes a ``settings.json`` whose
 hooks dispatch through the per-repo launcher, copies slash commands, and
 updates the registry. Idempotent — re-running refreshes generated files
 without disturbing user-owned content.
+
+See ``docs/architecture/per-repo-install.md`` for the full step list.
 """
 from __future__ import annotations
 
@@ -215,9 +217,9 @@ def _write_per_repo_settings(
     """Generate ``<target>/.claude/settings.json`` with hooks dispatched
     through the per-repo launcher. Returns the sha256 of the written file.
 
-    Imports ``setup.py``'s ``build_*_hooks`` so phase-1 installs use the
-    same hook set as ``setup.py --global``, just with the launcher path
-    swapped to ``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``.
+    Uses ``core/hooks_factory``'s ``build_*_hooks`` so every install gets
+    the same hook set, with the launcher path pointed at
+    ``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``.
     """
     from core import hooks_factory
     from core.hooks_lib import hook_cmd
@@ -262,9 +264,8 @@ def _write_per_repo_settings(
 def _apply_profile_permissions(settings_path: Path, apiary: Path, profile: str) -> None:
     """Merge the resolved profile's permissions into *settings_path*.
 
-    Lighter-weight than ``core/apiary_bootstrap.py`` — that script does
-    interactive drift prompts. For per-repo install we trust the install
-    contract (idempotent, profile is the source of truth for permissions).
+    No interactive drift prompt — the install contract is trusted
+    (idempotent, profile is the source of truth for permissions).
     """
     from core.apiary_profiles import resolve
 
@@ -292,8 +293,7 @@ def _copy_slash_commands(target_root: Path, apiary: Path) -> dict[str, str]:
 
 
 def _slash_command_sources(apiary: Path) -> Iterable[Path]:
-    """Yield every ``<tool>/commands/*.md`` path under main-apiary, matching
-    the historical set ``setup.py --global`` installed."""
+    """Yield every ``<tool>/commands/*.md`` path under main-apiary."""
     for tool in (
         "budgeter", "scribe", "core", "docs", "refiner",
         "harden", "compass", "researcher", "runner", "incubator",
@@ -306,9 +306,8 @@ def _slash_command_sources(apiary: Path) -> Iterable[Path]:
 def _write_claude_md_zone(target_root: Path, apiary: Path) -> str:
     """Write the apiary-managed zone into ``<target>/CLAUDE.md``.
 
-    Reuses ``core/context_rules`` for rendering, so the same sentinel
-    format is used for per-repo installs as for ``~/.claude/CLAUDE.md``
-    today. Existing user-owned content around the zone is preserved.
+    Reuses ``core/context_rules`` for rendering the sentinel-bounded
+    zone. Existing user-owned content around the zone is preserved.
 
     Returns the sha256 of the rendered zone (NOT the whole file) for
     drift detection by ``apiary doctor registry``.

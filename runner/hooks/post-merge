@@ -6,7 +6,7 @@
 # step subject, looks up run_history.jsonl for that uuid's source TODO,
 # and marks it done. Silent no-op when the merge isn't a runner branch.
 #
-# Installed by: python setup.py --global
+# Installed by: python scripts/install_repo_hooks.py
 # Source: runner/hooks/post-merge
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

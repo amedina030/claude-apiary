@@ -18,7 +18,7 @@ from core.utils import state
 
 # Mirror the test_install fixture set so a single tmpdir can host both.
 _APIARY_ITEMS = (
-    "setup.py", "VERSION", "core", "profiles", "context-rules", "migrations",
+    "VERSION", "core", "profiles", "context-rules", "migrations",
     "budgeter", "scribe", "docs", "refiner", "harden",
     "compass", "researcher", "runner", "incubator",
 )

@@ -1,6 +1,6 @@
 """``apiary uninstall --target <repo>`` — remove apiary from a bootstrapped repo.
 
-Inverse of ``core/install.py``. See MIGRATION-PLAN.md §7.11.
+Inverse of ``core/install.py``. See ``docs/architecture/per-repo-install.md``.
 
 Steps:
 

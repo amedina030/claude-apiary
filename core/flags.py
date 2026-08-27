@@ -12,8 +12,8 @@ module. Repo discovery order:
 3. The git root containing cwd, when neither env var is set.
 
 When none of those resolve to a directory, the helpers raise
-``RuntimeError`` — there's no global fallback post-migration
-(MIGRATION-PLAN.md §10 phase 5).
+``RuntimeError`` — there is no global fallback in the per-repo
+install model (``docs/architecture/per-repo-install.md``).
 
 CLI::
 

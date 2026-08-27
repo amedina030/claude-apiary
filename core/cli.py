@@ -14,6 +14,9 @@ tested in isolation:
 Run from inside a clone of main-apiary, or from a bootstrapped repo where
 the per-repo launcher resolves main-apiary via the pointer file. Either
 way the script needs to find main-apiary; pass ``--apiary-repo`` to override.
+
+A single CLI replaces the legacy collection of standalone install
+scripts; see ``docs/architecture/per-repo-install.md``.
 """
 from __future__ import annotations
 

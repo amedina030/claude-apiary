@@ -16,7 +16,7 @@ from core import cascade, drift
 from core.utils import state
 
 _APIARY_ITEMS = (
-    "setup.py", "VERSION", "core", "profiles", "context-rules", "migrations",
+    "VERSION", "core", "profiles", "context-rules", "migrations",
     "budgeter", "scribe", "docs", "refiner", "harden",
     "compass", "researcher", "runner", "incubator",
 )
