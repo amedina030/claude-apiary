@@ -41,6 +41,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.utils import state
+from core.utils.filelock import FileLock
 from core.utils.timeutil import now_iso
 
 MIGRATIONS_DIRNAME = "migrations"
@@ -221,15 +222,21 @@ def repo_version(repo: Path, registry_entry: dict | None = None) -> str | None:
 
 
 def _write_pin(apiary: Path, repo: Path, uid: int, version: str) -> None:
-    """Record *version* in both places that claim to know it."""
+    """Record *version* in both places that claim to know it.
+
+    The registry half is a read-modify-write, so it takes the same FileLock
+    ``install`` and the drift handler take — a session bootstrapping a repo
+    while an update is running must not lose its entry.
+    """
     existing = state.read_version(repo) or {}
     state.write_version(repo, {**existing, "apiary_version": version, "pinned_at": now_iso()})
-    registry = state._load_registry(apiary)
-    entry = registry.get(str(uid))
-    if isinstance(entry, dict):
-        entry["version"] = version
-        registry[str(uid)] = entry
-        state._save_registry(apiary, registry)
+    with FileLock(state.registry_path(apiary)):
+        registry = state._load_registry(apiary)
+        entry = registry.get(str(uid))
+        if isinstance(entry, dict):
+            entry["version"] = version
+            registry[str(uid)] = entry
+            state._save_registry(apiary, registry)
 
 
 def update_repo(
