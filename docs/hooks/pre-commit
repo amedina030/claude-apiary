@@ -19,7 +19,11 @@
 # Source: docs/hooks/pre-commit
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# Resolve from git, not from the hook file location: in a linked worktree the
+# hook lives in the COMMON git dir, so a path-relative root would be the main
+# checkout and every check (including the secret scan) would run against the
+# wrong tree.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 # Resolve a Python 3 interpreter portably. No single name works everywhere:
 # Windows ships the `py` launcher, Unix ships `python3`, some boxes only have
