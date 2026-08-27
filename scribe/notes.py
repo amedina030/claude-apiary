@@ -781,8 +781,10 @@ def cmd_defer(args):
             file=sys.stderr,
         )
         sys.exit(1)
-    _require_updated(store.update_note(note_type, year, seq, status='deferred'), args.id)
-    print(f'Deferred {args.id}. Use "resume {args.id}" to bring it back.')
+    updated = store.update_note(note_type, year, seq, status='deferred')
+    _require_updated(updated, args.id)
+    where = ' (it stays in the archive)' if updated.get('_from_archive') else ''
+    print(f'Deferred {args.id}{where}. Use "resume {args.id}" to bring it back.')
 
 
 def cmd_resume(args):
