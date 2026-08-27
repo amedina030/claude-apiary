@@ -6,7 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scribe import notes
+from scribe import templates
+from scribe.store import VALID_TYPES
 
 
 class ScaffoldRefreshTest(unittest.TestCase):
@@ -14,10 +15,10 @@ class ScaffoldRefreshTest(unittest.TestCase):
         # A state dir from before the hash record existed (pre-Phase-1 installs).
         with tempfile.TemporaryDirectory() as td:
             state = Path(td)
-            tdir = state / notes.TEMPLATES_DIRNAME
+            tdir = state / templates.TEMPLATES_DIRNAME
             tdir.mkdir()
             (tdir / "handoff.md").write_text("my old handoff template\n", encoding="utf-8")
-            notes.scaffold_default_templates(state)
+            templates.scaffold_defaults(state)
             self.assertEqual((tdir / "handoff.md").read_text(encoding="utf-8"), "my old handoff template\n")
             # Other types were scaffolded and recorded.
             self.assertTrue((tdir / "decision.md").exists())
@@ -28,8 +29,8 @@ class ScaffoldRefreshTest(unittest.TestCase):
     def test_unmodified_copy_refreshes_when_bundled_changes_and_edited_copy_does_not(self):
         with tempfile.TemporaryDirectory() as td:
             state = Path(td)
-            notes.scaffold_default_templates(state)
-            tdir = state / notes.TEMPLATES_DIRNAME
+            templates.scaffold_defaults(state)
+            tdir = state / templates.TEMPLATES_DIRNAME
             record = json.loads((tdir / ".bundled_hashes.json").read_text(encoding="utf-8"))
             # Simulate an older bundled version: the installed copy differs from
             # today's bundle while its RECORDED hash matches it (we scaffolded it).
@@ -39,8 +40,8 @@ class ScaffoldRefreshTest(unittest.TestCase):
             (tdir / ".bundled_hashes.json").write_text(json.dumps(record), encoding="utf-8")
             # An edited template: content differs from the recorded hash.
             (tdir / "blocker.md").write_text("user edited\n", encoding="utf-8")
-            notes.scaffold_default_templates(state)
-            bundled = (notes.DEFAULT_TEMPLATES_DIR / "decision.md").read_text(encoding="utf-8")
+            templates.scaffold_defaults(state)
+            bundled = (templates.DEFAULT_TEMPLATES_DIR / "decision.md").read_text(encoding="utf-8")
             self.assertEqual((tdir / "decision.md").read_text(encoding="utf-8"), bundled)
             self.assertEqual((tdir / "blocker.md").read_text(encoding="utf-8"), "user edited\n")
 

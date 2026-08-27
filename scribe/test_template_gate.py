@@ -16,6 +16,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scribe.store import ScribeStore
 from scribe import notes as notes_mod
+from scribe import templates as templates_mod
 
 HANDOFF_OK = ("## Session abcd1234 Handoff\n\n### What was done\n- x\n\n"
               "### Key decisions\n- y\n\n### What's pending\n- z\n\n"
@@ -36,24 +37,24 @@ def _args(store, **over):
 class TestPureHelpers(unittest.TestCase):
     def test_required_sections_parse(self):
         tpl = "---\nrequired: [shipped, open, pick up next session with]\n---\nbody"
-        self.assertEqual(notes_mod.template_required_sections(tpl),
+        self.assertEqual(templates_mod.required_sections(tpl),
                          ["shipped", "open", "pick up next session with"])
 
     def test_no_required_key(self):
-        self.assertEqual(notes_mod.template_required_sections("---\nfoo: bar\n---\n"), [])
+        self.assertEqual(templates_mod.required_sections("---\nfoo: bar\n---\n"), [])
 
     def test_section_present_heading(self):
-        self.assertTrue(notes_mod._section_present("## Shipped\n- x", "shipped"))
+        self.assertTrue(templates_mod.section_present("## Shipped\n- x", "shipped"))
 
     def test_section_present_bold_label(self):
-        self.assertTrue(notes_mod._section_present("**Why:** because", "why"))
-        self.assertTrue(notes_mod._section_present("**Why** stuff", "why"))
+        self.assertTrue(templates_mod.section_present("**Why:** because", "why"))
+        self.assertTrue(templates_mod.section_present("**Why** stuff", "why"))
 
     def test_section_absent(self):
-        self.assertFalse(notes_mod._section_present("nothing relevant", "shipped"))
+        self.assertFalse(templates_mod.section_present("nothing relevant", "shipped"))
 
     def test_missing_required(self):
-        self.assertEqual(notes_mod.missing_required_sections("## Shipped", ["shipped", "open"]),
+        self.assertEqual(templates_mod.missing_sections("## Shipped", ["shipped", "open"]),
                          ["open"])
 
     def test_hash_ack_helpers_are_gone(self):
@@ -74,30 +75,30 @@ class TestBundledTemplates(unittest.TestCase):
     def test_one_template_per_type(self):
         for note_type in notes_mod.VALID_TYPES:
             with self.subTest(note_type=note_type):
-                self.assertTrue((notes_mod.DEFAULT_TEMPLATES_DIR / f"{note_type}.md").is_file())
+                self.assertTrue((templates_mod.DEFAULT_TEMPLATES_DIR / f"{note_type}.md").is_file())
 
     def test_required_sections_match_the_spec(self):
         for note_type, expected in self.REQUIRED.items():
             with self.subTest(note_type=note_type):
-                text = (notes_mod.DEFAULT_TEMPLATES_DIR / f"{note_type}.md").read_text(
+                text = (templates_mod.DEFAULT_TEMPLATES_DIR / f"{note_type}.md").read_text(
                     encoding="utf-8")
-                self.assertEqual(notes_mod.template_required_sections(text), expected)
+                self.assertEqual(templates_mod.required_sections(text), expected)
 
     def test_guidance_templates_declare_nothing(self):
         for note_type in self.GUIDANCE_ONLY:
             with self.subTest(note_type=note_type):
-                text = (notes_mod.DEFAULT_TEMPLATES_DIR / f"{note_type}.md").read_text(
+                text = (templates_mod.DEFAULT_TEMPLATES_DIR / f"{note_type}.md").read_text(
                     encoding="utf-8")
-                self.assertEqual(notes_mod.template_required_sections(text), [])
+                self.assertEqual(templates_mod.required_sections(text), [])
 
     def test_templates_satisfy_their_own_required_sections(self):
         for note_type in self.REQUIRED:
             with self.subTest(note_type=note_type):
-                text = (notes_mod.DEFAULT_TEMPLATES_DIR / f"{note_type}.md").read_text(
+                text = (templates_mod.DEFAULT_TEMPLATES_DIR / f"{note_type}.md").read_text(
                     encoding="utf-8")
                 self.assertEqual(
-                    notes_mod.missing_required_sections(
-                        text, notes_mod.template_required_sections(text)), [])
+                    templates_mod.missing_sections(
+                        text, templates_mod.required_sections(text)), [])
 
     def test_handoff_required_matches_wrapup_skill(self):
         """The gate must accept the handoff shape core/commands/wrapup.md prescribes."""
@@ -117,20 +118,20 @@ class TestScaffold(unittest.TestCase):
         self._td.cleanup()
 
     def test_scaffold_writes_every_type(self):
-        written = notes_mod.scaffold_default_templates(self.state_dir)
+        written = templates_mod.scaffold_defaults(self.state_dir)
         self.assertEqual(written, sorted(notes_mod.VALID_TYPES))
         for note_type in notes_mod.VALID_TYPES:
-            self.assertTrue(notes_mod.template_path(self.state_dir, note_type).is_file())
+            self.assertTrue(templates_mod.template_path(self.state_dir, note_type).is_file())
 
     def test_scaffold_is_idempotent(self):
-        notes_mod.scaffold_default_templates(self.state_dir)
-        self.assertEqual(notes_mod.scaffold_default_templates(self.state_dir), [])
+        templates_mod.scaffold_defaults(self.state_dir)
+        self.assertEqual(templates_mod.scaffold_defaults(self.state_dir), [])
 
     def test_scaffold_never_overwrites_an_edited_template(self):
-        path = notes_mod.template_path(self.state_dir, "handoff")
+        path = templates_mod.template_path(self.state_dir, "handoff")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("MINE\n", encoding="utf-8")
-        written = notes_mod.scaffold_default_templates(self.state_dir)
+        written = templates_mod.scaffold_defaults(self.state_dir)
         self.assertNotIn("handoff", written)
         self.assertEqual(path.read_text(encoding="utf-8"), "MINE\n")
 
@@ -139,13 +140,13 @@ class TestGate(unittest.TestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()
         self.store = ScribeStore(Path(self._td.name))
-        notes_mod.scaffold_default_templates(self.store.state_dir)
+        templates_mod.scaffold_defaults(self.store.state_dir)
 
     def tearDown(self):
         self._td.cleanup()
 
     def test_type_without_template_accepts_anything(self):
-        notes_mod.template_path(self.store.state_dir, "todo").unlink()
+        templates_mod.template_path(self.store.state_dir, "todo").unlink()
         notes_mod.cmd_add(_args(self.store, type="todo", content="whatever"))
         self.assertEqual(len(self.store.list_notes(note_type="todo")), 1)
 

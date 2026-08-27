@@ -7,7 +7,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, NEXT_SEQ_FILENAME, INDEX_FILENAME
-from scribe.notes import _format_id, _parse_id_arg, _PREFIX_TO_TYPE
+from scribe.formatting import PREFIX_TO_TYPE as _PREFIX_TO_TYPE, format_id as _format_id
+from scribe.notes import _parse_id_arg
 
 class TestTypePrefixes(unittest.TestCase):
     def test_all_types_have_prefixes(self):

@@ -62,6 +62,19 @@ def inference_enabled(args=None, *, environ=None) -> bool:
     return env_opt_in(environ)
 
 
+def resolve(args, content: str, store, tags: list, areas: list) -> tuple:
+    """The tags/areas to store, asking a model only when allowed to.
+
+    Supplied tags always win: inference fills the untagged case, it never
+    overrides a choice someone made. And it is off unless asked, so a
+    `/wrapup` learning costs no model call.
+    """
+    if tags or areas or not inference_enabled(args):
+        return tags, areas
+    inferred = infer_tags_areas(content, store)
+    return (inferred.get('tags') or [], inferred.get('areas') or [])
+
+
 def build_prompt(content: str, vocab: list) -> str:
     """The single-turn prompt sent to ``claude -p``.
 

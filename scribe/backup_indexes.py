@@ -17,21 +17,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scribe.maintenance import (
     BACKUPS_DIRNAME, DEFAULT_RETAIN, create_backup, prune_backups,
 )
-from scribe.notes import scribe_state_dir, PROJECTS_DIR, _project_key
+from scribe.paths import ProjectKeyError, resolve_store_dir
 
 
 def resolve_backup_source(project: str | None = None) -> Path:
-    """The scribe state dir to back up, with the legacy per-project fallback.
-
-    Not ``core.utils.state.resolve_state_dir`` — this one adds the
-    ``~/.claude/projects/<key>/`` fallback that only the backup CLI still
-    honours, and it is named apart so there is exactly one
-    ``resolve_state_dir`` in the tree (review X-3).
-    """
-    sd = scribe_state_dir()
-    if sd is None:
-        sd = PROJECTS_DIR / _project_key(project)
-    return Path(sd)
+    """The scribe state dir to back up, with the legacy per-project fallback."""
+    return Path(resolve_store_dir(project))
 
 
 def main() -> int:
@@ -41,7 +32,11 @@ def main() -> int:
     parser.add_argument('--project', default=None, help='Project key override')
     args = parser.parse_args()
 
-    state_dir = resolve_backup_source(args.project)
+    try:
+        state_dir = resolve_backup_source(args.project)
+    except ProjectKeyError as e:
+        print(f'Error: {e}', file=sys.stderr)
+        return 1
     if not state_dir.exists():
         print('No scribe state directory found.', file=sys.stderr)
         return 0

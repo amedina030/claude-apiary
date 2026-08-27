@@ -162,6 +162,25 @@ def default_archive_cutoff(now: "datetime | None" = None) -> datetime:
     return (now or datetime.now(timezone.utc)) - timedelta(days=DEFAULT_ARCHIVE_DAYS)
 
 
+def external_ticket_links(note: dict) -> list:
+    """The external canonical-ticket refs (``ticket:K-<id>`` tags) on a note.
+
+    These name tickets owned by the external Asana tool, not apiary. Marking
+    the linked todo done is the mirror→canonical *close signal*; apiary holds
+    no local ``K`` tickets, so it takes no local action. Only ``K``-prefixed
+    refs are returned — apiary NEVER cascades ``done`` into a local note (spec
+    §5.14 / A2 hazard guard) — and the external id is never parsed, so a
+    missing or unparseable ticket cannot raise.
+    """
+    refs = []
+    for tag in (note.get('tags') or []):
+        if isinstance(tag, str) and tag.startswith('ticket:'):
+            ref = tag.split(':', 1)[1].strip()
+            if ref.upper().startswith('K-'):
+                refs.append(ref)
+    return refs
+
+
 def run_auto_archive(store, *, now: "datetime | None" = None) -> int:
     """Apply the retention rules to *store*. Returns the number archived.
 

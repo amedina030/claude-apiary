@@ -15,12 +15,26 @@ All three live under the per-target state directory the registry allocates for t
 | Store | Subpath under `<state-dir>/scribe/` | Lifespan | Good for |
 |---|---|---|---|
 | **Memory** | `memory/*.md` (indexed via `MEMORY.md`) | Permanent — still true in 3 months | User preferences, project facts, reference patterns, cross-session conventions |
-| **Notes** | `<type>/` folder-per-type, indexed via `index.jsonl` | Decays; auto-archived after 30 days | Operational state — TODOs, handoffs, decisions, blockers, wishlists, current-work context |
+| **Notes** | `<type>/` folder-per-type, indexed via `index.jsonl` | Decays; auto-archived per type (see below) | Operational state — TODOs, handoffs, decisions, blockers, wishlists, current-work context |
 | **Learnings** | `learnings/` (same folder-per-type structure) | Permanent (no auto-archive) | Project-specific error workarounds, non-obvious patterns, tool quirks you figured out |
 
-**Storage layout.** Notes use a folder-per-type layout. Each note type has its own folder (`todos/`, `handoffs/`, `decisions/`, `wishlists/`, `blockers/`, `references/`, `context/`, `general/`) containing individual `<id>.md` files and an `index.jsonl` for fast listing. Learnings live in `learnings/` with the same structure. Archived notes move into `<type>/archive/` subfolders.
+**Storage layout.** Notes use a folder-per-type layout. Each note type has its own folder (`todos/`, `handoffs/`, `decisions/`, `wishlists/`, `blockers/`, `references/`, `context/`, `general/`) containing individual `<id>.md` files and an `index.jsonl` for fast listing. Learnings live in `learnings/` with the same structure. Archived notes move into `<type>/<year>/archive/`.
 
 **Quick decision:** Is it still true in 3 months → memory. Is it a workaround or a non-obvious thing I learned → learning. Is it about current work that will decay → note.
+
+### Retention: what auto-archives, and when
+
+The rules live in `scribe/policy.py` and run from `notes.py add`, `notes.py tidy`, and session startup — never from `list`, which is read-only.
+
+| Type | Archived when |
+|---|---|
+| `handoff` | A newer handoff for the same role/mission exists |
+| `context` | 3 days old |
+| `decision` | 30 days old |
+| *(any type)* marked `done` | 1 day after it was **marked done**, not after it was written |
+| `todo`, `wishlist`, `blocker`, `reference`, `general` | Never on age — only once closed |
+
+Archiving is not deletion: `notes.py list --archive` searches it and `notes.py unarchive <ID>` brings a note back.
 
 ---
 
@@ -124,18 +138,27 @@ Learnings are project-specific things you discover during task execution. They p
 
 ### Learning commands
 
-Learnings are stored as individual `.md` files under `<state-dir>/scribe/learnings/`, with a single shared `index.jsonl` for fast listing.
+Learnings are stored as individual `.md` files under `<state-dir>/scribe/learnings/`, one per year with a shared `index.jsonl` for fast listing. Always invoke through the launcher, so the per-target state dir resolves:
 
 ```bash
-# Add a learning
-python scribe/notes.py learn --content "description of what was learned" --session-id "<sid>"
+L="$(git rev-parse --show-toplevel)/.claude/apiary/launch.py"
+
+# Add a learning. --tags is optional; see "Tagging" below.
+python "$L" scribe/notes.py learn --content "what you learned" --session-id "<sid>"
 
 # List all learnings
-python scribe/notes.py learnings [--full] [--search TEXT]
+python "$L" scribe/notes.py learnings [--full] [--search TEXT] [--tag TAG]
 
-# Remove a stale learning
-python scribe/notes.py unlearn <ID>  # e.g. L-2026-3
+# Retire a stale learning (reversible — the .md moves to archive/)
+python "$L" scribe/notes.py archive-learning <ID>   # e.g. L-2026-3
+
+# Replace one with an updated version that records the lineage
+python "$L" scribe/notes.py supersede <ID> --content "<new content>"
 ```
+
+`unlearn <ID>` also exists and **hard-deletes** the body and its row. Prefer `archive-learning`: it is the same retirement, and it is reversible.
+
+**Tagging.** `learn` does not call a model. Pass `--tags a,b` when you already know the right tags; leave them off otherwise and let `/review-learnings` run `notes.py retrotag` to fill the gaps in one batch. `--infer` opts a single command into inference, and `APIARY_SCRIBE_INFER=1` opts in a whole session. This is why `/wrapup` is fast: writing a learning never spawns a subprocess unless you asked it to.
 
 ---
 
@@ -187,7 +210,26 @@ Memory lives at `<state-dir>/scribe/memory/` (the per-target state dir resolved 
 If a note the user references isn't found in active notes, search the archive:
 
 ```bash
-python scribe/notes.py list --archive --search "<keyword>"
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py list --archive --search "<keyword>"
 ```
 
-Active notes age into the archive after 30 days; the archive is keyword-searchable but not loaded into startup context. Each note type folder has its own archive subfolder (e.g. `<state-dir>/scribe/todos/archive/`); the `notes.py list --archive` command scans all of them.
+Notes age into the archive on the per-type schedule above; the archive is keyword-searchable but not loaded into startup context. Each year folder has its own archive subfolder (e.g. `<state-dir>/scribe/todos/2026/archive/`); `notes.py list --archive` scans all of them, and `notes.py unarchive <ID>` brings one back.
+
+---
+
+## Module map
+
+`scribe/notes.py` is the command line only — argparse, one `cmd_*` per verb, and the printing. When you are changing behaviour, the file you want is usually one of these:
+
+| Module | Owns |
+|---|---|
+| `store.py` | The storage engine: folders, `index.jsonl`, `<seq>.md` bodies, `next_seq`. Every read-modify-write of an index runs inside one `_locked_index` hold |
+| `policy.py` | Retention — what auto-archives and when, as pure functions over index rows |
+| `maintenance.py` | Whole-store operations: `repair`, `backfill-brief`, `backup`/`restore`, `retrotag`, `mark-reviewed` |
+| `templates.py` | Per-type templates and the required-section gate on `add` |
+| `infer.py` | Tag/area inference — the only place scribe calls a model, and it is off by default |
+| `formatting.py` | Display IDs, relative ages, colour, the list and detail renderers |
+| `paths.py` | Where the state dir is, and the session identity a write inherits |
+| `cli_args.py` | The argparse declaration and the helpers that read values back out of it |
+| `api.py` | The frozen public API external tools import (`open_store`, `normalize_entry`, …) |
+| `backup_indexes.py` | The older entry point for `notes.py backup`; delegates to `maintenance.py` |

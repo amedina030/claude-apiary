@@ -548,12 +548,13 @@ def _scaffold_scribe_templates(state_dir: Path) -> None:
     works (the gate simply doesn't apply), so a failure warns, never raises.
     """
     try:
-        from scribe.notes import SCRIBE_SUBDIR, scaffold_default_templates
+        from scribe.paths import SCRIBE_SUBDIR
+        from scribe.templates import scaffold_defaults
     except Exception as exc:  # noqa: BLE001 - never fail an install over this
         print(f"  scribe templates : SKIPPED (import failed: {exc})")
         return
     try:
-        written = scaffold_default_templates(state_dir / SCRIBE_SUBDIR)
+        written = scaffold_defaults(state_dir / SCRIBE_SUBDIR)
     except OSError as exc:
         print(f"  scribe templates : SKIPPED ({exc.__class__.__name__}: {exc})")
         return

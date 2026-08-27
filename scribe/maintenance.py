@@ -92,6 +92,11 @@ def has_any_data(state_dir: Path) -> bool:
 # repair
 # --------------------------------------------------------------------------- #
 
+def _prefix(dry_run: bool) -> str:
+    """The ``(dry-run) `` marker every report headline shares."""
+    return '(dry-run) ' if dry_run else ''
+
+
 @dataclass
 class RepairReport:
     """What a repair pass found (and, unless dry-run, fixed)."""
@@ -100,6 +105,10 @@ class RepairReport:
     lines: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     found_data: bool = True
+
+    def summary(self, dry_run: bool = False) -> str:
+        return (f'Repair {_prefix(dry_run)}complete: {self.rebuilt} entries rebuilt, '
+                f'{self.orphans} orphans {"detected" if dry_run else "removed"}')
 
 
 def _rebuilt_entry(folder: Path, note_type: str, year: int, seq: int,
@@ -227,6 +236,10 @@ class BackfillReport:
     already_set: int = 0
     lines: list[str] = field(default_factory=list)
 
+    def summary(self, dry_run: bool = False) -> str:
+        return (f'Backfill {_prefix(dry_run)}complete: {self.updated} updated, '
+                f'{self.already_set} already set.')
+
 
 def backfill_brief(store: ScribeStore, *, dry_run: bool = False,
                    force: bool = False) -> BackfillReport:
@@ -351,6 +364,11 @@ class RetrotagReport:
     lines: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
+    def summary(self, dry_run: bool = False) -> str:
+        return (f'Retrotag {_prefix(dry_run)}complete: {self.processed} tagged, '
+                f'{self.already_tagged} already tagged, {len(self.errors)} error(s) '
+                f'of {self.total} learning(s).')
+
 
 def retrotag(store: ScribeStore, *, dry_run: bool = False,
              model: "str | None" = None, limit: "int | None" = None,
@@ -416,6 +434,11 @@ class RestoreReport:
     source: "Path | None" = None
     restored: int = 0
     lines: list[str] = field(default_factory=list)
+
+    def summary(self, dry_run: bool = False) -> str:
+        where = self.source.name if self.source else '(nothing)'
+        return (f'Restore {_prefix(dry_run)}complete: {self.restored} index file(s) '
+                f'from {where}.')
 
 
 def restore_backup(state_dir: Path, date_str: "str | None" = None, *,

@@ -30,6 +30,15 @@ TYPE_FOLDERS: dict[str, str] = {
     'reference': 'references',
 }
 
+#: The note types ``add --type`` accepts, in the order --help lists them.
+#: Same set as ``TYPE_FOLDERS``' keys; learnings are a separate store, not a
+#: type. One list, so the CLI, the installer and the template scaffolder
+#: cannot disagree about what a note type is.
+VALID_TYPES: list[str] = [
+    'todo', 'handoff', 'decision', 'wishlist',
+    'reference', 'blocker', 'context', 'general',
+]
+
 TYPE_PREFIXES: dict[str, str] = {
     'todo': 'T',
     'handoff': 'H',

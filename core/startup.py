@@ -19,10 +19,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.session import SessionId, load_history, sessions_dir
 from core.utils.project import get_project_key
-from scribe.notes import (
-    format_age, scribe_state_dir,
-    PROJECTS_DIR, _format_id,
-)
+from scribe.formatting import format_age, format_id as _format_id
+from scribe.paths import PROJECTS_DIR, scribe_state_dir
 from scribe.policy import run_auto_archive
 from scribe.store import ScribeStore, TYPE_FOLDERS
 

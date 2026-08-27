@@ -23,7 +23,7 @@ from captures import store as captures_store  # noqa: E402
 from core import context_rules, frontmatter  # noqa: E402
 from docs import check as docs_check  # noqa: E402
 from researcher import store as researcher_store  # noqa: E402
-from scribe import notes as scribe_notes  # noqa: E402
+from scribe import templates as scribe_templates  # noqa: E402
 from scribe import store as scribe_store  # noqa: E402
 
 # One document exercising every dialect feature, written the way each subsystem
@@ -109,7 +109,7 @@ class TestEveryReaderAgrees(ParityTestCase):
 
     def test_scribe_template_gate(self) -> None:
         self.assertEqual(
-            scribe_notes.template_required_sections(PARITY_DOC),
+            scribe_templates.required_sections(PARITY_DOC),
             EXPECTED_META["required"],
         )
 
@@ -212,7 +212,7 @@ class TestNoSecondDialect(unittest.TestCase):
     #: Every module that reads frontmatter must get it from ``core``.
     DELEGATORS = (
         "scribe/store.py",
-        "scribe/notes.py",
+        "scribe/templates.py",   # the template gate; was in scribe/notes.py
         "researcher/store.py",
         "researcher/cli.py",
         "captures/store.py",
