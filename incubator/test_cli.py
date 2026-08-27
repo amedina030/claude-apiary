@@ -326,7 +326,9 @@ class MigrateSpecTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(cli, "_run_scribe", side_effect=fake_run_scribe):
-                ok, _msg, added = cli._migrate_spec(Path(td).resolve() / "t", self.SPEC, "C-2026-999", "sess")
+                ok, _msg, added = cli._migrate_spec(
+                    Path(td).resolve() / "t", self.SPEC, "C-2026-999", "sess"
+                )
 
         self.assertTrue(ok)
         self.assertTrue(added)
@@ -348,7 +350,9 @@ class MigrateSpecTests(unittest.TestCase):
     def test_migrate_survives_an_oserror(self):
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(cli.subprocess, "run", side_effect=OSError("boom")):
-                ok, msg, added = cli._migrate_spec(Path(td).resolve() / "t", "spec", "C-2026-999", None)
+                ok, msg, added = cli._migrate_spec(
+                    Path(td).resolve() / "t", "spec", "C-2026-999", None
+                )
         self.assertFalse(ok)
         self.assertFalse(added)
         self.assertIn("boom", msg)
@@ -359,7 +363,9 @@ class MigrateSpecTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(cli, "_run_scribe", return_value=fail_add):
-                ok, msg, added = cli._migrate_spec(Path(td).resolve() / "t", "spec", "C-2026-999", None)
+                ok, msg, added = cli._migrate_spec(
+                    Path(td).resolve() / "t", "spec", "C-2026-999", None
+                )
         self.assertFalse(ok)
         self.assertFalse(added, "add failed, so nothing landed in the new repo")
         self.assertIn("scribe blew up", msg)
@@ -373,7 +379,9 @@ class MigrateSpecTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(cli, "_run_scribe", side_effect=[ok_add, fail_done]):
-                ok, msg, added = cli._migrate_spec(Path(td).resolve() / "t", "spec", "C-2026-999", None)
+                ok, msg, added = cli._migrate_spec(
+                    Path(td).resolve() / "t", "spec", "C-2026-999", None
+                )
         self.assertFalse(ok)
         self.assertTrue(added, "the spec did land — only the close failed")
         self.assertIn("no such note", msg)
