@@ -4,8 +4,10 @@ PreToolUse hook — injects session_id into conversation context on the
 first tool call of each session. This decouples session_id availability
 from the budgeter, so any process (startup, scribe, etc.) can use it.
 
-Runs once per session using a flag file, cleaned up by the companion
-Stop hook (check_install_stop.py).
+Runs once per session using a flag file. Flags are keyed by session_id
+and safe to persist — sessions don't come back — so there is no Stop-hook
+cleanup (Stop fires every assistant turn, not at session end; cleaning up
+there used to reset the guard, T-2026-117).
 
 Skipped entirely when ``APIARY_RUNNER_SUBPROCESS=1`` is set in the env —
 runner stage subprocesses already know their own session_id and don't

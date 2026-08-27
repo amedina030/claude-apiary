@@ -227,12 +227,12 @@ Full details: [`gui/README.md`](gui/README.md).
 claude-apiary/
 ├── core/                        # Shared infrastructure used by all tools
 │   ├── flags.py                 # Flag files + CLI (<repo>/.claude/apiary/flags/{name}-enabled)
-│   ├── config.py                # JSON config loader with defaults fallback
 │   ├── hooks_lib.py             # Hook registration and settings.json management
+│   ├── hooks_factory.py         # Builds the hook entries `apiary install` writes
 │   └── hooks/
-│       ├── save_transcript.py   # Stop hook: saves stripped session transcript
-│       ├── check_install.py     # PreToolUse hook: verifies installed files match repo
-│       └── check_install_stop.py # Stop hook: cleanup for install checker
+│       ├── inject_session.py    # PreToolUse hook: injects session identity (once per session)
+│       ├── learnings_inject_hook.py # PreToolUse hook: relevant learnings before Edit/Write/Bash
+│       └── save_transcript.py   # Stop hook: saves stripped session transcript
 │
 ├── budgeter/                    # Token usage monitoring tool
 │   ├── hooks/

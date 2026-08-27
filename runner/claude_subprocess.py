@@ -18,9 +18,8 @@ Centralizes the spawn so every runner subprocess:
      as a temporary escape hatch if the allowlist breaks a legitimate
      need.
 
-The startup hooks (core/hooks/startup_prompt_hook.py and
-core/hooks/startup_hook.py) check the env var on entry and short-circuit
-to a no-context allow when it is set.
+The startup hook (core/hooks/startup_prompt_hook.py) checks the env var
+on entry and short-circuits to a no-context allow when it is set.
 
 Module-level constants
 ----------------------

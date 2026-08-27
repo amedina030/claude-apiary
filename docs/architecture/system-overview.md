@@ -55,8 +55,7 @@ last_verified: 2026-08-26
 ```
 Tool call N starts
   → PreToolUse fires
-    → inject_session.py adds session context
-    → check_install.py validates installation (first call only)
+    → inject_session.py adds session context (first call only)
     → pre_tool_use.py:
         1. Reads baseline from previous call
         2. Computes delta (tokens_now - baseline) = cost of tool N-1
@@ -79,7 +78,6 @@ Session starts
   → ... normal work ...
   → Session ends
     → stop_session.py: logs final tool cost, cleans temp files
-    → check_install_stop.py: no-op (session-scoped flags persist)
     → save_transcript.py: saves transcript for the archive
 ```
 

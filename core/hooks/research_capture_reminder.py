@@ -22,9 +22,9 @@ named ``Agent`` in this harness and ``Task`` in stock Claude Code — we match
 both so the toolkit guardrail is portable; an unmatched name is simply inert.
 
 Gating: once per session, keyed on session_id via a persistent flag file
-(``SessionId.flag_path``) — the same mechanism inject_session / startup_hook
-use. Flags are safe to persist (sessions don't come back), so no Stop-hook
-cleanup is needed (see check_install_stop.py / T-2026-117).
+(``SessionId.flag_path``) — the same mechanism inject_session uses. Flags are
+safe to persist (sessions don't come back), so no Stop-hook cleanup is needed
+(Stop fires every assistant turn, not at session end — T-2026-117).
 
 Fail-open: every error path degrades to a plain allow — a buggy reminder must
 never wedge a tool call.

@@ -56,36 +56,6 @@ def _flag_files(home: Path) -> list[Path]:
     return [p for p in tmp.iterdir() if p.is_file()]
 
 
-class TestCheckInstallGuard(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.home = Path(self._tmp.name)
-
-    def test_runner_subprocess_skips_check_and_writes_no_flag(self):
-        result = _run_hook(
-            "check_install.py",
-            {"session_id": SAMPLE_SID},
-            self.home,
-            runner_subprocess=True,
-        )
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertEqual(_flag_files(self.home), [])
-
-    def test_normal_session_runs(self):
-        # Sanity: with the env var unset, the hook does its work and the
-        # flag file gets written. (No manifest exists, so the only side
-        # effect we can observe is the flag file.)
-        result = _run_hook(
-            "check_install.py",
-            {"session_id": SAMPLE_SID},
-            self.home,
-            runner_subprocess=False,
-        )
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertNotEqual(_flag_files(self.home), [])
-
-
 class TestInjectSessionGuard(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

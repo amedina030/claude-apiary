@@ -1,9 +1,7 @@
 """Hook entry builders for apiary's per-repo install.
 
 Constructs the per-tool ``hooks`` dicts that ``apiary install`` writes
-into each bootstrapped repo's ``.claude/settings.json``. Pulled out of
-``setup.py`` so the install path doesn't have to import the now-stub
-setup module. See ``MIGRATION-PLAN.md`` §10 phase 5 for context.
+into each bootstrapped repo's ``.claude/settings.json``.
 
 Hook commands always go through the per-repo launcher
 (``$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py``) post-migration.
@@ -66,14 +64,11 @@ def build_budgeter_hooks() -> dict:
 
 
 def build_core_hooks() -> dict:
-    """Core-tool hooks: session-id injection, install check, startup
-    rules drift, learnings injector, error reminder."""
+    """Core-tool hooks: startup context, session-id injection, learnings
+    injector, research reminder, error reminder, push gates."""
     kw = _per_repo_kwargs()
     prompt_startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_prompt_hook.py", PYTHON, **kw)
-    install_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install.py", PYTHON, **kw)
     session_cmd = hook_cmd(CORE_DIR / "hooks" / "inject_session.py", PYTHON, **kw)
-    startup_cmd = hook_cmd(CORE_DIR / "hooks" / "startup_hook.py", PYTHON, **kw)
-    stop_cmd = hook_cmd(CORE_DIR / "hooks" / "check_install_stop.py", PYTHON, **kw)
     error_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "context_rule_error_reminder.py", PYTHON, **kw)
     learnings_inject_cmd = hook_cmd(CORE_DIR / "hooks" / "learnings_inject_hook.py", PYTHON, **kw)
     research_reminder_cmd = hook_cmd(CORE_DIR / "hooks" / "research_capture_reminder.py", PYTHON, **kw)
@@ -84,12 +79,13 @@ def build_core_hooks() -> dict:
             {"hooks": [{"type": "command", "command": prompt_startup_cmd}]},
         ],
         "PreToolUse": [
-            {"matcher": "", "hooks": [{"type": "command", "command": install_cmd}]},
             {"matcher": "", "hooks": [{"type": "command", "command": session_cmd}]},
-            {"matcher": "", "hooks": [{"type": "command", "command": startup_cmd}]},
-            {"matcher": "Edit", "hooks": [{"type": "command", "command": learnings_inject_cmd}]},
-            {"matcher": "Write", "hooks": [{"type": "command", "command": learnings_inject_cmd}]},
-            {"matcher": "Bash", "hooks": [{"type": "command", "command": learnings_inject_cmd}]},
+            # One registration, not three. The hook already re-checks
+            # `tool_name in ('Edit', 'Write', 'Bash')` on the payload and
+            # allows through otherwise, so a single alternation matcher
+            # covers exactly the same calls at a third of the processes.
+            {"matcher": "Edit|Write|Bash",
+             "hooks": [{"type": "command", "command": learnings_inject_cmd}]},
             # Research-capture reminder: nudge to persist durable findings via
             # the researcher. Matches web-research tools plus the subagent tool
             # (Agent here, Task in stock Claude Code) so research run inside a
@@ -111,9 +107,6 @@ def build_core_hooks() -> dict:
         ],
         "PostToolUse": [
             {"matcher": "Bash", "hooks": [{"type": "command", "command": error_reminder_cmd}]},
-        ],
-        "Stop": [
-            {"hooks": [{"type": "command", "command": stop_cmd}]}
         ],
     }
 

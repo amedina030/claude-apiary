@@ -33,14 +33,11 @@ Hooks are Python scripts registered in `~/.claude/settings.json` that fire at Cl
 
 | Hook | Event | File | Description |
 |------|-------|------|-------------|
-| Install checker | PreToolUse | `core/hooks/check_install.py` | Verifies installed files match repo manifest. Runs once per session (sets a flag, skips subsequent calls) |
-| Install checker cleanup | Stop | `core/hooks/check_install_stop.py` | No-op placeholder (kept for backwards compatibility with existing settings.json). Session-scoped flags persist across turns — Stop fires every turn, not session end, so cleanup here was resetting once-per-session guards (T-2026-117). |
-| Session injector | PreToolUse | `core/hooks/inject_session.py` | Injects session identity (session_id, role, mission) into hook context |
+| Session injector | PreToolUse | `core/hooks/inject_session.py` | Injects session identity (session_id, role, mission) into hook context. Runs once per session (sets a flag under `<repo>/.claude/apiary/session-tmp/`, skips subsequent calls). Flags are keyed by session_id and safe to persist, so nothing cleans them up at Stop — Stop fires every turn, not at session end, and cleaning up there used to reset the guard (T-2026-117). |
 | Transcript saver | Stop | `core/hooks/save_transcript.py` | Saves a stripped copy of the session transcript for handoff generation |
 | Startup context injector | UserPromptSubmit | `core/hooks/startup_prompt_hook.py` | Injects identity, notes summary, learnings, and CLI reference on the first user message. When `APIARY_GUI_SESSION=1` (set by the GUI at spawn), also injects a `surface:` note telling the session it's running inside the GUI |
-| Context-rules drift detector | PreToolUse | `core/hooks/startup_hook.py` | Reports context-rules drift if `~/.claude/CLAUDE.md` has an installed managed zone whose rule hashes diverge from source. Gated by `auto-startup` flag. |
 | Context-rule error reminder | PostToolUse | `core/hooks/context_rule_error_reminder.py` | On Bash failure (non-zero exit, traceback, interrupted, is_error), injects the `recover_from_trivial_errors` behavioral rule and the `Errors Signal Doc Gaps` principle. Skips successes and hook denials. |
-| Learnings injector | PreToolUse | `core/hooks/learnings_inject_hook.py` | Injects the top-3 most-relevant learnings before Edit/Write/Bash, scored against the tool call payload (file paths, command text, tags). Fail-open on any error path — tool call still proceeds. |
+| Learnings injector | PreToolUse | `core/hooks/learnings_inject_hook.py` | Injects the top-3 most-relevant learnings before Edit/Write/Bash, scored against the tool call payload (file paths, command text, tags). Registered once with the matcher `Edit\|Write\|Bash`; the hook re-checks `tool_name` itself and allows through for anything else. Gated by the `learnings-inject` flag. Fail-open on any error path — tool call still proceeds. |
 | Research-capture reminder | PreToolUse | `core/hooks/research_capture_reminder.py` | On the first `WebSearch`/`WebFetch`/subagent (`Agent`/`Task`) call of a session, injects a one-time nudge to persist durable findings via the researcher rather than leaving them only in chat. Matching the subagent tool catches research run *inside* a subagent (fires in the parent at spawn). Once per session, keyed on session_id. Fail-open. |
 | Pre-push doc-conformer gate | PreToolUse | `core/hooks/pre_push_doc_conformer.py` | On a Bash `git push`, runs the pushed repo's `docs/check_cli_claims.py` and **blocks the push** (with the drift report as the reason) if it exits nonzero. No-op unless that repo ships the conformer, so it's inert in target repos. Fails open on any internal error — only a clean nonzero conformer exit blocks. This is the enforcement half of the doc-conformance loop. |
 | Pre-push secret-scan gate | PreToolUse | `core/hooks/pre_push_secret_scan.py` | On a Bash `git push`, works out what is being pushed (the named ref, every branch for `--all`/`--mirror`, else `HEAD`; honours `git -C <dir>`), then scans the added lines of **every outgoing commit individually** — commits reachable from that ref but from no ref on the target remote — so a secret committed and later deleted is still caught. Rules come from `core/secret_patterns.py`, the same table the commit-time gate uses (API keys for AWS/GitHub/GitLab/Stripe/npm/PyPI/SendGrid/Slack/Twilio/Google/OpenAI/Anthropic, private-key blocks, JWTs, bearer tokens, credentials in URLs, and a filtered `key = value` rule). **Blocks the push** on a hit, reporting `file:line @commit` with the value redacted so the gate never re-leaks it. Append `apiary:allow-secret` or `pragma: allowlist secret` to a line to whitelist an intentional fixture, or list the file in the repo-root `.secretsallow` — the same allowlist the commit-time gate reads. Runs in every repo (secret hygiene is universal). Fails open only on internal errors *before* the scan (bad payload, git not on `PATH`); a scan that starts but does not complete — timeout, git error — **blocks** and says so. |
@@ -48,22 +45,35 @@ Hooks are Python scripts registered in `~/.claude/settings.json` that fire at Cl
 
 ## Hook execution order
 
-All PreToolUse hooks fire before every tool call. The order is determined by their position in `settings.json` (managed by `setup.py`). Current order:
+Order is determined by position in `<repo>/.claude/settings.json`, which
+`apiary install` writes from `core/hooks_factory.py` (core, then budgeter,
+then scribe, then docs) with the drift check spliced in at the front. Hooks
+whose matcher does not match the tool are not run at all.
 
-1. `inject_session.py` — adds session context
-2. `check_install.py` — validates installation (first call only)
-3. `pre_tool_use.py` — logs cost, checks for expensive operations
-4. `remind_standards.py` — reminds to consult standards (Write/Edit only, once per category per session)
+PreToolUse:
 
-PostToolUse hooks fire after a tool returns:
+1. `per_repo_drift_check.py` — registry catch-up if the repo moved (all tools)
+2. `inject_session.py` — adds session context (all tools, first call only)
+3. `learnings_inject_hook.py` — relevant learnings (`Edit|Write|Bash`)
+4. `research_capture_reminder.py` — capture nudge (`WebSearch|WebFetch|Agent|Task`, once per session)
+5. `pre_push_doc_conformer.py` — doc-drift push gate (`Bash`)
+6. `pre_push_secret_scan.py` — secret push gate (`Bash`)
+7. `pre_tool_use.py` — logs cost, checks for expensive operations (one entry per monitored tool)
+8. `remind_standards.py` — reminds to consult standards (Write/Edit only, once per category per session)
 
-1. `post_tool_use.py` — logs agent costs
+PostToolUse:
+
+1. `context_rule_error_reminder.py` — behavioural reminder after a failed `Bash`
+2. `post_tool_use.py` — logs agent costs (one entry per monitored tool)
 
 Stop hooks fire at the end of every assistant turn (not session end):
 
 1. `stop_session.py` — logs final cost, cleans temp files
-2. `check_install_stop.py` — no-op placeholder
-3. `save_transcript.py` — saves transcript
+2. `save_transcript.py` — saves transcript
+
+UserPromptSubmit:
+
+1. `startup_prompt_hook.py` — injects the opening context block on the first user message
 
 ### Docs hooks
 
