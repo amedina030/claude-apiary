@@ -27,17 +27,12 @@ from . import run_lock
 from . import run_tracker
 from . import abort as abort_mod
 from .usher import assess as usher_assess
-from .usher_order import (
-    load_order, next_eligible, update_status as order_update_status,
-    cascade_failure, detect_stale_running,
-)
 from .run_history import append_entry as history_append
 from .detached_lib import (
     slugify, pick_backlog_item, hygiene_precheck,
-    all_backlog_items_claimed, append_overnight_log,
+    all_backlog_items_claimed,
     git_worktree_create, git_commit_all_in, git_worktree_remove,
     prune_stale_worktrees,
-    OVERNIGHT_LOG, BACKLOG_DIR, INTAKE_DIR,
 )
 from .target_repo import (
     executions_dir,
@@ -506,42 +501,15 @@ def _run_detached_impl(cli_args) -> int:
         })
         return 0
 
-    # Reset any stale 'running' tickets from a previous interrupted run
-    for stale in detect_stale_running():
-        print(f'usher_order: resetting stale running ticket {stale["uuid"]} to pending', file=sys.stderr)
-        order_update_status(stale["uuid"], "pending")
-
-    # Resolve intake path — try usher_order.json first, fall back to backlog
-    order_ticket = None  # set if this run is driven by usher_order
+    # Resolve intake path — an explicit --intake wins, else pick from backlog/
     if cli_args.intake is not None:
         picked_path = Path(cli_args.intake)
         from_backlog = False
     else:
-        # Check usher_order for an eligible ticket
-        order = load_order()
-        if order.get("groups") or order.get("standalone"):
-            order_ticket = next_eligible()
+        picked_path = pick_backlog_item()
+        from_backlog = True
 
-        if order_ticket is not None:
-            ticket_uuid = order_ticket["uuid"]
-            # Resolve the intake file from backlog/ or intake/ by uuid
-            candidate = BACKLOG_DIR / f"{ticket_uuid}.json"
-            if not candidate.exists():
-                candidate = INTAKE_DIR / f"{ticket_uuid}.json"
-            if candidate.exists():
-                picked_path = candidate
-                from_backlog = picked_path.parent == BACKLOG_DIR
-            else:
-                print(f'usher_order: ticket {ticket_uuid} has no intake file, marking failed',
-                      file=sys.stderr)
-                order_update_status(ticket_uuid, "failed")
-                order_ticket = None
-
-        if order_ticket is None:
-            picked_path = pick_backlog_item()
-            from_backlog = True
-
-        if order_ticket is None and picked_path is None:
+        if picked_path is None:
             reason = 'all in progress' if all_backlog_items_claimed() else 'backlog empty'
             _log_and_return = {
                 'start_ts': start_ts,
@@ -653,9 +621,6 @@ def _run_detached_impl(cli_args) -> int:
     if prior_attempts >= max_restarts:
         print(f'Run tracker: {uuid} exhausted {prior_attempts}/{max_restarts} restarts, giving up',
               file=sys.stderr)
-        if order_ticket is not None:
-            order_update_status(order_ticket["uuid"], "failed")
-            cascade_failure(order_ticket["uuid"])
         history_append({
             'start_ts': start_ts, 'end_ts': _now(),
             'exit_status': 'max_restarts_exceeded',
@@ -667,9 +632,6 @@ def _run_detached_impl(cli_args) -> int:
     if prior_tokens >= token_cap:
         print(f'Run tracker: {uuid} already spent {prior_tokens} tokens (cap={token_cap}), giving up',
               file=sys.stderr)
-        if order_ticket is not None:
-            order_update_status(order_ticket["uuid"], "failed")
-            cascade_failure(order_ticket["uuid"])
         history_append({
             'start_ts': start_ts, 'end_ts': _now(),
             'exit_status': 'cross_run_token_cap',
@@ -728,10 +690,6 @@ def _run_detached_impl(cli_args) -> int:
         return 1
 
     run_lock.write(uuid, stage="init", worktree_path=str(wt_path))
-
-    # Mark order ticket as running
-    if order_ticket is not None:
-        order_update_status(order_ticket["uuid"], "running")
 
     # Open per-run debug log
     run_logs_dir = logs_dir()
@@ -927,22 +885,6 @@ def _run_detached_impl(cli_args) -> int:
         'target_repo': str(target_repo_path),
     }
     history_append(entry)
-
-    # Update usher_order status if this was an order-driven run
-    if order_ticket is not None:
-        if exit_status == 'ok':
-            order_update_status(order_ticket["uuid"], "completed")
-        else:
-            order_update_status(order_ticket["uuid"], "failed")
-            blocked = cascade_failure(order_ticket["uuid"])
-            if blocked:
-                print(f'usher_order: blocked {len(blocked)} dependent ticket(s): {blocked}',
-                      file=sys.stderr)
-        # Check if more tickets are available for next cron invocation
-        _next = next_eligible()
-        if _next is not None:
-            print(f'usher_order: next eligible ticket available: {_next["slug"]}',
-                  file=sys.stderr)
 
     return 0 if exit_status == 'ok' else 1
 

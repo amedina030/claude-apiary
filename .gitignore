@@ -49,7 +49,6 @@ runner/crashes/
 runner/runs/
 runner/overnight.jsonl
 runner/run_history.jsonl
-runner/usher_order.json.lock
 
 # Detached runner worktrees (one per in-flight run)
 .runner-worktrees/

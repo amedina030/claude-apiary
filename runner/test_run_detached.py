@@ -154,10 +154,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', intake_dir),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
@@ -209,9 +207,7 @@ class TestDetachedRun(unittest.TestCase):
             with (
                 mock.patch.object(target_repo, 'APIARY_REPO_ROOT', td),
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', intake_dir_path),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
@@ -274,10 +270,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', td / 'intake'),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', side_effect=_capture),
@@ -304,10 +298,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', td / 'intake'),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
@@ -347,10 +339,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', td / 'intake'),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_path),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', side_effect=_capture),
@@ -377,10 +367,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', td / 'intake'),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create',
@@ -410,10 +398,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', intake_dir),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
@@ -447,10 +433,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', intake_dir),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
@@ -491,7 +475,6 @@ class TestDetachedRun(unittest.TestCase):
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=None),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
             ):
@@ -515,10 +498,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', intake_dir),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create',
@@ -551,10 +532,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', intake_dir),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=evil),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', side_effect=_track_create),
@@ -588,10 +567,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', intake_dir),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', side_effect=_capture),
@@ -622,10 +599,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', intake_dir),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
@@ -664,10 +639,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', intake_dir),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
@@ -696,10 +669,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', intake_dir),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
@@ -745,10 +716,8 @@ class TestDetachedRun(unittest.TestCase):
             try:
                 with (
                     mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                    mock.patch('runner.run.INTAKE_DIR', intake_dir),
                     mock.patch('runner.run.SCRIPT_DIR', td),
                     mock.patch('runner.run.hygiene_precheck', return_value=None),
-                    mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                     mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                     mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
@@ -793,10 +762,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', intake_dir),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
@@ -833,10 +800,8 @@ class TestDetachedRun(unittest.TestCase):
 
             with (
                 mock.patch.object(detached_lib, 'OVERNIGHT_LOG', log_path),
-                mock.patch('runner.run.INTAKE_DIR', intake_dir),
                 mock.patch('runner.run.SCRIPT_DIR', td),
                 mock.patch('runner.run.hygiene_precheck', return_value=None),
-                mock.patch('runner.run.next_eligible', return_value=None),
                 mock.patch('runner.run.pick_backlog_item', return_value=intake_file),
                 mock.patch('runner.run.all_backlog_items_claimed', return_value=False),
                 mock.patch('runner.run.git_worktree_create', return_value=(True, wt_path, '')),
