@@ -7,6 +7,8 @@ framework_version: "1.0"
 last_verified: 2026-08-26
 ---
 
+> **Snapshot of 2026-08-26; superseded by the remediation — see CHANGELOG. Deleted at close-out (T-2026-271).**
+
 # claude-apiary — Deep Review (LLM edition)
 
 **Audience:** an LLM (Opus / Fable class) that will plan and execute the remediation. This document is the map; the six appendices under `docs/review/subsystems/` are the territory — read the relevant appendix before touching a subsystem.

@@ -147,6 +147,21 @@ class StorageTableTests(unittest.TestCase):
         rows = {r.key: r.cells["Path"] for r in gen.storage_records()}
         self.assertTrue(rows["runner worktrees"].startswith(f"`{gen.REPO}/"))
 
+    def test_no_row_reads_a_global_a_test_may_have_redirected(self):
+        # budgeter's LOG_PATH/TMP_DIR are rebound by configure_for_project(),
+        # so reading them inside the suite printed a pytest tmpdir into the
+        # doc. Every row has to survive being generated mid-suite.
+        from budgeter.lib import logger
+        saved = (logger.LOG_PATH, logger.TMP_DIR)
+        logger.LOG_PATH = Path("/somewhere/else/log.jsonl")
+        logger.TMP_DIR = Path("/somewhere/else/tmp")
+        try:
+            rows = {r.key: r.cells["Path"] for r in gen.storage_records()}
+        finally:
+            logger.LOG_PATH, logger.TMP_DIR = saved
+        self.assertIn("budgeter/data", rows["budgeter log"])
+        self.assertNotIn("somewhere/else", rows["budgeter log"])
+
 
 class ArchivePolicyTests(unittest.TestCase):
     def test_the_table_matches_scribe_policy(self):

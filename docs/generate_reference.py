@@ -371,13 +371,19 @@ def storage_records() -> list[docgen.Record]:
             rows.append(("gui", _rel_to(gui_paths.state_dir(), gui_paths.main_apiary(), MAIN),
                          "`gui.paths.state_dir`"))
 
+            # `LOG_PATH` / `TMP_DIR` are module globals that
+            # `configure_for_project()` rebinds, so reading them here would
+            # print whatever the last caller in this process redirected them
+            # to — a pytest tmpdir, when the generator runs inside the suite.
+            # `_DEFAULT_*` are captured at import and never reassigned; they
+            # are what the doc means by "where the budgeter writes".
             from budgeter.lib import logger as budgeter_logger
             rows.append(("budgeter log",
-                         _rel_to(budgeter_logger.LOG_PATH, REPO_ROOT, MAIN),
-                         "`budgeter.lib.logger.LOG_PATH`"))
+                         _rel_to(budgeter_logger._DEFAULT_LOG_PATH, REPO_ROOT, MAIN),
+                         "`budgeter.lib.logger._DEFAULT_LOG_PATH`"))
             rows.append(("budgeter baselines",
-                         _rel_to(budgeter_logger.TMP_DIR, REPO_ROOT, MAIN),
-                         "`budgeter.lib.logger.TMP_DIR`"))
+                         _rel_to(budgeter_logger._DEFAULT_TMP_DIR, REPO_ROOT, MAIN),
+                         "`budgeter.lib.logger._DEFAULT_TMP_DIR`"))
         finally:
             if saved is None:
                 os.environ.pop(state_mod.TARGET_STATE_DIR_ENV, None)

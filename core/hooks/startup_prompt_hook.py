@@ -222,9 +222,13 @@ def run(payload: dict):
         scrubbed, hits = sanitize_and_report(cli_index.strip())
         _log_sanitizer_hits("cli_index", hits, sid.full)
         parts.append("")
+        # The launcher idiom, not a bare relative path: the session's cwd is
+        # the target repo, not main-apiary, so `python docs/...` only resolves
+        # in this one checkout (review §5 Phase 5).
         parts.append(
-            "--- cli-tools index (run `python docs/reference/cli_lookup.py <tool>` for full flags) ---"
-        )
+            "--- cli-tools index (run `python \"$(git rev-parse --show-toplevel)"
+            "/.claude/apiary/launch.py\" docs/reference/cli_lookup.py <tool>` "
+            "for full flags) ---")
         parts.append(scrubbed)
     except Exception:
         pass

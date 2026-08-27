@@ -7,6 +7,8 @@ framework_version: "1.0"
 last_verified: 2026-08-26
 ---
 
+> **Snapshot of 2026-08-26; superseded by the remediation — see CHANGELOG. Deleted at close-out (T-2026-271).**
+
 # Code review: `runner/` (claude-apiary)
 
 Read-only review of the autonomous six-stage orchestrator. Every non-test `.py` file under `runner/` was read in full; tests were skimmed for shape and run once (`poetry run pytest runner -q` → **594 passed in 35.5s**). Nothing was edited, committed, or executed beyond the test suite and read-only git queries. All paths are repo-relative to `D:\Professional\claude-apiary`.

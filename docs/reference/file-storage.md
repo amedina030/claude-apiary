@@ -57,8 +57,8 @@ it does.
 | next_id | `&lt;main-apiary&gt;/.repos/next_id` | `core.utils.state.next_id_path` |
 | per-target state root | `&lt;main-apiary&gt;/.repos/&lt;name&gt;-&lt;uid&gt;/` | `core.utils.state.resolve_target_state_dir` |
 | gui | `&lt;main-apiary&gt;/.apiary/gui/apiary_gui` | `gui.paths.state_dir` |
-| budgeter log | `&lt;main-apiary&gt;/budgeter/data/usage_log.jsonl` | `budgeter.lib.logger.LOG_PATH` |
-| budgeter baselines | `&lt;main-apiary&gt;/budgeter/tmp` | `budgeter.lib.logger.TMP_DIR` |
+| budgeter log | `&lt;main-apiary&gt;/budgeter/data/usage_log.jsonl` | `budgeter.lib.logger._DEFAULT_LOG_PATH` |
+| budgeter baselines | `&lt;main-apiary&gt;/budgeter/tmp` | `budgeter.lib.logger._DEFAULT_TMP_DIR` |
 <!-- generated:end: storage:paths -->
 
 ## Scribe data

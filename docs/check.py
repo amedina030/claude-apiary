@@ -59,6 +59,13 @@ EXTRA_SCOPES = {"project", "docs"}
 #: Top-level directories that hold data or config, never code to document.
 NON_TOOL_DIRS = {"profiles", "context-rules", "cron_registry", "captures"}
 
+#: Doc subtrees that are dated snapshots of a tree that has since changed on
+#: purpose. They still need frontmatter and an index entry, but "re-verify it
+#: against the code" is meaningless for a document whose value is that it
+#: records what was true on one day. `docs/review/` is deleted at close-out
+#: (T-2026-271); the snapshot line at the top of each file says so.
+SNAPSHOT_DIRS = {"review"}
+
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -195,10 +202,11 @@ def check_doc(path: Path, framework_version: str, scopes: set[str],
     if scope and scope not in scopes:
         errors.append(f"{rel}: invalid scope '{scope}' (expected: {', '.join(sorted(scopes))})")
 
+    is_snapshot = bool(SNAPSHOT_DIRS & set(rel.split("/")[:-1]))
     lv = str(fm.get("last_verified", "")).strip('"')
     if lv and not DATE_RE.match(lv):
         errors.append(f"{rel}: last_verified '{lv}' not in YYYY-MM-DD format")
-    elif lv:
+    elif lv and not is_snapshot:
         changed = git_dates.get(path.relative_to(REPO_ROOT).as_posix())
         if changed and lv < changed:
             errors.append(
