@@ -422,7 +422,7 @@ class ReadBudgeterLogTests(unittest.TestCase):
 
         original = budget_logger.LOG_PATH
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "usage_log.jsonl"
+            path = Path(tmp).resolve() / "usage_log.jsonl"
             path.write_text('{"session_id": "s", "task_turn": 1}\n{"bad json\n', encoding="utf-8")
             rows = evaluate.read_budgeter_log(path)
         self.assertEqual(rows, [{"session_id": "s", "task_turn": 1}])

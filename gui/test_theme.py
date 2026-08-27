@@ -16,14 +16,14 @@ from gui.theme import DEFAULT_THEME, ThemeWatcher, load_theme
 class LoadThemeTests(unittest.TestCase):
     def test_missing_file_returns_defaults_no_error(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "theme.json"
+            p = Path(tmp).resolve() / "theme.json"
             vars_, err = load_theme(p)
             self.assertIsNone(err)
             self.assertEqual(vars_, dict(DEFAULT_THEME))
 
     def test_malformed_json_returns_defaults_with_error(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "theme.json"
+            p = Path(tmp).resolve() / "theme.json"
             p.write_text("{not json", encoding="utf-8")
             vars_, err = load_theme(p)
             self.assertIsNotNone(err)
@@ -31,7 +31,7 @@ class LoadThemeTests(unittest.TestCase):
 
     def test_non_object_returns_defaults_with_error(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "theme.json"
+            p = Path(tmp).resolve() / "theme.json"
             p.write_text("[]", encoding="utf-8")
             _vars, err = load_theme(p)
             self.assertIsNotNone(err)
@@ -40,7 +40,7 @@ class LoadThemeTests(unittest.TestCase):
 
     def test_partial_overrides_merge_with_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "theme.json"
+            p = Path(tmp).resolve() / "theme.json"
             p.write_text(json.dumps({"--user-msg-bg": "#ff0000"}), encoding="utf-8")
             vars_, err = load_theme(p)
             self.assertIsNone(err)
@@ -52,7 +52,7 @@ class LoadThemeTests(unittest.TestCase):
 class ThemeWatcherTests(unittest.TestCase):
     def test_watcher_fires_after_save_with_debounce(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "theme.json"
+            p = Path(tmp).resolve() / "theme.json"
             p.write_text(json.dumps({"--accent": "#000000"}), encoding="utf-8")
 
             received: list[tuple[dict, str | None]] = []

@@ -49,14 +49,14 @@ class CapturedAtTest(unittest.TestCase):
 
     def test_uses_transcript_mtime(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = _write_transcript(Path(tmp) / "deadbeef.jsonl")
+            path = _write_transcript(Path(tmp).resolve() / "deadbeef.jsonl")
             when = datetime(2026, 4, 17, 20, 30, 15, tzinfo=timezone.utc)
             os.utime(path, (when.timestamp(), when.timestamp()))
             self.assertEqual(backfill._captured_at(path), "2026-04-17T20:30:15Z")
 
     def test_is_not_now_for_an_old_transcript(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = _write_transcript(Path(tmp) / "deadbeef.jsonl")
+            path = _write_transcript(Path(tmp).resolve() / "deadbeef.jsonl")
             old = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc).timestamp()
             os.utime(path, (old, old))
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -64,7 +64,7 @@ class CapturedAtTest(unittest.TestCase):
 
     def test_result_is_iso_8601_the_validator_accepts(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = _write_transcript(Path(tmp) / "deadbeef.jsonl")
+            path = _write_transcript(Path(tmp).resolve() / "deadbeef.jsonl")
             captured = backfill._captured_at(path)
             payload = {
                 "session_id": "deadbeef",
@@ -82,8 +82,8 @@ class CapturedAtTest(unittest.TestCase):
     def test_ordering_matches_transcript_age(self):
         # synthesize sorts on this string; lexical order must track real time.
         with tempfile.TemporaryDirectory() as tmp:
-            older = _write_transcript(Path(tmp) / "aaaaaaaa.jsonl")
-            newer = _write_transcript(Path(tmp) / "bbbbbbbb.jsonl")
+            older = _write_transcript(Path(tmp).resolve() / "aaaaaaaa.jsonl")
+            newer = _write_transcript(Path(tmp).resolve() / "bbbbbbbb.jsonl")
             t_old = datetime(2026, 3, 1, tzinfo=timezone.utc).timestamp()
             t_new = datetime(2026, 8, 1, tzinfo=timezone.utc).timestamp()
             os.utime(older, (t_old, t_old))

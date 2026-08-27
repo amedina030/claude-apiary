@@ -142,7 +142,7 @@ class TestRunAutoArchive(unittest.TestCase):
 
     def test_sweeps_the_store(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             stale = store.add_note("todo", "closed a while back", "s1")
             store.update_note("todo", stale["year"], stale["seq"], status="done")
             store.update_note(

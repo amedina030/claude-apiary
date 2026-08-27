@@ -42,8 +42,9 @@ class HostnameRegistryPathTests(unittest.TestCase):
         self.assertTrue(path.name.endswith(".json"))
         self.assertTrue(len(path.stem) > 0)
         # And that the computed hostname is not literally "platform.node()"
-        # (catches a dumb copy-paste bug).
-        self.assertNotIn(".", path.stem[1:] + " ")
+        # (catches a dumb copy-paste bug). A dot is legal in the stem itself:
+        # a macOS host is `name.local`, and the sanitiser keeps dots.
+        self.assertNotIn("platform.node", path.stem)
 
     def test_hostname_sanitises_illegal_chars(self):
         # Spaces and path separators get replaced with '-'.

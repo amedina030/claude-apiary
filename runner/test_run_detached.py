@@ -1005,7 +1005,7 @@ class TestRunCleanup(unittest.TestCase):
 
     def test_archive_execution_log_moves_file(self):
         with tempfile.TemporaryDirectory() as tmp:
-            executions = Path(tmp) / "executions"
+            executions = Path(tmp).resolve() / "executions"
             executions.mkdir()
             (executions / "abc-123.json").write_text('{"uuid":"abc-123"}', encoding="utf-8")
             archived = run._archive_execution_log(executions, "abc-123")
@@ -1016,7 +1016,7 @@ class TestRunCleanup(unittest.TestCase):
 
     def test_archive_execution_log_missing_returns_none(self):
         with tempfile.TemporaryDirectory() as tmp:
-            executions = Path(tmp) / "executions"
+            executions = Path(tmp).resolve() / "executions"
             executions.mkdir()
             self.assertIsNone(run._archive_execution_log(executions, "nope"))
 
@@ -1316,7 +1316,7 @@ class TestRunCleanup(unittest.TestCase):
         # A second cleanup for the same uuid must not clobber the first
         # archived log — the second one gets a timestamp suffix.
         with tempfile.TemporaryDirectory() as tmp:
-            executions = Path(tmp) / "executions"
+            executions = Path(tmp).resolve() / "executions"
             (executions / "archive").mkdir(parents=True)
             (executions / "archive" / "abc-123.json").write_text('{"old":true}', encoding="utf-8")
             (executions / "abc-123.json").write_text('{"new":true}', encoding="utf-8")

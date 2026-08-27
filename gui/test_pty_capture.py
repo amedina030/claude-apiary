@@ -28,7 +28,7 @@ class SanitizeLabelTests(unittest.TestCase):
 class NextCapturePathTests(unittest.TestCase):
     def test_creates_parent_dir_and_formats_stamp(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp) / "nested" / "captures"
+            base = Path(tmp).resolve() / "nested" / "captures"
             fixed = dt.datetime(2026, 4, 19, 14, 5, 33)
             p = pty_capture.next_capture_path("tool_permission", now=fixed, base=base)
             self.assertTrue(base.is_dir())
@@ -37,20 +37,20 @@ class NextCapturePathTests(unittest.TestCase):
     def test_no_label_suffix_omitted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixed = dt.datetime(2026, 4, 19, 14, 5, 33)
-            p = pty_capture.next_capture_path(None, now=fixed, base=Path(tmp))
+            p = pty_capture.next_capture_path(None, now=fixed, base=Path(tmp).resolve())
             self.assertEqual(p.name, "20260419-140533.bin")
 
     def test_empty_label_sanitized_to_capture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixed = dt.datetime(2026, 4, 19, 14, 5, 33)
-            p = pty_capture.next_capture_path("///", now=fixed, base=Path(tmp))
+            p = pty_capture.next_capture_path("///", now=fixed, base=Path(tmp).resolve())
             self.assertEqual(p.name, "20260419-140533-capture.bin")
 
 
 class CaptureWriterTests(unittest.TestCase):
     def test_writes_bytes_and_strings_as_utf8(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "cap.bin"
+            path = Path(tmp).resolve() / "cap.bin"
             w = pty_capture.CaptureWriter(path)
             w.write(b"\x1b[1mhello\x1b[0m")
             w.write("  world\r\n")
@@ -63,7 +63,7 @@ class CaptureWriterTests(unittest.TestCase):
 
     def test_close_is_idempotent_and_blocks_further_writes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "cap.bin"
+            path = Path(tmp).resolve() / "cap.bin"
             w = pty_capture.CaptureWriter(path)
             w.write(b"abc")
             w.close()
@@ -73,7 +73,7 @@ class CaptureWriterTests(unittest.TestCase):
 
     def test_context_manager_closes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "cap.bin"
+            path = Path(tmp).resolve() / "cap.bin"
             with pty_capture.CaptureWriter(path) as w:
                 w.write(b"x")
             # After __exit__ the handle is closed; writes are no-ops.
@@ -82,7 +82,7 @@ class CaptureWriterTests(unittest.TestCase):
 
     def test_concurrent_writes_do_not_lose_data_or_crash(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "cap.bin"
+            path = Path(tmp).resolve() / "cap.bin"
             w = pty_capture.CaptureWriter(path)
             payload = b"A" * 64
 
@@ -105,11 +105,11 @@ class CaptureWriterTests(unittest.TestCase):
 class ListCapturesTests(unittest.TestCase):
     def test_missing_dir_returns_empty(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(pty_capture.list_captures(Path(tmp) / "nope"), [])
+            self.assertEqual(pty_capture.list_captures(Path(tmp).resolve() / "nope"), [])
 
     def test_returns_sorted_bin_files_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
+            base = Path(tmp).resolve()
             (base / "20260419-100000-a.bin").write_bytes(b"")
             (base / "20260419-090000-b.bin").write_bytes(b"")
             (base / "ignored.txt").write_text("x", encoding="utf-8")

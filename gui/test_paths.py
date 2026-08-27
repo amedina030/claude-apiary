@@ -39,7 +39,7 @@ class StateDirFrozenTests(unittest.TestCase):
         # exe sits at <checkout>/dist/apiary-gui/apiary-gui.exe; state must
         # resolve to <checkout>/.apiary/gui, NOT inside the dist bundle.
         with TemporaryDirectory() as tmp:
-            checkout = _make_checkout(Path(tmp))
+            checkout = _make_checkout(Path(tmp).resolve())
             exe = checkout / "dist" / "apiary-gui" / "apiary-gui.exe"
             exe.parent.mkdir(parents=True)
             exe.touch()
@@ -55,7 +55,7 @@ class StateDirFrozenTests(unittest.TestCase):
     def test_frozen_falls_back_to_user_data_when_no_checkout(self):
         # Build shipped outside any checkout: no .git ancestor → user data dir.
         with TemporaryDirectory() as tmp, TemporaryDirectory() as data:
-            exe = Path(tmp) / "somewhere" / "apiary-gui.exe"
+            exe = Path(tmp).resolve() / "somewhere" / "apiary-gui.exe"
             exe.parent.mkdir(parents=True)
             exe.touch()
             data_base = Path(data)
@@ -73,7 +73,7 @@ class StateDirFrozenTests(unittest.TestCase):
 class FindCheckoutTests(unittest.TestCase):
     def test_requires_both_git_and_gui(self):
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / ".git").mkdir()  # .git but no gui/ → not a checkout
             start = root / "dist" / "apiary-gui"
             start.mkdir(parents=True)
@@ -81,7 +81,7 @@ class FindCheckoutTests(unittest.TestCase):
 
     def test_finds_nearest_checkout_ancestor(self):
         with TemporaryDirectory() as tmp:
-            checkout = _make_checkout(Path(tmp))
+            checkout = _make_checkout(Path(tmp).resolve())
             start = checkout / "dist" / "apiary-gui"
             start.mkdir(parents=True)
             self.assertEqual(paths._find_apiary_checkout(start), checkout)

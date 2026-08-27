@@ -727,7 +727,7 @@ class TestGitignoredPaths(unittest.TestCase):
         # Out-of-repo paths are handled by the allowlist, not here. The
         # gitignore check must silently skip them (not crash, not error).
         with tempfile.TemporaryDirectory() as tmp:
-            bad = str(Path(tmp) / "random.json")
+            bad = str(Path(tmp).resolve() / "random.json")
             steps = [_step(1, "create", "x", files=[bad])]
             self.assertEqual(_check_gitignored_paths(steps), [])
 

@@ -280,7 +280,7 @@ class AllowlistTests(unittest.TestCase):
 
     def test_allowlist_file_is_parsed(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / secret_scan.ALLOWLIST_FILENAME).write_text(
                 "# a comment\n\n^docs/\nline: EXAMPLE\n[unclosed\n", encoding="utf-8"
             )
@@ -293,7 +293,7 @@ class AllowlistTests(unittest.TestCase):
 
     def test_missing_allowlist_is_not_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(secret_scan.load_allowlist(Path(tmp)), secret_scan.Allowlist())
+            self.assertEqual(secret_scan.load_allowlist(Path(tmp).resolve()), secret_scan.Allowlist())
 
 
 class BlockedFileTests(unittest.TestCase):
@@ -455,7 +455,7 @@ class FailClosedTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             # Not a git repo: `git diff --cached` exits non-zero.
             with self.assertRaises(secret_scan.GitError):
-                secret_scan.scan_staged(Path(tmp))
+                secret_scan.scan_staged(Path(tmp).resolve())
 
     def test_staged_mode_exits_2_and_says_the_scan_did_not_run(self):
         err = io.StringIO()
@@ -483,7 +483,7 @@ class FailClosedTests(unittest.TestCase):
 class PathScanTests(unittest.TestCase):
     def test_scan_path_walks_a_tree(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / "sub").mkdir()
             (root / "sub" / "bad.py").write_text(
                 f"k = '{FAKE['github-token']}'\n", encoding="utf-8"
@@ -495,13 +495,13 @@ class PathScanTests(unittest.TestCase):
 
     def test_scan_path_accepts_a_single_file(self):
         with tempfile.TemporaryDirectory() as tmp:
-            f = Path(tmp) / "one.py"
+            f = Path(tmp).resolve() / "one.py"
             f.write_text(f"k = '{FAKE['openai-key']}'\n", encoding="utf-8")
             self.assertEqual(len(secret_scan.scan_path(f)), 1)
 
     def test_git_directory_is_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / ".git").mkdir()
             (root / ".git" / "cfg").write_text(FAKE["aws-access-key"], encoding="utf-8")
             self.assertEqual(secret_scan.scan_path(root), [])
@@ -509,7 +509,7 @@ class PathScanTests(unittest.TestCase):
     def test_gitignored_files_are_skipped_inside_a_repo(self):
         # Runtime logs a commit can never include are noise for a tree scan.
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             _run_git(["init", "-q"], root)
             (root / ".gitignore").write_text("logs/\n", encoding="utf-8")
             (root / "logs").mkdir()
@@ -524,13 +524,13 @@ class PathScanTests(unittest.TestCase):
 class CliTests(unittest.TestCase):
     def test_exit_code_1_on_finding(self):
         with tempfile.TemporaryDirectory() as tmp:
-            f = Path(tmp) / "x.py"
+            f = Path(tmp).resolve() / "x.py"
             f.write_text(FAKE["aws-access-key"], encoding="utf-8")
             self.assertEqual(secret_scan.main(["--path", str(f)]), 1)
 
     def test_exit_code_0_on_clean(self):
         with tempfile.TemporaryDirectory() as tmp:
-            f = Path(tmp) / "x.py"
+            f = Path(tmp).resolve() / "x.py"
             f.write_text("nothing here\n", encoding="utf-8")
             self.assertEqual(secret_scan.main(["--path", str(f), "--quiet"]), 0)
 

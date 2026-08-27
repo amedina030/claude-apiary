@@ -29,7 +29,7 @@ def _seed_scribe(repo: Path, notes: list[dict], folder: str = "todos", year: str
 class AggregateTests(unittest.TestCase):
     def test_picks_up_active_notes_and_skips_archived(self):
         with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp) / "repoA"
+            repo = Path(tmp).resolve() / "repoA"
             repo.mkdir()
             _seed_scribe(
                 repo,
@@ -71,8 +71,8 @@ class AggregateTests(unittest.TestCase):
 
     def test_aggregates_across_multiple_repos_and_types(self):
         with tempfile.TemporaryDirectory() as tmp:
-            r1 = Path(tmp) / "r1"
-            r2 = Path(tmp) / "r2"
+            r1 = Path(tmp).resolve() / "r1"
+            r2 = Path(tmp).resolve() / "r2"
             r1.mkdir()
             r2.mkdir()
             _seed_scribe(
@@ -126,7 +126,7 @@ class AggregateTests(unittest.TestCase):
 
     def test_skips_repo_without_apiary(self):
         with tempfile.TemporaryDirectory() as tmp:
-            empty = Path(tmp) / "empty"
+            empty = Path(tmp).resolve() / "empty"
             empty.mkdir()
             notes, warnings = aggregate([empty])
             self.assertEqual(notes, [])
@@ -134,7 +134,7 @@ class AggregateTests(unittest.TestCase):
 
     def test_malformed_index_line_skipped_others_kept(self):
         with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp) / "repo"
+            repo = Path(tmp).resolve() / "repo"
             repo.mkdir()
             type_dir = repo / ".apiary" / "scribe" / "todos" / "2026"
             type_dir.mkdir(parents=True)
@@ -163,7 +163,7 @@ class AggregateTests(unittest.TestCase):
 
     def test_brief_summary_passed_through_when_present(self):
         with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp) / "r"
+            repo = Path(tmp).resolve() / "r"
             repo.mkdir()
             _seed_scribe(
                 repo,
@@ -187,7 +187,7 @@ class AggregateTests(unittest.TestCase):
     def test_brief_summary_absent_defaults_to_empty(self):
         # Pre-migration entries lack the field — aggregator must still load.
         with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp) / "r"
+            repo = Path(tmp).resolve() / "r"
             repo.mkdir()
             _seed_scribe(
                 repo,
@@ -207,7 +207,7 @@ class AggregateTests(unittest.TestCase):
 
     def test_body_path_resolves_when_file_present(self):
         with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp) / "r"
+            repo = Path(tmp).resolve() / "r"
             repo.mkdir()
             _seed_scribe(
                 repo,
@@ -263,8 +263,8 @@ class AggregatePointerTests(unittest.TestCase):
 
     def test_pointer_resolves_to_centralized_state(self):
         with tempfile.TemporaryDirectory() as tmp:
-            apiary = Path(tmp) / "apiary"
-            target = Path(tmp) / "target"
+            apiary = Path(tmp).resolve() / "apiary"
+            target = Path(tmp).resolve() / "target"
             target_id = "target-7"
             state_dir = apiary / ".repos" / target_id
             state_dir.mkdir(parents=True)
@@ -289,8 +289,8 @@ class AggregatePointerTests(unittest.TestCase):
 
     def test_pointer_takes_precedence_over_legacy_data(self):
         with tempfile.TemporaryDirectory() as tmp:
-            apiary = Path(tmp) / "apiary"
-            target = Path(tmp) / "target"
+            apiary = Path(tmp).resolve() / "apiary"
+            target = Path(tmp).resolve() / "target"
             target_id = "target-7"
             state_dir = apiary / ".repos" / target_id
             state_dir.mkdir(parents=True)
@@ -330,8 +330,8 @@ class AggregatePointerTests(unittest.TestCase):
 
     def test_falls_back_to_legacy_when_pointer_state_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
-            apiary = Path(tmp) / "apiary"
-            target = Path(tmp) / "target"
+            apiary = Path(tmp).resolve() / "apiary"
+            target = Path(tmp).resolve() / "target"
             target.mkdir()
             # Pointer exists but the centralized state directory does not.
             _make_pointer(target, apiary, "target-99")
@@ -353,7 +353,7 @@ class AggregatePointerTests(unittest.TestCase):
 
     def test_no_pointer_uses_legacy(self):
         with tempfile.TemporaryDirectory() as tmp:
-            target = Path(tmp) / "target"
+            target = Path(tmp).resolve() / "target"
             target.mkdir()
             _seed_scribe(
                 target,
@@ -383,7 +383,7 @@ class RepoRegistryTests(unittest.TestCase):
         import unittest.mock as _mock
 
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_p = Path(tmp)
+            tmp_p = Path(tmp).resolve()
             live = tmp_p / "live-repo"
             live.mkdir()
             reg = tmp_p / "registry.json"
@@ -411,7 +411,7 @@ class RepoRegistryTests(unittest.TestCase):
         import unittest.mock as _mock
 
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_p = Path(tmp)
+            tmp_p = Path(tmp).resolve()
             with _mock.patch.object(
                 repo_registry, "_registry_path", return_value=tmp_p / "missing-registry.json"
             ):
@@ -432,7 +432,7 @@ class RepoRegistryTests(unittest.TestCase):
         import unittest.mock as _mock
 
         with tempfile.TemporaryDirectory() as tmp:
-            checkout = Path(tmp)
+            checkout = Path(tmp).resolve()
             (checkout / ".git").mkdir()
             (checkout / "gui").mkdir()
             exe = checkout / "dist" / "apiary-gui" / "apiary-gui.exe"
@@ -453,7 +453,7 @@ class RepoRegistryTests(unittest.TestCase):
         import unittest.mock as _mock
 
         with tempfile.TemporaryDirectory() as tmp:
-            checkout = Path(tmp)
+            checkout = Path(tmp).resolve()
             (checkout / ".git").mkdir()
             (checkout / "gui").mkdir()
             exe = checkout / "dist" / "apiary-gui" / "apiary-gui.exe"

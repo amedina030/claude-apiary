@@ -114,7 +114,7 @@ class DimensionsTest(unittest.TestCase):
 class PathsTest(unittest.TestCase):
     def test_observation_path_uses_8char_short(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
+            tmp_path = Path(tmp).resolve()
             short = store.observation_path("deadbeef", start=tmp_path)
             full = store.observation_path("deadbeef-1234-5678-9abc-def012345678", start=tmp_path)
             self.assertEqual(short.name, "deadbeef.json")
@@ -122,7 +122,7 @@ class PathsTest(unittest.TestCase):
 
     def test_archive_target_path_uses_iso_year_week(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
+            tmp_path = Path(tmp).resolve()
             src = store.observation_path("deadbeef", start=tmp_path)
             dt = datetime(2026, 1, 15, tzinfo=timezone.utc)  # ISO week 3
             dest = store.archive_target_path(src, now=dt, start=tmp_path)
@@ -131,7 +131,7 @@ class PathsTest(unittest.TestCase):
 
     def test_compass_dir_honors_target_state_env(self):
         with tempfile.TemporaryDirectory() as tmp:
-            state_dir = Path(tmp) / "claude-apiary-1"
+            state_dir = Path(tmp).resolve() / "claude-apiary-1"
             state_dir.mkdir()
             prev = os.environ.get(store.TARGET_STATE_DIR_ENV)
             os.environ[store.TARGET_STATE_DIR_ENV] = str(state_dir)
@@ -145,7 +145,7 @@ class PathsTest(unittest.TestCase):
 
     def test_compass_dir_falls_back_to_repo_root_without_env(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
+            tmp_path = Path(tmp).resolve()
             prev = os.environ.get(store.TARGET_STATE_DIR_ENV)
             if prev is not None:
                 del os.environ[store.TARGET_STATE_DIR_ENV]
@@ -163,7 +163,7 @@ class PathsTest(unittest.TestCase):
 class LoadObservationTest(unittest.TestCase):
     def test_load_valid_file(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
+            tmp_path = Path(tmp).resolve()
             data = {
                 "session_id": "deadbeef",
                 "captured_at": "2026-04-17T20:00:00Z",
@@ -175,13 +175,13 @@ class LoadObservationTest(unittest.TestCase):
 
     def test_load_invalid_json_returns_none(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "broken.json"
+            p = Path(tmp).resolve() / "broken.json"
             p.write_text("not json", encoding="utf-8")
             self.assertIsNone(store.load_observation(p))
 
     def test_load_invalid_schema_returns_none(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "bad.json"
+            p = Path(tmp).resolve() / "bad.json"
             p.write_text(json.dumps({"oops": True}), encoding="utf-8")
             self.assertIsNone(store.load_observation(p))
 

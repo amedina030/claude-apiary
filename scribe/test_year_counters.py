@@ -48,7 +48,7 @@ class TestFormatId(unittest.TestCase):
 class TestPerTypeYearCounters(unittest.TestCase):
     def test_add_note_returns_display_id(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             entry = store.add_note("todo", "Test content", "sess1")
             year = datetime.now(timezone.utc).year
             self.assertEqual(entry["display_id"], f"T-{year}-1")
@@ -59,7 +59,7 @@ class TestPerTypeYearCounters(unittest.TestCase):
 
     def test_counter_independence_across_types(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             todo_entry = store.add_note("todo", "todo1", "sess1")
             handoff_entry = store.add_note("handoff", "handoff1", "sess1", summary="test")
             year = datetime.now(timezone.utc).year
@@ -71,7 +71,7 @@ class TestPerTypeYearCounters(unittest.TestCase):
     def test_year_rollover(self):
         # Mock datetime to simulate year change
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             # Add note in 'current' year
             entry1 = store.add_note("todo", "note1", "sess1")
             self.assertEqual(entry1["seq"], 1)
@@ -87,7 +87,7 @@ class TestPerTypeYearCounters(unittest.TestCase):
 
     def test_add_learning_display_id(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             entry = store.add_learning("learned something", "sess1")
             year = datetime.now(timezone.utc).year
             self.assertEqual(entry["display_id"], f"L-{year}-1")
@@ -96,7 +96,7 @@ class TestPerTypeYearCounters(unittest.TestCase):
 
     def test_get_note_by_type_year_seq(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             entry = store.add_note("todo", "hello world", "sess1")
             result = store.get_note("todo", entry["year"], entry["seq"])
             self.assertIsNotNone(result)
@@ -105,14 +105,14 @@ class TestPerTypeYearCounters(unittest.TestCase):
 
     def test_get_note_nonexistent_year(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             result = store.get_note("todo", 1999, 1)
             self.assertIsNone(result)  # returns None, doesn't create subfolder
-            self.assertFalse((Path(tmp) / "todos" / "1999").exists())
+            self.assertFalse((Path(tmp).resolve() / "todos" / "1999").exists())
 
     def test_list_notes_across_years(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             # Create entries in two different years by directly manipulating
             store.add_note("todo", "note current year", "sess1")
             # Add a note in a different year subfolder manually
@@ -137,7 +137,7 @@ class TestPerTypeYearCounters(unittest.TestCase):
 
     def test_update_note_by_type_year_seq(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             entry = store.add_note("todo", "original", "sess1")
             updated = store.update_note("todo", entry["year"], entry["seq"], status="done")
             self.assertIsNotNone(updated)
@@ -145,7 +145,7 @@ class TestPerTypeYearCounters(unittest.TestCase):
 
     def test_archive_note_moves_to_year_archive(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             entry = store.add_note("todo", "archive me", "sess1")
             year = entry["year"]
             seq = entry["seq"]
@@ -154,17 +154,17 @@ class TestPerTypeYearCounters(unittest.TestCase):
             self.assertEqual(result["status"], "active")
             self.assertIn("archived_at", result)
             # Verify md moved
-            year_dir = Path(tmp) / "todos" / str(year)
+            year_dir = Path(tmp).resolve() / "todos" / str(year)
             self.assertFalse((year_dir / f"{seq}.md").exists())
             self.assertTrue((year_dir / "archive" / f"{seq}.md").exists())
 
     def test_next_seq_rebuild_on_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             entry1 = store.add_note("todo", "first", "sess1")
             year = entry1["year"]
             # Delete next_seq file
-            seq_path = Path(tmp) / "todos" / str(year) / NEXT_SEQ_FILENAME
+            seq_path = Path(tmp).resolve() / "todos" / str(year) / NEXT_SEQ_FILENAME
             seq_path.unlink()
             # Next add should rebuild
             entry2 = store.add_note("todo", "second", "sess1")
@@ -172,16 +172,16 @@ class TestPerTypeYearCounters(unittest.TestCase):
 
     def test_reference_type_uses_references_folder(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             entry = store.add_note("reference", "ref content", "sess1")
             year = datetime.now(timezone.utc).year
             self.assertEqual(entry["display_id"], f"R-{year}-1")
-            self.assertTrue((Path(tmp) / "references" / str(year)).exists())
+            self.assertTrue((Path(tmp).resolve() / "references" / str(year)).exists())
 
     def test_concurrent_safety_filelock(self):
         # Just verify the seq increment uses FileLock (structural test)
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             e1 = store.add_note("todo", "a", "sess1")
             e2 = store.add_note("todo", "b", "sess1")
             self.assertEqual(e1["seq"], 1)
@@ -191,26 +191,26 @@ class TestPerTypeYearCounters(unittest.TestCase):
 class TestParseIdArg(unittest.TestCase):
     def test_parse_type_year_seq(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             result = _parse_id_arg("T-2026-5", store)
             self.assertEqual(result, ("todo", 2026, 5))
 
     def test_parse_learning_prefix(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             result = _parse_id_arg("L-2026-3", store)
             self.assertEqual(result, ("learning", 2026, 3))
 
     def test_parse_all_prefixes(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             for prefix, ntype in _PREFIX_TO_TYPE.items():
                 result = _parse_id_arg(f"{prefix}-2026-1", store)
                 self.assertEqual(result[0], ntype)
 
     def test_invalid_prefix_exits(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             with self.assertRaises(SystemExit):
                 _parse_id_arg("X-2026-1", store)
 
@@ -218,13 +218,13 @@ class TestParseIdArg(unittest.TestCase):
         # Legacy bare-integer IDs are no longer accepted; the migration map
         # they resolved through is gone.
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             with self.assertRaises(SystemExit):
                 _parse_id_arg("42", store)
 
     def test_bare_l_prefix_exits(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             with self.assertRaises(SystemExit):
                 _parse_id_arg("L7", store)
 

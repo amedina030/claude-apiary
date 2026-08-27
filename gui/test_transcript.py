@@ -282,7 +282,7 @@ class TokenUsageTests(unittest.TestCase):
 class TranscriptTailTests(unittest.TestCase):
     def test_replays_existing_then_tails_appended(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "session.jsonl"
+            p = Path(tmp).resolve() / "session.jsonl"
             existing = [
                 json.dumps(
                     {
@@ -338,7 +338,7 @@ class TranscriptTailTests(unittest.TestCase):
         tail that byte count. A record written between the read and the
         tail start must be rendered exactly once; the replayed one never."""
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "session.jsonl"
+            p = Path(tmp).resolve() / "session.jsonl"
             first = json.dumps(
                 {
                     "type": "user",
@@ -374,7 +374,7 @@ class TranscriptTailTests(unittest.TestCase):
 
     def test_multibyte_utf8_survives_byte_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "session.jsonl"
+            p = Path(tmp).resolve() / "session.jsonl"
             p.write_text("", encoding="utf-8")
             received: list[Message] = []
             tail = TranscriptTail(p, on_message=received.append, poll_interval=0.05)
@@ -399,7 +399,7 @@ class TranscriptTailTests(unittest.TestCase):
 
     def test_truncated_file_is_reparsed_from_the_top(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "session.jsonl"
+            p = Path(tmp).resolve() / "session.jsonl"
             long_rec = json.dumps(
                 {
                     "type": "user",
@@ -434,7 +434,7 @@ class TranscriptTailTests(unittest.TestCase):
 
     def test_partial_line_buffered_until_newline(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "session.jsonl"
+            p = Path(tmp).resolve() / "session.jsonl"
             p.write_text("", encoding="utf-8")
             received: list[Message] = []
             tail = TranscriptTail(p, on_message=received.append, poll_interval=0.05)
@@ -467,7 +467,7 @@ class TranscriptTailTests(unittest.TestCase):
 class FindActiveSessionTests(unittest.TestCase):
     def test_picks_most_recently_modified(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / "a").mkdir()
             (root / "b").mkdir()
             old = root / "a" / "old.jsonl"
@@ -479,11 +479,11 @@ class FindActiveSessionTests(unittest.TestCase):
 
     def test_returns_none_when_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertIsNone(find_active_session_jsonl(Path(tmp)))
+            self.assertIsNone(find_active_session_jsonl(Path(tmp).resolve()))
 
     def test_excludes_pre_existing_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / "a").mkdir()
             parent = root / "a" / "parent.jsonl"
             parent.write_text("{}\n", encoding="utf-8")
@@ -498,7 +498,7 @@ class FindActiveSessionTests(unittest.TestCase):
 
     def test_min_ctime_filters_old_files(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / "a").mkdir()
             old = root / "a" / "old.jsonl"
             old.write_text("{}\n", encoding="utf-8")
@@ -516,7 +516,7 @@ class FindActiveSessionTests(unittest.TestCase):
 class SnapshotExistingJsonlsTests(unittest.TestCase):
     def test_returns_set_of_present_jsonls(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / "p1").mkdir()
             (root / "p2").mkdir()
             a = root / "p1" / "a.jsonl"
@@ -530,7 +530,7 @@ class SnapshotExistingJsonlsTests(unittest.TestCase):
 class SessionDiscoveryTests(unittest.TestCase):
     def test_fires_on_switch(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             switches: list[Path] = []
             disc = SessionDiscovery(
                 on_switch=switches.append, projects_root=root, poll_interval=0.05
@@ -557,7 +557,7 @@ class SessionDiscoveryTests(unittest.TestCase):
     def test_pin_excludes_pre_spawn_jsonls_even_when_modified(self):
         """The whole point of the pin: writes to the parent terminal's JSONL must not flap us back."""
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             parent = root / "parent.jsonl"
             parent.write_text("{}\n", encoding="utf-8")
             pre_existing = {parent}
@@ -599,7 +599,7 @@ class SessionDiscoveryTests(unittest.TestCase):
         """Once locked onto the first matching JSONL, later post-spawn JSONLs (subagent
         sidechains, etc.) must not steal focus."""
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             switches: list[Path] = []
             disc = SessionDiscovery(
                 on_switch=switches.append,
@@ -632,7 +632,7 @@ class SessionDiscoveryTests(unittest.TestCase):
 
     def test_set_pin_after_start_takes_effect(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             parent = root / "parent.jsonl"
             parent.write_text("{}\n", encoding="utf-8")
 
@@ -673,7 +673,7 @@ class SessionDiscoveryTests(unittest.TestCase):
         """Models the /clear flow: discovery locked onto JSONL A via lock_after_first,
         then set_pin bumps min_ctime so a fresh post-clear JSONL B takes over."""
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             first = root / "pre-clear.jsonl"
             first.write_text("{}\n", encoding="utf-8")
 

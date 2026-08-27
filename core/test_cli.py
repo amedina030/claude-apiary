@@ -223,7 +223,7 @@ class DoctorFixSeamTests(unittest.TestCase):
 class CascadeFixVerbTests(unittest.TestCase):
     def test_cascade_fix_runs_against_the_resolved_apiary(self):
         with tempfile.TemporaryDirectory() as tmp:
-            apiary = Path(tmp)
+            apiary = Path(tmp).resolve()
             report = cascade.CascadeReport(
                 new_main_apiary_path=apiary.resolve(),
                 updated=[3],

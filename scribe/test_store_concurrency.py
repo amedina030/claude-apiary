@@ -176,7 +176,7 @@ class TwoProcessAppendTests(unittest.TestCase):
     def test_two_processes_appending_lose_nothing(self):
         repo_root = str(Path(__file__).resolve().parent.parent)
         with tempfile.TemporaryDirectory() as tmp:
-            ScribeStore(Path(tmp))  # create the layout before the race starts
+            ScribeStore(Path(tmp).resolve())  # create the layout before the race starts
             procs = [
                 subprocess.Popen(
                     [
@@ -199,7 +199,7 @@ class TwoProcessAppendTests(unittest.TestCase):
                 _, err = proc.communicate(timeout=120)
                 self.assertEqual(proc.returncode, 0, err)
 
-            store = ScribeStore(Path(tmp))
+            store = ScribeStore(Path(tmp).resolve())
             rows = store.list_notes(note_type="todo", status="active")
             self.assertEqual(
                 len(rows),
@@ -210,7 +210,7 @@ class TwoProcessAppendTests(unittest.TestCase):
                 len({r["seq"] for r in rows}), len(rows), "two processes were issued the same seq"
             )
             # Every row has the body file it claims, and vice versa.
-            year_dir = next((Path(tmp) / "todos").iterdir())
+            year_dir = next((Path(tmp).resolve() / "todos").iterdir())
             bodies = {int(p.stem) for p in year_dir.glob("*.md")}
             self.assertEqual(bodies, {r["seq"] for r in rows})
             self.assertNotIn(
