@@ -2,6 +2,104 @@
 
 ## Unreleased
 
+### Phase 4 — engineering plumbing (2026-08-27; ruff/format follow in a later commit)
+
+- **CI:** first GitHub Actions workflow — ubuntu/windows/macos × Python
+  3.11/3.12 running the suite, both doc checkers, the secret scan and a
+  report-only duplicate check, plus a POSIX job that parses every shell
+  script the Windows dev box never runs. Not yet exercised on a runner.
+- **Packaging:** `pyproject.toml` moves to a PEP 621 `[project]` table and
+  `packages` finally ships captures, compass, researcher, incubator,
+  migrations, scripts and docs — `poetry build` used to fail outright
+  (`refiner is not a package`). `pytest-cov` added report-only;
+  `.gitattributes` gains `* text=auto`.
+- **Tests:** `core/testing.py` gives the install/drift/cascade/uninstall
+  suites one shared git-repo + fake-apiary fixture (those four files: 65 s →
+  28 s); `hermetic_env()` stops a live session's `APIARY_*` /
+  `CLAUDE_PROJECT_DIR` leaking into hook subprocess tests; the Node frontend
+  suites fail instead of skipping under `APIARY_CI=1`.
+- **Versioning (§5a-I, built):** `apiary update` runs the `migrations/`
+  chain in every bootstrapped repo and re-pins it (per step, resumable, one
+  failing repo does not stop the rest, registry lock held); `apiary version
+  --all`; `doctor versions` points at the command that fixes the drift.
+  `RELEASING.md` documents when `VERSION` moves and how to tag `v0.1.0`
+  (not tagged — morning step).
+- **§5a-C(3):** `scripts/check_duplicates.py` — stdlib AST near-duplicate
+  report for function bodies, report-only in CI. First findings: the
+  captures/researcher CLI and store twins (Phase 3.4's sidecar store).
+- `code-style.md` no longer claims "no pytest" or an unqualified stdlib-only
+  rule; restated as what the repo actually does.
+
+### Phase 3 — consolidate (2026-08-27; 3.5 scribe split and 3.6 runner land separately)
+
+- **3.1 One hook dispatcher per event** (`core/hooks/dispatch.py
+  {pre|post|stop|prompt|session-start}`) replaces the 18-entry
+  `settings.json` fan-out: the payload is read once and every relevant hook
+  runs in-process, output merged into one response. The per-repo launcher
+  runs its target with `runpy` instead of a second interpreter. Measured on
+  a throwaway bootstrapped repo: **PreToolUse 1418 ms → 187 ms, PostToolUse
+  335 → 155 ms, 18 → 2 interpreter starts per Bash call**; the permission
+  probe still reports prompts alive and the push gate still blocks. New hook
+  contract `run(payload) -> HookResult | None` — a hook can never vote
+  `allow`; gates return a block reason (deny + exit 2). Failures go to
+  `<repo>/.claude/apiary/hooks.log` (rotated) and never stop the chain. The
+  drift check runs once per session (it was rewriting `self-pointer.json`
+  on every tool call). **Re-bootstrap every registered repo after
+  upgrading** — old registrations keep working through the standalone
+  shims until then.
+- **3.2 One `core/utils/`** — `git_root`, `read_json_object`, `now_iso`,
+  `MAIN_APIARY_UID`, `resolve_state_dir` and the atomic writers are defined
+  once; the 8/5/4/6/6/7 copies across core, scribe, compass, researcher,
+  captures, runner and gui are gone. `resolve_apiary_repo` consults the
+  main-apiary pin before the source tree and resolves a linked worktree to
+  its main checkout (agent worktrees were creating a second registry).
+  `hooks_lib.save_settings` writes `settings.json` atomically (an
+  interrupted install could leave a truncated file with no hooks).
+- **3.3 One frontmatter dialect** — `core/frontmatter.py` replaces five
+  hand-rolled `---` parsers (scribe learnings + templates, researcher,
+  captures, context rules, `docs/check.py`); `researcher/_yaml_mini.py`
+  deleted. Two real bugs fixed by live data: an apostrophe ended an inline
+  list early (mangling the handoff template's `required:` line) and a glob
+  character class closed a list at the wrong bracket. `scripts/
+  migrate_frontmatter.py --check|--apply` parses every file in a state dir
+  with both readers: the live store is 645 files, 0 disagreements. Parity
+  tests fail if any module scans fences by hand again.
+- **3.7 GUI** — `App`'s tab list, active-tab pointer and pending-permission
+  maps are lock-guarded and the active tab is resolved by session id (a
+  double-clicked close could pop the wrong tab); the three transcript-replay
+  copies collapse into `_replay_active()` (a switch no longer loses the
+  agents strip, a reload no longer loses a pending permission banner);
+  `appendMessage`'s reconciliation and the thinking-bubble state machine are
+  extracted into Node-tested modules (`message_reconcile.js`,
+  `thinking_state.js`) and `gui/test_js_suites.py` runs every JS suite from
+  pytest; PyInstaller pinned in a `build` poetry group and the build stamps
+  its commit into `build_info.json` (shown at startup and in the MCP
+  handshake). First tests for `App` and the packaging spec. The `app.js`
+  IIFE split was deliberately not done (no load harness to verify it).
+- **3.8 Harden orchestration in Python** — `harden/orchestrate.py` owns
+  path selection, size cap, cost estimate, prompt assembly, retry/degrade,
+  budget abort, worktree lifecycle and TODO filing; `harden.md` 746 → 110
+  lines (~9.3k → ~1.7k tokens). `compass/capture.py` validates and stores
+  `/wrapup`'s observations (Step 4: 55 → 25 lines). Every `AskUserQuestion`
+  mandate dropped from `/harden`, `/wrapup`, `/refine`. 121 hermetic tests.
+- **3.9 Install correctness** — profile keys are merged into
+  `settings.json` (only `hooks` is apiary-owned; user permissions survive a
+  re-install; withdrawn profile entries are removed); apiary's hook entries
+  carry an explicit `# claude-apiary` mark and `is_apiary_entry` matches only
+  that (a user hook merely naming `runner/` or `scribe/` was deleted on every
+  install); install reconciles the self-pointer with the registry; new
+  `apiary doctor pins [--fix]`; uninstall goes files-first, registry-last and
+  refuses main-apiary; install/uninstall/profile failures exit 1 with one
+  line instead of a traceback.
+- **Compass measurement (§5a-H)** — `compass/evaluate.py` (leave-one-out
+  predictive validity with majority and random baselines; the default path
+  never calls a model, `--model` is behind a cost estimate and `--yes`), a
+  per-session A/B (`compass/config.json` `ab_enabled`, off by default —
+  no behaviour change), `apiary doctor compass`, and
+  `docs/architecture/compass-measurement.md` with a proposed keep/delete
+  rule and review date. Live data: 71 sessions / 408 observations;
+  `personality.md` is 131 days stale — run `/compass-sync` before any A/B.
+
 ### Phase 2 — dead weight deleted (2026-08-27, ~7,100 lines net)
 
 Every deletion was grep-verified against the tree by the agent that made it
