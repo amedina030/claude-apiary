@@ -125,7 +125,7 @@ def last_change_dates() -> dict[str, str]:
     One ``git log`` for the whole history rather than one per doc — 28 docs
     meant 28 subprocesses on the hook path, and this runs on every commit.
     """
-    out = _git("log", "--format=@%cs", "--name-only", "--no-renames")
+    out = _git("log", "--format=@%as", "--name-only", "--no-renames")  # author date: survives cherry-pick/rebase
     dates: dict[str, str] = {}
     current = ""
     for line in out.splitlines():
@@ -212,7 +212,7 @@ def check_doc(path: Path, framework_version: str, scopes: set[str],
             errors.append(
                 f"{rel}: last_verified {lv} is older than the file's last change "
                 f"({changed}) — re-verify the doc against the code and bump it, "
-                f"or explain the edit in the commit")
+                f"(merge with a merge commit, not a squash — a squash re-dates every doc)")
 
     doc_version = fm.get("framework_version", "")
     if doc_version and doc_version != framework_version:

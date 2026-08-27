@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Generate the CLI reference tables from each tool's real argparse.
+"""
+NOTE: --check verifies the NAME set of each table (flags/subcommands present in
+argparse and nothing extra); Description/Purpose cells are hand-written prose kept
+verbatim, so a wrong description passes --check. Re-read them when a tool changes.
+Generate the CLI reference tables from each tool's real argparse.
 
 Two documents are derived from ``check_cli_claims.inspect_tool()``:
 

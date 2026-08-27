@@ -247,6 +247,9 @@ class DocExampleTests(unittest.TestCase):
                               f"which argparse does not have")
 
     def test_every_documented_flag_exists(self):
+        # Known limit: ToolInterface.flags is the union over every subparser, so
+        # a real flag documented on the WRONG subcommand still passes here; the
+        # unknown-flag case is what this catches (per-subparser check: T-2026-291).
         for doc, line, rel, args in self.calls:
             if _named_path_claims(rel):
                 continue

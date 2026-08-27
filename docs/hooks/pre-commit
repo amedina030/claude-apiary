@@ -7,6 +7,10 @@
 #   3. scripts/secret_scan.py --staged — credentials in the staged diff
 #   4. ruff check — lint, on the staged .py files only
 #
+# The change-map check (docs/change_map.py) is NOT here: it needs the
+# commit message to honour the `docs: unchanged` trailer, and git only
+# writes the message after pre-commit — it runs in docs/hooks/commit-msg.
+#
 # All four run even when an earlier one fails, so one commit attempt reports
 # every problem instead of making you re-run to discover the next one.
 #
@@ -66,7 +70,6 @@ STATUS=0
 "${PY[@]}" "$REPO_ROOT/docs/check_cli_claims.py"             || STATUS=1
 "${PY[@]}" "$REPO_ROOT/docs/generate_cli_docs.py"  --check   || STATUS=1
 "${PY[@]}" "$REPO_ROOT/docs/generate_reference.py" --check   || STATUS=1
-"${PY[@]}" "$REPO_ROOT/docs/change_map.py"         --staged  || STATUS=1
 "${PY[@]}" "$REPO_ROOT/scripts/secret_scan.py" --staged --quiet || STATUS=1
 
 # Lint only the staged .py files — a whole-tree `ruff check` is still fast, but

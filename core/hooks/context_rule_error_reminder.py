@@ -288,7 +288,7 @@ def file_doc_todo(repo: Path, token: str, doc_ref: str, command: str) -> bool:
         tag,
     ]
     try:
-        subprocess.run(
+        proc = subprocess.run(
             argv,
             cwd=str(repo),
             capture_output=True,
@@ -298,7 +298,7 @@ def file_doc_todo(repo: Path, token: str, doc_ref: str, command: str) -> bool:
         )
     except (OSError, subprocess.SubprocessError):
         return False
-    return True
+    return proc.returncode == 0
 
 
 def doc_gap(payload: dict) -> tuple[str, str] | None:

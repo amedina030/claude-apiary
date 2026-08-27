@@ -63,7 +63,6 @@ where it lives, and how the parts coordinate.
       sessions/                                  # per-repo session state
         history.json                             # per-repo session history (v1 schema)
         identity-<short>.json                    # per-session role/mission
-        transcripts/<sid>.jsonl                  # transcript archives
       bootstrap_state.json                       # install hashes for drift detection (v2 schema)
   migrations/
     v0_<from>_to_v0_<to>.py                      # per-version migration scripts (kept indefinitely)
@@ -101,7 +100,6 @@ where it lives, and how the parts coordinate.
 | Per-target tool state | `<main-apiary>/.repos/<slug>/{scribe,runner,compass,...}/` | main-apiary |
 | Per-target session history | `<main-apiary>/.repos/<slug>/sessions/history.json` | main-apiary |
 | Per-target session identity | `<main-apiary>/.repos/<slug>/sessions/identity-<sid>.json` | main-apiary |
-| Transcript archives | `<main-apiary>/.repos/<slug>/sessions/transcripts/<sid>.jsonl` | main-apiary |
 | GUI state | `<main-apiary>/.apiary/gui/` | main-apiary |
 | Live Claude Code transcripts | `~/.claude/projects/<project-key>/*.jsonl` | Claude Code |
 
