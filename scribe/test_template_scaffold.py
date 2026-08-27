@@ -1,4 +1,4 @@
-"""scaffold_default_templates refresh rules: bundled changes reach an unmodified
+"""scaffold_defaults refresh rules: bundled changes reach an unmodified
 copy; a user-edited copy and a pre-existing UNRECORDED copy are never touched."""
 import hashlib
 import json

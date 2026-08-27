@@ -69,7 +69,7 @@ Scribe state lives at `<state-dir>/scribe/` under the per-target dir resolved by
 | `scribe/memory/MEMORY.md` | One-line index of permanent memory entries; loaded into startup context |
 | `scribe/memory/<topic>.md` | One memory entry per file, kebab-case slug |
 
-**Path resolution.** `scribe.notes.scribe_state_dir()` returns `$APIARY_TARGET_STATE_DIR/scribe` when the launcher set the env var, otherwise falls back to `<git-repo-root>/.apiary/scribe/` for unmigrated targets. `APIARY_STATE_LAYOUT=legacy` is an escape hatch that drops back to the historical `~/.claude/projects/<project-key>/` location.
+**Path resolution.** `scribe.paths.scribe_state_dir()` delegates to `core.utils.state.resolve_state_dir` — the one place the precedence lives: `$APIARY_TARGET_STATE_DIR/scribe` when the launcher set the env var, then the repo's pin files, then the legacy `.apiary/pointer` breadcrumb, then `<git-repo-root>/.apiary/scribe/` for an unmigrated target. It returns `None` outside a git repo rather than guessing; only the backup CLI and the startup banner then fall back to the historical `~/.claude/projects/<project-key>/` path. The `APIARY_STATE_LAYOUT=legacy` escape hatch was removed in phase 5 of the per-repo migration.
 
 ## Compass data
 

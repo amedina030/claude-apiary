@@ -73,9 +73,13 @@ def resolve_store_dir(override: "str | None" = None,
                       start: "Path | None" = None) -> Path:
     """The scribe dir to bind a store to, falling back to the legacy path.
 
-    Raises :class:`ProjectKeyError` on a bad ``--project`` override.
+    The override is validated even when the registry resolves a state dir and
+    the fallback is not taken: silently ignoring a ``--project`` the caller
+    got wrong is worse than telling them, and inside a git repo (the normal
+    case) the fallback never runs. Raises :class:`ProjectKeyError`.
     """
-    return scribe_state_dir(start) or (PROJECTS_DIR / project_key(override))
+    key = project_key(override)
+    return scribe_state_dir(start) or (PROJECTS_DIR / key)
 
 
 def session_identity() -> tuple:

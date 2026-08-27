@@ -151,7 +151,7 @@ class ScribeTemplateScaffoldTests(unittest.TestCase):
         return result.state_dir / "scribe" / "templates"
 
     def test_install_scaffolds_a_template_per_type(self):
-        from scribe.notes import VALID_TYPES
+        from scribe.store import VALID_TYPES
 
         result = install_mod.install(self.target, apiary_repo=self.apiary)
         tpl_dir = self._templates_dir(result)
@@ -174,7 +174,7 @@ class ScribeTemplateScaffoldTests(unittest.TestCase):
 
     def test_self_bootstrap_scaffolds_too(self):
         from core import self_bootstrap as sb
-        from scribe.notes import VALID_TYPES
+        from scribe.store import VALID_TYPES
 
         # _make_fake_apiary copies everything install needs; self-bootstrap
         # additionally checks for a migrations/ sentinel.
