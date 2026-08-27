@@ -5,8 +5,9 @@
 #   1. docs/check.py            — framework-doc conformance
 #   2. docs/check_cli_claims.py — cli-tools.md vs each tool's real argparse
 #   3. scripts/secret_scan.py --staged — credentials in the staged diff
+#   4. ruff check — lint, on the staged .py files only
 #
-# All three run even when an earlier one fails, so one commit attempt reports
+# All four run even when an earlier one fails, so one commit attempt reports
 # every problem instead of making you re-run to discover the next one.
 #
 # check_cli_claims.py shells out to ~44 tools' `--help` and takes ~15-20 s —
@@ -40,10 +41,45 @@ else
     exit 1
 fi
 
+# Resolve ruff the same way: an explicit $APIARY_RUFF, then the PATH, then the
+# dev-group install inside whatever interpreter we just found.
+if [ -n "$APIARY_RUFF" ]; then
+    RUFF=("$APIARY_RUFF")
+elif command -v ruff >/dev/null 2>&1; then
+    RUFF=(ruff)
+elif "${PY[@]}" -c 'import ruff' >/dev/null 2>&1; then
+    RUFF=("${PY[@]}" -m ruff)
+else
+    RUFF=()
+fi
+
 STATUS=0
 
 "${PY[@]}" "$REPO_ROOT/docs/check.py"            || STATUS=1
 "${PY[@]}" "$REPO_ROOT/docs/check_cli_claims.py" || STATUS=1
 "${PY[@]}" "$REPO_ROOT/scripts/secret_scan.py" --staged --quiet || STATUS=1
+
+# Lint only the staged .py files — a whole-tree `ruff check` is still fast, but
+# this keeps the hook from failing a commit on a file the author never touched.
+# `--force-exclude` makes ruff honour pyproject's `exclude` for paths handed to
+# it explicitly (without it, an excluded path passed by name is still linted).
+# No `ruff format --check` here: CI gates formatting, and a hook that rejects a
+# commit over whitespace is a hook people learn to --no-verify.
+STAGED_PY="$(git diff --cached --name-only --diff-filter=ACMR -- '*.py')"
+if [ -n "$STAGED_PY" ]; then
+    if [ ${#RUFF[@]} -gt 0 ]; then
+        # -z/xargs -0 rather than the newline list above: git quotes paths with
+        # spaces or non-ASCII in its normal output, and a quoted path is not a
+        # path. The emptiness test above is what keeps a zero-length list from
+        # reaching xargs, which would otherwise run ruff over the whole tree.
+        (
+            cd "$REPO_ROOT" || exit 1
+            git diff --cached --name-only --diff-filter=ACMR -z -- '*.py' \
+                | xargs -0 "${RUFF[@]}" check --force-exclude
+        ) || STATUS=1
+    else
+        echo "pre-commit: ruff not found, skipping lint (poetry install, or set \$APIARY_RUFF)" >&2
+    fi
+fi
 
 exit $STATUS

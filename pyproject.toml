@@ -131,7 +131,18 @@ select = ["E", "F", "I", "PLW1514", "S602", "S605"]
 # `scribe/api.py` are all entered by absolute path under a bare `python3`, so
 # the repo root has to be on `sys.path` *before* the first `from core import …`.
 # Moving those imports up is not a fix, it is an ImportError.
-ignore = ["E402"]
+#
+# E501 (line too long) is delegated to the formatter, which is the pairing
+# ruff itself recommends when `ruff format` runs: the formatter already wraps
+# every line it *can* wrap, so `ruff format --check` in CI is the real width
+# gate. What E501 reports on top of that is the residue the formatter will not
+# touch — 65 lines, all of them a single string literal, regex or comment:
+# the compass/ LLM prompts, the harden/ validator messages, argparse help
+# text, usage docstrings. Splitting those by hand edits message and prompt
+# *content* to satisfy a column count, which is a worse trade than the long
+# line. Both codes are ignored globally rather than per-file because both are
+# repo-wide patterns, not local exceptions.
+ignore = ["E402", "E501"]
 
 [tool.ruff.lint.isort]
 # Spelled out rather than left to ruff's directory sniffing: the checkout that

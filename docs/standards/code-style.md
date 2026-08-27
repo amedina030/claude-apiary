@@ -17,6 +17,33 @@ Conventions derived from the existing codebase. Follow these when writing or mod
 - **Stdlib only at runtime** — no third-party import in any module a hook, a git hook or a slash command can reach. Those run under `py -3` / `python3`, not the Poetry virtualenv, so a third-party import there is a crash, not a dependency. The exceptions are declared and quarantined in `pyproject.toml`: `pytest`/`pytest-cov` in the `dev` group (tests only), and `pywebview`/`pywinpty`/`pythonnet`/`watchdog` in the optional `gui` group, which nothing outside `gui/` imports.
 - **UTF-8 everywhere** — always pass `encoding="utf-8"` to `open()`, `read_text()`, `write_text()`.
 
+## Lint and format
+
+`ruff` is the mechanical half of this document; everything below it is the
+half a reviewer has to read for. Config lives in `[tool.ruff]` in
+`pyproject.toml` and both commands are CI steps:
+
+```bash
+poetry run ruff check .          # E, F, I, PLW1514, S602, S605
+poetry run ruff format .         # line-length 100
+```
+
+The rule set is deliberately small. `F` and `E` catch dead code and
+syntax-adjacent mistakes, `I` fixes import order, and `PLW1514` / `S602` /
+`S605` are the three PORTABILITY.md rules a linter can actually enforce —
+`open()` without `encoding=`, `shell=True`, `os.system`. Two codes are ignored
+repo-wide with the reasoning inline in `pyproject.toml`: `E402`, because the
+`sys.path.insert` bootstrap below requires it, and `E501`, because
+`ruff format --check` is the real width gate and E501's residue is
+unsplittable string literals.
+
+The repo-local pre-commit hook (`docs/hooks/pre-commit`) runs `ruff check` on
+the staged `.py` files only, and skips with a note if ruff is not installed.
+Formatting is not checked at commit time — run `ruff format` before you push,
+or CI will.
+
+`docs/` is currently excluded from both commands.
+
 ## File structure
 
 Each Python file follows this order:

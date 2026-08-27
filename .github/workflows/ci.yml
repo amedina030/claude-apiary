@@ -76,6 +76,19 @@ jobs:
           poetry env use python
           poetry install --with gui
 
+      # Lint before the suite: it takes ~1 s and a syntax-adjacent mistake is
+      # cheaper to read here than as a stack trace 3 minutes in. Both commands
+      # read their excludes (`docs`, `.claude`, `.repos`, `.apiary`, `_tmp_*`)
+      # from `[tool.ruff]` in pyproject.toml, so there is nothing to keep in
+      # sync between here and the pre-commit hook.
+      - name: Lint (ruff)
+        run: poetry run ruff check .
+
+      - name: Format check (ruff)
+        # This, not E501, is the line-width gate — see the `ignore` note in
+        # pyproject.toml. `ruff format` locally is the fix.
+        run: poetry run ruff format --check .
+
       - name: Test suite
         run: poetry run pytest -q
 
