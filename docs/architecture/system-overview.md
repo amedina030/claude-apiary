@@ -92,7 +92,6 @@ Handoffs are authored by the user at wrap-up time (`/wrapup`) and stored via scr
 All tools import from `core/` rather than reimplementing common patterns:
 
 - **`core/flags.py`** — feature toggles via sentinel files at `<repo>/.claude/apiary/flags/{name}-enabled`, in-process or via `python core/flags.py <toggle|enable|disable|status> <name>`
-- **`core/config.py`** — JSON config loading with defaults fallback
 - **`core/session.py`** — session identity (ID, role, mission) and validation
 - **`core/hook_context.py`** — formatting context blocks for hook output, reading hook payloads
 - **`core/hooks_lib.py`** — programmatic hook registration in `settings.json`

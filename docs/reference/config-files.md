@@ -4,7 +4,7 @@ title: Config Files
 scope: project
 description: All configuration files, their location, format, and editable fields
 framework_version: "1.0"
-last_verified: 2026-06-11
+last_verified: 2026-08-26
 ---
 
 # Config Files

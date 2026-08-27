@@ -1002,26 +1002,6 @@ Exit codes:
 
 See [Bootstrapping a repo](../guides/bootstrapping-a-repo.md) for profile authoring and the full workflow.
 
-## core/targets.py
-
-Inspect and verify the apiary target registry at `<apiary>/.repos/registry.json` (built by the resolver in `core/utils/state.py`). Every target whose `.apiary/` state has been created on this machine is indexed there; this tool reports the index and flags entries whose `real_path` no longer exists on disk.
-
-```bash
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" core/targets.py list
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" core/targets.py verify
-```
-
-### Subcommands
-
-| Subcommand | Description |
-|------------|-------------|
-| `list` | Tabular print of every registered target (id, name, status, last_used, real_path). Prints `No registered targets.` on a fresh checkout. |
-| `verify` | Walk every target, set `verified_ok` based on whether `real_path` is still a directory, stamp `last_verified`, and report missing paths. Always exits 0 unless registry IO fails — the verification *result* is in stdout, the *command* itself succeeded. |
-
-`verify` updates the registry under a file lock; missing entries are reported but not pruned (pruning is a separate, future operation — review-then-decide).
-
-Spec: scribe note `C-2026-46`.
-
 ## docs/check_cli_claims.py
 
 Reconcile the CLI claims in `cli-tools.md` against each tool's real argparse — reports drift when a documented subcommand/flag no longer exists, or a real one is undocumented. Sibling to `docs/check.py`; report-only, never rewrites the doc. Shells out to each tool's `--help`. Mark intentional omissions with an inline `<!-- cli-claims: ignore: --some-flag, somesubcmd -->` anywhere in a tool's section.

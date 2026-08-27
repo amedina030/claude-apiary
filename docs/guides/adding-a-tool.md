@@ -4,7 +4,7 @@ title: Adding a Tool
 scope: project
 description: End-to-end steps for creating a new top-level tool from scratch
 framework_version: "1.0"
-last_verified: 2026-04-07
+last_verified: 2026-08-26
 ---
 
 # Adding a Tool
@@ -39,7 +39,9 @@ See [Adding a Command](adding-a-command.md).
 ### 5. Add configuration (if applicable)
 
 - Create `<tool>/config.json` with sensible defaults
-- Load via `core/config.py` with `load_config(path, defaults)`
+- Read it with `json.loads(path.read_text(encoding="utf-8"))` and fall back to
+  the module's own defaults when the file is missing or malformed (see
+  `budgeter/lib/logger.py load_config` / `runner/config_loader.py`)
 - Optional per-project override at `.claude/<tool>.json`
 
 ### 6. Write tests

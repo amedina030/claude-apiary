@@ -4,7 +4,7 @@ title: New Tool Checklist
 scope: project
 description: What a new tool needs — directory structure, hooks, commands, tests, docs, and setup.py integration
 framework_version: "1.0"
-last_verified: 2026-04-07
+last_verified: 2026-08-26
 ---
 
 # New Tool Checklist
@@ -46,7 +46,7 @@ When adding a new top-level tool to the project (like budgeter, scribe, or harde
 
 ### 4. Configuration (if applicable)
 - [ ] Default config at `<tool>/config.json`
-- [ ] Loaded via `core/config.py` with defaults fallback
+- [ ] Loaded with a stdlib `json` read and an in-module defaults fallback
 - [ ] Per-project override support if needed (`.claude/<tool>.json`)
 
 ### 5. Tests

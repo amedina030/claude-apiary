@@ -4,7 +4,7 @@ title: Code Style
 scope: project
 description: Naming, structure, imports, error handling, and testing conventions for Python code
 framework_version: "1.0"
-last_verified: 2026-04-07
+last_verified: 2026-08-26
 ---
 
 # Code Style
@@ -90,7 +90,6 @@ Before writing utility code, check if `core/` already has it:
 | Need | Use |
 |------|-----|
 | Feature toggles | `core/flags.py` — `is_enabled()`, `enable()`, `disable()`, `toggle()` |
-| JSON config loading | `core/config.py` — `load_config()`, `write_config()` |
 | Hook context formatting | `core/hook_context.py` — `context_block()`, `join_contexts()`, `read_payload()` |
 | Hook registration | `core/hooks_lib.py` — `register_hooks()`, `remove_hooks()` |
 | Session identity | `core/session.py` — `SessionId` class |
