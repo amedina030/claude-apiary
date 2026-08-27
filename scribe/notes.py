@@ -5,7 +5,7 @@ Scribe — structured note management for LLM session continuity.
 Storage: JSONL files (.claude/notes.jsonl active, .claude/notes_archive.jsonl archived).
 Notes are operational state — deferred work, handoffs, decisions — not permanent facts.
 
-Requires PYTHONUTF8=1 environment variable on Windows (set by setup.py).
+Requires PYTHONUTF8=1 environment variable on Windows.
 
 Usage:
     notes.py add --type todo (--content "..." | --content-file PATH) --session-id X [--auto] [--role X] [--mission X]

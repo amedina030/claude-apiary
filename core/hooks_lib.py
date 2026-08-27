@@ -215,8 +215,8 @@ def remove_hooks(settings_path: Path, *, dry_run: bool = False) -> Dict[str, Any
         }
 
     With ``dry_run=True`` the file is not rewritten and the report still
-    describes what would have been removed. Callers (``scripts/uninstall_hooks.py``)
-    print the report for the operator.
+    describes what would have been removed. Callers print the report for
+    the operator.
     """
     report: Dict[str, Any] = {
         "settings_path": str(settings_path),
