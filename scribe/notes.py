@@ -30,7 +30,7 @@ from pathlib import Path as _PathImport
 sys.path.insert(0, str(_PathImport(__file__).resolve().parent.parent))
 from core.session import SessionId
 from core.utils.timeutil import parse_iso
-from scribe import policy
+from scribe import maintenance, policy
 from scribe.store import ScribeStore, TYPE_FOLDERS, TYPE_PREFIXES, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME, NEXT_SEQ_FILENAME, BRIEF_SUMMARY_MAX, derive_brief_summary, derive_summary
 
 from pathlib import Path
@@ -293,6 +293,23 @@ def _color_status_tag(label: str) -> str:
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
+
+
+#: Report lines printed in full before a maintenance command truncates.
+_REPORT_LINE_CAP = 50
+
+
+def _print_capped(lines: list) -> None:
+    """Print at most ``_REPORT_LINE_CAP`` report lines, then a count of the rest.
+
+    A repair or backfill over a four-year corpus can name thousands of
+    entries; the cap keeps the terminal (and a hook's captured output)
+    readable while still saying how much was elided.
+    """
+    for line in lines[:_REPORT_LINE_CAP]:
+        print(line)
+    if len(lines) > _REPORT_LINE_CAP:
+        print(f'  ... and {len(lines) - _REPORT_LINE_CAP} more')
 
 
 def _content_from_args(args):
@@ -797,19 +814,13 @@ def cmd_tidy(args):
 def cmd_mark_reviewed(args):
     """Stamp the learnings review marker the startup banner reads.
 
-    Writes/touches ``<state-dir>/scribe/learnings/last_review``; its mtime is
-    what ``core/startup._review_staleness_marker`` compares against the
-    30-day threshold. Exists so `/review-learnings` can call a verb through
-    the launcher instead of a `python -c` one-liner that resolved the wrong
-    state dir.
+    Exists so `/review-learnings` can call a verb through the launcher
+    instead of a `python -c` one-liner that resolved the wrong state dir.
     """
-    marker = args.store.state_dir / LEARNING_FOLDER / 'last_review'
     try:
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text('', encoding='utf-8')
-        os.utime(marker)
+        marker = maintenance.mark_reviewed(args.store)
     except OSError as e:
-        print(f'Error: could not stamp {marker}: {e}', file=sys.stderr)
+        print(f'Error: could not stamp the learnings review marker: {e}', file=sys.stderr)
         sys.exit(1)
     print(f'Stamped learnings review: {marker}')
 
@@ -1087,200 +1098,74 @@ def cmd_supersede(args):
 
 
 # ---------------------------------------------------------------------------
-# Repair
+# Maintenance (repair / backfill / backup / restore) — logic in maintenance.py
 # ---------------------------------------------------------------------------
 
-def _folder_to_note_type(folder_name: str) -> str:
-    """Invert TYPE_FOLDERS to look up note type by folder name."""
-    inverse = {v: k for k, v in TYPE_FOLDERS.items()}
-    return inverse.get(folder_name, 'general')
-
-
 def cmd_backfill_brief(args):
-    """Populate brief_summary on every existing entry that lacks one.
-
-    Walks active + archive indices under the scribe state dir, reads each
-    note's .md body, and derives a brief_summary via derive_brief_summary().
-    Dry-run prints what would change without writing. One-shot migration —
-    safe to re-run (it only touches entries with missing/empty brief, unless
-    --force is passed which re-derives every entry).
-    """
-    store = args.store
-    state_dir = store.state_dir
+    """Populate brief_summary on every entry that lacks one."""
     dry_run = bool(getattr(args, 'dry_run', False))
-    force = bool(getattr(args, 'force', False))
-
-    all_folder_names = list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]
-    updated = 0
-    already_set = 0
-    report: list[str] = []
-
-    for folder_name in all_folder_names:
-        type_dir = state_dir / folder_name
-        if not type_dir.exists():
-            continue
-        for child in type_dir.iterdir():
-            if not child.is_dir() or not child.name.isdigit():
-                continue
-            year_dir = child
-            for is_archive in (False, True):
-                folder = year_dir / ARCHIVE_DIRNAME if is_archive else year_dir
-                if not folder.exists():
-                    continue
-                entries = ScribeStore._read_index(folder)
-                changed = False
-                for entry in entries:
-                    seq = entry.get('seq')
-                    if not isinstance(seq, int):
-                        continue
-                    existing = (entry.get('brief_summary') or '').strip()
-                    if existing and not force:
-                        already_set += 1
-                        continue
-                    md_path = folder / f'{seq}.md'
-                    if not md_path.exists():
-                        # No body — derive from the stored summary as a best effort.
-                        derived = derive_brief_summary(entry.get('summary', ''))
-                    else:
-                        derived = derive_brief_summary(
-                            md_path.read_text(encoding='utf-8', errors='replace')
-                        )
-                    if derived == existing:
-                        already_set += 1
-                        continue
-                    entry['brief_summary'] = derived
-                    updated += 1
-                    changed = True
-                    report.append(f'  + {entry.get("display_id", "?")}: {derived[:60]!r}')
-                if changed and not dry_run:
-                    ScribeStore._write_index(folder, entries)
-
-    prefix = '(dry-run) ' if dry_run else ''
-    print(f'Backfill {prefix}complete: {updated} updated, {already_set} already set.')
-    for line in report[:50]:
-        print(line)
-    if len(report) > 50:
-        print(f'  ... and {len(report) - 50} more')
+    report = maintenance.backfill_brief(
+        args.store, dry_run=dry_run, force=bool(getattr(args, 'force', False)))
+    print(f'Backfill {"(dry-run) " if dry_run else ""}complete: '
+          f'{report.updated} updated, {report.already_set} already set.')
+    _print_capped(report.lines)
 
 
 def cmd_repair(args):
-    store = args.store
-    state_dir = store.state_dir
-
-    all_folder_names = list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]
-    if not state_dir.exists() or not any((state_dir / name).exists() for name in all_folder_names):
+    """Reconcile every index against the .md bodies beside it."""
+    dry_run = bool(getattr(args, 'dry_run', False))
+    report = maintenance.repair(args.store, dry_run=dry_run)
+    if not report.found_data:
         print('No scribe data found')
         return 0
-
-    dry_run = bool(getattr(args, 'dry_run', False))
-    rebuilt = 0
-    orphans = 0
-    report_lines = []
-
-    for type_folder_name in all_folder_names:
-        type_dir = state_dir / type_folder_name
-        if not type_dir.exists():
-            continue
-        note_type = 'learning' if type_folder_name == LEARNING_FOLDER else _folder_to_note_type(type_folder_name)
-
-        # Scan year subfolders (dirs whose name is all digits)
-        for child in type_dir.iterdir():
-            if not child.is_dir() or not child.name.isdigit():
-                continue
-            year = int(child.name)
-            year_dir = child
-
-            for is_archive in (False, True):
-                folder = year_dir / ARCHIVE_DIRNAME if is_archive else year_dir
-                if not folder.exists():
-                    continue
-
-                entries = ScribeStore._read_index(folder)
-                index_seqs = {e.get('seq'): e for e in entries if isinstance(e.get('seq'), int)}
-
-                md_files = list(folder.glob('*.md'))
-                md_seqs = set()
-                for md_path in md_files:
-                    try:
-                        seq = int(md_path.stem)
-                    except ValueError:
-                        print(f'Warning: skipping non-integer filename {md_path.name} in {folder}', file=sys.stderr)
-                        continue
-                    md_seqs.add(seq)
-
-                new_entries = list(entries)
-
-                for seq in sorted(md_seqs - set(index_seqs.keys())):
-                    md_path = folder / f'{seq}.md'
-                    content = md_path.read_text(encoding='utf-8')
-                    st_mtime = md_path.stat().st_mtime
-                    ts = datetime.fromtimestamp(st_mtime, tz=timezone.utc).isoformat()
-                    summary = derive_summary(content)
-                    prefix = TYPE_PREFIXES.get(note_type, 'G')
-                    display_id = f"{prefix}-{year}-{seq}"
-                    entry = {
-                        'display_id': display_id,
-                        'type': note_type,
-                        'year': year,
-                        'seq': seq,
-                        'status': 'archived' if is_archive else 'active',
-                        'session': '',
-                        'timestamp': ts,
-                        'summary': summary,
-                        'brief_summary': derive_brief_summary(content),
-                        'has_body': bool(content),
-                    }
-                    new_entries.append(entry)
-                    rebuilt += 1
-                    report_lines.append(f'  + rebuilt entry {display_id} in {folder.relative_to(state_dir)}')
-
-                filtered_entries = []
-                for entry in new_entries:
-                    eseq = entry.get('seq')
-                    if isinstance(eseq, int) and eseq not in md_seqs:
-                        orphans += 1
-                        report_lines.append(f'  - orphan entry seq={eseq} in {folder.relative_to(state_dir)}')
-                    else:
-                        filtered_entries.append(entry)
-
-                folder_changed = (len(new_entries) != len(filtered_entries)) or (len(new_entries) != len(entries))
-                if not dry_run and folder_changed:
-                    ScribeStore._write_index(folder, filtered_entries)
-
-                # Rebuild next_seq for active year_dir (not archive)
-                if not is_archive:
-                    max_seq = max(
-                        (e.get('seq', 0) for e in filtered_entries if isinstance(e.get('seq'), int)),
-                        default=0,
-                    )
-                    arc_dir = year_dir / ARCHIVE_DIRNAME
-                    if arc_dir.exists():
-                        for ae in ScribeStore._read_index(arc_dir):
-                            s = ae.get('seq', 0)
-                            if isinstance(s, int) and s > max_seq:
-                                max_seq = s
-                    new_next_seq = max_seq + 1
-                    seq_path = year_dir / NEXT_SEQ_FILENAME
-                    current_seq = 1
-                    if seq_path.exists():
-                        try:
-                            current_seq = int(seq_path.read_text(encoding='utf-8').strip())
-                        except ValueError:
-                            current_seq = 1
-                    if new_next_seq != current_seq:
-                        if not dry_run:
-                            seq_path.write_text(str(new_next_seq), encoding='utf-8')
-                        report_lines.append(
-                            f'  * next_seq for {year_dir.relative_to(state_dir)}: {current_seq} -> {new_next_seq}'
-                        )
-
+    for warning in report.warnings:
+        print(warning, file=sys.stderr)
     print(
         f'Repair {"(dry-run) " if dry_run else ""}complete: '
-        f'{rebuilt} entries rebuilt, '
-        f'{orphans} orphans {"detected" if dry_run else "removed"}'
+        f'{report.rebuilt} entries rebuilt, '
+        f'{report.orphans} orphans {"detected" if dry_run else "removed"}'
     )
-    for line in report_lines:
+    for line in report.lines:
         print(line)
+
+
+def cmd_backup(args):
+    """Snapshot every index.jsonl into ``<state-dir>/backups/<date>/``."""
+    state_dir = args.store.state_dir
+    root = maintenance.backups_root(state_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    target, count = maintenance.create_backup(state_dir, root, date_str)
+    print(f'Backup created: {target} ({count} files)')
+    pruned = maintenance.prune_backups(root, args.retain)
+    if pruned:
+        print(f'Pruned {len(pruned)} old backup(s)')
+
+
+def cmd_restore(args):
+    """Copy the indexes from a dated snapshot back over the live ones."""
+    state_dir = args.store.state_dir
+    if getattr(args, 'list', False):
+        snapshots = maintenance.list_backups(state_dir)
+        if not snapshots:
+            print(f'No snapshots under {maintenance.backups_root(state_dir)}.')
+            return
+        for snapshot in snapshots:
+            print(snapshot.name)
+        return
+    dry_run = bool(getattr(args, 'dry_run', False))
+    try:
+        report = maintenance.restore_backup(
+            state_dir, getattr(args, 'source', None), dry_run=dry_run)
+    except FileNotFoundError as e:
+        print(f'Error: {e}', file=sys.stderr)
+        sys.exit(1)
+    print(f'Restore {"(dry-run) " if dry_run else ""}complete: '
+          f'{report.restored} index file(s) from {report.source.name}.')
+    _print_capped(report.lines)
+    if report.restored and not dry_run:
+        print('Run `notes.py repair` next: any body written after the snapshot '
+              'has no index row until it is rebuilt.')
 
 
 def cmd_template(args):
@@ -1502,6 +1387,22 @@ def main():
     p_bf.add_argument("--force", action="store_true",
                        help="Re-derive brief_summary even for entries that already have one")
 
+    # backup / restore — dated index snapshots under <state-dir>/backups/
+    p_backup = sub.add_parser("backup",
+                              help="Snapshot every index.jsonl to backups/<YYYY-MM-DD>/")
+    p_backup.add_argument("--retain", type=int, default=maintenance.DEFAULT_RETAIN,
+                          help=f"Dated snapshots to keep (default {maintenance.DEFAULT_RETAIN}; "
+                               "0 keeps only the newest)")
+
+    p_restore = sub.add_parser("restore",
+                               help="Restore index.jsonl files from a dated snapshot")
+    p_restore.add_argument("source", nargs="?", default=None, metavar="DATE",
+                           help="Snapshot to restore (YYYY-MM-DD). Default: the newest.")
+    p_restore.add_argument("--list", action="store_true",
+                           help="List available snapshot dates and exit")
+    p_restore.add_argument("--dry-run", action="store_true",
+                           help="Report what would be restored without writing")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -1541,6 +1442,7 @@ def main():
         'supersede': cmd_supersede,
         'repair': cmd_repair,
         'backfill-brief': cmd_backfill_brief,
+        'backup': cmd_backup, 'restore': cmd_restore,
         'template': cmd_template,
     }
     handler = commands.get(args.command)

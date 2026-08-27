@@ -40,6 +40,8 @@ Core note and learning management.
 | `archive-learning` | `notes.py archive-learning <ID>` | Archive a learning by ID (e.g. `L-2026-5`) |
 | `repair` | `notes.py repair [--dry-run]` | Repair index/data inconsistencies |
 | `backfill-brief` | `notes.py backfill-brief [--dry-run] [--force]` | Populate `brief_summary` on entries that lack one |
+| `backup` | `notes.py backup [--retain N]` | Snapshot every `index.jsonl` to `<state-dir>/backups/<YYYY-MM-DD>/`, then prune old snapshots. Same operation as `scribe/backup_indexes.py` |
+| `restore` | `notes.py restore [DATE] [--list] [--dry-run]` | Restore the indexes from a dated snapshot (default: the newest). Run `repair` afterwards — a body written after the snapshot has no index row until it is rebuilt |
 
 > **Note IDs** use TYPE-YEAR-seq format (e.g. `T-2026-1`, `L-2026-3`) — the only accepted form. See `scribe/CLAUDE.md` for the full prefix table.
 
@@ -74,8 +76,10 @@ Core note and learning management.
 | `--tags LIST` | add, learn, supersede | Comma-separated tag list. Stored verbatim on `add`; on `learn`/`supersede`, omit to infer via `claude -p` |
 | `--area GLOB` | learn, supersede, learnings | Area glob — repeatable on `learn`/`supersede`; exact-match filter on `learnings` |
 | `--supersedes ID` | learn | ID of a prior learning this one replaces (e.g. `L-2026-5`) |
-| `--dry-run` | repair, backfill-brief | Report what would change without writing |
+| `--dry-run` | repair, backfill-brief, restore | Report what would change without writing |
 | `--force` | add, backfill-brief | On `add`, bypass the template gate's required-section check (logs to stderr what was missing); on `backfill-brief`, re-derive `brief_summary` even for entries that already have one |
+| `--retain N` | backup | Dated snapshots to keep (default 30; `0` keeps only the newest) |
+| `--list` | restore | List available snapshot dates and exit |
 
 ### Note templates
 
@@ -96,7 +100,9 @@ python scribe/backup_indexes.py --project other-project
 | `--retain N` | no | Number of dated backups to keep (default 30; `0` keeps only the newest) |
 | `--project KEY` | no | Project key override (defaults to the current repo's scribe state dir) |
 
-Copies `index.jsonl` files only — the `.md` bodies and the per-year `next_seq` counters are not backed up. Not scheduled anywhere today; exits 0 even when no state dir exists (the first `/apiary-context` call will create one).
+Copies `index.jsonl` files only — the `.md` bodies and the per-year `next_seq` counters are not backed up. That is deliberate: the indexes are the fragile part (rewritten whole on every mutation), and `notes.py restore` followed by `notes.py repair` rebuilds both from the bodies, which never move.
+
+Same operation as `notes.py backup`, sharing one implementation in `scribe/maintenance.py`; this entry point stays because it is what a scheduled snapshot invokes. The restore half is `notes.py restore`. Not scheduled anywhere today; exits 0 even when no state dir exists (the first `/apiary-context` call will create one).
 
 ## core/startup.py
 

@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""Backup scribe indexes to backups/<YYYY-MM-DD>/ with retention pruning."""
+"""Backup scribe indexes to backups/<YYYY-MM-DD>/ with retention pruning.
+
+The same operation as ``scribe/notes.py backup``, kept because it is what
+anything scheduling a snapshot (a cron entry, a task) already invokes. The
+copying and pruning live in :mod:`scribe.maintenance` — this file is the
+older entry point, not a second implementation.
+"""
 
 import argparse
-import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scribe.store import TYPE_FOLDERS, LEARNING_FOLDER, INDEX_FILENAME, ARCHIVE_DIRNAME
+from scribe.maintenance import (
+    BACKUPS_DIRNAME, DEFAULT_RETAIN, create_backup, prune_backups,
+)
 from scribe.notes import scribe_state_dir, PROJECTS_DIR, _project_key
-
-BACKUPS_DIRNAME = 'backups'
-DEFAULT_RETAIN = 30
 
 
 def resolve_backup_source(project: str | None = None) -> Path:
@@ -30,52 +34,10 @@ def resolve_backup_source(project: str | None = None) -> Path:
     return Path(sd)
 
 
-def create_backup(state_dir: Path, backups_root: Path, date_str: str) -> tuple[Path, int]:
-    target = backups_root / date_str
-    if target.exists():
-        shutil.rmtree(target)
-    target.mkdir(parents=True, exist_ok=True)
-    count = 0
-    for folder_name in list(TYPE_FOLDERS.values()) + [LEARNING_FOLDER]:
-        type_dir = state_dir / folder_name
-        if not type_dir.exists():
-            continue
-        for year_dir in type_dir.iterdir():
-            if not (year_dir.is_dir() and year_dir.name.isdigit() and len(year_dir.name) == 4):
-                continue
-            for rel in ((INDEX_FILENAME,), (ARCHIVE_DIRNAME, INDEX_FILENAME)):
-                src = year_dir.joinpath(*rel)
-                if src.exists():
-                    dst = target / folder_name / year_dir.name
-                    for part in rel[:-1]:
-                        dst = dst / part
-                    dst = dst / rel[-1]
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src, dst)
-                    count += 1
-    return (target, count)
-
-
-def prune_backups(backups_root: Path, retain: int) -> list[Path]:
-    if not backups_root.exists():
-        return []
-    all_dirs = sorted(
-        [d for d in backups_root.iterdir() if d.is_dir()],
-        key=lambda p: p.name,
-    )
-    if retain == 0:
-        to_delete = all_dirs[:-1] if len(all_dirs) > 1 else []
-    else:
-        to_delete = all_dirs[:-retain] if len(all_dirs) > retain else []
-    for d in to_delete:
-        shutil.rmtree(d)
-    return to_delete
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description='Backup scribe indexes with retention pruning.')
     parser.add_argument('--retain', type=int, default=DEFAULT_RETAIN,
-                        help='Number of backup dirs to keep (default 30)')
+                        help=f'Number of backup dirs to keep (default {DEFAULT_RETAIN})')
     parser.add_argument('--project', default=None, help='Project key override')
     args = parser.parse_args()
 
