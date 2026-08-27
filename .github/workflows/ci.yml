@@ -98,6 +98,16 @@ jobs:
       - name: CLI claim reconciliation
         run: poetry run python docs/check_cli_claims.py
 
+      # The generated reference tables (review §5a-D.1). `--check` rebuilds each
+      # block from code and fails when the committed doc differs; the fix is the
+      # same command with --write. Both share the `--help` cache the step above
+      # just warmed, so they cost a second each.
+      - name: Generated CLI tables are in sync
+        run: poetry run python docs/generate_cli_docs.py --check --diff
+
+      - name: Generated reference tables are in sync
+        run: poetry run python docs/generate_reference.py --check --diff
+
       - name: Secret scan
         run: poetry run python scripts/secret_scan.py --path .
 

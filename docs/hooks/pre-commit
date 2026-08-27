@@ -10,11 +10,14 @@
 # All four run even when an earlier one fails, so one commit attempt reports
 # every problem instead of making you re-run to discover the next one.
 #
-# check_cli_claims.py shells out to ~44 tools' `--help` and takes ~15-20 s —
-# by far the slowest of the three. It runs here rather than only at push
-# because `core/hooks/pre_push_doc_conformer.py` blocks the push on the same
-# check, and a doc edit is a much cheaper fix at commit time than a blocked
-# push with several commits already stacked behind it.
+# 2-4 all shell out to every tool's `--help`. They share an on-disk cache keyed
+# by a fingerprint of the tree (see check_cli_claims._repo_fingerprint), so the
+# first one pays ~9 s and the rest are ~0.3 s. The checks run here rather than
+# only at push because `core/hooks/pre_push_doc_conformer.py` blocks the push
+# on the same check, and a doc edit is a much cheaper fix at commit time than a
+# blocked push with several commits already stacked behind it.
+#
+# Anything 3 or 4 reports is fixed by re-running the same command with --write.
 #
 # Installed by: python scripts/install_repo_hooks.py
 # Source: docs/hooks/pre-commit
@@ -55,8 +58,10 @@ fi
 
 STATUS=0
 
-"${PY[@]}" "$REPO_ROOT/docs/check.py"            || STATUS=1
-"${PY[@]}" "$REPO_ROOT/docs/check_cli_claims.py" || STATUS=1
+"${PY[@]}" "$REPO_ROOT/docs/check.py"                        || STATUS=1
+"${PY[@]}" "$REPO_ROOT/docs/check_cli_claims.py"             || STATUS=1
+"${PY[@]}" "$REPO_ROOT/docs/generate_cli_docs.py"  --check   || STATUS=1
+"${PY[@]}" "$REPO_ROOT/docs/generate_reference.py" --check   || STATUS=1
 "${PY[@]}" "$REPO_ROOT/scripts/secret_scan.py" --staged --quiet || STATUS=1
 
 # Lint only the staged .py files — a whole-tree `ruff check` is still fast, but

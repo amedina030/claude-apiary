@@ -26,13 +26,15 @@ All three live under the per-target state directory the registry allocates for t
 
 The rules live in `scribe/policy.py` and run from `notes.py add`, `notes.py tidy`, and session startup — never from `list`, which is read-only.
 
+<!-- generated:start: scribe:archive-policy -->
 | Type | Archived when |
-|---|---|
-| `handoff` | A newer handoff for the same role/mission exists |
+|----|-------------|
+| `handoff` | A newer handoff for the same `(role, mission)` exists |
 | `context` | 3 days old |
 | `decision` | 30 days old |
-| *(any type)* marked `done` | 1 day after it was **marked done**, not after it was written |
-| `todo`, `wishlist`, `blocker`, `reference`, `general` | Never on age — only once closed |
+| *(any type)* marked `done` | 1 day after it was **marked done** (`status_changed_at`), not after it was written |
+| `blocker`, `general`, `reference`, `todo`, `wishlist` | Never on age — only once closed |
+<!-- generated:end: scribe:archive-policy -->
 
 Archiving is not deletion: `notes.py list --archive` searches it and `notes.py unarchive <ID>` brings a note back.
 

@@ -17,6 +17,7 @@ Core note and learning management.
 
 ### Subcommands
 
+<!-- generated:start: cli:scribe/notes.py:sub -->
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `add` | `notes.py add --type <type> --content "<text>"` | Add a note |
@@ -43,11 +44,13 @@ Core note and learning management.
 | `retrotag` | `notes.py retrotag [--dry-run] [--model NAME] [--limit N]` | Infer tags and areas for every learning that has neither. One `claude -p` call per untagged learning; skips anything already tagged, so a half-finished run is cheap to resume |
 | `backup` | `notes.py backup [--retain N]` | Snapshot every `index.jsonl` to `<state-dir>/backups/<YYYY-MM-DD>/`, then prune old snapshots. Same operation as `scribe/backup_indexes.py` |
 | `restore` | `notes.py restore [DATE] [--list] [--dry-run]` | Restore the indexes from a dated snapshot (default: the newest). Run `repair` afterwards — a body written after the snapshot has no index row until it is rebuilt |
+<!-- generated:end: cli:scribe/notes.py:sub -->
 
 > **Note IDs** use TYPE-YEAR-seq format (e.g. `T-2026-1`, `L-2026-3`) — the only accepted form. See `scribe/CLAUDE.md` for the full prefix table.
 
 ### Common flags
 
+<!-- generated:start: cli:scribe/notes.py:flag -->
 | Flag | Applies to | Description |
 |------|-----------|-------------|
 | `--project PROJECT` | all | Project key override (default: derived from cwd) |
@@ -85,6 +88,7 @@ Core note and learning management.
 | `--force` | add, backfill-brief | On `add`, bypass the template gate's required-section check (logs to stderr what was missing); on `backfill-brief`, re-derive `brief_summary` even for entries that already have one |
 | `--retain N` | backup | Dated snapshots to keep (default 30; `0` keeps only the newest) |
 | `--list` | restore | List available snapshot dates and exit |
+<!-- generated:end: cli:scribe/notes.py:flag -->
 
 ### Tag inference
 
@@ -112,10 +116,12 @@ python scribe/backup_indexes.py --retain 14
 python scribe/backup_indexes.py --project other-project
 ```
 
+<!-- generated:start: cli:scribe/backup_indexes.py:flag -->
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--retain N` | no | Number of dated backups to keep (default 30; `0` keeps only the newest) |
 | `--project KEY` | no | Project key override (defaults to the current repo's scribe state dir) |
+<!-- generated:end: cli:scribe/backup_indexes.py:flag -->
 
 Copies `index.jsonl` files only — the `.md` bodies and the per-year `next_seq` counters are not backed up. That is deliberate: the indexes are the fragile part (rewritten whole on every mutation), and `notes.py restore` followed by `notes.py repair` rebuilds both from the bodies, which never move.
 
@@ -127,13 +133,16 @@ Session initialization and summary loading.
 
 ### Subcommands
 
+<!-- generated:start: cli:core/startup.py:sub -->
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `init` | `startup.py init --session-id ID --first-message "..." --repo-dir PATH` | Register the session and persist its identity |
 | `summary` | `startup.py summary [--repo-dir PATH] [--role R] [--mission M]` | Load active notes and learnings summary |
+<!-- generated:end: cli:core/startup.py:sub -->
 
 ### Flags
 
+<!-- generated:start: cli:core/startup.py:flag -->
 | Flag | Applies to | Required | Description |
 |------|-----------|----------|-------------|
 | `--session-id ID` | init | yes | Session ID |
@@ -141,6 +150,7 @@ Session initialization and summary loading.
 | `--repo-dir PATH` | init, summary | init: yes | Repository root directory |
 | `--role ROLE` | summary | no | Filter by role (default: `user`) |
 | `--mission MISSION` | summary | no | Filter by mission (default: `general`) |
+<!-- generated:end: cli:core/startup.py:flag -->
 
 ## core/doctor.py
 
@@ -156,6 +166,7 @@ python core/doctor.py [subcommand] [--fix] [--apiary-repo PATH]
 
 ### Subcommands
 
+<!-- generated:start: cli:core/doctor.py:sub -->
 | Subcommand | Description |
 |------------|-------------|
 | (none) | Run all checks, print a summary |
@@ -168,13 +179,16 @@ python core/doctor.py [subcommand] [--fix] [--apiary-repo PATH]
 | `duplicates` | Registry entries sharing a `real_path` |
 | `unreachable` | Registry entries whose `real_path` does not exist on disk |
 | `compass` | Compass measurement health for main-apiary's own state dir: observation counts, `personality.md` size and synthesis age (warns above 14 days), A/B arm counts, and the last `compass/evaluate.py offline` headline. Report-only — always notes, never issues, so it cannot fail a doctor run. See [Compass Measurement Programme](../architecture/compass-measurement.md) |
+<!-- generated:end: cli:core/doctor.py:sub -->
 
 ### Flags
 
+<!-- generated:start: cli:core/doctor.py:flag -->
 | Flag | Description |
 |------|-------------|
 | `--fix` | Apply the named check's safe fix. Supported for `pointers` (cascade every bootstrapped repo's pointer to the current main-apiary path) and `pins` (rewrite a repo's self-pointer `uid`/`name` and main-apiary-pointer path from the registry, which is the source of truth). Requires a subcommand. |
 | `--apiary-repo PATH` | Path to main-apiary checkout (default: resolved via launcher / pointer) |
+<!-- generated:end: cli:core/doctor.py:flag -->
 
 ### Exit code
 
@@ -201,12 +215,14 @@ then the git root containing the cwd.
 
 ### Subcommands
 
+<!-- generated:start: cli:core/flags.py:sub -->
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `toggle` | `flags.py toggle NAME` | Flip the flag, print its new state |
 | `enable` | `flags.py enable NAME` | Create the flag file, print `ON` (idempotent) |
 | `disable` | `flags.py disable NAME` | Remove the flag file, print `OFF` (idempotent) |
 | `status` | `flags.py status NAME` | Print the current state without changing it |
+<!-- generated:end: cli:core/flags.py:sub -->
 
 ### Arguments and flags
 
@@ -231,6 +247,7 @@ Usage reporting CLI.
 python budgeter/report.py [options]
 ```
 
+<!-- generated:start: cli:budgeter/report.py:flag -->
 | Flag | Description |
 |------|-------------|
 | `--date YYYY-MM-DD` | Show only entries from this date |
@@ -242,6 +259,7 @@ python budgeter/report.py [options]
 | `--by-agent` | Show per-agent-type token breakdown |
 | `--by-request` | Group by `request_id` (sums multi-call chains like one runner run; entries without a `request_id` bucket into `(no request)`) |
 | `--weighted` | Weight tokens by type: cache 0.1x, output 5x |
+<!-- generated:end: cli:budgeter/report.py:flag -->
 
 ## budgeter/query_request.py
 
@@ -251,10 +269,12 @@ Sum total tokens logged for a given `request_id` from the budgeter log. Used by 
 python budgeter/query_request.py --request-id <rid> [--cwd <project_dir>]
 ```
 
+<!-- generated:start: cli:budgeter/query_request.py:flag -->
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--request-id ID` | yes | The `APIARY_REQUEST_ID` value to query |
 | `--cwd DIR` | no | Project working directory (selects per-project log via `logger.configure_for_project`) |
+<!-- generated:end: cli:budgeter/query_request.py:flag -->
 
 Prints the total token count (single integer) to stdout on success. Exits non-zero with the error message on stderr if the cwd is invalid or the query fails. Intended for use in Bash pipelines where the caller captures stdout and checks the exit status.
 
@@ -266,12 +286,14 @@ Log background agent token costs. Reads `<usage>` XML from stdin.
 echo '<usage>...</usage>' | python budgeter/log_agent_cost.py --session-id ID [--agent NAME] [--cwd DIR] [--request-id ID]
 ```
 
+<!-- generated:start: cli:budgeter/log_agent_cost.py:flag -->
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--session-id ID` | yes | Current session ID |
 | `--agent NAME` | no | Agent name (e.g. "startup") |
 | `--cwd DIR` | no | Working directory for config resolution |
 | `--request-id ID` | no | Optional grouping id for multi-call chains (e.g. one runner run). Surfaces in `report.py --by-request`. |
+<!-- generated:end: cli:budgeter/log_agent_cost.py:flag -->
 
 ## compass/observations.py
 
@@ -279,12 +301,14 @@ Inspect and maintain per-session personality observation files at `<state-dir>/c
 
 ### Subcommands
 
+<!-- generated:start: cli:compass/observations.py:sub -->
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `count` | `observations.py count` | Print active observation count |
 | `list` | `observations.py list [--full] [--archive]` | List observation files (one per line; `--full` prints JSON; `--archive` lists archived files instead) |
 | `validate` | `observations.py validate <path> [--no-filename-check]` | Validate one observation file's schema. Default checks `session_id` matches the filename stem |
 | `archive` | `observations.py archive [--apply]` | Archive sweep — moves files older than 90 days into `observations/archive/<iso-year>-<iso-week>/`. Skips entirely when active count is below 50. Dry-run by default; `--apply` performs the move |
+<!-- generated:end: cli:compass/observations.py:sub -->
 
 ## compass/capture.py
 
@@ -299,15 +323,18 @@ python compass/capture.py store --content-file obs.json --session-id abc12345 [-
 
 ### Subcommands
 
+<!-- generated:start: cli:compass/capture.py:sub -->
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `dimensions` | `capture.py dimensions [--json]` | Print the dimensions to look for and which are volatile; `--json` prints the raw config |
 | `template` | `capture.py template [--session-id ID]` | Print a skeleton payload so the skill never retypes the schema |
 | `validate` | `capture.py validate --content-file PATH` | Validate a payload without storing it |
 | `store` | `capture.py store --content-file PATH --session-id ID` | Validate, then write the observation file |
+<!-- generated:end: cli:compass/capture.py:sub -->
 
 ### Flags
 
+<!-- generated:start: cli:compass/capture.py:flag -->
 | Flag | Applies to | Description |
 |------|-----------|-------------|
 | `--content-file PATH` | validate, store | The observation JSON (one wrapping markdown fence is tolerated) |
@@ -315,6 +342,7 @@ python compass/capture.py store --content-file obs.json --session-id abc12345 [-
 | `--json` | dimensions | Print the raw dimensions config |
 | `--allow-empty` | store | Write the file even when `observations` is empty (skipped by default) |
 | `--dry-run` | store | Validate and report the target path, write nothing |
+<!-- generated:end: cli:compass/capture.py:flag -->
 
 Exit codes: `0` stored (or honestly empty and skipped), `1` invalid payload or write failure (capture is non-blocking: `/wrapup` warns and moves on), `2` usage error.
 
@@ -328,12 +356,14 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/synth
 python -m compass.synthesize --cron        # cron-driven; no-ops if personality.md is < 7 days old
 ```
 
+<!-- generated:start: cli:compass/synthesize.py:flag -->
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--dry-run` | no | Print the synthesis prompt instead of calling claude |
 | `--model MODEL` | no | Override the claude CLI's default model |
 | `--cron` | no | Self-throttle to a 7-day cadence (no-op if `personality.md` was rewritten in the last week) |
 | `--max-sessions N` | no | Synthesize from at most the N most recent sessions by `captured_at` (default 50, matching the archive threshold; `0` disables the cap) |
+<!-- generated:end: cli:compass/synthesize.py:flag -->
 
 Exit codes: `0` wrote `personality.md`; `1` no active observations; `2` claude subprocess failed (previous file untouched).
 
@@ -347,6 +377,7 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/backf
 python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/backfill.py --since 2026-04-10 --last 5
 ```
 
+<!-- generated:start: cli:compass/backfill.py:flag -->
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--last N` | one of these | N most recent transcripts by mtime |
@@ -354,6 +385,7 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/backf
 | `--since YYYY-MM-DD` | one of these | Only transcripts modified on/after this date |
 | `--force` | no | Overwrite existing observation files (default: skip) |
 | `--model MODEL` | no | Override the claude CLI's default model |
+<!-- generated:end: cli:compass/backfill.py:flag -->
 
 Exit codes: `0` at least one file written; `1` no selectors / no matches / nothing written; `2` claude subprocess failed for every selected session.
 
@@ -371,14 +403,17 @@ python compass/evaluate.py labels
 
 ### Subcommands
 
+<!-- generated:start: cli:compass/evaluate.py:sub -->
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `offline` | `evaluate.py offline [--dry-run] [--model M] [--max-folds N] [--yes] [--json] [--no-cache]` | Leave-one-out predictive validity over the observation files: does a profile synthesized from the other sessions predict a held-out session's per-dimension labels? Reports micro/macro accuracy, majority and random baselines, lift, coverage and per-dimension precision, and caches the headline to `<state-dir>/compass/evaluate/last.json` |
 | `ab` | `evaluate.py ab [--since YYYY-MM-DD] [--log PATH] [--json]` | Join the per-session A/B arm against budgeter outcome proxies (tool calls per task, corrections per task, net tokens per task) and print both arms with n |
 | `labels` | `evaluate.py labels [--json]` | Print the per-dimension label vocabulary — the metric's target definition |
+<!-- generated:end: cli:compass/evaluate.py:sub -->
 
 ### Flags
 
+<!-- generated:start: cli:compass/evaluate.py:flag -->
 | Flag | Applies to | Description |
 |------|-----------|-------------|
 | `--state-dir PATH` | all | Evaluate another target's compass state (sets `$APIARY_TARGET_STATE_DIR`) |
@@ -390,6 +425,7 @@ python compass/evaluate.py labels
 | `--since YYYY-MM-DD` | ab | Only count budgeter log rows on/after this date |
 | `--log PATH` | ab | Budgeter usage log path (default: budgeter's own) |
 | `--json` | offline, ab, labels | Emit machine-readable output instead of the table |
+<!-- generated:end: cli:compass/evaluate.py:flag -->
 
 Exit codes: `0` evaluation ran; `1` not enough data (fewer than two valid observation files, or an empty budgeter log); `2` usage error, or a `--model` run declined for want of `--yes`.
 
@@ -399,19 +435,23 @@ Spawn a new side-project repo wired up with the apiary toolkit. Used by the `/in
 
 ### Subcommands
 
+<!-- generated:start: cli:incubator/cli.py:sub -->
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `spawn` | `cli.py spawn --path <abs-path> --spec-note-id <id> [--author "<name>"] [--session-id ID]` | Create the new repo and migrate the spec |
 | `verify` | `cli.py verify --path <abs-path>` | Check that a path is a complete, working spawn (see below) |
+<!-- generated:end: cli:incubator/cli.py:sub -->
 
 ### Flags
 
+<!-- generated:start: cli:incubator/cli.py:flag -->
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--path` | yes | Absolute target directory; must not exist; parent must exist; must not be inside an existing git repo |
 | `--spec-note-id` | yes | ID of the `/refine` context note in apiary scribe (e.g. `C-2026-43`) |
 | `--author` | no | Author string for `pyproject.toml`; defaults to git config `user.name <user.email>` |
 | `--session-id` | no | Optional session ID stamped on the migrated spec note |
+<!-- generated:end: cli:incubator/cli.py:flag -->
 
 Exit codes: `0` success; `2` validation error (bad path); `3` spec note not found; `4` spawn failure (rolled back automatically); `5` partial success — repo created but spec migration failed (recover manually).
 
@@ -441,6 +481,7 @@ Manage structured research findings per repo. Entries live at `<state-dir>/resea
 
 ### Subcommands
 
+<!-- generated:start: cli:researcher/cli.py:sub -->
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `add` | `cli.py add <topic> "<title>" [--tags t1,t2,...]` | Scaffold a new entry from the template. Rejects unknown tags and duplicate slugs |
@@ -449,6 +490,7 @@ Manage structured research findings per repo. Entries live at `<state-dir>/resea
 | `show` | `cli.py show <topic> <slug>` | Print the full entry file to stdout |
 | `verify` | `cli.py verify <topic> <slug>` | Bump `date_last_verified` to today |
 | `register-tag` | `cli.py register-tag <tag>` | Append a tag to `tags.yaml` (controlled vocabulary) |
+<!-- generated:end: cli:researcher/cli.py:sub -->
 
 ### Exit codes
 
@@ -466,6 +508,7 @@ Manage visual captures (screenshots, UI mockups, viewport shots, etc.) per repo.
 
 ### Subcommands
 
+<!-- generated:start: cli:captures/cli.py:sub -->
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `add` | `cli.py add <topic> <image-path> --title "<t>" [--tags t1,t2] [--context "<text>"] [--related ID1,ID2] [--session-id <id>] [--move]` | Ingest an image by copying (default) or moving it into the store; writes the sidecar. Rejects unknown tags, unsupported extensions, duplicate slugs |
@@ -474,6 +517,7 @@ Manage visual captures (screenshots, UI mockups, viewport shots, etc.) per repo.
 | `show` | `cli.py show <topic> <slug>` | Print the sidecar contents followed by the absolute image path |
 | `path` | `cli.py path <topic> <slug>` | Print only the absolute image path (for scripting / feeding into Claude's Read tool) |
 | `register-tag` | `cli.py register-tag <tag>` | Append a tag to `tags.yaml` (controlled vocabulary) |
+<!-- generated:end: cli:captures/cli.py:sub -->
 
 ### Allowed image extensions
 
@@ -514,6 +558,7 @@ python harden/orchestrate.py save-summary --session-id SID --content-file summar
 
 ### Subcommands
 
+<!-- generated:start: cli:harden/orchestrate.py:sub -->
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `plan` | `plan --session-id SID --targets ...` | Resolve targets, pick the path (legacy / single-lens / multi-lens), run the size cap, estimate cost, mint the `request_id`. Writes the run plan every other subcommand reads. Creates no other state |
@@ -524,9 +569,11 @@ python harden/orchestrate.py save-summary --session-id SID --content-file summar
 | `budget` | `budget check` | Query per-request spend, format the round-summary suffix, and decide whether the run must abort |
 | `file-todos` | `file-todos --response R.json` | File the Defender's `todos` and every deferred finding as scribe todos, through the launcher with `--content-file` |
 | `save-summary` | `save-summary --content-file S.md` | Save the run summary as a scribe note through the launcher |
+<!-- generated:end: cli:harden/orchestrate.py:sub -->
 
 ### Flags
 
+<!-- generated:start: cli:harden/orchestrate.py:flag -->
 | Flag | Applies to | Description |
 |------|-----------|-------------|
 | `--session-id ID` | all | The harden run. Keys the plan file, the round counter and the worktree name |
@@ -572,6 +619,7 @@ python harden/orchestrate.py save-summary --session-id SID --content-file summar
 | `--content-file PATH` | save-summary | Summary body, kept off argv (Windows caps argv at 32,767 chars) |
 | `--type TYPE` | save-summary | Scribe note type (default `context`) |
 | `--dry-run` | file-todos, save-summary | Print what would be written, write nothing |
+<!-- generated:end: cli:harden/orchestrate.py:flag -->
 
 Exit codes: `0` success, `1` abort or hard error (one user-facing line on stderr), `3` `validate` rejected the agent output — the decision object on stdout says what to do next.
 
@@ -589,14 +637,17 @@ python harden/validate_and_assign.py consolidation --degrade --file merged_findi
 
 ### Subcommands
 
+<!-- generated:start: cli:harden/validate_and_assign.py:sub -->
 | Subcommand | Description |
 |------------|-------------|
 | `findings` | Validate and assign IDs to Attacker findings. Legacy mode → `ATK-NNN`; lens mode (`--lens`) → `ATK-<CODE>-NNN` |
 | `response` | Validate and assign DEF-IDs to Defender response (prefix-agnostic `--expected-ids`) |
 | `consolidation` | Validate Consolidator/referee output and assign `CON-NNN` to accepted findings (multi-lens path) |
+<!-- generated:end: cli:harden/validate_and_assign.py:sub -->
 
 ### Flags
 
+<!-- generated:start: cli:harden/validate_and_assign.py:flag -->
 | Flag | Applies to | Required | Description |
 |------|-----------|----------|-------------|
 | `--file PATH` | all | no | Read JSON from file instead of stdin |
@@ -607,6 +658,7 @@ python harden/validate_and_assign.py consolidation --degrade --file merged_findi
 | `--expected-ids IDS` | response | yes | Comma-separated finding IDs (`ATK-NNN`, `ATK-<CODE>-NNN`, or `CON-NNN`) that must be addressed |
 | `--source-ids IDS` | consolidation | no | Comma-separated `ATK-<CODE>-NNN` ids dispatched; enables exact coverage checking |
 | `--degrade` | consolidation | no | Deterministic fallback: dedup raw merged findings by location, assign `CON-NNN`, no adjudication |
+<!-- generated:end: cli:harden/validate_and_assign.py:flag -->
 
 Exit 0 + validated JSON with IDs on success. Exit 1 + error details on failure.
 
@@ -622,11 +674,13 @@ python harden/lenses.py json    # full taxonomy: lenses, briefs, seam_rules
 
 ### Subcommands
 
+<!-- generated:start: cli:harden/lenses.py:sub -->
 | Subcommand | Description |
 |------------|-------------|
 | `list` | Print the canonical lens names, one per line |
 | `codes` | Print `name=CODE` pairs, one per line |
 | `json` | Print the full taxonomy (names, codes, briefs, seams) as JSON |
+<!-- generated:end: cli:harden/lenses.py:sub -->
 
 The seven lenses: `correctness` (COR), `security` (SEC), `robustness` (ROB), `resilience` (RES), `complexity` (CPX), `architecture` (ARC), `testing` (TST).
 
@@ -639,12 +693,14 @@ python harden/validate_consolidation.py --file consolidation.json --source-ids A
 python harden/validate_consolidation.py --degrade --file merged_findings.json
 ```
 
+<!-- generated:start: cli:harden/validate_consolidation.py:flag -->
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--source-ids IDS` | no | Comma-separated `ATK-<CODE>-NNN` ids dispatched to the consolidator; enables coverage checking |
 | `--check-files` | no | Verify accepted-finding files exist (code mode) |
 | `--degrade` | no | Fallback: dedup raw merged findings by location instead of validating |
 | `--file PATH` | no | Read JSON from file instead of stdin |
+<!-- generated:end: cli:harden/validate_consolidation.py:flag -->
 
 Exit 0 + validated JSON on success. Exit 1 + error details on failure.
 
@@ -657,10 +713,12 @@ echo '<json_array>' | python harden/assign_ids.py --prefix ATK
 python harden/assign_ids.py --prefix ATK-SEC --file findings.json
 ```
 
+<!-- generated:start: cli:harden/assign_ids.py:flag -->
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--prefix PREFIX` | yes | ID prefix: `ATK` (legacy findings), `ATK-<CODE>` (per-lens findings), `CON` (consolidated), or `DEF` (responses) |
 | `--file PATH` | no | Read JSON from file instead of stdin |
+<!-- generated:end: cli:harden/assign_ids.py:flag -->
 
 ## harden/validate_findings.py
 
@@ -671,6 +729,7 @@ echo '<json>' | python harden/validate_findings.py [--check-files] [--deep] [--s
 python harden/validate_findings.py --file findings.json [--check-files] [--deep] [--sanitize]
 ```
 
+<!-- generated:start: cli:harden/validate_findings.py:flag -->
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--check-files` | no | Verify referenced files exist (code mode) |
@@ -678,6 +737,7 @@ python harden/validate_findings.py --file findings.json [--check-files] [--deep]
 | `--file PATH` | no | Read JSON from file instead of stdin |
 | `--sanitize` | no | Auto-fix common issues before validation |
 | `--lens NAME` | no | Validate as lens-mode findings for the given lens (replaces the legacy category field) |
+<!-- generated:end: cli:harden/validate_findings.py:flag -->
 
 Exit 0 + validated JSON on success. Exit 1 + error details on failure.
 
@@ -690,11 +750,13 @@ echo '<json>' | python harden/validate_response.py --expected-ids ATK-001,ATK-00
 python harden/validate_response.py --file response.json --expected-ids ATK-001,ATK-002 [--check-files]
 ```
 
+<!-- generated:start: cli:harden/validate_response.py:flag -->
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--expected-ids IDS` | yes | Comma-separated ATK-IDs that must be addressed |
 | `--check-files` | no | Verify referenced files exist (code mode) |
 | `--file PATH` | no | Read JSON from file instead of stdin |
+<!-- generated:end: cli:harden/validate_response.py:flag -->
 
 Exit 0 + validated JSON on success. Exit 1 + error details on failure.
 
@@ -704,6 +766,7 @@ Track harden round counts per session. Also used by `/refine`, which scopes its 
 
 ### Subcommands
 
+<!-- generated:start: cli:harden/round_counter.py:sub -->
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `start` | `round_counter.py start --session-id ID` | Initialize counter at 0 |
@@ -712,6 +775,7 @@ Track harden round counts per session. Also used by `/refine`, which scopes its 
 | `status` | `round_counter.py status --session-id ID` | Print current count without incrementing |
 | `defender` | `round_counter.py defender --session-id ID --set AGENT_ID` | Store defender agent ID |
 | `defender` | `round_counter.py defender --session-id ID --get` | Retrieve defender agent ID (exit 1 if not set) |
+<!-- generated:end: cli:harden/round_counter.py:sub -->
 
 State is stored at `harden/tmp/round_<session-id>.json`. Format: `{"session_id": "...", "count": N, "defender_agent_id": "..."}`.
 
@@ -724,9 +788,11 @@ python scripts/preflight.py            # base install checks
 python scripts/preflight.py --gui      # also check desktop GUI prerequisites
 ```
 
+<!-- generated:start: cli:scripts/preflight.py:flag -->
 | Flag | Description |
 |------|-------------|
 | `--gui` | Also check desktop GUI prerequisites (pythonnet Python pin, WebView2 runtime) |
+<!-- generated:end: cli:scripts/preflight.py:flag -->
 
 Exit codes: `0` no hard blockers (warnings allowed; install can proceed), `1` a blocker must be fixed first.
 
@@ -739,6 +805,7 @@ python -m runner.run runner/intake/<uuid>.json
 python -m runner.run runner/intake/<uuid>.json --target-repo /path/to/other/repo
 ```
 
+<!-- generated:start: cli:runner/run.py:flag -->
 | Argument / Flag | Required | Description |
 |-----------------|----------|-------------|
 | `intake_path` | yes | Path to intake JSON file (`runner/intake/<uuid>.json`) |
@@ -752,6 +819,7 @@ python -m runner.run runner/intake/<uuid>.json --target-repo /path/to/other/repo
 | `--prune-failed` | no | Prune failed/abandoned runner branches (with `--older-than`) |
 | `--older-than DAYS` | no | Age threshold for `--prune-failed` (default 7) |
 | `--dry-run` | no | List prune candidates without deleting anything |
+<!-- generated:end: cli:runner/run.py:flag -->
 
 Stages run in order: validate_intake → auto_refine → auto_plan → executor → auto_harden → approval. Each stage's input path is derived from the UUID. Prints per-stage status and elapsed time. Exit 0 if all stages pass; exit 1 on first failure.
 
@@ -776,6 +844,7 @@ python -m runner.ticket validate <path-to-intake.json>
 
 ### Subcommands
 
+<!-- generated:start: cli:runner/ticket.py:sub -->
 | Subcommand | Description |
 |------------|-------------|
 | `draft` | Create a backlog draft ticket at `backlog/<slug>.json` |
@@ -784,9 +853,9 @@ python -m runner.ticket validate <path-to-intake.json>
 | `mark-done` | Delete a backlog draft that was fixed by hand instead of by the runner |
 | `from-note` | Bridge a `/refine` handoff scribe note into intake (or `--backlog`) |
 | `validate` | Validate an intake JSON file already on disk |
+<!-- generated:end: cli:runner/ticket.py:sub -->
 
-`mark-done` is safe by construction: `promote` removes the backlog file the moment a ticket enters intake, so a backlog file that still exists is guaranteed not to be in flight. Use `promote` first if you actually want the ticket to run through the runner.
-
+<!-- generated:start: cli:runner/ticket.py:flag -->
 | Argument / Flag | Applies to | Required | Description |
 |-----------------|------------|----------|-------------|
 | `slug` | `promote`, `mark-done` | yes | Backlog ticket slug — the filename **without** directory or `.json` extension |
@@ -801,6 +870,7 @@ python -m runner.ticket validate <path-to-intake.json>
 | `--note ID` | `from-note` | yes | Scribe note ID containing the refiner handoff |
 | `--note TEXT` | `mark-done` | no | Note describing the manual completion (informational only) |
 | `--backlog` | `from-note` | no | Write to `backlog/<slug>.json` instead of `intake/<uuid>.json` |
+<!-- generated:end: cli:runner/ticket.py:flag -->
 
 \* Required unless `--from-todo` fills it.
 
@@ -815,6 +885,7 @@ python -m runner.create_intake --title "Add caching" --problem "Repeated DB quer
 python -m runner.create_intake --from-todo T-2026-42
 ```
 
+<!-- generated:start: cli:runner/create_intake.py:flag -->
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--title TEXT` | yes* | Short title for the task |
@@ -824,6 +895,7 @@ python -m runner.create_intake --from-todo T-2026-42
 | `--context TEXT` | no | Additional context (optional) |
 | `--explore-hints CSV` | no | Comma-separated repo-relative paths the refiner should start with (refiner can still branch out) |
 | `--from-todo ID` | no | Scribe TODO ID to seed from (replaces manual fields) |
+<!-- generated:end: cli:runner/create_intake.py:flag -->
 
 \* Required unless `--from-todo` is used.
 
@@ -837,12 +909,14 @@ python -m runner.refine_to_intake --note C-2026-5 --title "Add caching" --backlo
 python -m runner.refine_to_intake --note C-2026-5 --title "Add caching" --explore-hints "api/cache.py,api/db.py"
 ```
 
+<!-- generated:start: cli:runner/refine_to_intake.py:flag -->
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--note ID` | yes | Scribe note ID containing the refiner handoff |
 | `--title TEXT` | yes | Short title (refiner handoffs have no title field) |
 | `--backlog` | no | Write to `runner/backlog/<slug>.json` instead of `runner/intake/<uuid>.json` |
 | `--explore-hints CSV` | no | Comma-separated repo-relative paths for the auto-refiner |
+<!-- generated:end: cli:runner/refine_to_intake.py:flag -->
 
 Mapping: `Goal > **Problem:**` → `problem`; `Shape` + `Behavior` → `description`; `Boundaries` → `scope`; `Acceptance criteria` → `context`. On intake mode the file is validated via `validate_intake` and deleted on failure. The written record sets `source` to `scribe-note:<id>`.
 
@@ -854,9 +928,11 @@ Validate an intake JSON file. Checks required fields, types, minimum content thr
 python -m runner.validate_intake runner/intake/<uuid>.json
 ```
 
+<!-- generated:start: cli:runner/validate_intake.py:arg -->
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `file` | yes | Path to intake JSON file |
+<!-- generated:end: cli:runner/validate_intake.py:arg -->
 
 Exit 0 on valid. Exit 1 with error details on invalid.
 
@@ -868,9 +944,11 @@ Autonomous refiner — Stage 2. Reads a validated intake JSON, launches a Claude
 python -m runner.auto_refine runner/intake/<uuid>.json
 ```
 
+<!-- generated:start: cli:runner/auto_refine.py:arg -->
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `intake` | yes | Path to intake JSON file |
+<!-- generated:end: cli:runner/auto_refine.py:arg -->
 
 Output: `runner/specs/<uuid>.json`. Model and retries configurable via `runner/config.json` under `refine`.
 
@@ -882,9 +960,11 @@ Validate a spec JSON file against the 8 handoff validation rules.
 python -m runner.validate_spec runner/specs/<uuid>.json
 ```
 
+<!-- generated:start: cli:runner/validate_spec.py:arg -->
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `file` | yes | Path to spec JSON file |
+<!-- generated:end: cli:runner/validate_spec.py:arg -->
 
 Exit 0 on valid. Exit 1 with error details on invalid.
 
@@ -896,9 +976,11 @@ Autonomous planner — Stage 3. Reads a validated spec JSON, launches a Claude C
 python -m runner.auto_plan runner/specs/<uuid>.json
 ```
 
+<!-- generated:start: cli:runner/auto_plan.py:arg -->
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `spec` | yes | Path to spec JSON file |
+<!-- generated:end: cli:runner/auto_plan.py:arg -->
 
 Output: `runner/plans/<uuid>.json`. Model and retries configurable via `runner/config.json` under `plan`.
 
@@ -910,9 +992,11 @@ Validate a plan JSON file for the autonomous runner.
 python -m runner.validate_plan runner/plans/<uuid>.json
 ```
 
+<!-- generated:start: cli:runner/validate_plan.py:arg -->
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `file` | yes | Path to plan JSON file |
+<!-- generated:end: cli:runner/validate_plan.py:arg -->
 
 Exit 0 on valid. Exit 1 with error details on invalid.
 
@@ -924,9 +1008,11 @@ Executor — Stage 4. Reads a validated plan JSON, works on the run's branch, an
 python -m runner.executor runner/plans/<uuid>.json
 ```
 
+<!-- generated:start: cli:runner/executor.py:arg -->
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `plan` | yes | Path to plan JSON file |
+<!-- generated:end: cli:runner/executor.py:arg -->
 
 Output: the execution log under `<state>/runner/executions/<uuid>.json`. Model and retries configurable via `runner/config.json` under `executor`.
 
@@ -942,9 +1028,11 @@ Autonomous hardener — Stage 5. Runs attack-defend rounds against the executor'
 python -m runner.auto_harden runner/executions/<uuid>.json
 ```
 
+<!-- generated:start: cli:runner/auto_harden.py:arg -->
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `execution_log` | yes | Path to execution log JSON |
+<!-- generated:end: cli:runner/auto_harden.py:arg -->
 
 Output: `runner/hardens/<uuid>.json`. Rounds, models, and timeout configurable via `runner/config.json` under `harden` (default: 1 round).
 
@@ -961,9 +1049,11 @@ Approval — Stage 6. Reads the harden verdict and either squash-merges to maste
 python -m runner.approval runner/hardens/<uuid>.json
 ```
 
+<!-- generated:start: cli:runner/approval.py:arg -->
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `harden_result` | yes | Path to harden result JSON |
+<!-- generated:end: cli:runner/approval.py:arg -->
 
 Output: `runner/reports/<uuid>.json`. Path taken: `merged-locally`, `pending-review`, `defender-failed`, or a merge error. Exits non-zero on `defender_failed` so `run_history.jsonl` records the failure.
 
@@ -976,6 +1066,7 @@ python -m runner.draft_ticket --title "..." --problem "..." --description "..." 
 python -m runner.draft_ticket --from-todo T-2026-42 --title "..." --problem "..." --scope "..."
 ```
 
+<!-- generated:start: cli:runner/draft_ticket.py:flag -->
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--title TEXT` | yes | Short title (used to generate the slug filename) |
@@ -984,6 +1075,7 @@ python -m runner.draft_ticket --from-todo T-2026-42 --title "..." --problem "...
 | `--scope TEXT` | yes | Scope of work |
 | `--context TEXT` | no | Additional context (optional) |
 | `--from-todo ID` | no | Scribe note ID — only auto-fills `--description` from the note content; `--title`, `--problem`, and `--scope` are still required |
+<!-- generated:end: cli:runner/draft_ticket.py:flag -->
 
 \* Required unless `--from-todo` is provided (which fills it from the note).
 
@@ -997,9 +1089,11 @@ Promote a backlog draft to a runner intake file. Validates against the intake sc
 python -m runner.promote <slug>
 ```
 
+<!-- generated:start: cli:runner/promote.py:arg -->
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `slug` | yes | Backlog ticket slug — the filename **without** directory or `.json` extension |
+<!-- generated:end: cli:runner/promote.py:arg -->
 
 **Gotcha:** Pass the slug only (e.g. `my-feature`), not a path (e.g. `runner/backlog/my-feature.json`). Path separators are rejected to prevent traversal. The script always looks in `runner/backlog/<slug>.json`.
 
@@ -1011,10 +1105,14 @@ python -m runner.promote <slug>
 python -m runner.mark_done <slug> [--note "explanation"]
 ```
 
+<!-- generated:start: cli:runner/mark_done.py:flag -->
 | Argument / Flag | Required | Description |
 |-----------------|----------|-------------|
 | `slug` | yes | Backlog ticket slug — the filename **without** directory or `.json` extension |
-| `--note TEXT` | no | Optional note describing the manual completion (informational only) |
+| `--note TEXT` | no | Optional note describing the manual completion (currently informational only) |
+<!-- generated:end: cli:runner/mark_done.py:flag -->
+
+The presence of the backlog file is itself the safety check — `promote.py` removes the backlog file when a ticket enters intake, so a backlog file that still exists is guaranteed not to be in flight. Use `promote.py` first if you actually want the ticket to run through the runner.
 
 ## runner/cost_emit.py
 
@@ -1038,10 +1136,12 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" runner/cron_h
 
 ### Subcommands
 
+<!-- generated:start: cli:runner/cron_health.py:sub -->
 | Subcommand | Description |
 |------------|-------------|
 | `check` | Read-only inspection; prints a status table, exit 0 when everything matches the registry |
 | `repair` | Dry-run by default (prints intended changes); pass `--apply` to execute delete + recreate against the scheduler |
+<!-- generated:end: cli:runner/cron_health.py:sub -->
 
 ### Exit codes
 
@@ -1127,6 +1227,7 @@ to a single-purpose module under `core/`.
 
 ### Subcommands
 
+<!-- generated:start: cli:apiary:sub -->
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `install` | `apiary install --target <repo> [--profile <name>]` | Bootstrap apiary into a target repo (`core/install.py`). Idempotent. |
@@ -1136,9 +1237,11 @@ to a single-purpose module under `core/`.
 | `cascade-fix` | `apiary cascade-fix` | Rewrite every bootstrapped repo's `main-apiary-pointer.json` to the current main-apiary path (`core/cascade.py`). |
 | `update` | `apiary update [--target <repo>] [--dry-run]` | Run the pending `migrations/` chain in every bootstrapped repo and re-pin it to `<main-apiary>/VERSION` (`core/update.py`). |
 | `version` | `apiary version [--all]` | Print main-apiary's pinned version (the contents of `<main-apiary>/VERSION`); `--all` also lists every registered repo's pin. |
+<!-- generated:end: cli:apiary:sub -->
 
 ### Flags
 
+<!-- generated:start: cli:apiary:flag -->
 | Flag | Applies to | Required | Description |
 |------|-----------|----------|-------------|
 | `--target PATH` | install, uninstall, update | install/uninstall only | Target repo. On `update` it is optional and narrows the run to that one repo. |
@@ -1148,6 +1251,7 @@ to a single-purpose module under `core/`.
 | `--dry-run` | update | no | Print the migrations that would run and write nothing. |
 | `--all` | version | no | List every registered repo's pinned version next to main-apiary's; `!` marks a repo that has drifted. |
 | `--apiary-repo PATH` | all | no | Path to main-apiary. Default: resolved via `APIARY_MAIN_REPO`, the running source tree, or `<cwd>/.claude/apiary/main-apiary-pointer.json`. |
+<!-- generated:end: cli:apiary:flag -->
 
 `install` walks the profile's `extends` chain, deep-merges parents left-to-right then the child on top (`{"$replace": value}` escape hatch replaces instead of merges), and merges the resolved profile into `<repo>/.claude/settings.json`. `hooks` is the only key apiary owns outright — it is regenerated every install (apiary-marked entries only; the user's own hooks stay). Every other profile key is merged into the user's file: their entries survive, the profile's are added, and an entry a previous install contributed that the profile no longer ships is withdrawn. Keys the profile does not mention are left untouched. It also generates `<repo>/.claude/apiary/{launch.py, main-apiary-pointer.json, self-pointer.json, version.json}`, copies slash commands into `<repo>/.claude/commands/`, writes the apiary-managed zone into `<repo>/CLAUDE.md`, updates `<repo>/.gitignore`, and installs the commit-time secret-scan pre-commit hook (best-effort — a refusal warns instead of failing the install). Centralized state lands at `<main-apiary>/.repos/<name>-<uid>/bootstrap_state.json` (schema v2 — adds the file hashes `apiary doctor stale` compares against to detect slash-command drift).
 
@@ -1193,6 +1297,79 @@ Exit codes: `0` no objection (the merged `additionalContext`, or `{}`); `2` a ga
 
 The hook contract (`run(payload) -> HookResult | None`), the registry, the matcher semantics and the log format are documented in [hooks.md](hooks.md).
 
+## docs/check.py
+
+Documentation framework conformance checker: every doc under `docs/` has the
+six frontmatter keys, a valid `type`/`scope`, and an `_index.md` entry — and a
+`last_verified` no older than the file's last git commit. That last rule is the
+one with teeth: it is what makes "I edited the doc but did not re-verify it" a
+failure instead of a silent lie (review §5a-D.3). Tool coverage is derived from
+the tree, so a new top-level tool directory is checked the day it appears.
+
+```bash
+python docs/check.py
+python docs/check.py --strict     # warnings fail too
+```
+
+<!-- generated:start: cli:docs/check.py:flag -->
+| Flag | Description |
+|------|-------------|
+| `--strict` | Exit non-zero on any issue (warnings included) |
+<!-- generated:end: cli:docs/check.py:flag -->
+
+Exit codes: `0` no errors; `1` errors (or `--strict` and any warnings).
+
+## docs/generate_cli_docs.py
+
+Regenerates `cli-index.md` and the Subcommands / Arguments / Flags tables in
+this file from each tool's real argparse, between `<!-- generated:start: … -->`
+sentinels. The row set is code's; the hand-written columns are preserved. Same
+reconciliation rule as `check_cli_claims.py`, applied rather than reported.
+
+```bash
+python docs/generate_cli_docs.py            # --check (the default)
+python docs/generate_cli_docs.py --write
+python docs/generate_cli_docs.py --check --diff
+```
+
+<!-- generated:start: cli:docs/generate_cli_docs.py:flag -->
+| Flag | Description |
+|------|-------------|
+| `--check` | Report drift and exit 1 (default) |
+| `--write` | Rewrite the generated blocks in place |
+| `--diff` | Print a unified diff for each drifted file |
+<!-- generated:end: cli:docs/generate_cli_docs.py:flag -->
+
+Exit codes: `0` in sync (or written); `1` drift under `--check`; `2` a source doc is missing.
+
+## docs/generate_reference.py
+
+The same machinery for the reference tables that are not about argparse: the
+hook registry and lifecycle events (from `core.hooks.dispatch`), the slash
+command list (from `<tool>/commands/*.md` frontmatter), the config-key tables
+(from the shipped `config.json` files plus the loaders' code-side defaults),
+the storage path table (by calling the real resolvers against a synthetic state
+dir), and the scribe archive policy (from `scribe/policy.py`).
+
+```bash
+python docs/generate_reference.py           # --check (the default)
+python docs/generate_reference.py --write
+```
+
+<!-- generated:start: cli:docs/generate_reference.py:flag -->
+| Flag | Description |
+|------|-------------|
+| `--check` | Report drift and exit 1 (default) |
+| `--write` | Rewrite the generated blocks in place |
+| `--diff` | Print a unified diff for each drifted file |
+<!-- generated:end: cli:docs/generate_reference.py:flag -->
+
+## docs/docgen.py
+
+Library shared by both generators: sentinel-block find/replace, markdown table
+parse/render, and the `--check`/`--write` harness. Not a CLI — running it
+prints its own docstring.
+
 ## docs/check_cli_claims.py
 
 Reconcile the CLI claims in `cli-tools.md` against each tool's real argparse — reports drift when a documented subcommand/flag no longer exists, or a real one is undocumented. Sibling to `docs/check.py`; report-only, never rewrites the doc. Shells out to each tool's `--help`. Mark intentional omissions with an inline `<!-- cli-claims: ignore: --some-flag, somesubcmd -->` anywhere in a tool's section.
@@ -1204,9 +1381,11 @@ python docs/check_cli_claims.py
 python docs/check_cli_claims.py --only scribe/notes.py
 ```
 
+<!-- generated:start: cli:docs/check_cli_claims.py:flag -->
 | Flag | Description |
 |------|-------------|
 | `--only HEADER` | Check a single tool section by its `## ` header (e.g. `scribe/notes.py`) |
+<!-- generated:end: cli:docs/check_cli_claims.py:flag -->
 
 Exit codes: `0` no drift; `1` drift found; `2` `cli-tools.md` not found.
 
@@ -1224,12 +1403,14 @@ python scripts/secret_scan.py --path some/dir      # ad-hoc scan of a tree
 python scripts/secret_scan.py --staged --entropy   # + high-entropy strings
 ```
 
+<!-- generated:start: cli:scripts/secret_scan.py:flag -->
 | Flag | Description |
 |------|-------------|
 | `--staged` | Scan the staged diff (pre-commit mode) |
 | `--path PATH` | Scan a file or directory tree instead |
 | `--entropy` | Also flag high-entropy strings; noisier, off by default |
 | `--quiet` | Print nothing on a clean scan |
+<!-- generated:end: cli:scripts/secret_scan.py:flag -->
 
 Exit codes: `0` clean; `1` findings; `2` bad arguments, not a git repo, or the scan could not run.
 
@@ -1252,6 +1433,7 @@ python scripts/check_duplicates.py --threshold 0.7       # widen the net
 python scripts/check_duplicates.py --fail-on-identical   # gate mode
 ```
 
+<!-- generated:start: cli:scripts/check_duplicates.py:flag -->
 | Flag | Description |
 |------|-------------|
 | `--path PATH` | File or directory to scan (default: the repo root) |
@@ -1260,6 +1442,7 @@ python scripts/check_duplicates.py --fail-on-identical   # gate mode
 | `--top N` | How many groups and pairs to print (default: 25) |
 | `--fail-on-identical` | Exit 1 when identical bodies are found; off by default |
 | `--quiet` | Print only the summary counts |
+<!-- generated:end: cli:scripts/check_duplicates.py:flag -->
 
 Exit codes: `0` report produced; `1` identical bodies found **and** `--fail-on-identical` was passed; `2` bad arguments or unreadable path.
 
@@ -1275,12 +1458,14 @@ python .claude/apiary/launch.py scripts/install_git_hooks.py --list
 python .claude/apiary/launch.py scripts/install_git_hooks.py --uninstall
 ```
 
+<!-- generated:start: cli:scripts/install_git_hooks.py:flag -->
 | Flag | Description |
 |------|-------------|
 | `--uninstall` | Remove the hook, if we own it |
 | `--list` | Report install status without changing anything |
 | `--force` | Replace an existing non-apiary pre-commit hook |
 | `--repo PATH` | Target repo (default: the git repo containing the working directory) |
+<!-- generated:end: cli:scripts/install_git_hooks.py:flag -->
 
 Exit codes: `0` success or nothing to do; `1` refused (foreign hook in the way, main-apiary targeted, or not a git repo); `2` bad arguments.
 
@@ -1295,10 +1480,12 @@ poetry run python scripts/probe_permission_prompt.py /path/to/bootstrapped-repo
 poetry run python scripts/probe_permission_prompt.py /path/to/bootstrapped-repo --model claude-haiku-4-5-20251001 --timeout 180
 ```
 
+<!-- generated:start: cli:scripts/probe_permission_prompt.py:flag -->
 | Flag | Description |
 |------|-------------|
 | `--model MODEL` | Model for the probe call (default: Haiku) |
 | `--timeout SECONDS` | Kill the probe after this many seconds (default: 180) |
+<!-- generated:end: cli:scripts/probe_permission_prompt.py:flag -->
 
 Exit codes: `0` the call was held for a prompt (hooks are not auto-approving); `1` the call ran without a prompt (something voted allow); `2` inconclusive; `3` the probe itself could not run (no `claude`, timeout, non-JSON output).
 
@@ -1316,6 +1503,7 @@ python scripts/migrate_frontmatter.py --check --state-dir /path/to/.repos --verb
 python scripts/migrate_frontmatter.py --apply --family learnings
 ```
 
+<!-- generated:start: cli:scripts/migrate_frontmatter.py:flag -->
 | Flag | Description |
 |------|-------------|
 | `--check` | Report differences without writing (default) |
@@ -1323,6 +1511,7 @@ python scripts/migrate_frontmatter.py --apply --family learnings
 | `--state-dir DIR` | Store to walk (default: `<repo>/.repos`) |
 | `--family NAME` | Limit to `learnings`, `templates`, `memory`, `research`, or `captures`; repeatable |
 | `--verbose` | List every file, not just the ones needing review |
+<!-- generated:end: cli:scripts/migrate_frontmatter.py:flag -->
 
 Exit codes: `0` every file agrees (or every rewrite succeeded); `1` at least one file disagrees or could not be parsed; `2` the state dir does not exist.
 

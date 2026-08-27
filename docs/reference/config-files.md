@@ -11,26 +11,51 @@ last_verified: 2026-08-26
 
 ## runner/config.json
 
-Runner stage settings. Located in the repo at `runner/config.json`. All values have built-in defaults — the file is optional.
+Runner stage settings. Located in the repo at `runner/config.json`. Every caller
+reads it through `runner/config_loader.py`'s `get(section, key, default)`, so a
+key the file omits falls back to the default the caller passes — the file is
+optional in full.
 
+The Section / Field / Type / Default columns below are **generated from the
+shipped `runner/config.json`** by `docs/generate_reference.py`; only the
+Description column is hand-written. Change a value in the file and
+`--check` fails until the table is regenerated.
+
+<!-- generated:start: config:runner/config.json -->
 | Section | Field | Type | Default | Description |
-|---------|-------|------|---------|-------------|
-| `refine` | `max_retries` | int | `3` | Max retries for spec generation |
-| `refine` | `model` | string | `"opus"` | Claude model alias for refiner |
-| `refine` | `timeout` | int | `300` | Per-retry timeout (seconds) |
-| `plan` | `max_retries` | int | `3` | Max retries for plan generation |
-| `plan` | `model` | string | `"opus"` | Claude model alias for planner |
-| `plan` | `timeout` | int | `300` | Per-retry timeout (seconds) |
-| `executor` | `model` | string | `"sonnet"` | Claude model alias for executor |
+|-------|-----|----|-------|-----------|
+| `refine` | `max_retries` | int | `3` | Retries the refiner gets to produce a valid spec |
+| `refine` | `model` | string | `"opus"` | Claude model alias for the refiner stage |
+| `refine` | `timeout` | int | `900` | Per-attempt timeout in seconds |
+| `plan` | `max_retries` | int | `3` | Retries the planner gets to produce a valid plan |
+| `plan` | `model` | string | `"opus"` | Claude model alias for the planner stage |
+| `plan` | `timeout` | int | `900` | Per-attempt timeout in seconds |
+| `executor` | `model` | string | `"sonnet"` | Claude model alias for the executor stage |
 | `executor` | `max_retries_per_step` | int | `2` | Retries per execution step |
-| `executor` | `timeout` | int | `300` | Per-step timeout (seconds) |
-| `harden` | `max_rounds` | int | `1` | Attack-defend rounds |
-| `harden` | `attacker_model` | string | `"opus"` | Attacker Claude model alias |
-| `harden` | `defender_model` | string | `"sonnet"` | Defender Claude model alias |
-| `harden` | `timeout` | int | `300` | Per-round timeout (seconds) |
-| `orchestrator` | `stage_timeout` | int | `3600` | Max seconds per stage before kill |
+| `executor` | `max_no_change_retries` | int | `2` | Retries allowed when a step returns without touching a file — the "the model did nothing" guard |
+| `executor` | `timeout` | int | `900` | Per-step timeout in seconds |
+| `executor` | `mode` | string | `"per_step"` | `per_step` runs one Claude call per plan step; `monolithic` runs the whole plan in one call (and uses `monolithic_executor.timeout_seconds`) |
+| `monolithic_executor` | `timeout_seconds` | int | `1800` | Timeout for the single call the monolithic executor makes |
+| `harden` | `max_rounds` | int | `1` | Attack-defend rounds per run |
+| `harden` | `attacker_model` | string | `"opus"` | Claude model alias for the attacker |
+| `harden` | `defender_model` | string | `"sonnet"` | Claude model alias for the defender |
+| `harden` | `timeout` | int | `300` | Per-round timeout in seconds |
+| `orchestrator` | `stage_timeout` | int | `3600` | Wall-clock ceiling for any one stage before the orchestrator kills it |
+| `detached` | `token_cap` | int | `10000000` | Per-run token cap in detached (cron) mode; `--token-cap` overrides it |
+| `detached` | `max_unreviewed` | int | `5` | Detached runs refuse to start a new ticket once this many branches are waiting for review |
+| `detached` | `max_restarts` | int | `3` | How many times a detached run may be restarted after a recoverable failure |
+| `runner` | `target_repo` | null | `null` | Default target repo path for runs that name none. `null` means "the repo apiary resolved" |
+| `runner` | `banned_tokens` | object | `{"pytest": "use unittest (stdlib) \u2014 see docs/standards/code-style.md", "shell=true": "shell=True is banned \u2014 use list-form subprocess args", "import requests": "external dependencies are banned \u2014 stdlib only", "from requests": "external dependencies are banned \u2014 stdlib only"}` | Lowercase substring → the message the executor prints when a generated diff contains it |
+| `runner` | `target_overrides` | object | `{}` | Target-repo path → a partial config that shadows the top-level one for runs against that repo |
+| `usher` | `max_files` | object | `{"pass": 5, "warn": 8}` | Ticket-size gate: files touched, `pass`/`warn` thresholds |
+| `usher` | `max_subsystems` | object | `{"pass": 2, "warn": 3}` | Ticket-size gate: distinct subsystems touched |
+| `usher` | `max_description_chars` | object | `{"pass": 2000, "warn": 4000}` | Ticket-size gate: description length |
+<!-- generated:end: config:runner/config.json -->
 
-Loaded by `runner/config_loader.py`: `get(section, key, default)`.
+`runner.banned_tokens` maps a lowercase substring to the message the executor
+prints when a generated diff contains it; `runner.target_overrides` maps a
+target-repo path to a partial config that shadows the top-level one for runs
+against that repo.
 
 ## cron_registry/&lt;hostname&gt;.json
 
@@ -115,11 +140,13 @@ Adding a dimension: edit the JSON, then re-run any backfill or wait for the next
 
 Compass runtime config, controlling the live A/B on profile injection. Located at `compass/config.json` (in the repo — source, not state). `$APIARY_COMPASS_CONFIG` points at an alternate file; tests use it.
 
+<!-- generated:start: config:compass/config.json -->
 | Field | Type | Default | Description |
-|-------|------|---------|-------------|
+|-----|----|-------|-----------|
 | `ab_enabled` | bool | `false` | When false (shipped default) **nothing changes**: every session is in arm `on` and `personality.md` is injected as always. Set true to start splitting sessions |
 | `ab_seed` | string | `"compass-ab-2026-08"` | Salt for the per-session coin flip. Change it only to start a fresh measurement window — changing it mid-window makes the two halves incomparable |
 | `ab_on_fraction` | float | `0.5` | Share of sessions in the injected arm. `0` sends everyone to `off`, `1` to `on` |
+<!-- generated:end: config:compass/config.json -->
 
 A malformed or missing file reads as the defaults (A/B off) — this is loaded from a startup hook and must never break session start. See [Compass Measurement Programme](../architecture/compass-measurement.md).
 
@@ -130,17 +157,25 @@ Target definition for `compass/evaluate.py offline`: `{"labels": {<dimension>: {
 ## budgeter/config.json
 
 Global budgeter configuration. Located in the repo at `budgeter/config.json`.
+`monitored_tools` is also what `core/hooks/dispatch.py` turns into the
+budgeter hooks' matcher, so changing it changes which tool calls are logged
+*and* which ones pay for the hook.
 
+The last four rows are read by `budgeter/report.py --weighted` and are
+deliberately **absent from the shipped file** — their defaults live in
+`budgeter/report.py` and are generated from there.
+
+<!-- generated:start: config:budgeter/config.json -->
 | Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `monitored_tools` | array | `["Agent", "Bash", "Read", "Write"]` | Tool types the PreToolUse hook fires for |
+|-----|----|-------|-----------|
+| `monitored_tools` | array | `["Agent", "Bash", "Read", "Write"]` | Tool names the budgeter hooks fire for; also the dispatcher matcher for both budgeter hooks |
 | `session_warn_soft_tokens` | int | `600000` | Prompt size at which the session-length nudge suggests wrapping up |
 | `session_warn_hard_tokens` | int | `800000` | Prompt size at which it suggests starting a new session now |
-
-`budgeter/report.py --weighted` also reads four optional pricing weights from
-this file — `price_weight_input` (1.0), `price_weight_cache` (0.1),
-`price_weight_cache_creation` (1.25) and `price_weight_output` (5.0). They are
-absent from the shipped file; the defaults in parentheses apply.
+| `price_weight_input` | float | `1.0` (code default; not in the file) | Weight applied to input tokens by `report.py --weighted` |
+| `price_weight_cache` | float | `0.1` (code default; not in the file) | Weight applied to cache-read tokens |
+| `price_weight_cache_creation` | float | `1.25` (code default; not in the file) | Weight applied to cache-creation tokens |
+| `price_weight_output` | float | `5.0` (code default; not in the file) | Weight applied to output tokens |
+<!-- generated:end: config:budgeter/config.json -->
 
 ## .claude/budgeter.json (per-project)
 
