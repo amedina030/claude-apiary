@@ -54,8 +54,24 @@ def make_test_project(tmp_path):
     return tmp_path
 
 
-def run_hook(script, payload):
+def run_hook(script, payload, project=None, env_extra=None):
+    """Run a budgeter hook as a subprocess against a throwaway project.
+
+    ``APIARY_TARGET_REPO`` is pinned to that project (the payload's ``cwd``
+    unless *project* overrides it) and ``CLAUDE_PROJECT_DIR`` — which
+    ``core.flags`` consults *first* — is dropped, so both the feature flags
+    the hook reads and the per-session flag files it writes resolve inside
+    the test project. Without that the hooks read the developer's own
+    ``budgeter-log-enabled`` state out of this checkout and wrote session
+    flag files into it (T-2026-274).
+    """
     env = {**os.environ, "APIARY_BUDGETER_TEST_ISOLATION": "1"}
+    env.pop("CLAUDE_PROJECT_DIR", None)
+    target = str(project) if project is not None else payload.get("cwd", "")
+    if target:
+        env["APIARY_TARGET_REPO"] = target
+    if env_extra:
+        env.update(env_extra)
     return subprocess.run(
         [PYTHON, str(HOOKS_DIR / script)],
         input=json.dumps(payload),
@@ -63,6 +79,21 @@ def run_hook(script, payload):
         capture_output=True,
         env=env,
     )
+
+
+def flag_file(project, flag_name):
+    """The sentinel ``core.flags`` looks for inside *project*."""
+    from core import flags
+    return Path(project) / flags.PIN_FLAGS_SUBPATH / f"{flag_name}-enabled"
+
+
+def _with_flag_enabled(flag_name, project):
+    """Enable a budgeter flag for the throwaway *project*, never for the
+    checkout the suite runs from. Returns a cleanup callable."""
+    path = flag_file(project, flag_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("enabled", encoding="utf-8")
+    return lambda: path.unlink(missing_ok=True)
 
 
 def log_entry_count(log_path):
@@ -299,6 +330,8 @@ def test_post_agent_logs_total_tokens(tmp_path):
     log_path = project_dir / ".claude" / "budgeter-log.jsonl"
     session_id = make_session_id()
 
+    _with_flag_enabled("budgeter-log", project_dir)
+
     # Point logger at project paths and write a baseline
     orig_tmp, orig_log = lg.TMP_DIR, lg.LOG_PATH
     lg.configure_for_project(cwd)
@@ -361,6 +394,8 @@ def test_pre_skips_logging_after_agent(tmp_path):
     cwd = str(project_dir)
     log_path = project_dir / ".claude" / "budgeter-log.jsonl"
     session_id = make_session_id()
+
+    _with_flag_enabled("budgeter-log", project_dir)
 
     orig_tmp, orig_log = lg.TMP_DIR, lg.LOG_PATH
     lg.configure_for_project(cwd)
@@ -534,6 +569,8 @@ def test_feedback_written_at_session_end(tmp_path):
     project_dir = make_test_project(tmp_path / "project_feedback")
     cwd = str(project_dir)
     session_id = make_session_id()
+
+    _with_flag_enabled("budgeter-log", project_dir)
 
     orig_tmp, orig_log, orig_feedback = lg.TMP_DIR, lg.LOG_PATH, lg.FEEDBACK_PATH
     lg.configure_for_project(cwd)
@@ -749,11 +786,8 @@ def test_tune_propose_weights_clamps_extremes(tmp_path):
 # ---------------------------------------------------------------------------
 
 def main():
-    # Require budgeter-log-enabled for integration tests
-    flag = Path.home() / ".claude" / "budgeter-log-enabled"
-    if not flag.exists():
-        print("Note: budgeter-log-enabled not set — integration tests will skip logging checks.")
-
+    # Every test builds its own throwaway project and enables the flags it
+    # needs there, so nothing depends on this checkout's flag state.
     with tempfile.TemporaryDirectory() as td:
         tmp_path = Path(td)
 
@@ -917,10 +951,6 @@ def main():
         test_session_length_nudge_skipped_when_session_warn_disabled(tmp_path)
         print("OK")
 
-        print("Integration: session nudge independent of magnitude-warn ", end="")
-        test_session_length_nudge_independent_of_magnitude_warn(tmp_path)
-        print("OK")
-
         print("Unit: cumulative tokens dedupe + cache creation . ", end="")
         test_cumulative_tokens_dedupes_by_message_id_and_counts_cache_creation(tmp_path)
         print("OK")
@@ -1014,33 +1044,6 @@ def _write_transcript(tmp_path, *, input_tokens=0, cache_read=0, output_tokens=0
     return path
 
 
-def _with_flag_enabled(flag_name):
-    """Enable a budgeter flag for a test, returning a cleanup callable."""
-    from core import flags
-    was_enabled = flags.is_enabled(flag_name)
-    if not was_enabled:
-        flags.enable(flag_name)
-    return lambda: (None if was_enabled else flags.disable(flag_name))
-
-
-def _cleanup_session_flag_files(session_id):
-    """Remove any flag files created by the hook for this session_id."""
-    from core.session import SessionId
-    try:
-        sid = SessionId(session_id)
-    except ValueError:
-        return
-    for suffix in ("budgeter_context_done",
-                   "budgeter_session_len_soft_fired",
-                   "budgeter_session_len_hard_fired"):
-        path = sid.flag_path(suffix)
-        if path.exists():
-            try:
-                path.unlink()
-            except OSError:
-                pass
-
-
 def _extract_additional_context(hook_stdout):
     """Parse hook stdout JSON and return additionalContext string, or ''."""
     try:
@@ -1063,22 +1066,18 @@ def test_session_length_nudge_fires_once_per_tier(tmp_path):
         "cwd": cwd,
     }
 
-    restore_warn = _with_flag_enabled("budgeter-session-warn")
-    try:
-        r1 = run_hook("pre_tool_use.py", payload)
-        assert r1.returncode == 0, f"PRE failed: {r1.stderr}"
-        ctx1 = _extract_additional_context(r1.stdout)
-        assert "Session context is getting long" in ctx1, \
-            f"Soft nudge should fire at 600k tokens; got: {ctx1!r}"
+    _with_flag_enabled("budgeter-session-warn", project_dir)
+    r1 = run_hook("pre_tool_use.py", payload)
+    assert r1.returncode == 0, f"PRE failed: {r1.stderr}"
+    ctx1 = _extract_additional_context(r1.stdout)
+    assert "Session context is getting long" in ctx1, \
+        f"Soft nudge should fire at 600k tokens; got: {ctx1!r}"
 
-        r2 = run_hook("pre_tool_use.py", payload)
-        assert r2.returncode == 0, f"PRE #2 failed: {r2.stderr}"
-        ctx2 = _extract_additional_context(r2.stdout)
-        assert "Session context is getting long" not in ctx2, \
-            f"Second PRE must not re-inject soft nudge; got: {ctx2!r}"
-    finally:
-        restore_warn()
-        _cleanup_session_flag_files(session_id)
+    r2 = run_hook("pre_tool_use.py", payload)
+    assert r2.returncode == 0, f"PRE #2 failed: {r2.stderr}"
+    ctx2 = _extract_additional_context(r2.stdout)
+    assert "Session context is getting long" not in ctx2, \
+        f"Second PRE must not re-inject soft nudge; got: {ctx2!r}"
 
 
 def test_session_length_nudge_hard_tier_fires(tmp_path):
@@ -1094,16 +1093,12 @@ def test_session_length_nudge_hard_tier_fires(tmp_path):
         "cwd": cwd,
     }
 
-    restore_warn = _with_flag_enabled("budgeter-session-warn")
-    try:
-        r = run_hook("pre_tool_use.py", payload)
-        assert r.returncode == 0, f"PRE failed: {r.stderr}"
-        ctx = _extract_additional_context(r.stdout)
-        assert "Session context is very long" in ctx, \
-            f"Hard nudge should fire at 800k tokens; got: {ctx!r}"
-    finally:
-        restore_warn()
-        _cleanup_session_flag_files(session_id)
+    _with_flag_enabled("budgeter-session-warn", project_dir)
+    r = run_hook("pre_tool_use.py", payload)
+    assert r.returncode == 0, f"PRE failed: {r.stderr}"
+    ctx = _extract_additional_context(r.stdout)
+    assert "Session context is very long" in ctx, \
+        f"Hard nudge should fire at 800k tokens; got: {ctx!r}"
 
 
 def test_session_length_nudge_skipped_when_detached(tmp_path):
@@ -1119,30 +1114,17 @@ def test_session_length_nudge_skipped_when_detached(tmp_path):
         "cwd": cwd,
     }
 
-    restore_warn = _with_flag_enabled("budgeter-session-warn")
-    try:
-        env = {**os.environ,
-               "APIARY_BUDGETER_TEST_ISOLATION": "1",
-               "APIARY_RUNNER_SUBPROCESS": "1"}
-        r = subprocess.run(
-            [PYTHON, str(HOOKS_DIR / "pre_tool_use.py")],
-            input=json.dumps(payload),
-            text=True,
-            capture_output=True,
-            env=env,
-        )
-        assert r.returncode == 0, f"PRE failed: {r.stderr}"
-        ctx = _extract_additional_context(r.stdout)
-        assert "Session context" not in ctx, \
-            f"Nudge must not fire in detached runner; got: {ctx!r}"
-    finally:
-        restore_warn()
-        _cleanup_session_flag_files(session_id)
+    _with_flag_enabled("budgeter-session-warn", project_dir)
+    r = run_hook("pre_tool_use.py", payload,
+                 env_extra={"APIARY_RUNNER_SUBPROCESS": "1"})
+    assert r.returncode == 0, f"PRE failed: {r.stderr}"
+    ctx = _extract_additional_context(r.stdout)
+    assert "Session context" not in ctx, \
+        f"Nudge must not fire in detached runner; got: {ctx!r}"
 
 
 def test_session_length_nudge_skipped_when_session_warn_disabled(tmp_path):
     """budgeter-session-warn flag disabled suppresses the nudge."""
-    from core import flags
     project_dir = make_test_project(tmp_path / "project_nudge_session_warn_off")
     cwd = str(project_dir)
     session_id = make_session_id()
@@ -1154,51 +1136,14 @@ def test_session_length_nudge_skipped_when_session_warn_disabled(tmp_path):
         "cwd": cwd,
     }
 
-    was_enabled = flags.is_enabled("budgeter-session-warn")
-    if was_enabled:
-        flags.disable("budgeter-session-warn")
-    try:
-        r = run_hook("pre_tool_use.py", payload)
-        assert r.returncode == 0, f"PRE failed: {r.stderr}"
-        ctx = _extract_additional_context(r.stdout)
-        assert "Session context" not in ctx, \
-            f"Nudge must not fire when session-warn disabled; got: {ctx!r}"
-    finally:
-        if was_enabled:
-            flags.enable("budgeter-session-warn")
-        _cleanup_session_flag_files(session_id)
-
-
-def test_session_length_nudge_independent_of_magnitude_warn(tmp_path):
-    """Nudge fires with budgeter-warn OFF as long as budgeter-session-warn is ON."""
-    from core import flags
-    project_dir = make_test_project(tmp_path / "project_nudge_indep")
-    cwd = str(project_dir)
-    session_id = make_session_id()
-    transcript = _write_transcript(tmp_path, input_tokens=700_000)
-    payload = {
-        "tool_name": "Bash",
-        "session_id": session_id,
-        "transcript_path": str(transcript),
-        "cwd": cwd,
-    }
-
-    warn_was_on = flags.is_enabled("budgeter-warn")
-    if warn_was_on:
-        flags.disable("budgeter-warn")
-    restore_session = _with_flag_enabled("budgeter-session-warn")
-    try:
-        r = run_hook("pre_tool_use.py", payload)
-        assert r.returncode == 0, f"PRE failed: {r.stderr}"
-        ctx = _extract_additional_context(r.stdout)
-        assert "Session context is getting long" in ctx, \
-            f"Nudge must fire regardless of budgeter-warn state; got: {ctx!r}"
-    finally:
-        restore_session()
-        if warn_was_on:
-            flags.enable("budgeter-warn")
-        _cleanup_session_flag_files(session_id)
-
+    # No flag file in the project => the feature is off, whatever the
+    # developer's own checkout has enabled.
+    assert not flag_file(project_dir, "budgeter-session-warn").exists()
+    r = run_hook("pre_tool_use.py", payload)
+    assert r.returncode == 0, f"PRE failed: {r.stderr}"
+    ctx = _extract_additional_context(r.stdout)
+    assert "Session context" not in ctx, \
+        f"Nudge must not fire when session-warn disabled; got: {ctx!r}"
 
 
 
@@ -1272,14 +1217,10 @@ def test_corrupt_baseline_does_not_wedge_the_session(tmp_path):
     assert "permissionDecision" not in r.stdout
     assert json.loads(baseline_path.read_text(encoding="utf-8"))["prev_tool_name"] == "Bash", \
         "PRE must rewrite the baseline"
-    _cleanup_session_flag_files(session_id)
 
     baseline_path.write_text('{"tokens": 12', encoding="utf-8")
-    restore = _with_flag_enabled("budgeter-log")
-    try:
-        r = run_hook("stop_session.py", {"session_id": session_id, "transcript_path": "", "cwd": cwd})
-    finally:
-        restore()
+    _with_flag_enabled("budgeter-log", project_dir)
+    r = run_hook("stop_session.py", {"session_id": session_id, "transcript_path": "", "cwd": cwd})
     assert r.returncode == 0, f"STOP crashed on corrupt baseline: {r.stderr}"
     assert not baseline_path.exists(), "STOP must still clean up"
 
@@ -1299,7 +1240,7 @@ def test_pre_skips_phantom_entry_when_no_api_call(tmp_path):
     payload = {"tool_name": "Bash", "session_id": session_id,
                "transcript_path": str(transcript), "cwd": cwd}
 
-    restore = _with_flag_enabled("budgeter-log")
+    _with_flag_enabled("budgeter-log", project_dir)
     try:
         r = run_hook("pre_tool_use.py", payload)
         assert r.returncode == 0, r.stderr
@@ -1326,8 +1267,6 @@ def test_pre_skips_phantom_entry_when_no_api_call(tmp_path):
         # prompt grew from 1000 to 1210 (+210), plus 40 output.
         assert entry["net_tokens_delta"] == 250
     finally:
-        restore()
-        _cleanup_session_flag_files(session_id)
         lg.configure_for_project(cwd)
         lg.cleanup_session(session_id)
 
@@ -1354,23 +1293,19 @@ def test_old_schema_baseline_is_not_compared(tmp_path):
     (tmp_dir / f"{session_id}_baseline.json").write_text(json.dumps(old), encoding="utf-8")
     payload = {"tool_name": "Bash", "session_id": session_id,
                "transcript_path": str(transcript), "cwd": cwd}
-    restore = _with_flag_enabled("budgeter-log")
-    try:
-        r = run_hook("pre_tool_use.py", payload)
-        assert r.returncode == 0, r.stderr
-        assert log_entry_count(log_path) == 0, "no marker, no entry against an old-schema baseline"
-        new = json.loads((tmp_dir / f"{session_id}_baseline.json").read_text(encoding="utf-8"))
-        assert new["schema"] == lg.BASELINE_SCHEMA and new["tokens"] == 1050
-        assert new["task_turn"] == 1, "turn continuity is kept"
-        # STOP against a shrunk total logs nothing (compaction is the PRE's job).
-        (tmp_dir / f"{session_id}_baseline.json").write_text(
-            json.dumps({**new, "tokens": 5000}), encoding="utf-8")
-        r = run_hook("stop_session.py", {"session_id": session_id, "transcript_path": str(transcript), "cwd": cwd})
-        assert r.returncode == 0, r.stderr
-        assert log_entry_count(log_path) == 0
-    finally:
-        restore()
-        _cleanup_session_flag_files(session_id)
+    _with_flag_enabled("budgeter-log", project_dir)
+    r = run_hook("pre_tool_use.py", payload)
+    assert r.returncode == 0, r.stderr
+    assert log_entry_count(log_path) == 0, "no marker, no entry against an old-schema baseline"
+    new = json.loads((tmp_dir / f"{session_id}_baseline.json").read_text(encoding="utf-8"))
+    assert new["schema"] == lg.BASELINE_SCHEMA and new["tokens"] == 1050
+    assert new["task_turn"] == 1, "turn continuity is kept"
+    # STOP against a shrunk total logs nothing (compaction is the PRE's job).
+    (tmp_dir / f"{session_id}_baseline.json").write_text(
+        json.dumps({**new, "tokens": 5000}), encoding="utf-8")
+    r = run_hook("stop_session.py", {"session_id": session_id, "transcript_path": str(transcript), "cwd": cwd})
+    assert r.returncode == 0, r.stderr
+    assert log_entry_count(log_path) == 0
 
 
 def test_post_agent_payload_over_64kb_is_logged(tmp_path):
@@ -1385,16 +1320,13 @@ def test_post_agent_payload_over_64kb_is_logged(tmp_path):
         "tool_response": {"totalTokens": 777, "content": "x" * 200_000},
     }
     assert len(json.dumps(payload)) > 64 * 1024
-    restore = _with_flag_enabled("budgeter-log")
-    try:
-        r = run_hook("post_tool_use.py", payload)
-        assert r.returncode == 0, r.stderr
-        assert log_entry_count(log_path) == 1, f"large Agent payload must be logged: {r.stderr}"
-        lg.configure_for_project(cwd)
-        entry = [e for e in lg.read_log() if e.get("session_id") == session_id][0]
-        assert entry["tokens_delta"] == 777 and entry["agent_type"] == "lens attacker"
-    finally:
-        restore()
+    _with_flag_enabled("budgeter-log", project_dir)
+    r = run_hook("post_tool_use.py", payload)
+    assert r.returncode == 0, r.stderr
+    assert log_entry_count(log_path) == 1, f"large Agent payload must be logged: {r.stderr}"
+    lg.configure_for_project(cwd)
+    entry = [e for e in lg.read_log() if e.get("session_id") == session_id][0]
+    assert entry["tokens_delta"] == 777 and entry["agent_type"] == "lens attacker"
 
 
 def test_weighted_delta_counts_cache_creation(tmp_path):
