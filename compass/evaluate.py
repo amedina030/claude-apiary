@@ -541,19 +541,20 @@ def cmd_offline(args: argparse.Namespace) -> int:
         labelled = sum(1 for s in sessions if session_labels(s, vocabulary))
         folds = min(labelled, args.max_folds) if args.max_folds else labelled
         estimate = estimate_cost(sessions, dimensions, folds, args.model)
-        print(f"model run: {folds} fold(s) × 1 `claude -p` call each, model={args.model!r}")
-        print(f"  estimated input  ~{estimate['input_tokens']:,} tokens "
-              f"(~{estimate['per_fold_input_tokens']:,}/fold)")
-        print(f"  estimated output ~{estimate['output_tokens']:,} tokens")
+        # The estimate goes to stderr so `--json` stdout stays parseable.
+        say = lambda line: print(line, file=sys.stderr)  # noqa: E731
+        say(f"model run: {folds} fold(s) × 1 `claude -p` call each, model={args.model!r}")
+        say(f"  estimated input  ~{estimate['input_tokens']:,} tokens "
+            f"(~{estimate['per_fold_input_tokens']:,}/fold)")
+        say(f"  estimated output ~{estimate['output_tokens']:,} tokens")
         if estimate["usd"] is not None:
-            print(f"  ≈ ${estimate['usd']:.2f} at {args.model} API list price "
-                  f"— an estimate, not a quote; a subscription-plan CLI is billed "
-                  f"differently")
+            say(f"  ≈ ${estimate['usd']:.2f} at {args.model} API list price "
+                f"— an estimate, not a quote; a subscription-plan CLI is billed "
+                f"differently")
         else:
-            print(f"  (no list price known for model {args.model!r})")
+            say(f"  (no list price known for model {args.model!r})")
         if not args.yes:
-            print("\nre-run with --yes to spend this. Nothing was called.",
-                  file=sys.stderr)
+            say("\nre-run with --yes to spend this. Nothing was called.")
             return 2
 
         def progress(i, n):

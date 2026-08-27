@@ -13,7 +13,7 @@ import os
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -381,6 +381,14 @@ class StateDirSandbox(unittest.TestCase):
         else:
             os.environ[store.TARGET_STATE_DIR_ENV] = self._previous
 
+    def _run(self, argv):
+        """Run the CLI, capturing stdout and stderr separately."""
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = evaluate.main(argv)
+        self._stderr = err.getvalue()
+        return code, out.getvalue()
+
     def write_sessions(self, n=4):
         for i in range(n):
             payload = session(f"{i:08x}", f"2026-01-{i + 1:02d}T00:00:00Z",
@@ -411,12 +419,6 @@ class CacheTests(StateDirSandbox):
 
 
 class CliTests(StateDirSandbox):
-    def _run(self, argv):
-        buffer = io.StringIO()
-        with redirect_stdout(buffer):
-            code = evaluate.main(argv)
-        return code, buffer.getvalue()
-
     def test_offline_json_end_to_end(self):
         self.write_sessions()
         code, out = self._run(["offline", "--json"])
@@ -449,7 +451,8 @@ class CliTests(StateDirSandbox):
         self.write_sessions()
         code, out = self._run(["offline", "--model", "opus"])
         self.assertEqual(code, 2, "a spend must not happen without --yes")
-        self.assertIn("estimated input", out)
+        self.assertIn("estimated input", self._stderr)
+        self.assertEqual(out, "", "the estimate must not pollute stdout")
 
     def test_labels_lists_every_dimension(self):
         code, out = self._run(["labels"])
@@ -509,6 +512,46 @@ class NeverSpawnsClaudeTests(StateDirSandbox):
         buffer = io.StringIO()
         with redirect_stdout(buffer):
             self.assertEqual(evaluate.main(["offline", "--json"]), 0)
+
+    def test_model_synthesize_unwraps_the_claude_envelope(self):
+        seen = {}
+
+        def fake_run(prompt, model=None):
+            seen["model"] = model
+            seen["prompt"] = prompt
+            return 0, json.dumps({"result": "```md\n## autonomy\nbroad\n```"}), ""
+
+        original = synth.run_claude
+        synth.run_claude = fake_run
+        self.addCleanup(lambda: setattr(synth, "run_claude", original))
+        profile = evaluate.model_synthesize(
+            [session("a", "2026-01-01T00:00:00Z", observation("autonomy", "broad"))],
+            store.load_dimensions(), "sonnet")
+        self.assertEqual(seen["model"], "sonnet")
+        self.assertIn("## autonomy", profile)
+        self.assertNotIn("```", profile)
+        self.assertIn("Active observations", seen["prompt"])
+        self.assertIn("(none — first synthesis)", seen["prompt"],
+                      "the live personality.md must not leak into a fold")
+
+    def test_model_path_runs_one_call_per_fold_when_confirmed(self):
+        self.write_sessions(3)
+        calls = []
+
+        def fake_run(prompt, model=None):
+            calls.append(model)
+            return 0, json.dumps({"result": "## autonomy\nbroad\n"}), ""
+
+        original = synth.run_claude
+        synth.run_claude = fake_run
+        self.addCleanup(lambda: setattr(synth, "run_claude", original))
+        code, output = self._run(["offline", "--model", "opus", "--yes", "--json"])
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, ["opus", "opus", "opus"],
+                         "one synthesis call per fold, no more")
+        payload = json.loads(output)
+        self.assertEqual(payload["mode"], "model")
+        self.assertEqual(payload["model"], "opus")
 
     def test_model_synthesize_survives_a_failing_subprocess(self):
         original = synth.run_claude
