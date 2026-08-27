@@ -123,7 +123,9 @@ class CheckVersionsTests(unittest.TestCase):
             "1": {"name": "x", "real_path": str(self.root), "uid": 1, "version": "0.1.0"},
         })
         _, issues = doctor.check_versions(self.apiary)
-        self.assertTrue(any("apiary install --target" in i for i in issues))
+        # The remediation is `apiary update`, not a re-install: re-installing
+        # rewrites files but never runs a migration (review §5a-I).
+        self.assertTrue(any("apiary update --target" in i for i in issues))
 
     def test_missing_version_field_is_an_issue(self):
         _write_registry(self.apiary, {

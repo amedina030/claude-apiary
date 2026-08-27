@@ -13,6 +13,7 @@ Look up full usage with: `python docs/reference/cli_lookup.py <tool>`
 
 | Tool | Purpose | Subcommands / Key Flags |
 |------|---------|------------------------|
+| `apiary` | Per-repo install, drift and version tooling (console script over `core/cli.py`) | install, uninstall, self-bootstrap, doctor, cascade-fix, update, version |
 | `scribe/notes.py` | Note and learning management | add, list, get, done, update, archive, tidy, mark-reviewed, learn, learnings, unlearn |
 | `scribe/backup_indexes.py` | Snapshot scribe indexes with retention pruning | --retain, --project |
 | `core/startup.py` | Session initialization and summary | init, summary |

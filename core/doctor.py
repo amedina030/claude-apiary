@@ -117,7 +117,13 @@ def check_registry(apiary: Path) -> CheckResult:
 
 
 def check_versions(apiary: Path) -> CheckResult:
-    """Compare each registered repo's pinned version against main-apiary's."""
+    """Compare each registered repo's pinned version against main-apiary's.
+
+    Two records claim to know a repo's version: the registry entry and the
+    repo's own ``.claude/apiary/version.json``. ``apiary update`` writes both
+    in one step, so a disagreement means something else edited one of them —
+    worth a note even when neither has drifted from main-apiary.
+    """
     notes: list[str] = []
     issues: list[str] = []
     main_version = state.read_apiary_version(apiary)
@@ -125,23 +131,31 @@ def check_versions(apiary: Path) -> CheckResult:
     for id_str, entry in registry.items():
         if not isinstance(entry, dict):
             continue
+        name = entry.get("name", "?")
+        real = entry.get("real_path", "")
         repo_version = entry.get("version")
         if repo_version is None:
-            issues.append(
-                f"registry[{id_str}] ({entry.get('name', '?')}) has no `version` field"
-            )
+            issues.append(f"registry[{id_str}] ({name}) has no `version` field")
             continue
+
+        if real and Path(real).is_dir():
+            pin = state.read_version(Path(real)) or {}
+            pinned = pin.get("apiary_version")
+            if pinned and pinned != repo_version:
+                notes.append(
+                    f"registry[{id_str}] ({name}) says {repo_version} but "
+                    f"{Path(real).name}/.claude/apiary/version.json says {pinned}"
+                )
+
         if repo_version != main_version:
-            real = entry.get("real_path", "")
             remediation = (
-                f"run `apiary install --target \"{real}\"` to update"
-                if real
-                else "re-run `apiary install --target <path>` to update"
+                f"run `apiary update --target \"{real}\"`"
+                if real else "run `apiary update`"
             )
             issues.append(
-                f"registry[{id_str}] ({entry.get('name', '?')}) "
+                f"registry[{id_str}] ({name}) "
                 f"pinned to {repo_version}; main-apiary is at {main_version} "
-                f"— {remediation}."
+                f"— {remediation} to run the migration chain and re-pin."
             )
     return notes, issues
 

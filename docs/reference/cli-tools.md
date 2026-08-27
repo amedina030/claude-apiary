@@ -1066,23 +1066,34 @@ to a single-purpose module under `core/`.
 | `self-bootstrap` | `apiary self-bootstrap` | First-machine setup of main-apiary; equivalent to running `install --target` on main-apiary itself (`core/self_bootstrap.py`). |
 | `doctor` | `apiary doctor [check] [--fix]` | Consistency checks (`core/doctor.py`). Checks: `pointers`, `pins`, `registry`, `versions`, `stale`, `orphans`, `duplicates`, `unreachable`, `compass` — name one, or omit to run all. See the `core/doctor.py` section for what each reports. |
 | `cascade-fix` | `apiary cascade-fix` | Rewrite every bootstrapped repo's `main-apiary-pointer.json` to the current main-apiary path (`core/cascade.py`). |
-| `version` | `apiary version` | Print main-apiary's pinned version (the contents of `<main-apiary>/VERSION`). |
+| `update` | `apiary update [--target <repo>] [--dry-run]` | Run the pending `migrations/` chain in every bootstrapped repo and re-pin it to `<main-apiary>/VERSION` (`core/update.py`). |
+| `version` | `apiary version [--all]` | Print main-apiary's pinned version (the contents of `<main-apiary>/VERSION`); `--all` also lists every registered repo's pin. |
 
 ### Flags
 
 | Flag | Applies to | Required | Description |
 |------|-----------|----------|-------------|
-| `--target PATH` | install, uninstall | yes | Target repo. |
+| `--target PATH` | install, uninstall, update | install/uninstall only | Target repo. On `update` it is optional and narrows the run to that one repo. |
 | `--profile NAME` | install | no | Profile under `<main-apiary>/profiles/` (default: `base`). |
 | `--remove-data` | uninstall | no | Also delete `<main-apiary>/.repos/<name>-<uid>/` (the centralized per-target state). |
 | `--fix` | doctor | no | Apply the named check's safe fix. Only `pointers` (cascade the pointer rewrite) and `pins` (rewrite pins from the registry) have one; `--fix` without a check name, or on any other check, exits `2`. |
+| `--dry-run` | update | no | Print the migrations that would run and write nothing. |
+| `--all` | version | no | List every registered repo's pinned version next to main-apiary's; `!` marks a repo that has drifted. |
 | `--apiary-repo PATH` | all | no | Path to main-apiary. Default: resolved via `APIARY_MAIN_REPO`, the running source tree, or `<cwd>/.claude/apiary/main-apiary-pointer.json`. |
 
 `install` walks the profile's `extends` chain, deep-merges parents left-to-right then the child on top (`{"$replace": value}` escape hatch replaces instead of merges), and merges the resolved profile into `<repo>/.claude/settings.json`. `hooks` is the only key apiary owns outright — it is regenerated every install (apiary-marked entries only; the user's own hooks stay). Every other profile key is merged into the user's file: their entries survive, the profile's are added, and an entry a previous install contributed that the profile no longer ships is withdrawn. Keys the profile does not mention are left untouched. It also generates `<repo>/.claude/apiary/{launch.py, main-apiary-pointer.json, self-pointer.json, version.json}`, copies slash commands into `<repo>/.claude/commands/`, writes the apiary-managed zone into `<repo>/CLAUDE.md`, updates `<repo>/.gitignore`, and installs the commit-time secret-scan pre-commit hook (best-effort — a refusal warns instead of failing the install). Centralized state lands at `<main-apiary>/.repos/<name>-<uid>/bootstrap_state.json` (schema v2 — adds the file hashes `apiary doctor stale` compares against to detect slash-command drift).
 
+`update` is the other half of the version pin. Each bootstrapped repo carries `.claude/apiary/version.json`; `<main-apiary>/VERSION` says where the toolkit is now. For every registered repo, `update` walks the `migrations/v<from>_to_v<to>.py` chain from the repo's pin towards main-apiary's version, calls each module's `upgrade(repo_path)` in order, and rewrites the pin **after each step** — so an interrupted run resumes rather than replaying. A version gap with no matching migration module is not an error: the chain stops and the pin still moves. A migration that raises leaves the pin at the last version that completed, aborts that repo's chain, and does not stop the other repos. See [`migrations/README.md`](../../migrations/README.md) for the contract each module must honour, and [RELEASING.md](../../RELEASING.md) for when to bump `VERSION`.
+
+```bash
+poetry run apiary version --all          # who is on what
+poetry run apiary update --dry-run       # what would run
+poetry run apiary update                 # run it
+```
+
 Exit codes:
 - `0` — success; for `doctor`, every check passed.
-- `1` — `doctor` reported an issue, or `install` / `uninstall` refused: target is not a git repo, unknown profile, `extends` cycle, unsupported `$schema_version`, JSONC parse error, a tampered `CLAUDE.md` managed zone, an unreadable `bootstrap_state.json`, or `uninstall --target` aimed at main-apiary itself. These print one line naming the fix, not a traceback.
+- `1` — `doctor` reported an issue, `update` had at least one repo whose migration failed (or `--target` naming an unregistered repo), or `install` / `uninstall` refused: target is not a git repo, unknown profile, `extends` cycle, unsupported `$schema_version`, JSONC parse error, a tampered `CLAUDE.md` managed zone, an unreadable `bootstrap_state.json`, or `uninstall --target` aimed at main-apiary itself. These print one line naming the fix, not a traceback.
 - `2` — argparse usage error, or `--fix` on a check that has no fix.
 
 See [Bootstrapping a repo](../guides/bootstrapping-a-repo.md) for profile authoring and the full workflow.

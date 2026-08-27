@@ -9,7 +9,8 @@ tested in isolation:
     apiary self-bootstrap              core/self_bootstrap.py
     apiary doctor [check] [--fix]      core/doctor.py
     apiary cascade-fix                 core/cascade.py
-    apiary version                     prints <main-apiary>/VERSION
+    apiary update [--target]           core/update.py
+    apiary version [--all]             prints <main-apiary>/VERSION
 
 Run from inside a clone of main-apiary, or from a bootstrapped repo where
 the per-repo launcher resolves main-apiary via the pointer file. Either
@@ -131,8 +132,36 @@ def _cmd_cascade(args: argparse.Namespace) -> int:
 
 def _cmd_version(args: argparse.Namespace) -> int:
     apiary = state.resolve_apiary_repo(args.apiary_repo)
-    print(state.read_apiary_version(apiary))
+    main_version = state.read_apiary_version(apiary)
+    if not args.all:
+        print(main_version)
+        return 0
+
+    from core import update as update_mod
+    print(f"main-apiary {main_version}  ({apiary})")
+    registry = state._load_registry(apiary)
+    if not registry:
+        print("  (no registered repos)")
+        return 0
+    for uid_str, entry in sorted(registry.items(), key=lambda kv: kv[0].rjust(6)):
+        if not isinstance(entry, dict):
+            continue
+        repo = Path(str(entry.get("real_path", "")))
+        pinned = update_mod.repo_version(repo, entry) or "?"
+        marker = "  " if pinned == main_version else "! "
+        print(f"  {marker}{entry.get('name', '?')} (uid={uid_str}) {pinned}  {repo}")
     return 0
+
+
+def _cmd_update(args: argparse.Namespace) -> int:
+    from core import update as update_mod
+    return update_mod.main(
+        [
+            *(["--target", str(args.target)] if args.target else []),
+            *(["--dry-run"] if args.dry_run else []),
+            *(["--apiary-repo", str(args.apiary_repo)] if args.apiary_repo else []),
+        ]
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -184,8 +213,27 @@ def main(argv: list[str] | None = None) -> int:
     p_cascade.set_defaults(func=_cmd_cascade)
 
     p_version = sub.add_parser("version", help="print main-apiary's pinned version")
+    p_version.add_argument(
+        "--all", action="store_true",
+        help="also list every registered repo's pinned version (`!` marks drift)",
+    )
     _add_apiary_repo_arg(p_version)
     p_version.set_defaults(func=_cmd_version)
+
+    p_update = sub.add_parser(
+        "update",
+        help="run pending migrations/ in every bootstrapped repo and re-pin it",
+    )
+    p_update.add_argument(
+        "--target", type=Path, default=None,
+        help="update only this repo (default: every registered repo)",
+    )
+    p_update.add_argument(
+        "--dry-run", action="store_true",
+        help="print the migrations that would run; write nothing",
+    )
+    _add_apiary_repo_arg(p_update)
+    p_update.set_defaults(func=_cmd_update)
 
     args = parser.parse_args(argv)
     try:

@@ -209,6 +209,49 @@ class VersionVerbTests(unittest.TestCase):
         resolve.assert_called_once_with(Path("main/apiary"))
         read.assert_called_once_with(Path("main/apiary"))
 
+    def test_version_all_lists_every_registered_repo_and_marks_drift(self):
+        registry = {
+            "1": {"name": "apiary", "uid": 1, "version": "0.9.1", "real_path": "/a"},
+            "2": {"name": "stale", "uid": 2, "version": "0.8.0", "real_path": "/b"},
+        }
+        with mock.patch("core.utils.state.resolve_apiary_repo",
+                        return_value=Path("main/apiary")), \
+             mock.patch("core.utils.state.read_apiary_version", return_value="0.9.1"), \
+             mock.patch("core.utils.state._load_registry", return_value=registry), \
+             mock.patch("core.update.repo_version",
+                        side_effect=lambda repo, entry=None: entry["version"]):
+            rc, out = _main(["version", "--all"])
+        self.assertEqual(rc, 0)
+        self.assertIn("main-apiary 0.9.1", out)
+        # `!` marks the one that has drifted, and only that one.
+        self.assertIn("!stale", out.replace("! ", "!"))
+        self.assertNotIn("!apiary", out.replace("! ", "!"))
+
+
+class UpdateVerbTests(unittest.TestCase):
+    def test_bare_update_forwards_nothing(self):
+        with mock.patch("core.update.main", return_value=0) as m:
+            rc, _ = _main(["update"])
+        self.assertEqual(rc, 0)
+        m.assert_called_once_with([])
+
+    def test_target_dry_run_and_apiary_repo_are_forwarded(self):
+        with mock.patch("core.update.main", return_value=0) as m:
+            rc, _ = _main([
+                "update", "--target", "some/repo", "--dry-run",
+                "--apiary-repo", "main/apiary",
+            ])
+        self.assertEqual(rc, 0)
+        m.assert_called_once_with(
+            ["--target", str(Path("some/repo")), "--dry-run",
+             "--apiary-repo", str(Path("main/apiary"))],
+        )
+
+    def test_update_exit_code_is_propagated(self):
+        with mock.patch("core.update.main", return_value=1):
+            rc, _ = _main(["update"])
+        self.assertEqual(rc, 1)
+
 
 class UserFacingErrorTests(unittest.TestCase):
     """Bug 10 — a bad target or a bad profile is a message, not a traceback.
@@ -288,7 +331,7 @@ class ParserContractTests(unittest.TestCase):
         self.assertEqual(
             {s.strip() for s in match.group(1).split(",")},
             {"install", "uninstall", "self-bootstrap", "doctor",
-             "cascade-fix", "version"},
+             "cascade-fix", "version", "update"},
         )
 
 
