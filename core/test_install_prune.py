@@ -20,22 +20,18 @@ class PruneRemovedCommandsTest(unittest.TestCase):
         root = Path(self._tmp.name)
         self.apiary = root / "apiary"
         (self.apiary / "budgeter" / "commands").mkdir(parents=True)
-        (self.apiary / "budgeter" / "commands" / "budgeter.md").write_text("# new
-", encoding="utf-8")
+        (self.apiary / "budgeter" / "commands" / "budgeter.md").write_text("# new\n", encoding="utf-8")
         self.target = root / "target"
         self.dest = self.target / ".claude" / "commands"
         self.dest.mkdir(parents=True)
         # Previous install shipped budgeter-log.md; the user edited budgeter-warn.md;
         # mine.md is the user's own file, never recorded.
-        (self.dest / "budgeter-log.md").write_text("# old
-", encoding="utf-8")
-        (self.dest / "budgeter-warn.md").write_text("# old warn
-", encoding="utf-8")
-        (self.dest / "mine.md").write_text("# mine
-", encoding="utf-8")
+        (self.dest / "budgeter-log.md").write_text("# old\n", encoding="utf-8")
+        (self.dest / "budgeter-warn.md").write_text("# old warn\n", encoding="utf-8")
+        (self.dest / "mine.md").write_text("# mine\n", encoding="utf-8")
         self.previous = {
             "budgeter-log.md": _sha(self.dest / "budgeter-log.md"),
-            "budgeter-warn.md": "0" * 64,               # recorded hash != current → edited
+            "budgeter-warn.md": "0" * 64,               # recorded hash != current -> edited
         }
 
     def test_unmodified_stale_removed_edited_and_unrecorded_kept(self):
@@ -54,7 +50,8 @@ class PruneRemovedCommandsTest(unittest.TestCase):
         state = Path(self._tmp.name) / "state"
         state.mkdir()
         self.assertEqual(_previous_commands_hashes(state), {})
-        (state / "bootstrap_state.json").write_text(json.dumps({"commands_dir_hashes": {"a.md": "x"}}), encoding="utf-8")
+        (state / "bootstrap_state.json").write_text(
+            json.dumps({"commands_dir_hashes": {"a.md": "x"}}), encoding="utf-8")
         self.assertEqual(_previous_commands_hashes(state), {"a.md": "x"})
         (state / "bootstrap_state.json").write_text("not json", encoding="utf-8")
         self.assertEqual(_previous_commands_hashes(state), {})
