@@ -129,6 +129,35 @@ class ConfigTableTests(unittest.TestCase):
             self.assertTrue(data)
 
 
+class HandWrittenConfigTableTests(unittest.TestCase):
+    """The config tables that are NOT generated, tested instead.
+
+    `launch.json`'s defaults live in `gui/theme.py::DEFAULT_LAUNCH`, which the
+    generator does not read (it would import the gui package for one table).
+    So the claim is checked here: every field documented, every default right,
+    and nothing documented that the whitelist would drop on load.
+    """
+
+    def setUp(self):
+        from gui.theme import DEFAULT_LAUNCH
+        self.defaults = DEFAULT_LAUNCH
+        text = gen.CONFIG_DOC.read_text(encoding="utf-8")
+        section = text.split("launch.json", 1)[1]
+        self.table = docgen.first_table(section)
+
+    def _documented(self) -> dict[str, str]:
+        col = self.table.index_of("default")
+        return {docgen.cell_key(r[0]): r[col] for r in self.table.rows}
+
+    def test_every_field_is_documented(self):
+        self.assertEqual(set(self._documented()), set(self.defaults))
+
+    def test_every_documented_default_matches_the_code(self):
+        for key, shown in self._documented().items():
+            with self.subTest(field=key):
+                self.assertEqual(shown, gen._render_default(self.defaults[key]))
+
+
 class StorageTableTests(unittest.TestCase):
     def test_no_machine_specific_path_leaks_into_the_doc(self):
         text = gen.STORAGE_DOC.read_text(encoding="utf-8")
