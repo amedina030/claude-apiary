@@ -6,63 +6,53 @@ Agent calls are invisible to the pre_tool_use PRE-to-PRE delta because the subag
 runs in a separate transcript. This hook captures the exact token count from
 tool_response.totalTokens and logs it directly.
 """
+
 import os
 import re
 import sys
-import json
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apiary root
 
 from budgeter.lib import logger
 from core import flags
-
+from core.hook_context import run_standalone
 
 # /harden encodes the run's request_id in the Agent description as "[rid:<id>]"
 # because the Agent tool has no `env` parameter — there is no LLM-controlled
 # mechanism to set APIARY_REQUEST_ID on a spawn. The hook parses it here as
 # the authoritative source; the env var is a secondary fallback for callers that
 # do control the harness environment.
-_RID_PATTERN = re.compile(r'\[rid:([^\]\n\r]{1,128})\]')
+_RID_PATTERN = re.compile(r"\[rid:([^\]\n\r]{1,128})\]")
 _REQUEST_ID_MAX_LEN = 128
 
 
 def _sanitize_request_id(value: str) -> str:
     """Cap length and reject values with newlines or non-printable characters."""
     if not value:
-        return ''
+        return ""
     value = value[:_REQUEST_ID_MAX_LEN]
-    if not all(c.isprintable() and c not in '\n\r' for c in value):
-        return ''
+    if not all(c.isprintable() and c not in "\n\r" for c in value):
+        return ""
     return value
 
 
-def main():
-    """Never crash the tool call (review B1)."""
-    try:
-        _run()
-    except Exception as exc:  # noqa: BLE001 — hooks must not crash
-        print(f"[budgeter] post_tool_use failed: {exc!r}", file=sys.stderr)
+def run(payload: dict):
+    """Log an Agent spawn's exact token cost. Never returns context.
 
-
-def _run():
-    # Read the whole payload. A 64 KB cap used to drop exactly the most
-    # expensive Agent calls — tool_response carries the subagent's full
-    # return text — with no trace (review B6). Claude Code bounds the
-    # payload; we don't need to.
-    try:
-        payload = json.loads(sys.stdin.buffer.read())
-    except json.JSONDecodeError as exc:
-        print(f"[budgeter] post_tool_use: unreadable payload: {exc}", file=sys.stderr)
-        sys.exit(0)
-
+    Never crashes the tool call: the dispatcher (and the standalone shim)
+    catch and log anything raised here (review B1). The whole payload is read
+    — a 64 KB cap used to drop exactly the most expensive Agent calls, since
+    ``tool_response`` carries the subagent's full return text, with no trace
+    (review B6). Claude Code bounds the payload; we don't need to.
+    """
     tool_name = payload.get("tool_name", "")
     if tool_name != "Agent":
-        sys.exit(0)
+        return None
 
     if not flags.is_enabled("budgeter-log"):
-        sys.exit(0)
+        return None
 
     session_id = payload.get("session_id", "")
     cwd = payload.get("cwd", "")
@@ -70,10 +60,10 @@ def _run():
 
     tool_response = payload.get("tool_response")
     if not isinstance(tool_response, dict):
-        sys.exit(0)
+        return None
     total_tokens = max(0, tool_response.get("totalTokens", 0))
     if total_tokens == 0:
-        sys.exit(0)
+        return None
 
     baseline = logger.load_baseline(session_id)
 
@@ -82,7 +72,9 @@ def _run():
     # over baseline.agent_description, which is session-level and can be stale for
     # round 2+ in /harden — causing wrong per-round attribution in report --by-agent.
     tool_input = payload.get("tool_input") or {}
-    agent_desc = tool_input.get("description", "") or (baseline.get("agent_description", "") if baseline else "")
+    agent_desc = tool_input.get("description", "") or (
+        baseline.get("agent_description", "") if baseline else ""
+    )
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "session_id": session_id,
@@ -101,17 +93,18 @@ def _run():
     # /harden because the Agent tool has no env parameter and APIARY_REQUEST_ID
     # cannot be injected by the LLM. Fall back to the env var for callers that
     # do control the harness environment (e.g. log_agent_cost.py).
-    request_id = ''
+    request_id = ""
     if agent_desc:
         m = _RID_PATTERN.search(agent_desc)
         if m:
             request_id = m.group(1)
     if not request_id:
-        request_id = _sanitize_request_id(os.environ.get('APIARY_REQUEST_ID', ''))
+        request_id = _sanitize_request_id(os.environ.get("APIARY_REQUEST_ID", ""))
     if request_id:
-        entry['request_id'] = request_id
+        entry["request_id"] = request_id
     logger.append_entry(entry)
+    return None
 
 
 if __name__ == "__main__":
-    main()
+    run_standalone(run, event="PostToolUse")

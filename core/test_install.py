@@ -1,4 +1,5 @@
 """Tests for ``core/install.py`` — per-repo apiary install."""
+
 from __future__ import annotations
 
 import json
@@ -14,53 +15,21 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from core import git_hooks
 from core import install as install_mod
+
+# The fake main-apiary and the throwaway git repos come from one place now —
+# see core/testing.py for why they are built the way they are.
+from core.testing import init_git_repo as _git_init
+from core.testing import make_fake_apiary as _make_fake_apiary
 from core.utils import state
-
-
-# Items the install needs to find under main-apiary. Tests copy the real
-# files into a tmpdir "fake apiary" so each test gets an isolated install
-# target without touching the real registry under ``D:\Professional\claude-apiary\.repos``.
-_APIARY_ITEMS = (
-    "setup.py", "VERSION", "core", "profiles", "context-rules",
-    "budgeter", "scribe", "docs", "refiner", "harden",
-    "compass", "researcher", "runner", "incubator",
-)
-
-
-def _git_init(path: Path) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
-         "commit", "--allow-empty", "-q", "-m", "init"],
-        cwd=path, check=True,
-    )
-
-
-def _make_fake_apiary(root: Path) -> Path:
-    """Copy enough of the real apiary into *root*/apiary_copy that install
-    can run against it. Returns the fake apiary path."""
-    fake = root / "apiary_copy"
-    fake.mkdir()
-    for item in _APIARY_ITEMS:
-        src = REPO_ROOT / item
-        if src.is_dir():
-            shutil.copytree(src, fake / item, dirs_exist_ok=True)
-        elif src.is_file():
-            shutil.copy2(src, fake / item)
-    (fake / ".repos").mkdir()
-    (fake / ".apiary" / "forwarding").mkdir(parents=True)
-    return fake
 
 
 class InstallTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_fake_apiary(self.root)
-        self.target = self.root / "demo"
-        self.target.mkdir()
-        _git_init(self.target)
+        self.target = _git_init(self.root / "demo")
 
     def test_first_install_writes_all_pin_files(self):
         result = install_mod.install(self.target, apiary_repo=self.apiary)
@@ -137,9 +106,7 @@ class InstallTests(unittest.TestCase):
 
     def test_bootstrap_state_schema_v2_written(self):
         result = install_mod.install(self.target, apiary_repo=self.apiary)
-        bs = json.loads(
-            (result.state_dir / "bootstrap_state.json").read_text(encoding="utf-8")
-        )
+        bs = json.loads((result.state_dir / "bootstrap_state.json").read_text(encoding="utf-8"))
         self.assertEqual(bs["schema_version"], 2)
         self.assertEqual(bs["profile"], "base")
         self.assertEqual(bs["apiary_version"], "0.1.0")
@@ -170,6 +137,132 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(mp["main_apiary_uid"], 1)
 
 
+class ScribeTemplateScaffoldTests(unittest.TestCase):
+    """Deep review §5a-B: bootstrap seeds <state-dir>/scribe/templates/."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.apiary = _make_fake_apiary(self.root)
+        self.target = _git_init(self.root / "demo")
+
+    def _templates_dir(self, result) -> Path:
+        return result.state_dir / "scribe" / "templates"
+
+    def test_install_scaffolds_a_template_per_type(self):
+        from scribe.store import VALID_TYPES
+
+        result = install_mod.install(self.target, apiary_repo=self.apiary)
+        tpl_dir = self._templates_dir(result)
+        for note_type in VALID_TYPES:
+            self.assertTrue((tpl_dir / f"{note_type}.md").is_file(), f"missing {note_type}.md")
+
+    def test_reinstall_never_overwrites_an_edited_template(self):
+        result = install_mod.install(self.target, apiary_repo=self.apiary)
+        handoff = self._templates_dir(result) / "handoff.md"
+        handoff.write_text("MY OWN TEMPLATE\n", encoding="utf-8")
+        install_mod.install(self.target, apiary_repo=self.apiary)
+        self.assertEqual(handoff.read_text(encoding="utf-8"), "MY OWN TEMPLATE\n")
+
+    def test_deleted_template_is_not_recreated_mid_session_but_is_on_reinstall(self):
+        result = install_mod.install(self.target, apiary_repo=self.apiary)
+        todo = self._templates_dir(result) / "todo.md"
+        todo.unlink()
+        install_mod.install(self.target, apiary_repo=self.apiary)
+        self.assertTrue(todo.is_file())
+
+    def test_self_bootstrap_scaffolds_too(self):
+        from core import self_bootstrap as sb
+        from scribe.store import VALID_TYPES
+
+        # _make_fake_apiary copies everything install needs; self-bootstrap
+        # additionally checks for a migrations/ sentinel.
+        (self.apiary / "migrations").mkdir(exist_ok=True)
+        _git_init(self.apiary)
+        result = sb.self_bootstrap(self.apiary)
+        tpl_dir = self._templates_dir(result)
+        for note_type in VALID_TYPES:
+            self.assertTrue((tpl_dir / f"{note_type}.md").is_file(), f"missing {note_type}.md")
+
+
+class GeneratedLauncherTests(unittest.TestCase):
+    """Execute the generated ``.claude/apiary/launch.py``.
+
+    Every other test only asserts the file exists, so the launcher — the
+    single process every hook in every bootstrapped repo goes through — has
+    never actually been run by the suite.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.apiary = _make_fake_apiary(self.root)
+        self.target = _git_init(self.root / "demo")
+        install_mod.install(self.target, apiary_repo=self.apiary)
+        self.launcher = self.target / ".claude" / "apiary" / "launch.py"
+
+    def _run(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(self.launcher), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+        )
+
+    def test_print_repo_path_reports_main_apiary(self):
+        result = self._run("--print-repo-path")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(Path(result.stdout.strip()), self.apiary.resolve())
+
+    def test_dispatch_sets_main_repo_and_state_dir_env(self):
+        probe = self.apiary / "probe_env.py"
+        probe.write_text(
+            "import json, os, sys\n"
+            "print(json.dumps({k: os.environ.get(k)\n"
+            "                  for k in ('APIARY_MAIN_REPO', 'APIARY_TARGET_STATE_DIR')}))\n",
+            encoding="utf-8",
+        )
+        result = self._run("probe_env.py")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        env = json.loads(result.stdout)
+        self.assertEqual(Path(env["APIARY_MAIN_REPO"]), self.apiary.resolve())
+        self.assertEqual(
+            Path(env["APIARY_TARGET_STATE_DIR"]),
+            state.repos_dir(self.apiary) / "demo-1",
+        )
+
+    def test_a_removed_hook_script_degrades_quietly(self):
+        # Existing repos carry settings.json entries for hooks apiary has
+        # since deleted. Until they are re-bootstrapped the launcher is what
+        # Claude Code runs, so it must exit 0 with one actionable line and no
+        # traceback — anything else surfaces as a hook error every tool call.
+        result = self._run("core/hooks/deleted_in_a_later_release.py")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        # `{}` is the documented "no opinion" response; an empty stdout with
+        # exit 0 is shown as a hook-error notice on every tool call.
+        self.assertEqual(result.stdout.strip(), "{}")
+        self.assertIn("hook script removed", result.stderr)
+        self.assertIn("re-run apiary install", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1)
+
+    def test_unreachable_main_apiary_never_blocks(self):
+        state.write_main_apiary_pointer(
+            self.target,
+            {
+                "main_apiary_path": str(self.root / "gone"),
+                "main_apiary_uid": 1,
+                "registered_at": "2026-08-26T00:00:00Z",
+            },
+        )
+        result = self._run("core/hooks/inject_session.py")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("running as vanilla Claude session", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -189,7 +282,7 @@ class SecretScanHookOnInstallTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = _make_fake_apiary(self.root)
         self.target = self.root / "target"
         self.target.mkdir()
@@ -237,7 +330,7 @@ class GitignoreDotClaudeTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.repo = Path(self._tmp.name)
+        self.repo = Path(self._tmp.name).resolve()
 
     def _gitignore(self):
         return (self.repo / ".gitignore").read_text(encoding="utf-8")
@@ -263,6 +356,206 @@ class GitignoreDotClaudeTests(unittest.TestCase):
         self.assertEqual(self._gitignore(), original)
 
 
+class _InstalledRepoCase(unittest.TestCase):
+    """A fake main-apiary plus one already-installed git target."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.apiary = _make_fake_apiary(self.root)
+        self.target = _git_init(self.root / "demo")
+        self.first = install_mod.install(self.target, apiary_repo=self.apiary)
+        self.settings_path = self.target / ".claude" / "settings.json"
+
+    def settings(self) -> dict:
+        return json.loads(self.settings_path.read_text(encoding="utf-8"))
+
+    def write_settings(self, data: dict) -> None:
+        self.settings_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def reinstall(self):
+        return install_mod.install(self.target, apiary_repo=self.apiary)
+
+
+class ProfileMergeTests(_InstalledRepoCase):
+    """Bug 7 — a re-install must not clobber user-owned settings.json keys.
+
+    ``_APIARY_OWNED_KEYS`` is the contract: those keys are regenerated from
+    scratch on every install, everything else in the file is the user's and
+    only gains the profile's entries.
+    """
+
+    PROFILE_PERMISSION = "Bash(*python* *scribe/notes.py *)"
+
+    def test_only_hooks_are_apiary_owned(self):
+        # If this set grows, the merge below stops protecting that key —
+        # so the constant is asserted rather than assumed.
+        self.assertEqual(install_mod._APIARY_OWNED_KEYS, ("hooks",))
+
+    def test_reinstall_keeps_a_user_added_permission(self):
+        s = self.settings()
+        s["permissions"]["allow"].append("Bash(make *)")
+        self.write_settings(s)
+        self.reinstall()
+        self.assertIn("Bash(make *)", self.settings()["permissions"]["allow"])
+
+    def test_reinstall_keeps_a_user_owned_top_level_key(self):
+        s = self.settings()
+        s["env"] = {"MY_VAR": "1"}
+        s["model"] = "opus"
+        self.write_settings(s)
+        self.reinstall()
+        after = self.settings()
+        self.assertEqual(after["env"], {"MY_VAR": "1"})
+        self.assertEqual(after["model"], "opus")
+
+    def test_profile_permissions_still_land_on_a_reinstall(self):
+        s = self.settings()
+        s["permissions"]["allow"] = ["Bash(make *)"]  # user replaced the list
+        self.write_settings(s)
+        self.reinstall()
+        allow = self.settings()["permissions"]["allow"]
+        self.assertIn(self.PROFILE_PERMISSION, allow)
+        self.assertIn("Bash(make *)", allow)
+
+    def test_a_permission_the_profile_dropped_is_pruned(self):
+        # The profile is the source of truth for what apiary contributes, so an
+        # entry it stops shipping must go — without taking the user's with it.
+        s = self.settings()
+        s["permissions"]["allow"].append("Bash(make *)")
+        self.write_settings(s)
+        (self.apiary / "profiles" / "base.jsonc").write_text(
+            json.dumps({"$schema_version": 1, "permissions": {"allow": []}}),
+            encoding="utf-8",
+        )
+        self.reinstall()
+        allow = self.settings()["permissions"]["allow"]
+        self.assertNotIn(self.PROFILE_PERMISSION, allow)
+        self.assertIn("Bash(make *)", allow)
+
+    def test_a_user_hook_entry_survives_a_reinstall(self):
+        # Bug 8 end to end: the user's hook names a directory apiary also
+        # ships, which used to be enough to get it deleted.
+        s = self.settings()
+        s["hooks"].setdefault("PreToolUse", []).insert(
+            0,
+            {
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": "python scripts/runner/lint.py"}],
+            },
+        )
+        self.write_settings(s)
+        self.reinstall()
+        self.assertIn("scripts/runner/lint.py", json.dumps(self.settings()["hooks"]))
+
+    def test_reinstall_does_not_duplicate_apiary_hook_entries(self):
+        before = json.dumps(self.settings()["hooks"])
+        self.reinstall()
+        self.assertEqual(json.dumps(self.settings()["hooks"]), before)
+
+
+class SelfPointerReconciliationTests(_InstalledRepoCase):
+    """Bug 4 — the self-pointer's uid must never disagree with the registry.
+
+    When it does, the launcher derives ``<name>-<pinned-uid>`` for a state dir
+    the registry knows nothing about, so scribe/compass state silently reroutes
+    to a fallback path and the drift hook queues messages for an unknown uid.
+    """
+
+    def _registry(self) -> dict:
+        return json.loads(state.registry_path(self.apiary).read_text(encoding="utf-8"))
+
+    def _second_repo(self, name: str) -> Path:
+        repo = self.root / name
+        _git_init(repo)
+        return repo
+
+    def _lose_the_registry(self) -> None:
+        # .repos/ is gitignored, so a fresh clone of main-apiary starts with no
+        # registry and no counter, while every bootstrapped repo still carries
+        # its pin. A half-failed uninstall (Bug 6) produced the same shape.
+        state.registry_path(self.apiary).unlink()
+        state.next_id_path(self.apiary).unlink()
+
+    def test_registry_loss_re_adopts_the_pinned_uid(self):
+        late = self._second_repo("late")
+        first = install_mod.install(late, apiary_repo=self.apiary)
+        self.assertEqual(first.uid, 2, "fixture assumption: `demo` took uid 1")
+        self._lose_the_registry()
+        second = install_mod.install(late, apiary_repo=self.apiary)
+        # A fresh counter would have said 1, stranding .repos/late-2 (the
+        # repo's whole scribe/compass history) as an orphan.
+        self.assertEqual(second.uid, 2)
+        self.assertEqual(second.state_dir, first.state_dir)
+        self.assertEqual(state.read_self_pointer(late)["uid"], 2)
+        self.assertIn("2", self._registry())
+
+    def test_a_re_adopted_uid_is_never_handed_out_again(self):
+        late = self._second_repo("late")
+        install_mod.install(late, apiary_repo=self.apiary)
+        self._lose_the_registry()
+        install_mod.install(late, apiary_repo=self.apiary)  # re-adopts uid 2
+        newcomer = self._second_repo("newcomer")
+        result = install_mod.install(newcomer, apiary_repo=self.apiary)
+        self.assertGreater(result.uid, 2)
+
+    def test_a_pin_uid_owned_by_another_repo_is_rewritten(self):
+        other = self.root / "other"
+        other.mkdir()
+        state.write_self_pointer(
+            self.target,
+            {
+                "uid": 7,
+                "name": "demo",
+                "real_path": str(self.target),
+                "registered_at": "2026-01-01T00:00:00Z",
+            },
+        )
+        state.registry_path(self.apiary).write_text(
+            json.dumps(
+                {
+                    "7": {"name": "other", "real_path": str(other), "uid": 7, "version": "0.1.0"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        second = self.reinstall()
+        self.assertNotEqual(second.uid, 7)
+        self.assertEqual(state.read_self_pointer(self.target)["uid"], second.uid)
+        self.assertEqual(self._registry()[str(second.uid)]["real_path"], str(self.target.resolve()))
+
+    def test_last_drift_check_is_preserved(self):
+        sp = state.read_self_pointer(self.target)
+        sp["last_drift_check"] = "2020-01-01T00:00:00Z"
+        state.write_self_pointer(self.target, sp)
+        self.reinstall()
+        self.assertEqual(
+            state.read_self_pointer(self.target)["last_drift_check"], "2020-01-01T00:00:00Z"
+        )
+
+
+class InstallErrorWrappingTests(_InstalledRepoCase):
+    """Bug 10 — `apiary install` must never end in a raw traceback."""
+
+    def test_a_tampered_claude_md_zone_raises_install_error(self):
+        (self.target / "CLAUDE.md").write_text(
+            "<!-- apiary-context-rules-start -->\n"
+            "<!-- apiary-context-rules-start -->\n"
+            "<!-- apiary-context-rules-end -->\n",
+            encoding="utf-8",
+        )
+        with self.assertRaises(install_mod.InstallError) as ctx:
+            self.reinstall()
+        self.assertIn("CLAUDE.md", str(ctx.exception))
+
+    def test_an_unreadable_bootstrap_state_raises_install_error(self):
+        (self.first.state_dir / "bootstrap_state.json").write_text("{not json", encoding="utf-8")
+        with self.assertRaises(install_mod.InstallError) as ctx:
+            self.reinstall()
+        self.assertIn("bootstrap_state.json", str(ctx.exception))
+
+
 @unittest.skipIf(shutil.which("git") is None, "git not on PATH")
 class GitignoreSemanticsTests(unittest.TestCase):
     """Ask git itself whether the block does what it claims.
@@ -274,7 +567,7 @@ class GitignoreSemanticsTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.repo = Path(self._tmp.name)
+        self.repo = Path(self._tmp.name).resolve()
         subprocess.run(["git", "init", "-q"], cwd=str(self.repo), check=False)
         install_mod._ensure_gitignore_entry(self.repo)
         (self.repo / ".claude" / "commands").mkdir(parents=True)
@@ -282,7 +575,9 @@ class GitignoreSemanticsTests(unittest.TestCase):
     def _ignored(self, rel: str) -> bool:
         proc = subprocess.run(
             ["git", "check-ignore", "-q", rel],
-            cwd=str(self.repo), capture_output=True, check=False,
+            cwd=str(self.repo),
+            capture_output=True,
+            check=False,
         )
         return proc.returncode == 0
 
@@ -319,4 +614,3 @@ class GitignoreSemanticsTests(unittest.TestCase):
             "a blanket .claude/ should defeat the re-include — if this fails, "
             "git's semantics changed and the stepwise block may be unnecessary",
         )
-

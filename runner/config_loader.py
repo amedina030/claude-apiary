@@ -1,4 +1,5 @@
 """Shared config loader for the runner."""
+
 import json
 from pathlib import Path
 

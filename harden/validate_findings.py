@@ -13,10 +13,10 @@ Usage:
     echo '<json>' | validate_findings.py [--check-files] [--deep]
     validate_findings.py --file findings.json [--check-files] [--deep]
 """
+
 import argparse
 import json
 import re
-import sys
 from pathlib import Path
 
 from lenses import LENSES, is_valid_lens
@@ -115,8 +115,9 @@ def _resolve_filepath(location: str) -> str:
     return location
 
 
-def validate(findings: list, check_files: bool = False, deep: bool = False,
-             lens: str = None) -> list[str]:
+def validate(
+    findings: list, check_files: bool = False, deep: bool = False, lens: str = None
+) -> list[str]:
     """Validate findings and return a list of error strings (empty = valid).
 
     When ``lens`` is set, validates lens-mode findings: the per-agent lens
@@ -151,7 +152,9 @@ def validate(findings: list, check_files: bool = False, deep: bool = False,
 
         # findings must NOT include an 'id' field
         if "id" in finding:
-            errors.append(f"{label}: findings must not include an 'id' field (assigned by post-processor)")
+            errors.append(
+                f"{label}: findings must not include an 'id' field (assigned by post-processor)"
+            )
 
         # Required fields present and non-empty
         for field in required:
@@ -160,19 +163,25 @@ def validate(findings: list, check_files: bool = False, deep: bool = False,
                 errors.append(f"{label}: missing required field '{field}'")
             elif not isinstance(val, str):
                 # ATK-007: non-string values for required fields are invalid
-                errors.append(f"{label}: field '{field}' must be a string, got {type(val).__name__}")
+                errors.append(
+                    f"{label}: field '{field}' must be a string, got {type(val).__name__}"
+                )
             elif not val.strip():
                 errors.append(f"{label}: field '{field}' is empty")
 
         # ATK-010: enum checks — only run when the value is a non-empty string.
         severity = finding.get("severity")
         if isinstance(severity, str) and severity not in VALID_SEVERITIES:
-            errors.append(f"{label}: invalid severity '{severity}' (expected: {', '.join(sorted(VALID_SEVERITIES))})")
+            errors.append(
+                f"{label}: invalid severity '{severity}' (expected: {', '.join(sorted(VALID_SEVERITIES))})"
+            )
 
         if lens is None:
             category = finding.get("category")
             if isinstance(category, str) and category not in VALID_CATEGORIES:
-                errors.append(f"{label}: invalid category '{category}' (expected: {', '.join(sorted(VALID_CATEGORIES))})")
+                errors.append(
+                    f"{label}: invalid category '{category}' (expected: {', '.join(sorted(VALID_CATEGORIES))})"
+                )
         else:
             # Lens mode: a carried 'lens' must match the attacker's assigned lens.
             fl = finding.get("lens")
@@ -185,7 +194,9 @@ def validate(findings: list, check_files: bool = False, deep: bool = False,
             if location:
                 # ATK-085: reject comma-separated multi-file locations
                 if "," in location:
-                    errors.append(f"{label}: 'location' must reference a single file, got multi-file: {location}")
+                    errors.append(
+                        f"{label}: 'location' must reference a single file, got multi-file: {location}"
+                    )
                 else:
                     filepath = _resolve_filepath(location)
                     escape_err = check_path_escape(filepath)
@@ -204,31 +215,41 @@ def validate(findings: list, check_files: bool = False, deep: bool = False,
                 errors.append(f"{label}: --deep requires a 'scenario' field")
             elif not isinstance(scenario, str):
                 # Covers non-string falsy (0, False, []) and non-string truthy (dicts)
-                errors.append(f"{label}: 'scenario' must be a string, got {type(scenario).__name__}")
+                errors.append(
+                    f"{label}: 'scenario' must be a string, got {type(scenario).__name__}"
+                )
             elif not scenario.strip():
                 errors.append(f"{label}: --deep requires a 'scenario' field")
             else:
                 lower = scenario.lower()
                 for keyword in ("given", "when", "then"):
                     if keyword not in lower:
-                        errors.append(f"{label}: scenario missing '{keyword}' (expected Given/When/Then format)")
+                        errors.append(
+                            f"{label}: scenario missing '{keyword}' (expected Given/When/Then format)"
+                        )
 
     return errors
 
 
 def main():
     parser = argparse.ArgumentParser(description="Validate harden Attacker findings")
-    parser.add_argument("--check-files", action="store_true",
-                        help="Verify that referenced files exist")
-    parser.add_argument("--deep", action="store_true",
-                        help="Require Given/When/Then scenarios in each finding")
-    parser.add_argument("--file", dest="file_path",
-                        help="Read JSON from file instead of stdin")
-    parser.add_argument("--sanitize", action="store_true",
-                        help="Auto-fix common issues (strip unknown fields, map invalid categories)")
-    parser.add_argument("--lens",
-                        help="Validate as lens-mode findings for the given lens "
-                             "(replaces the legacy category field)")
+    parser.add_argument(
+        "--check-files", action="store_true", help="Verify that referenced files exist"
+    )
+    parser.add_argument(
+        "--deep", action="store_true", help="Require Given/When/Then scenarios in each finding"
+    )
+    parser.add_argument("--file", dest="file_path", help="Read JSON from file instead of stdin")
+    parser.add_argument(
+        "--sanitize",
+        action="store_true",
+        help="Auto-fix common issues (strip unknown fields, map invalid categories)",
+    )
+    parser.add_argument(
+        "--lens",
+        help="Validate as lens-mode findings for the given lens "
+        "(replaces the legacy category field)",
+    )
     args = parser.parse_args()
 
     raw, findings = read_json_input(file_path=args.file_path)

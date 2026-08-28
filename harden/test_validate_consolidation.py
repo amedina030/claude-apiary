@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for harden/validate_consolidation.py."""
+
 import json
 import subprocess
 import sys
@@ -10,8 +11,9 @@ SCRIPT = str(Path(__file__).parent / "validate_consolidation.py")
 PYTHON = sys.executable
 
 
-def run(input_json: str, source_ids: str = None, check_files: bool = False,
-        degrade: bool = False) -> subprocess.CompletedProcess:
+def run(
+    input_json: str, source_ids: str = None, check_files: bool = False, degrade: bool = False
+) -> subprocess.CompletedProcess:
     cmd = [PYTHON, SCRIPT]
     if source_ids:
         cmd += ["--source-ids", source_ids]
@@ -41,7 +43,6 @@ def make_consolidation(**overrides):
 
 
 class TestValidateConsolidation(unittest.TestCase):
-
     def test_valid_passes(self):
         result = run(json.dumps(make_consolidation()))
         self.assertEqual(result.returncode, 0)
@@ -77,7 +78,12 @@ class TestValidateConsolidation(unittest.TestCase):
         self.assertIn("missing required field 'reason'", result.stderr)
 
     def test_rejected_with_reason_passes(self):
-        c = {"accepted": [], "rejected": [{"source_ids": ["ATK-COR-001"], "reason": "not substantiated by cited code"}]}
+        c = {
+            "accepted": [],
+            "rejected": [
+                {"source_ids": ["ATK-COR-001"], "reason": "not substantiated by cited code"}
+            ],
+        }
         result = run(json.dumps(c))
         self.assertEqual(result.returncode, 0)
 
@@ -110,8 +116,12 @@ class TestValidateConsolidation(unittest.TestCase):
         self.assertIn("referenced more than once", result.stderr)
 
     def test_check_files_missing_file_fails(self):
-        result = run(json.dumps({"accepted": [make_accepted(location="nope/missing.py:1-2")], "rejected": []}),
-                     check_files=True)
+        result = run(
+            json.dumps(
+                {"accepted": [make_accepted(location="nope/missing.py:1-2")], "rejected": []}
+            ),
+            check_files=True,
+        )
         self.assertEqual(result.returncode, 1)
         self.assertIn("file not found", result.stderr)
 
@@ -126,12 +136,27 @@ class TestValidateConsolidation(unittest.TestCase):
 
     def test_degrade_dedups_by_location(self):
         merged = [
-            {"id": "ATK-SEC-001", "lens": "security", "severity": "medium",
-             "description": "path issue", "location": "app/files.py:12"},
-            {"id": "ATK-COR-001", "lens": "correctness", "severity": "high",
-             "description": "off by one", "location": "app/files.py:12"},
-            {"id": "ATK-RES-001", "lens": "resilience", "severity": "low",
-             "description": "leak", "location": "app/net.py:5"},
+            {
+                "id": "ATK-SEC-001",
+                "lens": "security",
+                "severity": "medium",
+                "description": "path issue",
+                "location": "app/files.py:12",
+            },
+            {
+                "id": "ATK-COR-001",
+                "lens": "correctness",
+                "severity": "high",
+                "description": "off by one",
+                "location": "app/files.py:12",
+            },
+            {
+                "id": "ATK-RES-001",
+                "lens": "resilience",
+                "severity": "low",
+                "description": "leak",
+                "location": "app/net.py:5",
+            },
         ]
         result = run(json.dumps(merged), degrade=True)
         self.assertEqual(result.returncode, 0)

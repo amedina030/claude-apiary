@@ -13,10 +13,14 @@ The path helpers (intake_dir, plans_dir, etc.) check the env var on each
 call so subprocess chains (run.py → auto_refine → ...) stay target-aware
 without every call site passing the target explicitly.
 """
+
 from __future__ import annotations
+
 import os
 from pathlib import Path
 from typing import Optional, Union
+
+from core.utils.state import state_dir_from_env
 
 from .config_loader import get as cfg
 
@@ -89,7 +93,9 @@ def resolve_target_repo(
     check fails. Returns the resolved (absolute) path.
     """
     chosen = choose_target_repo(
-        cli_override=cli_override, intake=intake, apiary_root=apiary_root,
+        cli_override=cli_override,
+        intake=intake,
+        apiary_root=apiary_root,
     )
     chosen = chosen.resolve()
     if not chosen.exists():
@@ -98,9 +104,7 @@ def resolve_target_repo(
         raise ValueError(f"target_repo path is not a directory: {chosen}")
     git_marker = chosen / ".git"
     if not git_marker.exists():
-        raise ValueError(
-            f"target_repo path is not a git repository (no .git entry): {chosen}"
-        )
+        raise ValueError(f"target_repo path is not a git repository (no .git entry): {chosen}")
     return chosen
 
 
@@ -113,7 +117,6 @@ def resolve_target_repo(
 
 _RUNNER_STATE_DIR = ".apiary/runner"
 _RUNNER_SUBDIR = "runner"
-_TARGET_STATE_DIR_ENV = "APIARY_TARGET_STATE_DIR"
 
 
 def _default_target(target: Optional[Path]) -> Path:
@@ -129,18 +132,25 @@ def artifacts_root(target: Optional[Path] = None) -> Path:
     """Return the umbrella directory for runner state.
 
     Resolution order:
-      1. ``APIARY_TARGET_STATE_DIR`` env var (set by apiary_launch.py after
+      1. ``APIARY_TARGET_STATE_DIR`` env var (set by the per-repo launcher, .claude/apiary/launch.py, after
          the registry resolver runs) — returns ``<state_dir>/runner/``.
          Used when the caller did not pass an explicit *target* override.
+         Read through ``core.utils.state.state_dir_from_env`` so the env
+         var is named in exactly one place (review X-3).
       2. ``<target>/.apiary/runner/`` — legacy in-repo path. Used when an
          explicit *target* is passed (e.g. multi-repo runner orchestrating
          a different repo than the one apiary is registered against), or
          as a fallback when the env var is unset.
+
+    Deliberately *not* ``resolve_state_dir``: an explicit *target* here
+    means "this other repo's in-tree artifacts", and consulting that
+    repo's pins would silently redirect a multi-repo run's artifacts to
+    the centralized store.
     """
     if target is None:
-        env_state = os.environ.get(_TARGET_STATE_DIR_ENV, "").strip()
-        if env_state:
-            return Path(env_state) / _RUNNER_SUBDIR
+        env_state = state_dir_from_env()
+        if env_state is not None:
+            return env_state / _RUNNER_SUBDIR
     return _default_target(target) / _RUNNER_STATE_DIR
 
 
@@ -188,15 +198,14 @@ def run_history_path(target: Optional[Path] = None) -> Path:
     return artifacts_root(target) / "run_history.jsonl"
 
 
-def overnight_log_path(target: Optional[Path] = None) -> Path:
-    return artifacts_root(target) / "overnight.jsonl"
-
-
 def worktrees_dir(target: Optional[Path] = None) -> Path:
-    """Live git worktrees under the target repo.
+    """Live git worktrees under the target repo: ``<target>/.runner-worktrees/``.
 
-    Note the path is ``<target>/.apiary/runner-worktrees/`` (sibling to
-    ``.apiary/runner/``) so live checkouts don't collide with state
-    artifacts.
+    This used to return ``<target>/.apiary/runner-worktrees/`` while
+    ``detached_lib`` created worktrees under ``<target>/.runner-worktrees/``,
+    so ``prune_stale_worktrees`` scanned a directory nothing ever wrote to and
+    could never recover a hard-killed run (review runner Bug 4). One
+    definition now, and it is the path that is actually used —
+    ``.runner-worktrees/`` is what apiary's own ``.gitignore`` covers.
     """
-    return _default_target(target) / ".apiary" / "runner-worktrees"
+    return _default_target(target) / ".runner-worktrees"

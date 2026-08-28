@@ -14,9 +14,9 @@ Output: runner/reports/<uuid>.json + scribe note
 Usage:
     approval.py <path_to_harden_result.json>
 """
+
 import argparse
 import json
-import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -38,7 +38,7 @@ NOTES_SCRIPT = REPO_DIR / "scribe" / "notes.py"
 
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
-from .git_lib import git
+from .git_lib import checkout, git
 from .schema_versions import (
     EXECUTION_SCHEMA_VERSION,
     HARDEN_SCHEMA_VERSION,
@@ -47,16 +47,16 @@ from .schema_versions import (
     SPEC_SCHEMA_VERSION,
     assert_schema_version,
 )
-
-
-def get_current_branch() -> str:
-    return git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-
-
-def checkout(branch: str):
-    result = git("checkout", branch)
-    if result.returncode != 0:
-        raise RuntimeError(f"Git checkout failed: {result.stderr.strip()}")
+from .stage_lib import (
+    extract_json_str as extract_json_from_text,
+)
+from .stage_lib import (
+    extract_text,
+    iter_unique,
+)
+from .stage_lib import (
+    run_claude as _spawn,
+)
 
 
 def is_worktree() -> bool:
@@ -108,11 +108,14 @@ MERGED_LOCALLY_NOTE = (
 
 # -- Scribe helper --
 
+
 def write_scribe_note(note_type: str, content: str):
     """Write a scribe note. Warn on failure but don't abort."""
     result = subprocess.run(
         [sys.executable, str(NOTES_SCRIPT), "add", "--type", note_type, "--content", content],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
     if result.returncode != 0:
         print(f"Warning: failed to write scribe note: {result.stderr.strip()}", file=sys.stderr)
@@ -120,37 +123,10 @@ def write_scribe_note(note_type: str, content: str):
 
 # -- Deferral review --
 
+
 def run_claude(prompt: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess and return (returncode, stdout, stderr)."""
-    from .claude_subprocess import run_claude as _spawn
     return _spawn(prompt, timeout=120)
-
-
-def extract_text(raw_output: str) -> str:
-    """Extract text content from Claude Code JSON envelope."""
-    try:
-        envelope = json.loads(raw_output)
-        if isinstance(envelope, dict) and "result" in envelope:
-            return envelope["result"]
-    except (json.JSONDecodeError, TypeError):
-        pass
-    return raw_output
-
-
-def extract_json_from_text(text: str) -> str:
-    """Extract JSON from text that may contain prose or markdown fences."""
-    text = text.strip()
-    fence_match = re.search(r"```(?:json)?\s*\n([\s\S]*?)```", text)
-    if fence_match:
-        return fence_match.group(1).strip()
-    for start_char, end_char in [('{', '}'), ('[', ']')]:
-        start = text.find(start_char)
-        if start == -1:
-            continue
-        end = text.rfind(end_char)
-        if end > start:
-            return text[start:end + 1]
-    return text
 
 
 def collect_deferrals(harden: dict) -> list[dict]:
@@ -172,39 +148,43 @@ def collect_deferrals(harden: dict) -> list[dict]:
                     if r.get("finding_ref") == rid:
                         reason = r.get("description", "")
                         break
-                deferrals.append({
-                    "id": rid,
-                    "finding": finding_desc,
-                    "reason": reason,
-                })
+                deferrals.append(
+                    {
+                        "id": rid,
+                        "finding": finding_desc,
+                        "reason": reason,
+                    }
+                )
     return deferrals
 
 
 def review_deferrals(deferrals: list[dict], title: str) -> tuple[bool, list[dict]]:
     """Review deferred findings via Claude. Returns (all_accepted, reviews)."""
     deferral_text = json.dumps(deferrals, indent=2)
-    prompt = "\n".join([
-        "You are a code review triage agent. Your job is to decide whether "
-        "deferred findings from an adversarial code review are acceptable "
-        "deferrals or need human escalation.",
-        "",
-        f"## Runner: {title}",
-        "",
-        "## Deferred findings to review",
-        f"```json\n{deferral_text}\n```",
-        "",
-        "## Instructions",
-        "",
-        "For each deferral, decide:",
-        "- **accept**: The deferral reason is sound — the finding is a style nit, "
-        "out of scope, or the existing code is correct. Safe to auto-merge.",
-        "- **escalate**: The finding points to a real risk (bug, security issue, "
-        "data loss) that the defender dismissed without adequate justification.",
-        "",
-        "Output ONLY a JSON object:",
-        '{"reviews": [{"id": "ATK-001", "decision": "accept|escalate", '
-        '"rationale": "brief reason"}]}',
-    ])
+    prompt = "\n".join(
+        [
+            "You are a code review triage agent. Your job is to decide whether "
+            "deferred findings from an adversarial code review are acceptable "
+            "deferrals or need human escalation.",
+            "",
+            f"## Runner: {title}",
+            "",
+            "## Deferred findings to review",
+            f"```json\n{deferral_text}\n```",
+            "",
+            "## Instructions",
+            "",
+            "For each deferral, decide:",
+            "- **accept**: The deferral reason is sound — the finding is a style nit, "
+            "out of scope, or the existing code is correct. Safe to auto-merge.",
+            "- **escalate**: The finding points to a real risk (bug, security issue, "
+            "data loss) that the defender dismissed without adequate justification.",
+            "",
+            "Output ONLY a JSON object:",
+            '{"reviews": [{"id": "ATK-001", "decision": "accept|escalate", '
+            '"rationale": "brief reason"}]}',
+        ]
+    )
 
     try:
         rc, stdout, stderr = run_claude(prompt)
@@ -229,6 +209,7 @@ def review_deferrals(deferrals: list[dict], title: str) -> tuple[bool, list[dict
 
 # -- Artifact loading --
 
+
 def load_artifact(path: Path, name: str, schema_version: int | None = None) -> dict:
     """Load a JSON artifact or exit with error.
 
@@ -251,218 +232,213 @@ def load_artifact(path: Path, name: str, schema_version: int | None = None) -> d
     return data
 
 
+def load_run_artifacts(harden_path: Path) -> dict:
+    """Load the harden result and every artifact it refers back to.
+
+    Returns a dict of the loaded artifacts and their paths. Every one of them
+    is asserted against its schema version; a missing or mis-versioned
+    artifact exits 1 inside load_artifact.
+    """
+    if not harden_path.exists():
+        print(f"Harden result not found: {harden_path}", file=sys.stderr)
+        sys.exit(1)
+
+    harden = load_artifact(harden_path, "Harden result", HARDEN_SCHEMA_VERSION)
+    uuid = harden.get("uuid")
+    paths = {
+        "intake": intake_dir() / f"{uuid}.json",
+        "spec": specs_dir() / f"{uuid}.json",
+        "plan": plans_dir() / f"{uuid}.json",
+        "execution": executions_dir() / f"{uuid}.json",
+        "harden": harden_path,
+    }
+    return {
+        "uuid": uuid,
+        "harden": harden,
+        "intake": load_artifact(paths["intake"], "Intake"),
+        "spec": load_artifact(paths["spec"], "Spec", SPEC_SCHEMA_VERSION),
+        "plan": load_artifact(paths["plan"], "Plan", PLAN_SCHEMA_VERSION),
+        "execution": load_artifact(paths["execution"], "Execution log", EXECUTION_SCHEMA_VERSION),
+        "paths": paths,
+    }
+
+
+def summarize_run(artifacts: dict) -> dict:
+    """Roll the run's artifacts up into the numbers the report and the commit
+    message both need."""
+    steps = artifacts["execution"].get("steps", [])
+    harden = artifacts["harden"]
+    return {
+        "title": artifacts["intake"].get("title", "Untitled"),
+        "total_steps": len(steps),
+        "steps_passed": sum(1 for s in steps if s.get("status") == "passed"),
+        "files_changed": iter_unique(f for s in steps for f in s.get("files_changed", [])),
+        "total_findings": harden.get("total_findings", 0),
+        "total_resolved": harden.get("total_resolved", 0),
+        "harden_rounds": len(harden.get("rounds", [])),
+    }
+
+
+def merge_or_defer(
+    branch: str, uuid: str, stats: dict, deferrals_accepted: int | None = None
+) -> tuple:
+    """Land a clean run on master, or explain why it wasn't landed.
+
+    Returns ``(path_taken, exit_code)``. This body existed twice, ~55 lines
+    each, differing only by one line of the commit message and one clause of
+    the scribe note (review: "Squash-merge-and-push block | 2 x ~55 lines").
+
+    Never pushes: the merge is local and the operator decides what leaves the
+    machine.
+    """
+    if is_branch_merged(branch):
+        print(f"Branch {branch} already merged — skipping merge", file=sys.stderr)
+        return "already-merged", 0
+    if is_worktree():
+        # Running inside a secondary worktree — cannot check out master.
+        # Defer the merge to manual review or the next cycle on the main tree.
+        print(
+            f"Worktree mode: deferring merge of {branch} to master (manual merge required)",
+            file=sys.stderr,
+        )
+        return "worktree-deferred", 0
+
+    try:
+        checkout("master")
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+
+    title = stats["title"]
+    body_lines = [
+        f"Files changed: {len(stats['files_changed'])}",
+        f"Harden rounds: {stats['harden_rounds']}",
+        f"Findings resolved: {stats['total_resolved']}",
+    ]
+    if deferrals_accepted is not None:
+        body_lines.append(f"Deferrals accepted: {deferrals_accepted}")
+    commit_msg = f"runner/{uuid}: {title}\n\n" + "\n".join(body_lines)
+
+    ok, err = squash_merge(branch, commit_msg)
+    if not ok:
+        if err == "merge-conflict":
+            print(f"Merge conflict on {branch} -- manual resolution required", file=sys.stderr)
+            write_scribe_note(
+                "todo",
+                f"RUNNER MERGE CONFLICT: {title}. Branch {branch} has merge "
+                f"conflicts. Resolve manually and merge.",
+            )
+            return "merge-conflict", 1
+        print(f"Merge failed: {err}", file=sys.stderr)
+        return "merge-failed", 1
+
+    print(f"Merged {branch} to master locally; not pushed", file=sys.stderr)
+    detail = f" {stats['total_resolved']} findings resolved"
+    if deferrals_accepted is not None:
+        detail += f", {deferrals_accepted} deferrals accepted"
+    detail += f" across {stats['harden_rounds']} harden rounds."
+    write_scribe_note(
+        "todo",
+        MERGED_LOCALLY_NOTE.format(title=title, branch=branch) + detail,
+    )
+    return "merged-locally", 0
+
+
+def triage_unresolved(harden: dict, branch: str, uuid: str, stats: dict) -> tuple:
+    """Decide what a `has_unresolved` verdict means for this run.
+
+    Deferred findings get one Claude triage pass: if every deferral is
+    accepted the run is upgraded to `all_resolved` and merged like a clean
+    one; otherwise the branch is left for a human with a scribe todo naming
+    the findings. Returns ``(verdict, unresolved, path_taken, exit_code)``.
+    """
+    unresolved = harden.get("unresolved", [])
+    deferrals = collect_deferrals(harden)
+    if deferrals:
+        print(f"Reviewing {len(deferrals)} deferral(s)...", file=sys.stderr)
+        all_accepted, reviews = review_deferrals(deferrals, stats["title"])
+        if all_accepted and reviews:
+            print("All deferrals accepted — upgrading to auto-merge", file=sys.stderr)
+            unresolved = []
+            harden["verdict"] = "all_resolved"
+            harden["unresolved"] = unresolved
+            harden["deferral_reviews"] = reviews
+            path_taken, exit_code = merge_or_defer(
+                branch, uuid, stats, deferrals_accepted=len(deferrals)
+            )
+            return "all_resolved", unresolved, path_taken, exit_code
+
+    unresolved_list = ", ".join(unresolved) if unresolved else "unknown"
+    write_scribe_note(
+        "todo",
+        f"RUNNER PENDING REVIEW: {stats['title']}. Branch {branch} has "
+        f"{len(unresolved)} unresolved findings: {unresolved_list}. "
+        f"Review and resolve before merging.",
+    )
+    return "has_unresolved", unresolved, "pending-review", 0
+
+
+def build_report(
+    artifacts: dict, stats: dict, verdict: str, path_taken, unresolved: list, report_path: Path
+) -> dict:
+    """Assemble the final run report."""
+    paths = artifacts["paths"]
+    return {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "uuid": artifacts["uuid"],
+        "title": stats["title"],
+        "verdict": verdict,
+        "path_taken": path_taken,
+        "timestamps": {
+            "intake_created": artifacts["intake"].get("created_at"),
+            "approval_completed": datetime.now(timezone.utc).isoformat(),
+        },
+        "stats": {
+            "total_steps": stats["total_steps"],
+            "steps_passed": stats["steps_passed"],
+            "total_findings": stats["total_findings"],
+            "findings_resolved": stats["total_resolved"],
+            "findings_unresolved": len(unresolved),
+            "harden_rounds": stats["harden_rounds"],
+        },
+        "files_changed": stats["files_changed"],
+        "artifacts": {name: str(path) for name, path in paths.items()}
+        | {
+            "report": str(report_path),
+        },
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Approval — runner stage 6")
     parser.add_argument("harden_result", help="Path to harden result JSON")
     args = parser.parse_args()
 
-    # Read harden result
-    harden_path = Path(args.harden_result)
-    if not harden_path.exists():
-        print(f"Harden result not found: {args.harden_result}", file=sys.stderr)
-        sys.exit(1)
-
-    harden = load_artifact(harden_path, "Harden result", HARDEN_SCHEMA_VERSION)
-    uuid = harden.get("uuid")
+    artifacts = load_run_artifacts(Path(args.harden_result))
+    harden = artifacts["harden"]
+    uuid = artifacts["uuid"]
     verdict = harden.get("verdict")
     branch = harden.get("branch", f"runner/{uuid}")
     unresolved = harden.get("unresolved", [])
-
-    # Load all prior artifacts
-    intake_path = intake_dir() / f"{uuid}.json"
-    spec_path = specs_dir() / f"{uuid}.json"
-    plan_path = plans_dir() / f"{uuid}.json"
-    exec_path = executions_dir() / f"{uuid}.json"
-
-    intake = load_artifact(intake_path, "Intake")
-    spec = load_artifact(spec_path, "Spec", SPEC_SCHEMA_VERSION)
-    plan = load_artifact(plan_path, "Plan", PLAN_SCHEMA_VERSION)
-    execution = load_artifact(exec_path, "Execution log", EXECUTION_SCHEMA_VERSION)
-
-    title = intake.get("title", "Untitled")
-
-    # Gather stats
-    steps = execution.get("steps", [])
-    steps_passed = sum(1 for s in steps if s.get("status") == "passed")
-    total_steps = len(steps)
-    files_changed = []
-    for s in steps:
-        for f in s.get("files_changed", []):
-            if f and f not in files_changed:
-                files_changed.append(f)
-
-    total_findings = harden.get("total_findings", 0)
-    total_resolved = harden.get("total_resolved", 0)
-    harden_rounds = len(harden.get("rounds", []))
+    stats = summarize_run(artifacts)
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     report_path = REPORTS_DIR / f"{uuid}.json"
-    now = datetime.now(timezone.utc).isoformat()
-
-    path_taken = None
-    exit_code = 0
 
     if verdict == "all_resolved":
-        # Check if already merged
-        if is_branch_merged(branch):
-            path_taken = "already-merged"
-            print(f"Branch {branch} already merged — skipping merge", file=sys.stderr)
-        elif is_worktree():
-            # Running inside a secondary worktree — cannot checkout master.
-            # Defer merge to manual review or next cron cycle on the main tree.
-            path_taken = "worktree-deferred"
-            print(f"Worktree mode: deferring merge of {branch} to master (manual merge required)", file=sys.stderr)
-        else:
-            # Checkout master and squash merge
-            original_branch = get_current_branch()
-            try:
-                checkout("master")
-            except RuntimeError as e:
-                print(str(e), file=sys.stderr)
-                sys.exit(1)
-
-            # Build commit message
-            body_lines = [
-                f"Files changed: {len(files_changed)}",
-                f"Harden rounds: {harden_rounds}",
-                f"Findings resolved: {total_resolved}",
-            ]
-            commit_msg = f"runner/{uuid}: {title}\n\n" + "\n".join(body_lines)
-
-            ok, err = squash_merge(branch, commit_msg)
-            if not ok:
-                if err == "merge-conflict":
-                    path_taken = "merge-conflict"
-                    print(f"Merge conflict on {branch} -- manual resolution required", file=sys.stderr)
-                    write_scribe_note(
-                        "todo",
-                        f"RUNNER MERGE CONFLICT: {title}. Branch {branch} has merge conflicts. "
-                        f"Resolve manually and merge."
-                    )
-                    exit_code = 1
-                else:
-                    path_taken = "merge-failed"
-                    print(f"Merge failed: {err}", file=sys.stderr)
-                    exit_code = 1
-            else:
-                path_taken = "merged-locally"
-                print(f"Merged {branch} to master locally; not pushed", file=sys.stderr)
-                write_scribe_note(
-                    "todo",
-                    MERGED_LOCALLY_NOTE.format(title=title, branch=branch)
-                    + f" {total_resolved} findings resolved across {harden_rounds} harden rounds."
-                )
-
+        path_taken, exit_code = merge_or_defer(branch, uuid, stats)
     elif verdict == "defender_failed":
-        # Harden run is structurally broken — defender produced no responses
+        # Structurally broken harden run — the defender produced no responses
         # despite attacker findings. Do not auto-merge, do not review deferrals
         # (there are none), do not write a scribe note. The reviewer sees this
-        # in the runner queue via the HARDEN column and overnight.jsonl status.
-        path_taken = "defender-failed"
-        exit_code = 1
-
+        # in the runner queue via the HARDEN column and run_history.jsonl.
+        path_taken, exit_code = "defender-failed", 1
     elif verdict == "has_unresolved":
-        # Review deferrals before deciding
-        deferrals = collect_deferrals(harden)
-        if deferrals:
-            print(f"Reviewing {len(deferrals)} deferral(s)...", file=sys.stderr)
-            all_accepted, reviews = review_deferrals(deferrals, title)
+        verdict, unresolved, path_taken, exit_code = triage_unresolved(harden, branch, uuid, stats)
+    else:
+        path_taken, exit_code = None, 0
 
-            if all_accepted and reviews:
-                print(f"All deferrals accepted — upgrading to auto-merge", file=sys.stderr)
-                verdict = "all_resolved"
-                unresolved = []
-                harden["verdict"] = verdict
-                harden["unresolved"] = unresolved
-                harden["deferral_reviews"] = reviews
-
-        if verdict == "all_resolved":
-            if is_branch_merged(branch):
-                path_taken = "already-merged"
-                print(f"Branch {branch} already merged — skipping merge", file=sys.stderr)
-            elif is_worktree():
-                path_taken = "worktree-deferred"
-                print(f"Worktree mode: deferring merge of {branch} to master (manual merge required)", file=sys.stderr)
-            else:
-                original_branch = get_current_branch()
-                try:
-                    checkout("master")
-                except RuntimeError as e:
-                    print(str(e), file=sys.stderr)
-                    sys.exit(1)
-
-                body_lines = [
-                    f"Files changed: {len(files_changed)}",
-                    f"Harden rounds: {harden_rounds}",
-                    f"Findings resolved: {total_resolved}",
-                    f"Deferrals accepted: {len(deferrals)}",
-                ]
-                commit_msg = f"runner/{uuid}: {title}\n\n" + "\n".join(body_lines)
-
-                ok, err = squash_merge(branch, commit_msg)
-                if not ok:
-                    if err == "merge-conflict":
-                        path_taken = "merge-conflict"
-                        print(f"Merge conflict on {branch} -- manual resolution required", file=sys.stderr)
-                        write_scribe_note(
-                            "todo",
-                            f"RUNNER MERGE CONFLICT: {title}. Branch {branch} has merge conflicts. "
-                            f"Resolve manually and merge."
-                        )
-                        exit_code = 1
-                    else:
-                        path_taken = "merge-failed"
-                        print(f"Merge failed: {err}", file=sys.stderr)
-                        exit_code = 1
-                else:
-                    path_taken = "merged-locally"
-                    print(f"Merged {branch} to master locally; not pushed", file=sys.stderr)
-                    write_scribe_note(
-                        "todo",
-                        MERGED_LOCALLY_NOTE.format(title=title, branch=branch)
-                        + f" {total_resolved} findings resolved, {len(deferrals)} deferrals accepted "
-                        f"across {harden_rounds} harden rounds."
-                    )
-        else:
-            path_taken = "pending-review"
-            unresolved_list = ", ".join(unresolved) if unresolved else "unknown"
-            write_scribe_note(
-                "todo",
-                f"RUNNER PENDING REVIEW: {title}. Branch {branch} has "
-                f"{len(unresolved)} unresolved findings: {unresolved_list}. "
-                f"Review and resolve before merging."
-            )
-
-    # Build report
-    report = {
-        "schema_version": REPORT_SCHEMA_VERSION,
-        "uuid": uuid,
-        "title": title,
-        "verdict": verdict,
-        "path_taken": path_taken,
-        "timestamps": {
-            "intake_created": intake.get("created_at"),
-            "approval_completed": now,
-        },
-        "stats": {
-            "total_steps": total_steps,
-            "steps_passed": steps_passed,
-            "total_findings": total_findings,
-            "findings_resolved": total_resolved,
-            "findings_unresolved": len(unresolved),
-            "harden_rounds": harden_rounds,
-        },
-        "files_changed": files_changed,
-        "artifacts": {
-            "intake": str(intake_path),
-            "spec": str(spec_path),
-            "plan": str(plan_path),
-            "execution": str(exec_path),
-            "harden": str(harden_path),
-            "report": str(report_path),
-        },
-    }
-
+    report = build_report(artifacts, stats, verdict, path_taken, unresolved, report_path)
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     print(f"{verdict} ({path_taken})")

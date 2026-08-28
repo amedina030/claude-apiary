@@ -21,6 +21,7 @@ Usage:
     validate_consolidation.py --file consolidation.json [--source-ids ATK-SEC-001,ATK-COR-002] [--check-files]
     validate_consolidation.py --degrade --file merged_findings.json   # deterministic fallback
 """
+
 import argparse
 import json
 import sys
@@ -101,20 +102,26 @@ def validate(data: dict, source_ids: set = None, check_files: bool = False) -> l
         label = f"accepted[{i}]"
 
         if "id" in item:
-            errors.append(f"{label}: accepted findings must not include an 'id' field (assigned by post-processor)")
+            errors.append(
+                f"{label}: accepted findings must not include an 'id' field (assigned by post-processor)"
+            )
 
         for field in ("description", "severity", "location"):
             val = item.get(field)
             if val is None:
                 errors.append(f"{label}: missing required field '{field}'")
             elif not isinstance(val, str):
-                errors.append(f"{label}: field '{field}' must be a string, got {type(val).__name__}")
+                errors.append(
+                    f"{label}: field '{field}' must be a string, got {type(val).__name__}"
+                )
             elif not val.strip():
                 errors.append(f"{label}: field '{field}' is empty")
 
         severity = item.get("severity")
         if isinstance(severity, str) and severity not in VALID_SEVERITIES:
-            errors.append(f"{label}: invalid severity '{severity}' (expected: {', '.join(sorted(VALID_SEVERITIES))})")
+            errors.append(
+                f"{label}: invalid severity '{severity}' (expected: {', '.join(sorted(VALID_SEVERITIES))})"
+            )
 
         ids = _validate_source_ids(item.get("source_ids"), label, errors)
         _track(ids, label)
@@ -123,7 +130,9 @@ def validate(data: dict, source_ids: set = None, check_files: bool = False) -> l
         lenses = item.get("lenses")
         if lenses is not None:
             if not isinstance(lenses, list):
-                errors.append(f"{label}: 'lenses' must be a JSON array, got {type(lenses).__name__}")
+                errors.append(
+                    f"{label}: 'lenses' must be a JSON array, got {type(lenses).__name__}"
+                )
             elif not all(isinstance(x, str) and x.strip() for x in lenses):
                 errors.append(f"{label}: each entry in 'lenses' must be a non-empty string")
 
@@ -131,7 +140,9 @@ def validate(data: dict, source_ids: set = None, check_files: bool = False) -> l
             location = item.get("location", "")
             if isinstance(location, str) and location:
                 if "," in location:
-                    errors.append(f"{label}: 'location' must reference a single file, got multi-file: {location}")
+                    errors.append(
+                        f"{label}: 'location' must reference a single file, got multi-file: {location}"
+                    )
                 else:
                     filepath = _resolve_filepath(location)
                     escape_err = check_path_escape(filepath)
@@ -149,7 +160,9 @@ def validate(data: dict, source_ids: set = None, check_files: bool = False) -> l
         _track(ids, label)
         reason = item.get("reason")
         if reason is None:
-            errors.append(f"{label}: missing required field 'reason' (default-accept means a rejection must be justified)")
+            errors.append(
+                f"{label}: missing required field 'reason' (default-accept means a rejection must be justified)"
+            )
         elif not isinstance(reason, str):
             errors.append(f"{label}: 'reason' must be a string, got {type(reason).__name__}")
         elif not reason.strip():
@@ -209,15 +222,20 @@ def degrade_dedup(findings: list) -> list:
 
 def main():
     parser = argparse.ArgumentParser(description="Validate harden Consolidator output")
-    parser.add_argument("--source-ids",
-                        help="Comma-separated ATK-<CODE>-NNN ids dispatched to the consolidator; "
-                             "enables exact coverage checking")
-    parser.add_argument("--check-files", action="store_true",
-                        help="Verify that accepted-finding files exist")
-    parser.add_argument("--degrade", action="store_true",
-                        help="Fallback mode: dedup raw merged findings by location instead of validating")
-    parser.add_argument("--file", dest="file_path",
-                        help="Read JSON from file instead of stdin")
+    parser.add_argument(
+        "--source-ids",
+        help="Comma-separated ATK-<CODE>-NNN ids dispatched to the consolidator; "
+        "enables exact coverage checking",
+    )
+    parser.add_argument(
+        "--check-files", action="store_true", help="Verify that accepted-finding files exist"
+    )
+    parser.add_argument(
+        "--degrade",
+        action="store_true",
+        help="Fallback mode: dedup raw merged findings by location instead of validating",
+    )
+    parser.add_argument("--file", dest="file_path", help="Read JSON from file instead of stdin")
     args = parser.parse_args()
 
     if args.degrade:

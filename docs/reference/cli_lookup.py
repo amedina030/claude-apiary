@@ -34,12 +34,40 @@ def list_known_tools() -> list[str]:
     return list(dict.fromkeys(tools))
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: cli_lookup.py <tool-name>", file=sys.stderr)
-        sys.exit(1)
+USAGE = """usage: cli_lookup.py <query>
 
-    query = sys.argv[1].lower()
+Print the cli-tools.md section for a tool. The query is matched as a
+case-insensitive substring against each section's `## ` header, so a bare
+name works as well as a path.
+
+positional arguments:
+  query       tool name or path fragment (e.g. notes.py, round_counter, report)
+
+options:
+  -h, --help  show this help message and exit
+  --list      list every known tool header and exit
+"""
+
+
+def main():
+    argv = sys.argv[1:]
+    # Hand-rolled rather than argparse: `--help` has to answer without reading
+    # cli-tools.md, and a bare `--help` used to fall through to the substring
+    # match and exit 1 with "No tool matching '--help'" (review §4). Every
+    # documented command in the repo is run with `--help` by
+    # docs/test_doc_examples.py, so this one has to mean what it says.
+    if not argv:
+        print(USAGE, file=sys.stderr)
+        sys.exit(1)
+    if argv[0] in ("-h", "--help"):
+        print(USAGE)
+        sys.exit(0)
+    if argv[0] == "--list":
+        for tool in list_known_tools():
+            print(tool)
+        sys.exit(0)
+
+    query = argv[0].lower()
 
     if not REFERENCE.exists():
         print(f"Error: {REFERENCE} not found", file=sys.stderr)

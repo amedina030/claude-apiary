@@ -19,11 +19,6 @@ from typing import Optional
 
 from gui.paths import main_apiary
 
-# Kept for backwards-compatible import paths in tests; a path that doesn't
-# exist on a fresh machine. Callers shouldn't rely on its filesystem
-# behavior — it's never read post-migration.
-CONFIG_PATH = main_apiary() / ".apiary" / "gui" / "repo_registry.json"
-
 
 def _registry_path() -> Path:
     # Resolved per call, not at import: main_apiary() answers differently
@@ -33,14 +28,9 @@ def _registry_path() -> Path:
     return main_apiary() / ".repos" / "registry.json"
 
 
-def load(config_path: Path = CONFIG_PATH) -> tuple[list[Path], Optional[str]]:
+def load() -> tuple[list[Path], Optional[str]]:
     """Return ``(repos, error)`` where *repos* is the list of bootstrapped
     repos to surface in the GUI sidebar.
-
-    *config_path* is accepted for backward compatibility with the
-    ``apiary_repos.json`` API, but is no longer the source of truth — it's
-    used only as a tie-breaker if the registry can't be read. Tests that
-    pass a custom path should fall through to the registry on this machine.
 
     Errors when:
     - the registry file is missing (`error` describes the situation),
@@ -50,11 +40,6 @@ def load(config_path: Path = CONFIG_PATH) -> tuple[list[Path], Optional[str]]:
     """
     p = _registry_path()
     if not p.is_file():
-        # Fall through to the (deprecated) JSON-list config path. This
-        # path lets operator-curated lists work for one-off setups, but
-        # `apiary install` is the canonical way to register a repo.
-        if config_path.is_file():
-            return _load_legacy_list(config_path)
         return [], f"registry not found at {p}; run `apiary self-bootstrap` first"
 
     try:
@@ -84,24 +69,4 @@ def load(config_path: Path = CONFIG_PATH) -> tuple[list[Path], Optional[str]]:
             continue
         seen.add(resolved)
         out.append(candidate)
-    return out, None
-
-
-def _load_legacy_list(config_path: Path) -> tuple[list[Path], Optional[str]]:
-    """Read a flat JSON list of paths. Best-effort fallback for the (rare)
-    case where main-apiary's registry isn't available."""
-    try:
-        text = config_path.read_text(encoding="utf-8")
-        data = json.loads(text)
-    except (OSError, json.JSONDecodeError) as exc:
-        return [], f"{config_path.name} invalid: {exc}"
-    if not isinstance(data, list):
-        return [], f"{config_path.name} must be a JSON array of paths"
-    out: list[Path] = []
-    for item in data:
-        if not isinstance(item, str):
-            continue
-        candidate = Path(item)
-        if candidate.is_dir():
-            out.append(candidate)
     return out, None

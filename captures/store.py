@@ -12,27 +12,43 @@ Layout::
 The image is the canonical artifact; the sidecar is metadata. Each capture
 pairs exactly one image with exactly one sidecar, sharing a stem.
 """
+
 from __future__ import annotations
 
-import os
 import re
-import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
-from researcher import _yaml_mini
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core import frontmatter  # noqa: E402
 
-APIARY_STATE_DIRNAME = ".apiary"
+# Path resolution and the two names that describe it live in core.utils.state -
+# re-exported here so callers (and tests) can keep saying ``store.<NAME>``
+# while there is exactly one definition in the tree (review X-3).
+from core.utils.state import (  # noqa: F401
+    LEGACY_STATE_DIRNAME as APIARY_STATE_DIRNAME,
+)
+from core.utils.state import (
+    resolve_state_dir,
+)
+
 CAPTURES_SUBDIR = "captures"
-TARGET_STATE_DIR_ENV = "APIARY_TARGET_STATE_DIR"
 TAGS_FILENAME = "tags.yaml"
 
 FRONTMATTER_DELIM = "---"
 SIDECAR_EXT = ".md"
 
-ALLOWED_IMAGE_EXTENSIONS = frozenset({
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
-})
+ALLOWED_IMAGE_EXTENSIONS = frozenset(
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".bmp",
+    }
+)
 
 ENTRY_FIELDS = (
     "title",
@@ -48,41 +64,15 @@ ENTRY_FIELDS = (
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
-def _git_repo_root(start: Path | None = None) -> Path | None:
-    """Return the git repo root containing *start* (or cwd), or None."""
-    cwd = str(start) if start is not None else str(Path.cwd())
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (FileNotFoundError, OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0:
-        return None
-    top = result.stdout.strip()
-    return Path(top) if top else None
-
-
 def captures_dir(start: Path | None = None) -> Path:
     """Return the captures state directory.
 
-    Resolution order:
-      1. ``APIARY_TARGET_STATE_DIR`` env var (set by apiary_launch.py after
-         the registry resolver runs) — returns ``<state_dir>/captures/``.
-      2. Legacy in-repo path via git rev-parse on *start* — used for
-         unmigrated targets only.
-      3. ``<cwd>/.apiary/captures/`` when not inside a git repo.
+    Delegates to :func:`core.utils.state.resolve_state_dir`, which is the
+    one place the precedence lives (launcher env var → the repo's pins →
+    the legacy ``.apiary/pointer`` breadcrumb → ``<repo>/.apiary/`` →
+    ``<cwd>/.apiary/`` outside a git repo). See its docstring.
     """
-    env_dir = os.environ.get(TARGET_STATE_DIR_ENV, "").strip()
-    if env_dir:
-        return Path(env_dir) / CAPTURES_SUBDIR
-    root = _git_repo_root(start) or (start or Path.cwd())
-    return Path(root) / APIARY_STATE_DIRNAME / CAPTURES_SUBDIR
+    return resolve_state_dir(start, subdir=CAPTURES_SUBDIR, cwd_fallback=True)
 
 
 def tags_file(start: Path | None = None) -> Path:
@@ -127,7 +117,7 @@ def ensure_layout(start: Path | None = None) -> None:
     base.mkdir(parents=True, exist_ok=True)
     tags_path = tags_file(start)
     if not tags_path.exists():
-        tags_path.write_text(_yaml_mini.dumps({"tags": []}), encoding="utf-8")
+        tags_path.write_text(frontmatter.dumps({"tags": []}), encoding="utf-8")
 
 
 def normalize_topic(raw: str) -> str:
@@ -146,48 +136,43 @@ def read_tags(start: Path | None = None) -> list[str]:
     path = tags_file(start)
     if not path.exists():
         return []
-    data = _yaml_mini.loads(path.read_text(encoding="utf-8"))
+    data = frontmatter.loads(path.read_text(encoding="utf-8"))
     tags = data.get("tags", [])
     if not isinstance(tags, list):
-        raise _yaml_mini.YamlParseError("'tags' must be a list", 1)
+        raise frontmatter.FrontmatterError("'tags' must be a list", 1)
     return [str(t) for t in tags]
 
 
 def write_tags(tags: list[str], start: Path | None = None) -> None:
     path = tags_file(start)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_yaml_mini.dumps({"tags": list(tags)}), encoding="utf-8")
+    path.write_text(frontmatter.dumps({"tags": list(tags)}), encoding="utf-8")
 
 
 def parse_sidecar(path: Path) -> tuple[dict[str, Any], str]:
     """Split a sidecar file into (frontmatter, body).
 
-    Raises ``ValueError`` if the file lacks a closing frontmatter delimiter.
+    Raises ``ValueError`` if the file lacks a frontmatter block or the block
+    is outside the dialect. Body bytes are preserved exactly.
     """
     text = path.read_text(encoding="utf-8")
-    lines = text.splitlines(keepends=True)
-    if not lines or lines[0].rstrip() != FRONTMATTER_DELIM:
-        raise ValueError(f"{path} missing opening frontmatter delimiter")
-
-    close_idx = None
-    for i in range(1, len(lines)):
-        if lines[i].rstrip() == FRONTMATTER_DELIM:
-            close_idx = i
-            break
-    if close_idx is None:
-        raise ValueError(f"{path} missing closing frontmatter delimiter")
-
-    fm_text = "".join(lines[1:close_idx])
-    body = "".join(lines[close_idx + 1:])
-    frontmatter = _yaml_mini.loads(fm_text)
-    return frontmatter, body
+    try:
+        return frontmatter.parse(text, strict=True)
+    except frontmatter.FrontmatterError as exc:
+        raise ValueError(f"{path} has unreadable frontmatter: {exc}") from exc
 
 
-def write_sidecar(path: Path, frontmatter: dict[str, Any], body: str) -> None:
-    """Write a sidecar file atomically. Creates parent dirs as needed."""
+def write_sidecar(path: Path, meta: dict[str, Any], body: str) -> None:
+    """Write a sidecar file. Creates parent dirs as needed.
+
+    Fences are always written, even for empty *meta*, so ``parse_sidecar``'s
+    strict read of the file it just wrote always succeeds.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fm_dump = _yaml_mini.dumps(frontmatter)
-    content = f"{FRONTMATTER_DELIM}\n{fm_dump}{FRONTMATTER_DELIM}\n{body}"
+    if meta:
+        content = frontmatter.dump(meta, body)
+    else:
+        content = f"{FRONTMATTER_DELIM}\n{FRONTMATTER_DELIM}\n{body}"
     if not content.endswith("\n"):
         content += "\n"
     path.write_text(content, encoding="utf-8")

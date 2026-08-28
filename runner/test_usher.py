@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for runner/usher.py — ticket sizing gate."""
+
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,14 +10,13 @@ from unittest import mock
 from runner.usher import (
     _extract_file_paths,
     _extract_subsystems,
-    score,
     assess,
     main,
+    score,
 )
 
 
 class TestExtractFilePaths(unittest.TestCase):
-
     def test_structured_scope(self):
         scope = "Modified: runner/run.py, runner/executor.py. New: scripts/migrate.py"
         paths = _extract_file_paths(scope)
@@ -47,7 +46,6 @@ class TestExtractFilePaths(unittest.TestCase):
 
 
 class TestExtractSubsystems(unittest.TestCase):
-
     def test_basic(self):
         paths = ["runner/run.py", "runner/executor.py", "core/startup.py"]
         self.assertEqual(_extract_subsystems(paths), {"runner", "core"})
@@ -66,7 +64,6 @@ class TestExtractSubsystems(unittest.TestCase):
 
 
 class TestScore(unittest.TestCase):
-
     def test_basic_score(self):
         data = {
             "scope": "Modified: runner/run.py, core/startup.py. New: scripts/migrate.py",
@@ -75,7 +72,9 @@ class TestScore(unittest.TestCase):
         result = score(data)
         self.assertEqual(result["file_count"], 3)
         self.assertEqual(result["subsystem_count"], 3)
-        self.assertEqual(result["description_chars"], len("A short description for testing purposes."))
+        self.assertEqual(
+            result["description_chars"], len("A short description for testing purposes.")
+        )
 
     def test_missing_scope(self):
         result = score({"description": "something"})
@@ -88,10 +87,15 @@ class TestScore(unittest.TestCase):
 
 
 class TestAssess(unittest.TestCase):
-
-    def _make_config(self, max_files_pass=5, max_files_warn=8,
-                     max_sub_pass=2, max_sub_warn=3,
-                     max_desc_pass=2000, max_desc_warn=4000):
+    def _make_config(
+        self,
+        max_files_pass=5,
+        max_files_warn=8,
+        max_sub_pass=2,
+        max_sub_warn=3,
+        max_desc_pass=2000,
+        max_desc_warn=4000,
+    ):
         return {
             "max_files": {"pass": max_files_pass, "warn": max_files_warn},
             "max_subsystems": {"pass": max_sub_pass, "warn": max_sub_warn},
@@ -163,7 +167,6 @@ class TestAssess(unittest.TestCase):
 
 
 class TestMain(unittest.TestCase):
-
     def _write_intake(self, tmp_dir, data):
         path = Path(tmp_dir) / "intake.json"
         path.write_text(json.dumps(data), encoding="utf-8")
@@ -171,10 +174,13 @@ class TestMain(unittest.TestCase):
 
     def test_cli_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = self._write_intake(tmp, {
-                "scope": "runner/a.py",
-                "description": "Short.",
-            })
+            path = self._write_intake(
+                tmp,
+                {
+                    "scope": "runner/a.py",
+                    "description": "Short.",
+                },
+            )
             with mock.patch("sys.argv", ["usher", path]):
                 with mock.patch("sys.exit") as mock_exit:
                     main()
@@ -183,10 +189,13 @@ class TestMain(unittest.TestCase):
     def test_cli_fail(self):
         with tempfile.TemporaryDirectory() as tmp:
             files = ", ".join(f"runner/f{i}.py" for i in range(10))
-            path = self._write_intake(tmp, {
-                "scope": files,
-                "description": "Short.",
-            })
+            path = self._write_intake(
+                tmp,
+                {
+                    "scope": files,
+                    "description": "Short.",
+                },
+            )
             with mock.patch("sys.argv", ["usher", path]):
                 with self.assertRaises(SystemExit) as ctx:
                     main()
@@ -195,10 +204,13 @@ class TestMain(unittest.TestCase):
     def test_cli_warn_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             files = ", ".join(f"runner/f{i}.py" for i in range(10))
-            path = self._write_intake(tmp, {
-                "scope": files,
-                "description": "Short.",
-            })
+            path = self._write_intake(
+                tmp,
+                {
+                    "scope": files,
+                    "description": "Short.",
+                },
+            )
             with mock.patch("sys.argv", ["usher", path, "--warn-only"]):
                 with mock.patch("sys.exit") as mock_exit:
                     main()

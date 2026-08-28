@@ -120,7 +120,7 @@ class NeverSendCtrlCTest(unittest.TestCase):
 class ReplayCutTest(unittest.TestCase):
     def test_cuts_after_last_complete_line(self):
         self.assertEqual(replay_cut(b'{"a":1}\n{"b":2}\n'), 16)
-        self.assertEqual(replay_cut(b'{"a":1}\n{"b":'), 8)   # torn tail left for the tail thread
+        self.assertEqual(replay_cut(b'{"a":1}\n{"b":'), 8)  # torn tail left for the tail thread
         self.assertEqual(replay_cut(b'{"a":'), 0)
         self.assertEqual(replay_cut(b""), 0)
 

@@ -92,13 +92,25 @@ Both store state under `<state-dir>/<tool>/` per-repo, where `<state-dir>` is th
 When invoking a CLI tool with a text argument longer than ~3 lines or containing markdown, **always** use list-form subprocess -- never bash with shell quoting (backticks trigger command substitution, apostrophes break quoting).
 
 ```python
-root = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                      capture_output=True, text=True, check=True).stdout.strip()
+root = subprocess.run(
+    ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
+).stdout.strip()
 launcher = str(Path(root) / ".claude" / "apiary" / "launch.py")
-subprocess.run(["python", launcher,
-                 "scribe/notes.py", "add", "--type", "handoff",
-                 "--summary", short_summary_var,
-                 "--content", long_text_var], ...)
+subprocess.run(
+    [
+        "python",
+        launcher,
+        "scribe/notes.py",
+        "add",
+        "--type",
+        "handoff",
+        "--summary",
+        short_summary_var,
+        "--content",
+        long_text_var,
+    ],
+    ...,
+)
 ```
 
 **Never:** `python scribe/notes.py add --content "text with `backticks` and it's broken"`

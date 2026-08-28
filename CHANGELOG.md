@@ -2,6 +2,334 @@
 
 ## Unreleased
 
+### Phase 5 — docs generated from code or tested against it (2026-08-27)
+
+- **Reference tables are generated** — the CLI index and every flag/subcommand
+  table from each tool's argparse, the hook registry from
+  `core.hooks.dispatch`, the slash-command list from command frontmatter,
+  config keys from the shipped JSON, storage paths by calling the real
+  resolvers, the scribe retention policy from `scribe/policy.py`
+  (`docs/generate_cli_docs.py`, `docs/generate_reference.py`, sentinel
+  blocks `<!-- generated:start/end -->`; `--check` in pre-commit and CI).
+  Tables that cannot be generated are tested instead (`launch.json`
+  defaults, change-map entries, the "not introspectable" list …).
+- **Every documented ```bash block that invokes an apiary CLI runs in CI**
+  with `--help` substituted — 214 invocations checked for a real target,
+  parser, subcommand and flag (`docs/test_doc_examples.py`).
+- `docs/check.py` fails when a doc's `last_verified` predates its last git
+  change, derives the tool list from the tree (3 hard-coded tools → 14) and
+  matches CLI coverage on section headers. A recursion in
+  `check_cli_claims.py --help` (the generator introspected itself) plus a
+  shared `--help` cache took a cold docs pass from 121 s to 4 s.
+- **Change-mapping:** a commit that changes mapped code without its
+  architecture doc is blocked (`docs/change_map.json`, `docs/change_map.py
+  --staged`), waived by a `docs: unchanged` trailer (read by a new
+  `commit-msg` hook — git has not written the message at pre-commit time)
+  or `APIARY_DOCS_UNCHANGED=1`.
+- **Error → todo:** a doc-shaped Bash failure — an unrecognised flag or a
+  missing path the docs still name — files a scribe todo naming `doc:line`,
+  once per session per command, deduplicated across sessions
+  (`core/hooks/context_rule_error_reminder.py`).
+- ~95 stale statements corrected across 23 files: runner artifact paths
+  moved to the state dir, `system-overview.md` and the hook docs rewritten
+  for the dispatcher, the `~/.claude` / `/startup` / `APIARY_STATE_LAYOUT`
+  leftovers removed, four undocumented CLIs documented. The review
+  appendices are marked as dated snapshots pending close-out
+  (T-2026-271).
+
+### Phase 4 — engineering plumbing (2026-08-27)
+
+- **ruff + ruff format.** `E,F,I,PLW1514,S602,S605` at line-length 100
+  (chosen to keep the format pass a format pass — 1,103 lines exceeded 88,
+  268 exceeded 100), gated in CI and on staged files at commit time. All
+  530 findings cleared: dead imports/locals, import order, ambiguous
+  names, one lambda assignment; `E402` (the mandated `sys.path.insert`
+  bootstrap) and `E501` (67 survivors, all single literals/regexes — `ruff
+  format --check` is the real width gate) baselined with the reasoning in
+  `pyproject.toml`. There were zero `open()` calls without an encoding and
+  zero `shell=True` calls to fix. The tree was reformatted in one
+  no-functional-change commit (263 files; suite identical either side).
+  `docs/` is excluded pending its own pass.
+- Runner config defaults now match `runner/config.json` — the harden round
+  count, the detached token cap, three stage timeouts and two stage models
+  had all drifted — pinned by an AST-scanning test. `python -m
+  runner.mark_done` → `runner.ticket mark-done` (shim kept one release);
+  the orchestrator tests no longer write lockfiles into the real
+  `.apiary/runner/locks/`.
+
+- **CI:** first GitHub Actions workflow — ubuntu/windows/macos × Python
+  3.11/3.12 running the suite, both doc checkers, the secret scan and a
+  report-only duplicate check, plus a POSIX job that parses every shell
+  script the Windows dev box never runs. Not yet exercised on a runner.
+- **Packaging:** `pyproject.toml` moves to a PEP 621 `[project]` table and
+  `packages` finally ships captures, compass, researcher, incubator,
+  migrations, scripts and docs — `poetry build` used to fail outright
+  (`refiner is not a package`). `pytest-cov` added report-only;
+  `.gitattributes` gains `* text=auto`.
+- **Tests:** `core/testing.py` gives the install/drift/cascade/uninstall
+  suites one shared git-repo + fake-apiary fixture (those four files: 65 s →
+  28 s); `hermetic_env()` stops a live session's `APIARY_*` /
+  `CLAUDE_PROJECT_DIR` leaking into hook subprocess tests; the Node frontend
+  suites fail instead of skipping under `APIARY_CI=1`.
+- **Versioning (§5a-I, built):** `apiary update` runs the `migrations/`
+  chain in every bootstrapped repo and re-pins it (per step, resumable, one
+  failing repo does not stop the rest, registry lock held); `apiary version
+  --all`; `doctor versions` points at the command that fixes the drift.
+  `RELEASING.md` documents when `VERSION` moves and how to tag `v0.1.0`
+  (not tagged — morning step).
+- **§5a-C(3):** `scripts/check_duplicates.py` — stdlib AST near-duplicate
+  report for function bodies, report-only in CI. First findings: the
+  captures/researcher CLI and store twins (Phase 3.4's sidecar store).
+- `code-style.md` no longer claims "no pytest" or an unqualified stdlib-only
+  rule; restated as what the repo actually does.
+
+### Phase 3 — consolidate (2026-08-27)
+
+- **3.5 scribe split** — the 1,634-line `notes.py` becomes 706 lines of
+  argparse and printing over `scribe/{policy,maintenance,infer,templates,
+  formatting,paths,cli_args}.py`; `core/startup.py`, `core/install.py` and
+  the learnings hook no longer import the CLI module. **The lost-update
+  race is fixed**: every read-modify-write of an index holds the FileLock
+  across the whole operation — a stress test that lost 100 of 100
+  concurrently appended rows before the fix now passes, along with a
+  two-process append test. Bodies are written before their index rows and
+  archive moves use `os.replace`, so a crash mid-write leaves something
+  `repair` rebuilds instead of something it deletes. **Tag inference is off
+  by default** (`--infer` / `--no-infer` / `APIARY_SCRIBE_INFER=1`) — `/wrapup`
+  spawns no `claude -p` per learning any more; `scripts/retrotag_learnings.py`
+  is `notes.py retrotag`. New `backup` / `restore` verbs; the layout check
+  is lazy (nine stats instead of ~45 mkdirs on the PreToolUse hot path). A
+  lock timeout is one line + exit 1 instead of a traceback.
+- **3.6 runner consolidation + the revive programme's first step** — a
+  hermetic end-to-end test (`runner/test_e2e_pipeline.py`) drives all six
+  REAL stages through `python -m runner.run` (interactive and `--detached`)
+  with a fake `claude` on `PATH`, against a temp git repo with a bare
+  origin: artifacts, one branch per run, the run-history row, and that
+  nothing is ever pushed. Then, guarded by it: one branch per run owned by
+  the orchestrator (the executor used to create a second `runner/<uuid>`;
+  the morning queue table now joins by uuid); `validate_plan` resolves
+  paths against the plan's `target_repo`; `detached_lib` git calls require
+  an explicit cwd; the worktree-dir mismatch that made pruning scan an
+  empty dir; failed setups counted against `max_restarts`; `run_lock`
+  keeps a heartbeat; `<usage>` emitted on non-zero exits; `--abort`
+  archives from the state dir; `encoding="utf-8"` on every subprocess;
+  `stage_lib.py` / a finished `git_lib.py` replace five `run_claude`
+  wrappers, five JSON salvagers, two retry loops and six UUID guards; the
+  five ticket CLIs collapse into `python -m runner.ticket` (old entry points
+  are shims for one release); `_run_detached_impl` and three >200-line
+  `main()`s split into named steps (443 → 152, 365 → 55, 285 → 35, 213 →
+  35). `claude` is resolved via `which` (an npm `claude.cmd` used to fail).
+
+- **3.1 One hook dispatcher per event** (`core/hooks/dispatch.py
+  {pre|post|stop|prompt|session-start}`) replaces the 18-entry
+  `settings.json` fan-out: the payload is read once and every relevant hook
+  runs in-process, output merged into one response. The per-repo launcher
+  runs its target with `runpy` instead of a second interpreter. Measured on
+  a throwaway bootstrapped repo: **PreToolUse 1418 ms → 187 ms, PostToolUse
+  335 → 155 ms, 18 → 2 interpreter starts per Bash call**; the permission
+  probe still reports prompts alive and the push gate still blocks. New hook
+  contract `run(payload) -> HookResult | None` — a hook can never vote
+  `allow`; gates return a block reason (deny + exit 2). Failures go to
+  `<repo>/.claude/apiary/hooks.log` (rotated) and never stop the chain. The
+  drift check runs once per session (it was rewriting `self-pointer.json`
+  on every tool call). **Re-bootstrap every registered repo after
+  upgrading** — old registrations keep working through the standalone
+  shims until then.
+- **3.2 One `core/utils/`** — `git_root`, `read_json_object`, `now_iso`,
+  `MAIN_APIARY_UID`, `resolve_state_dir` and the atomic writers are defined
+  once; the 8/5/4/6/6/7 copies across core, scribe, compass, researcher,
+  captures, runner and gui are gone. `resolve_apiary_repo` consults the
+  main-apiary pin before the source tree and resolves a linked worktree to
+  its main checkout (agent worktrees were creating a second registry).
+  `hooks_lib.save_settings` writes `settings.json` atomically (an
+  interrupted install could leave a truncated file with no hooks).
+- **3.3 One frontmatter dialect** — `core/frontmatter.py` replaces five
+  hand-rolled `---` parsers (scribe learnings + templates, researcher,
+  captures, context rules, `docs/check.py`); `researcher/_yaml_mini.py`
+  deleted. Two real bugs fixed by live data: an apostrophe ended an inline
+  list early (mangling the handoff template's `required:` line) and a glob
+  character class closed a list at the wrong bracket. `scripts/
+  migrate_frontmatter.py --check|--apply` parses every file in a state dir
+  with both readers: the live store is 645 files, 0 disagreements. Parity
+  tests fail if any module scans fences by hand again.
+- **3.7 GUI** — `App`'s tab list, active-tab pointer and pending-permission
+  maps are lock-guarded and the active tab is resolved by session id (a
+  double-clicked close could pop the wrong tab); the three transcript-replay
+  copies collapse into `_replay_active()` (a switch no longer loses the
+  agents strip, a reload no longer loses a pending permission banner);
+  `appendMessage`'s reconciliation and the thinking-bubble state machine are
+  extracted into Node-tested modules (`message_reconcile.js`,
+  `thinking_state.js`) and `gui/test_js_suites.py` runs every JS suite from
+  pytest; PyInstaller pinned in a `build` poetry group and the build stamps
+  its commit into `build_info.json` (shown at startup and in the MCP
+  handshake). First tests for `App` and the packaging spec. The `app.js`
+  IIFE split was deliberately not done (no load harness to verify it).
+- **3.8 Harden orchestration in Python** — `harden/orchestrate.py` owns
+  path selection, size cap, cost estimate, prompt assembly, retry/degrade,
+  budget abort, worktree lifecycle and TODO filing; `harden.md` 746 → 110
+  lines (~9.3k → ~1.7k tokens). `compass/capture.py` validates and stores
+  `/wrapup`'s observations (Step 4: 55 → 25 lines). Every `AskUserQuestion`
+  mandate dropped from `/harden`, `/wrapup`, `/refine`. 121 hermetic tests.
+- **3.9 Install correctness** — profile keys are merged into
+  `settings.json` (only `hooks` is apiary-owned; user permissions survive a
+  re-install; withdrawn profile entries are removed); apiary's hook entries
+  carry an explicit `# claude-apiary` mark and `is_apiary_entry` matches only
+  that (a user hook merely naming `runner/` or `scribe/` was deleted on every
+  install); install reconciles the self-pointer with the registry; new
+  `apiary doctor pins [--fix]`; uninstall goes files-first, registry-last and
+  refuses main-apiary; install/uninstall/profile failures exit 1 with one
+  line instead of a traceback.
+- **Compass measurement (§5a-H)** — `compass/evaluate.py` (leave-one-out
+  predictive validity with majority and random baselines; the default path
+  never calls a model, `--model` is behind a cost estimate and `--yes`), a
+  per-session A/B (`compass/config.json` `ab_enabled`, off by default —
+  no behaviour change), `apiary doctor compass`, and
+  `docs/architecture/compass-measurement.md` with a proposed keep/delete
+  rule and review date. Live data: 71 sessions / 408 observations;
+  `personality.md` is 131 days stale — run `/compass-sync` before any A/B.
+
+### Phase 2 — dead weight deleted (2026-08-27, ~7,100 lines net)
+
+Every deletion was grep-verified against the tree by the agent that made it
+and re-verified by a residual-reference sweep; the suite, both doc
+checkers and a full-tree secret scan are green at the end of the phase.
+
+- **core:** the drift mailbox (`core/mailbox.py`, `apiary mailbox`,
+  `doctor mailbox`) — `drift.py` now applies the registry update inline
+  under the lock it already held; zero-caller `targets.py`, `config.py`,
+  `transcript.py`; three dead hooks (`check_install.py`,
+  `check_install_stop.py`, `startup_hook.py`) and the triple
+  `learnings_inject_hook` registration collapsed to one `Edit|Write|Bash`
+  matcher (~10 fewer interpreter starts per Edit/Write/Bash);
+  `launcher_template.render()`, `_APIARY_OWNED_KEYS`, `hook_cmd`'s
+  `~/.claude/apiary_launch.py` mode. The generated launcher now reports a
+  removed hook script as one stderr line and exits 0, so repos bootstrapped
+  before this release degrade quietly until re-bootstrapped — **re-run
+  `apiary install --target <repo>` on every registered repo after
+  upgrading.** First tests that actually execute the generated `launch.py`.
+- **budgeter:** the warning feature (9% precision over 3,717 tasks):
+  `tune.py`, the estimator rule tables and magnitude estimate, the feedback
+  JSONL and `report.py --feedback`, the `budgeter-warn` flag; `[CONT]`
+  chaining and approval inheritance (fired on 11 of 25,027 entries while
+  costing context every session); `predicted_cost`/`warning_fired`/
+  `scope_flags` fields; snapshot helpers; `count_entries`. Old log entries
+  still read. `/budgeter` takes `log` or `session-warn`. The hook tests are
+  hermetic (T-2026-274).
+- **runner:** `usher_order.py` + manifest and its orchestrator wiring (the
+  detached runner selects from the backlog only); six dead helpers and the
+  `overnight.jsonl` double-write (`run_history.jsonl` is the one run log);
+  a no-op validation loop, DEBUG prints, "Chained executor" strings;
+  `runner/cron_setup.md`; 37 stranded April run artifacts. `run_tracker.py`
+  stays — the nightly pipeline reaches it at four sites and the revive
+  programme fixes it rather than deletes it. `cron_health.run_bootstrap_check`
+  (only caller was the deleted `scripts/bootstrap.py`) removed too.
+- **scribe / refiner:** `migrate` and `handoff-sessions` subcommands,
+  `_repo_scribe_dir`, legacy integer / `L<n>` note-ID resolution (the live
+  store has 1,873/1,874 rows on `TYPE-YEAR-seq` ids; the two legacy
+  mentions are prose in archived April handoffs); `refiner/round_counter.py`
+  — `/refine` uses harden's with a `refine-` session prefix.
+- **gui:** `diag_pty.py`, the pty ring buffer, `TranscriptTail.poke`/
+  `on_skip`, the unreachable `ping`/`list_sessions`/`restart_pty`/
+  `set_session_setting` bridge methods, `repo_registry`'s legacy JSON-list
+  fallback, unused imports; the pty-exit toast no longer promises a restart
+  menu that does not exist. Two GUI tests made hermetic (T-2026-274).
+- **scripts / root:** `scripts/bootstrap.py`, `uninstall_hooks.py`,
+  `install_context_rules.py` (+ tests), `audit_portability.py`, `setup.py`;
+  every `MIGRATION-PLAN.md` citation; the README's hand-maintained
+  Repository Structure tree (~40% drifted); `.gitignore` duplicates and
+  dead entries; the phantom `core/apiary_bootstrap.py` doc references;
+  local cruft (`.apiary.pre-migration/` zipped to
+  `D:\Professional\apiary-pre-migration-backup-2026-08-26.zip` before
+  removal).
+- **hooks:** `docs/hooks/pre-commit` resolves the repo root from git; from a
+  linked worktree it used to check — and secret-scan — the *main*
+  checkout's tree.
+
+### Phase 1 — unbreak what was silently broken (2026-08-26)
+
+- **Apiary writes nothing under `~/.claude` — now true.** Session identity
+  and the session history / last-session records live under
+  `<main-apiary>/.repos/<slug>/sessions/` (the launcher's
+  `APIARY_TARGET_STATE_DIR`), once-per-session hook flags under
+  `<repo>/.claude/apiary/session-tmp/` (created by the installer,
+  git-ignored); with neither resolvable the fallback is the OS temp dir,
+  announced once on stderr. The GUI's `bubble_anomalies.jsonl` moves under
+  the GUI state dir too, and `find_state_dir` now reads the live
+  `.claude/apiary/*-pointer.json` pins (the retired `.apiary/pointer` it
+  looked for meant launcher-less callers could never find their state).
+  `core/session.py` used to anchor both at `~/.claude` and grew ~5 stray
+  files per session (review S1). `save_transcript.py` — a Stop hook that
+  runs every turn — no longer crashes on a lock timeout or an unwritable
+  dir (Bug 11). `core/test_session.py` pins the layout; the hook tests
+  point every hook at temp repo/state dirs.
+- The two scheduled tasks (`overnight-runner`, `compass-weekly-synthesis`)
+  had drifted to a bare `python` that does not resolve to the poetry env
+  under Task Scheduler; `cron_health repair --apply` recreated them with
+  the venv interpreter after confirming the registered commands (1.4).
+  Compass synthesis keeps running per §6 (keep, fix, measure).
+- **`/budgeter-log`, `/budgeter-warn`, `/budgeter-session-warn` toggled the
+  wrong file** (`~/.claude/<flag>-enabled`) while the hooks read
+  `<repo>/.claude/apiary/flags/<flag>-enabled` — they reported ON and changed
+  nothing (B4). Replaced by one `/budgeter <log|warn|session-warn>` that
+  shells out to a new `core/flags.py` CLI (`toggle|enable|disable|status
+  <name>`, prints ON/OFF, exit 0/1), so the toggle and the hooks share one
+  code path. Already-bootstrapped repos keep the three stale command files
+  until re-bootstrapped (`apiary install` does not prune — tracked).
+- **`apiary doctor <check> --fix` works.** The console script never declared
+  `--fix`, so the one remediation the docs and doctor's own messages point at
+  exited 2. `core/cli.py` gets its first tests (29) — every verb's argv, and
+  the `--fix` seam through the real `doctor.main`.
+- `docs/check_cli_claims.py` reconciles console scripts (`CONSOLE_SCRIPTS`
+  maps `apiary` → `core/cli.py`), so the `apiary` section is checked like
+  every other tool; its cli-tools.md section was rewritten to match
+  (Subcommands/Flags tables, the missing `doctor stale`, a first-run
+  prompt / `--force` narrative that never existed removed). The checker now
+  also runs in the docs pre-commit hook next to `docs/check.py`
+  (re-run `python scripts/install_repo_hooks.py` to pick it up).
+- **Scribe: mutations on archived notes actually write now.** `update_note`
+  searches the year's `archive/` index when the active index misses, and
+  `done`/`drop`/`defer`/`resume`/`update` exit 1 instead of printing false
+  success. Done notes auto-archive one day after being *marked* done
+  (`status_changed_at`), not one day after creation. `list` no longer
+  archives as a side effect — that sweep is the new `notes.py tidy` — and
+  `notes.py mark-reviewed` stamps the learnings review marker that
+  `/review-learnings` was writing to the wrong directory (`/notes learning`
+  → `learnings` fixed too).
+- **Scribe note templates, one per type (§5a-B, option C).** Bootstrap seeds
+  `<state-dir>/scribe/templates/` from `scribe/default_templates/`, never
+  overwriting. `handoff`, `decision` and `blocker` enforce their required
+  sections on `add` (handoff matches `/wrapup`'s structure, pinned by a
+  test); the other five types are guidance only. The `--ack-template` hash
+  handshake is gone — one check, one attempt, `--force` bypasses and logs
+  what it skipped. Existing notes are never validated or rewritten.
+- **`researcher/_yaml_mini` corrupted frontmatter on every read.** `dumps`
+  quoted ambiguous values but `loads` never unquoted them, and any `#`
+  started a comment, so `/research verify` (load → mutate → dump) degraded
+  any title with a colon or URL with a fragment, compounding each pass.
+  Quotes are now unquoted only when symmetric, `#` opens a comment only at
+  line start or after whitespace; round-trip tests cover the failing inputs.
+  Captures inherits the fix.
+- **Incubator no longer passes the `/refine` spec on argv** (B9): it stages
+  the body to a temp file and uses `scribe/notes.py --content-file` (now on
+  `learn` too), so multi-kilobyte specs migrate instead of dying at the
+  Windows command-line cap. Spawn's git/scribe `OSError`s are reported (exit
+  5) not raised; the partial-failure recovery hint says "close the original"
+  instead of duplicating the spec (B10); spawned-repo templates drop the
+  crashing `report.py --since 7d` example and the dead `.apiary/` gitignore
+  rules.
+- **Runner: the monolithic executor stamps `schema_version`** on its artifact
+  and asserts the plan's, so stage 5 no longer rejects everything stage 4
+  produced. Stage 4's default flips back to the per-step `executor`:
+  `executor.mode` was introduced 2026-04-14, one day after the last
+  runner-produced commit, so the monolithic path has never completed a run.
+  A test drives stage 4 into `auto_harden.main` over a real temp repo.
+- **Compass:** `backfill.py` stamps `captured_at` from the transcript's mtime
+  instead of the backfill time (restoring the recency ordering synthesis
+  weights on); `synthesize.py` caps its prompt at the 50 most recent sessions
+  (`--max-sessions`, 0 = no cap) and writes `personality.md` atomically. The
+  tmp+replace helper is now shared as `core/utils/atomic.py` with budgeter's
+  two copies pointed at it (four more copies remain for Phase 3).
+
 ### Runner never pushes, never sweeps, never runs unbounded (2026-08-26)
 
 Review runner Bug 9 and the permissions note.

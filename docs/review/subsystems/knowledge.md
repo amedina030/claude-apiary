@@ -7,6 +7,8 @@ framework_version: "1.0"
 last_verified: 2026-08-26
 ---
 
+> **Snapshot of 2026-08-26; superseded by the remediation — see CHANGELOG. Deleted at close-out (T-2026-271).**
+
 # Review: knowledge and memory cluster (scribe, compass, researcher, captures, refiner)
 
 Read-only review of `D:\Professional\claude-apiary` at `1bee5e5` (master). Every non-test `.py` in the cluster was read in full; every `commands/*.md` in the cluster plus `core/commands/wrapup.md` and `core/commands/apiary-context.md` (the skills that actually drive these tools) was read; tests were skimmed and run. Claims below were verified by reading the code or by running throwaway probes against `tempfile` state — never against the user's real `.repos/` state (only `ls`/`grep` was used there).

@@ -14,6 +14,7 @@ from typing import Optional
 
 def _user32():
     import ctypes
+
     return ctypes.windll.user32
 
 

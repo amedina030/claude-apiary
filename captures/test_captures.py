@@ -1,13 +1,14 @@
 """Tests for the captures subsystem.
 
 Each test isolates state to a fresh ``tempfile.TemporaryDirectory()`` by
-monkey-patching ``store._git_repo_root`` to return the temp path. This
-keeps tests off real user data and avoids depending on git being runnable.
+monkey-patching the shared ``core.utils.state.git_root`` resolver to return
+the temp path. This keeps tests off real user data and avoids depending on
+git being runnable.
 """
+
 from __future__ import annotations
 
 import io
-import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -16,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from captures import cli, store
-from researcher import _yaml_mini
+from core import frontmatter
 
 # Smallest possible valid PNG — 1x1 transparent pixel.
 PNG_1X1 = bytes.fromhex(
@@ -35,9 +36,9 @@ def _make_png(path: Path) -> None:
 class CapturesTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp_path = Path(self._tmp.name)
+        self.tmp_path = Path(self._tmp.name).resolve()
         self._patch = mock.patch(
-            "captures.store._git_repo_root",
+            "core.utils.state.git_root",
             return_value=self.tmp_path,
         )
         self._patch.start()
@@ -69,10 +70,15 @@ class TestAdd(CapturesTestCase):
         self._seed_tags("gui-iteration")
         src = self._seed_image()
         code, out, _err = self._run_cli(
-            "add", "gui", str(src),
-            "--title", "Toolbar v3 dense",
-            "--tags", "gui-iteration",
-            "--context", "First attempt at dense toolbar.",
+            "add",
+            "gui",
+            str(src),
+            "--title",
+            "Toolbar v3 dense",
+            "--tags",
+            "gui-iteration",
+            "--context",
+            "First attempt at dense toolbar.",
         )
         self.assertEqual(code, 0)
         image = self.tmp_path / ".apiary/captures/gui/toolbar-v3-dense.png"
@@ -99,8 +105,11 @@ class TestAdd(CapturesTestCase):
         self._seed_tags()
         src = self._seed_image()
         code, _out, _err = self._run_cli(
-            "add", "gui", str(src),
-            "--title", "Move test",
+            "add",
+            "gui",
+            str(src),
+            "--title",
+            "Move test",
             "--move",
         )
         self.assertEqual(code, 0)
@@ -112,9 +121,13 @@ class TestAdd(CapturesTestCase):
         self._seed_tags("gui-iteration")
         src = self._seed_image()
         code, _out, err = self._run_cli(
-            "add", "gui", str(src),
-            "--title", "Has bad tag",
-            "--tags", "nope",
+            "add",
+            "gui",
+            str(src),
+            "--title",
+            "Has bad tag",
+            "--tags",
+            "nope",
         )
         self.assertEqual(code, cli.EXIT_VALIDATION)
         self.assertIn("unknown tag", err)
@@ -126,8 +139,11 @@ class TestAdd(CapturesTestCase):
         bogus = self.src_dir / "shot.tiff"
         bogus.write_bytes(b"not a png")
         code, _out, err = self._run_cli(
-            "add", "gui", str(bogus),
-            "--title", "Bad ext",
+            "add",
+            "gui",
+            str(bogus),
+            "--title",
+            "Bad ext",
         )
         self.assertEqual(code, cli.EXIT_VALIDATION)
         self.assertIn("unsupported image extension", err)
@@ -135,8 +151,11 @@ class TestAdd(CapturesTestCase):
     def test_add_nonexistent_source_rejected(self) -> None:
         self._seed_tags()
         code, _out, err = self._run_cli(
-            "add", "gui", "/does/not/exist.png",
-            "--title", "Ghost",
+            "add",
+            "gui",
+            "/does/not/exist.png",
+            "--title",
+            "Ghost",
         )
         self.assertEqual(code, cli.EXIT_VALIDATION)
         self.assertIn("image not found", err)
@@ -145,13 +164,21 @@ class TestAdd(CapturesTestCase):
         self._seed_tags()
         src = self._seed_image()
         code, _out, _err = self._run_cli(
-            "add", "gui", str(src), "--title", "Same title",
+            "add",
+            "gui",
+            str(src),
+            "--title",
+            "Same title",
         )
         self.assertEqual(code, 0)
         # Second add with same title/topic must fail even with different source.
         src2 = self._seed_image("second.png")
         code, _out, err = self._run_cli(
-            "add", "gui", str(src2), "--title", "Same title",
+            "add",
+            "gui",
+            str(src2),
+            "--title",
+            "Same title",
         )
         self.assertEqual(code, cli.EXIT_VALIDATION)
         self.assertIn("already exists", err)
@@ -160,15 +187,18 @@ class TestAdd(CapturesTestCase):
         self._seed_tags()
         src = self._seed_image()
         code, _out, _err = self._run_cli(
-            "add", "gui", str(src),
-            "--title", "With refs",
-            "--session-id", "abcd1234",
-            "--related", "T-2026-209,C-2026-42",
+            "add",
+            "gui",
+            str(src),
+            "--title",
+            "With refs",
+            "--session-id",
+            "abcd1234",
+            "--related",
+            "T-2026-209,C-2026-42",
         )
         self.assertEqual(code, 0)
-        fm, _ = store.parse_sidecar(
-            self.tmp_path / ".apiary/captures/gui/with-refs.md"
-        )
+        fm, _ = store.parse_sidecar(self.tmp_path / ".apiary/captures/gui/with-refs.md")
         self.assertEqual(fm["session_id"], "abcd1234")
         self.assertEqual(fm["related_notes"], ["T-2026-209", "C-2026-42"])
 
@@ -177,7 +207,11 @@ class TestAdd(CapturesTestCase):
         src = self.src_dir / "Shot.JPG"
         src.write_bytes(PNG_1X1)  # content doesn't matter for ingestion
         code, _out, _err = self._run_cli(
-            "add", "gui", str(src), "--title", "Caps",
+            "add",
+            "gui",
+            str(src),
+            "--title",
+            "Caps",
         )
         self.assertEqual(code, 0)
         dest = self.tmp_path / ".apiary/captures/gui/caps.jpg"
@@ -188,17 +222,26 @@ class TestFind(CapturesTestCase):
     def _add(self, topic: str, title: str, tags: str = "", context: str = "") -> None:
         src = self._seed_image(f"{store.slugify(title)}.png")
         self._run_cli(
-            "add", topic, str(src), "--title", title,
+            "add",
+            topic,
+            str(src),
+            "--title",
+            title,
             *(["--tags", tags] if tags else []),
             *(["--context", context] if context else []),
         )
 
     def test_find_ranks_title_matches_highest(self) -> None:
         self._seed_tags("gui-iteration", "ue-viewport")
-        self._add("gui", "Toolbar redesign", tags="gui-iteration",
-                  context="a screenshot with the word toolbar inside")
-        self._add("ue", "Viewport shot", tags="ue-viewport",
-                  context="mentions toolbar once in passing")
+        self._add(
+            "gui",
+            "Toolbar redesign",
+            tags="gui-iteration",
+            context="a screenshot with the word toolbar inside",
+        )
+        self._add(
+            "ue", "Viewport shot", tags="ue-viewport", context="mentions toolbar once in passing"
+        )
         code, out, _err = self._run_cli("find", "toolbar")
         self.assertEqual(code, 0)
         # Title match should appear before body-only match.
@@ -227,11 +270,9 @@ class TestList(CapturesTestCase):
     def test_list_groups_by_topic_and_filters(self) -> None:
         self._seed_tags("gui-iteration", "ue-viewport")
         src = self._seed_image("a.png")
-        self._run_cli("add", "gui", str(src), "--title", "GUI shot",
-                      "--tags", "gui-iteration")
+        self._run_cli("add", "gui", str(src), "--title", "GUI shot", "--tags", "gui-iteration")
         src2 = self._seed_image("b.png")
-        self._run_cli("add", "ue", str(src2), "--title", "UE shot",
-                      "--tags", "ue-viewport")
+        self._run_cli("add", "ue", str(src2), "--title", "UE shot", "--tags", "ue-viewport")
         code, out, _err = self._run_cli("list")
         self.assertEqual(code, 0)
         self.assertIn("## gui", out)
@@ -310,10 +351,8 @@ class TestStore(CapturesTestCase):
 
     def test_read_tags_raises_on_non_list_root(self) -> None:
         store.ensure_layout()
-        store.tags_file().write_text(
-            "tags: not_a_list\n", encoding="utf-8"
-        )
-        with self.assertRaises(_yaml_mini.YamlParseError):
+        store.tags_file().write_text("tags: not_a_list\n", encoding="utf-8")
+        with self.assertRaises(frontmatter.FrontmatterError):
             store.read_tags()
 
 

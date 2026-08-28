@@ -13,30 +13,37 @@ Output:
 Usage:
     executor.py <path_to_plan.json>
 """
+
 import argparse
 import json
-import os
+import re
 import shlex
 import subprocess
 import sys
 from pathlib import Path
 
 from .config_loader import get as cfg
-# Eager-import claude_subprocess (and transitively cost_emit) at module top.
-# These modules MUST be resolved while the working tree is still on the
-# parent branch (typically master). If we let run_claude() do a deferred
-# import, Python loads the source AFTER executor.main() has done
-# `git checkout runner/<uuid>`, which silently picks up whatever older
-# copies happen to live on the runner branch and shadows every fix we
-# ship on master. Loading them now caches the master versions in
-# sys.modules so all later calls use them regardless of working-tree state.
-from .claude_subprocess import run_claude as _spawn_claude
 from .schema_versions import (
     EXECUTION_SCHEMA_VERSION,
     PLAN_SCHEMA_VERSION,
     assert_schema_version,
 )
 
+# Eager-import stage_lib (and transitively claude_subprocess / cost_emit) at
+# module top. These modules MUST be resolved while the working tree is still
+# on the parent branch (typically master). If we let run_claude() do a
+# deferred import, Python loads the source AFTER executor.main() has done
+# `git checkout runner/<uuid>`, which silently picks up whatever older
+# copies happen to live on the runner branch and shadows every fix we
+# ship on master. Loading them now caches the master versions in
+# sys.modules so all later calls use them regardless of working-tree state.
+from .stage_lib import (
+    check_uuid_safe,
+    extract_json,
+)
+from .stage_lib import (
+    run_claude as _spawn_claude,
+)
 from .target_repo import executions_dir
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -56,19 +63,20 @@ class NoChangesError(RuntimeError):
 
 # -- Git helpers (#253: shared via runner/git_lib.py) --
 
-from .git_lib import git, format_git_error as _format_git_error
+from core.utils.atomic import write_json_atomic
 
-
-def branch_exists(branch: str) -> bool:
-    # ATK-006: check refs/heads/ explicitly so remote tracking refs don't match
-    result = git("rev-parse", "--verify", f"refs/heads/{branch}")
-    return result.returncode == 0
-
-
-def create_branch(branch: str):
-    result = git("checkout", "-b", branch)
-    if result.returncode != 0:
-        raise RuntimeError(_format_git_error(f"creating branch '{branch}'", result))
+from .git_lib import (
+    branch_exists,
+    create_branch,
+    git,
+    run_branch_from_env,
+)
+from .git_lib import (
+    current_branch as get_current_branch,
+)
+from .git_lib import (
+    format_git_error as _format_git_error,
+)
 
 
 def assert_files_clean(files: list[str]):
@@ -143,7 +151,9 @@ def _norm_rel(path: str) -> str:
 
 
 def assert_no_unexpected_writes(
-    pre: set, post: set, expected_files: list,
+    pre: set,
+    post: set,
+    expected_files: list,
 ):
     """Raise if the step wrote to any path not listed in step.files (#236).
 
@@ -216,9 +226,7 @@ def _assert_action_matches_staged(action: str, files: list):
         code = parts[0][:1]
         path = parts[-1] if len(parts) > 1 else line
         if code not in allowed:
-            mismatches.append(
-                f"{path}: staged as '{code}' but action is '{action}'"
-            )
+            mismatches.append(f"{path}: staged as '{code}' but action is '{action}'")
     if mismatches:
         raise RuntimeError(
             f"Step action '{action}' does not match the staged changes: "
@@ -275,16 +283,44 @@ def commit_files(files: list, message: str, action: str = ""):
         _assert_action_matches_staged(action, files)
     result = git("commit", "-m", message)
     if result.returncode != 0:
-        raise RuntimeError(_format_git_error(
-            "committing",
-            result,
-            extra=f"staged files: {', '.join(files)}",
-        ))
+        raise RuntimeError(
+            _format_git_error(
+                "committing",
+                result,
+                extra=f"staged files: {', '.join(files)}",
+            )
+        )
 
 
-def get_current_branch() -> str:
-    result = git("rev-parse", "--abbrev-ref", "HEAD")
-    return result.stdout.strip()
+def _ensure_on_branch(branch: str) -> tuple[str, bool]:
+    """Put the working tree on *branch*. Returns (previous branch, switched).
+
+    Three cases, in order of how the runner actually reaches them:
+      * already on it (detached mode — the orchestrator created the worktree
+        on this branch): do nothing, so there is no second branch and no
+        branch to restore on abort;
+      * it exists (a resumed run): check it out;
+      * it does not exist (interactive first run): create it.
+
+    Exits the process on a git failure, since nothing downstream is safe once
+    the working tree is on the wrong branch.
+    """
+    original_branch = get_current_branch()
+    if original_branch == branch:
+        return original_branch, False
+    if branch_exists(branch):
+        print(f"Branch {branch} already exists, checking out", file=sys.stderr)
+        result = git("checkout", branch)
+        if result.returncode != 0:
+            print(_format_git_error(f"checking out branch '{branch}'", result), file=sys.stderr)
+            sys.exit(1)
+    else:
+        try:
+            create_branch(branch)
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(1)
+    return original_branch, True
 
 
 _NON_COMMITTING_ACTIONS = frozenset({"test", "verify"})
@@ -303,11 +339,9 @@ def persist_execution_log(log_path: Path, execution_log: dict):
 
     The atomic-write pattern (write to .tmp, os.replace) ensures the
     log file is never partially written even if the process dies
-    mid-flush.
+    mid-flush. ``core.utils.atomic`` owns that pattern.
     """
-    tmp = log_path.with_suffix(log_path.suffix + ".tmp")
-    tmp.write_text(json.dumps(execution_log, indent=2), encoding="utf-8")
-    os.replace(tmp, log_path)
+    write_json_atomic(log_path, execution_log, indent=2)
 
 
 def validate_resume_state(
@@ -443,9 +477,7 @@ def verify_post_conditions(step: dict, repo_root: Path) -> list:
         elif ctype in ("file_contains", "file_lacks"):
             text = cond.get("text", "")
             if not target.exists():
-                failures.append(
-                    f"[{j}] {ctype}: '{fpath}' does not exist (cannot check text)"
-                )
+                failures.append(f"[{j}] {ctype}: '{fpath}' does not exist (cannot check text)")
                 continue
             try:
                 body = target.read_text(encoding="utf-8")
@@ -454,14 +486,10 @@ def verify_post_conditions(step: dict, repo_root: Path) -> list:
                 continue
             present = text in body
             if ctype == "file_contains" and not present:
-                failures.append(
-                    f"[{j}] file_contains: '{fpath}' missing expected text "
-                    f"{text!r}"
-                )
+                failures.append(f"[{j}] file_contains: '{fpath}' missing expected text {text!r}")
             elif ctype == "file_lacks" and present:
                 failures.append(
-                    f"[{j}] file_lacks: '{fpath}' still contains forbidden "
-                    f"text {text!r}"
+                    f"[{j}] file_lacks: '{fpath}' still contains forbidden text {text!r}"
                 )
     return failures
 
@@ -488,7 +516,7 @@ def files_touched_by_prior_steps(uuid: str, files: list) -> dict:
         for line in result.stdout.splitlines():
             if not line.startswith(prefix):
                 continue
-            rest = line[len(prefix):]
+            rest = line[len(prefix) :]
             num_str = rest.split(":", 1)[0].strip()
             try:
                 touched[file].append(int(num_str))
@@ -520,7 +548,7 @@ def get_completed_step_numbers(uuid: str) -> set:
     for line in result.stdout.splitlines():
         if not line.startswith(prefix):
             continue
-        rest = line[len(prefix):]
+        rest = line[len(prefix) :]
         num_str = rest.split(":", 1)[0].strip()
         try:
             completed.add(int(num_str))
@@ -530,6 +558,7 @@ def get_completed_step_numbers(uuid: str) -> set:
 
 
 # -- Topological sort --
+
 
 def topo_sort(steps: list[dict]) -> list[dict]:
     """Sort steps by dependency order (topological sort)."""
@@ -556,6 +585,7 @@ def topo_sort(steps: list[dict]) -> list[dict]:
 
 # -- Step execution --
 
+
 def build_step_prompt(step: dict, spec: dict, retry_hint: str = "") -> str:
     """Build the prompt for a create/modify/delete step.
 
@@ -581,17 +611,23 @@ def build_step_prompt(step: dict, spec: dict, retry_hint: str = "") -> str:
 
     action = step.get("action", "")
     if action == "create":
-        parts.append("Create the file(s) listed above with the implementation described in the code specification.")
+        parts.append(
+            "Create the file(s) listed above with the implementation described in the code specification."
+        )
     elif action == "modify":
-        parts.append("Read the existing file(s) listed above and apply the changes described in the code specification.")
+        parts.append(
+            "Read the existing file(s) listed above and apply the changes described in the code specification."
+        )
     elif action == "delete":
         parts.append("Delete the file(s) listed above as described in the code specification.")
 
-    parts.extend([
-        "",
-        "Write the actual code — not pseudocode, not explanations. Just implement it.",
-        "Use the existing codebase patterns and conventions.",
-    ])
+    parts.extend(
+        [
+            "",
+            "Write the actual code — not pseudocode, not explanations. Just implement it.",
+            "Use the existing codebase patterns and conventions.",
+        ]
+    )
 
     if retry_hint:
         parts.extend(["", retry_hint])
@@ -601,122 +637,79 @@ def build_step_prompt(step: dict, spec: dict, retry_hint: str = "") -> str:
 
 def build_verify_prompt(step: dict, spec: dict) -> str:
     """Build the prompt for a verify step."""
-    return "\n".join([
-        f"You are verifying step {step['step_number']} of a plan.",
-        "",
-        f"## Verification: {step['description']}",
-        "",
-        f"## What to check",
-        step.get("code_spec", ""),
-        "",
-        "## Instructions",
-        "",
-        "Read the relevant files and confirm whether the acceptance criterion is met.",
-        "Output ONLY a JSON object: {\"passed\": true/false, \"explanation\": \"brief reason\"}",
-    ])
+    return "\n".join(
+        [
+            f"You are verifying step {step['step_number']} of a plan.",
+            "",
+            f"## Verification: {step['description']}",
+            "",
+            "## What to check",
+            step.get("code_spec", ""),
+            "",
+            "## Instructions",
+            "",
+            "Read the relevant files and confirm whether the acceptance criterion is met.",
+            'Output ONLY a JSON object: {"passed": true/false, "explanation": "brief reason"}',
+        ]
+    )
 
 
 def parse_verify_output(stdout: str) -> dict:
     """Parse a verify step's Claude Code output into a {passed, explanation} dict.
 
-    Handles every envelope shape the runner has actually seen (#252):
-    - Bare JSON object: {"passed": true, "explanation": "..."}
-    - Claude Code envelope: {"result": "<inner text>"} — inner is then parsed
-    - Markdown-fenced JSON: ```json\\n{...}\\n``` or ```\\n{...}\\n```
-    - JSON embedded in prose: "Here's the result: {...}"
-    - Combination: envelope → inner prose → fenced JSON
-    - Anything unparseable falls through to {"passed": False, "explanation": "Unparseable output"}
-
-    Extracted from execute_step for unit testability — the parser used
-    to be inlined, which meant none of its branches had coverage and a
-    silent regression could break every verify step across every plan.
+    Every envelope shape the runner has actually seen (#252) — bare JSON, the
+    Claude Code ``{"result": ...}`` envelope, markdown fences (closed or not),
+    JSON embedded in prose, and combinations — is handled by the one shared
+    salvager in ``stage_lib``. Anything that does not yield an object with a
+    ``passed`` key falls through to a failed verdict rather than guessing.
     """
-    verify = {"passed": False, "explanation": "Unparseable output"}
     try:
-        envelope = json.loads(stdout)
-        if isinstance(envelope, dict) and "result" in envelope:
-            text = envelope["result"].strip()
-        elif isinstance(envelope, dict) and "passed" in envelope:
-            return envelope
-        else:
-            text = stdout.strip()
-
-        # Strip markdown code fences if present.
-        if text.startswith("```"):
-            lines = text.splitlines()
-            if lines and lines[-1].strip() == "```":
-                lines = lines[1:-1]
-            else:
-                lines = lines[1:]
-            text = "\n".join(lines).strip()
-        # Find first { and last } to extract JSON from prose.
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end > start:
-            try:
-                parsed = json.loads(text[start:end + 1])
-                if isinstance(parsed, dict) and "passed" in parsed:
-                    verify = parsed
-            except json.JSONDecodeError:
-                pass
+        parsed = extract_json(stdout, require_keys=("passed",), allow_list=False)
     except (json.JSONDecodeError, TypeError):
-        # stdout is not JSON at all — fall through and try to find a
-        # raw JSON blob in the prose.
-        text = stdout.strip() if isinstance(stdout, str) else ""
-        if text.startswith("```"):
-            lines = text.splitlines()
-            if lines and lines[-1].strip() == "```":
-                lines = lines[1:-1]
-            else:
-                lines = lines[1:]
-            text = "\n".join(lines).strip()
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end > start:
-            try:
-                parsed = json.loads(text[start:end + 1])
-                if isinstance(parsed, dict) and "passed" in parsed:
-                    verify = parsed
-            except json.JSONDecodeError:
-                pass
-    return verify
+        parsed = None
+    if isinstance(parsed, dict) and "passed" in parsed:
+        return parsed
+    return {"passed": False, "explanation": "Unparseable output"}
 
 
 def run_claude(prompt: str, model: str) -> tuple[int, str, str]:
     """Run Claude Code subprocess with the specified model."""
-    return _spawn_claude(prompt, timeout=cfg("executor", "timeout", 300), model=model)
+    return _spawn_claude(prompt, timeout=cfg("executor", "timeout", 900), model=model)
 
 
 def run_test_command(code_spec: str) -> tuple[bool, str]:
     """Execute a test command from code_spec. Returns (passed, output)."""
     command = code_spec.strip()
     if not command:
-        return False, 'No test command in code_spec'
+        return False, "No test command in code_spec"
     # Handle 'cd <dir> && <real_command>' — planners emit this for worktree
     # paths, but we can't use shell=True. Extract cwd and run the rest.
     cwd = None
-    import re as _re
-    cd_match = _re.match(r'^cd\s+(\S+)\s*&&\s*(.+)$', command)
+    cd_match = re.match(r"^cd\s+(\S+)\s*&&\s*(.+)$", command)
     if cd_match:
         cwd = cd_match.group(1)
         command = cd_match.group(2).strip()
     try:
         argv = shlex.split(command)
     except ValueError as e:
-        return False, f'could not parse test command: {e}'
+        return False, f"could not parse test command: {e}"
     if not argv:
-        return False, 'No test command in code_spec'
+        return False, "No test command in code_spec"
     try:
         result = subprocess.run(
             argv,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=120,
             cwd=cwd,
         )
     except (FileNotFoundError, NotADirectoryError, OSError) as e:
-        return False, f'test command not found: {argv[0]} — code_spec must be a single command starting with an executable on PATH ({e})'
-    output = (result.stdout or '') + (result.stderr or '')
+        return (
+            False,
+            f"test command not found: {argv[0]} — code_spec must be a single command starting with an executable on PATH ({e})",
+        )
+    output = (result.stdout or "") + (result.stderr or "")
     return result.returncode == 0, output.strip()
 
 
@@ -758,7 +751,9 @@ def execute_step(step: dict, spec: dict, model: str, retry_hint: str = "") -> di
                 rc, stdout, stderr = run_claude(prompt, model)
                 result["transcript"] = {"stdout": stdout, "stderr": stderr, "rc": rc}
                 if rc != 0:
-                    result["error"] = f"Claude Code error (attempt {attempt}): {stderr.strip()[:500]}"
+                    result["error"] = (
+                        f"Claude Code error (attempt {attempt}): {stderr.strip()[:500]}"
+                    )
                     # -1 = subprocess timeout, -2 = binary not found / permission denied.
                     # Both are deterministic failures — retrying with identical settings
                     # is guaranteed to waste tokens, so abort the retry loop now.
@@ -775,7 +770,9 @@ def execute_step(step: dict, spec: dict, model: str, retry_hint: str = "") -> di
                     result["error"] = None
                     return result
                 else:
-                    result["error"] = f"Verify failed (attempt {attempt}): {verify.get('explanation', 'unknown')}"
+                    result["error"] = (
+                        f"Verify failed (attempt {attempt}): {verify.get('explanation', 'unknown')}"
+                    )
 
             else:
                 # create/modify/delete
@@ -783,7 +780,9 @@ def execute_step(step: dict, spec: dict, model: str, retry_hint: str = "") -> di
                 rc, stdout, stderr = run_claude(prompt, model)
                 result["transcript"] = {"stdout": stdout, "stderr": stderr, "rc": rc}
                 if rc != 0:
-                    result["error"] = f"Claude Code error (attempt {attempt}): {stderr.strip()[:500]}"
+                    result["error"] = (
+                        f"Claude Code error (attempt {attempt}): {stderr.strip()[:500]}"
+                    )
                     # -1 = subprocess timeout, -2 = binary not found / permission denied.
                     # Both are deterministic failures — retrying with identical settings
                     # is guaranteed to waste tokens, so abort the retry loop now.
@@ -805,79 +804,46 @@ def execute_step(step: dict, spec: dict, model: str, retry_hint: str = "") -> di
     return result
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Executor — runner stage 4")
-    parser.add_argument("plan", help="Path to plan JSON file")
-    args = parser.parse_args()
+def load_plan(plan_path: Path) -> tuple:
+    """Read and gate the plan artifact. Returns ``(plan, uuid)``.
 
-    # Read plan
-    plan_path = Path(args.plan)
+    Exits 1 on a missing file, invalid JSON, a schema-version mismatch, a plan
+    the validator rejected, or a uuid that is not a safe filename component.
+    """
     if not plan_path.exists():
-        print(f"Plan file not found: {args.plan}", file=sys.stderr)
+        print(f"Plan file not found: {plan_path}", file=sys.stderr)
         sys.exit(1)
-
     try:
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         print(f"Invalid plan JSON: {e}", file=sys.stderr)
         sys.exit(1)
-
     try:
         assert_schema_version(plan, "plan", PLAN_SCHEMA_VERSION)
     except ValueError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
-
     if not plan.get("valid", False):
         print("Plan is not valid -- cannot execute invalid plan", file=sys.stderr)
         sys.exit(1)
-
-    uuid = plan.get("uuid", plan_path.stem)
-
     # ATK-005: validate uuid from plan JSON to prevent path traversal
-    if not isinstance(uuid, str):
-        print("Plan uuid field is not a string", file=sys.stderr)
+    try:
+        uuid = check_uuid_safe(plan.get("uuid", plan_path.stem), "Plan uuid")
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
         sys.exit(1)
-    uuid = uuid.strip()
-    if (
-        not uuid
-        or "\\" in uuid
-        or "\x00" in uuid
-        or uuid in (".", "..")
-        or Path(uuid) != Path(Path(uuid).name)
-        or not Path(uuid).name
-    ):
-        print("Plan uuid field contains invalid characters (path separators not allowed)", file=sys.stderr)
-        sys.exit(1)
+    return plan, uuid
 
-    default_model = plan.get("executor_model", "sonnet")
-    spec = plan.get("spec", {})
-    steps = plan.get("steps", [])
-    branch = f"runner/{uuid}"
 
-    # Remember original branch to return to on error
-    original_branch = get_current_branch()
+def prepare_resume(uuid: str, sorted_steps: list, log_path: Path) -> tuple:
+    """Reconcile git history with the previous execution log before resuming.
 
-    # Check out existing branch or create new one
-    if branch_exists(branch):
-        print(f"Branch {branch} already exists, checking out", file=sys.stderr)
-        result = git("checkout", branch)
-        if result.returncode != 0:
-            print(_format_git_error(f"checking out branch '{branch}'", result), file=sys.stderr)
-            sys.exit(1)
-    else:
-        try:
-            create_branch(branch)
-        except RuntimeError as e:
-            print(str(e), file=sys.stderr)
-            sys.exit(1)
-
-    # Sort steps by dependency order
-    sorted_steps = topo_sort(steps)
-
-    # Detect steps already committed on the branch (resume path). Git is
-    # authoritative because it is the actual record of what landed; the
-    # execution log is derivative and gets overwritten on each run.
+    Returns ``(completed_step_numbers, previous_entries)``. Git is
+    authoritative — it is the record of what landed — and the log is
+    derivative metadata for steps that never commit. Exits 1 when the two
+    disagree (#242): resume behaviour would be undefined, so the operator
+    reconciles by hand.
+    """
     completed_step_numbers = get_completed_step_numbers(uuid)
     if completed_step_numbers:
         print(
@@ -885,31 +851,202 @@ def main():
             f"step(s): {sorted(completed_step_numbers)}",
             file=sys.stderr,
         )
-
-    # Execute
-    EXECUTIONS_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = EXECUTIONS_DIR / f"{uuid}.json"
-
-    # Read prior execution log (if any) BEFORE we start writing the new one.
-    # The map lets us preserve verify/test step status from previous runs,
-    # which git log can't recover because verify/test steps don't commit.
+    # Read the prior log BEFORE we start writing the new one: it is the only
+    # source for verify/test step status, which git log cannot recover.
     previous_entries = load_previous_log(log_path)
-
-    # #242: cross-validate git commits against the previous execution log
-    # before resuming. Disagreement means history was rewritten or a
-    # hand-fix commit landed between runs — either way resume behavior
-    # would be undefined, so abort and ask the operator to reconcile.
     resume_errors = validate_resume_state(
-        completed_step_numbers, previous_entries, sorted_steps,
+        completed_step_numbers,
+        previous_entries,
+        sorted_steps,
     )
     if resume_errors:
         print(
-            "Resume state inconsistent — refusing to proceed:\n  "
-            + "\n  ".join(resume_errors),
+            "Resume state inconsistent — refusing to proceed:\n  " + "\n  ".join(resume_errors),
             file=sys.stderr,
         )
         sys.exit(1)
+    return completed_step_numbers, previous_entries
 
+
+def _carried_forward_entry(step: dict, previous_entries: dict) -> dict:
+    """The log entry for a step whose commit is already on the branch.
+
+    Prefers the previous run's richer entry (real files_changed, timing) over
+    a bland stub; re-running the step would produce "nothing to commit" and
+    abort the run.
+    """
+    note = "carried forward from previous run (commit on branch)"
+    prior = previous_entries.get(step["step_number"])
+    if isinstance(prior, dict) and prior.get("status") == "passed":
+        return dict(prior, note=note)
+    return {
+        "step_number": step["step_number"],
+        "status": "passed",
+        "files_changed": step.get("files", []),
+        "error": None,
+        "note": note,
+    }
+
+
+def _mark_remaining_skipped(
+    execution_log: dict, sorted_steps: list, after: int | None = None
+) -> None:
+    """Append 'Runner aborted' entries for the steps that will never run.
+
+    ``after`` marks everything with a higher step_number; without it, every
+    step that has no entry yet.
+    """
+    if after is None:
+        logged = {s["step_number"] for s in execution_log["steps"]}
+        remaining = [s for s in sorted_steps if s["step_number"] not in logged]
+    else:
+        remaining = [s for s in sorted_steps if s["step_number"] > after]
+    for step in remaining:
+        execution_log["steps"].append(
+            {
+                "step_number": step["step_number"],
+                "status": "skipped",
+                "files_changed": step.get("files", []),
+                "error": "Runner aborted",
+            }
+        )
+
+
+def run_step_with_commit(
+    step: dict, spec: dict, model: str, uuid: str, execution_log: dict, log_path: Path
+) -> tuple:
+    """Execute one step, verify it, and commit it. Returns ``(result, error)``.
+
+    ``error`` is non-None when the commit itself failed and the run must
+    abort. The loop exists for T-2026-119: when commit_files finds no diff
+    (the subprocess succeeded but made no edits) the step is retried with an
+    augmented prompt up to MAX_NO_CHANGE_RETRIES times, because the
+    subprocess is the only thing that can actually write the files.
+
+    The log entry is rewritten and persisted after every state change (#243)
+    so a crash leaves the log honest about what the step produced.
+    """
+    step_num = step["step_number"]
+    retry_hint = ""
+    no_change_attempts = 0
+
+    while True:
+        # #236: snapshot worktree state before the step so we can detect
+        # writes to paths the step didn't declare in step.files.
+        pre_state = snapshot_worktree_state()
+        step_result = execute_step(step, spec, model, retry_hint=retry_hint)
+        # Unexpected-write check on any non-test/verify step that succeeded —
+        # test/verify steps shell out and shouldn't write files at all, and
+        # they aren't subject to the step.files contract.
+        if step_result["status"] == "passed" and step.get("action") not in ("test", "verify"):
+            try:
+                assert_no_unexpected_writes(
+                    pre_state,
+                    snapshot_worktree_state(),
+                    step.get("files", []),
+                )
+            except RuntimeError as e:
+                step_result["status"] = "failed"
+                step_result["error"] = str(e)
+        # #244: overwrite the 'started' stub with the real result. It is the
+        # last appended entry — nothing else appends in between.
+        execution_log["steps"][-1] = step_result
+        persist_execution_log(log_path, execution_log)
+
+        if step_result["status"] != "passed":
+            return step_result, None
+
+        # Post-conditions (#T-2026-122 phase 2) run BEFORE the commit, so a
+        # step whose declared post-state is wrong is never committed. They
+        # read the live filesystem, so a condition a prior step already
+        # satisfied counts as met.
+        pc_failures = verify_post_conditions(step, Path.cwd())
+        if pc_failures:
+            step_result["status"] = "failed"
+            step_result["error"] = "Post-condition(s) not satisfied after step: " + "; ".join(
+                pc_failures
+            )
+            execution_log["steps"][-1] = step_result
+            persist_execution_log(log_path, execution_log)
+            return step_result, None
+
+        files = step.get("files", [])
+        if not files or step.get("action") in ("test", "verify"):
+            return step_result, None
+
+        try:
+            commit_files(
+                files,
+                f"runner/{uuid} step {step_num}: {step.get('description', '')}",
+                action=step.get("action", ""),
+            )
+            return step_result, None
+        except NoChangesError as e:
+            # Phase-2 path: declared post_conditions are satisfied (they were
+            # checked above), so the end state is correct whoever produced it
+            # — accept as a no-op success without a new commit.
+            if step.get("post_conditions"):
+                print(
+                    f"Step {step_num}: no new changes but declared "
+                    f"post-conditions already satisfied — accepting as a "
+                    f"no-op success.",
+                    file=sys.stderr,
+                )
+                step_result["subsumed_by"] = "post_conditions"
+                execution_log["steps"][-1] = step_result
+                persist_execution_log(log_path, execution_log)
+                return step_result, None
+
+            # Phase-1 fallback (no post_conditions): if prior steps on this
+            # branch already committed every file this step declares, the
+            # subprocess correctly did nothing — the planner over-decomposed
+            # (T-2026-122). status stays 'passed'; subsumed_by is the audit
+            # trail.
+            touched = files_touched_by_prior_steps(uuid, files)
+            if touched and all(touched.get(f) for f in files):
+                subsuming = sorted({n for nums in touched.values() for n in nums})
+                print(
+                    f"Step {step_num}: no new changes — target files "
+                    f"({', '.join(files)}) already modified by prior "
+                    f"step(s) {subsuming}. Marking subsumed.",
+                    file=sys.stderr,
+                )
+                step_result["subsumed_by"] = subsuming
+                execution_log["steps"][-1] = step_result
+                persist_execution_log(log_path, execution_log)
+                return step_result, None
+
+            no_change_attempts += 1
+            if no_change_attempts > MAX_NO_CHANGE_RETRIES:
+                return step_result, str(e)
+            print(
+                f"Step {step_num}: subprocess produced no changes — "
+                f"retrying ({no_change_attempts}/{MAX_NO_CHANGE_RETRIES}) "
+                f"with Edit-tool nudge",
+                file=sys.stderr,
+            )
+            retry_hint = (
+                "IMPORTANT: A previous attempt made no file changes. "
+                "You MUST use the Edit or Write tool to actually modify "
+                f"the files listed above ({', '.join(files)}). Do not "
+                "just describe or plan the change — execute the tool call."
+            )
+        except RuntimeError as e:
+            return step_result, str(e)
+
+
+def execute_plan(
+    *,
+    sorted_steps,
+    spec,
+    default_model,
+    uuid,
+    branch,
+    completed_step_numbers,
+    previous_entries,
+    log_path,
+) -> dict:
+    """Run every step in dependency order and return the execution log."""
     execution_log = {
         "schema_version": EXECUTION_SCHEMA_VERSION,
         "uuid": uuid,
@@ -917,222 +1054,73 @@ def main():
         "status": "completed",
         "steps": [],
     }
-
     failed_steps = set()
-    aborted = False
 
     for step in sorted_steps:
         step_num = step["step_number"]
-        deps = step.get("depends_on", [])
 
-        # Resume: carry forward already-committed steps as passed without
-        # re-running them. Their commit already exists on the branch, so
-        # re-running would produce "nothing to commit" and abort the runner.
-        # If the previous execution log has a richer entry for this step
-        # (real files_changed list, original timing, etc.), prefer that
-        # over the bland stub. Otherwise fall back to the stub.
         if step_num in completed_step_numbers:
-            prior = previous_entries.get(step_num)
-            if isinstance(prior, dict) and prior.get("status") == "passed":
-                carried = dict(prior)
-                carried["note"] = "carried forward from previous run (commit on branch)"
-                execution_log["steps"].append(carried)
-            else:
-                execution_log["steps"].append({
-                    "step_number": step_num,
-                    "status": "passed",
-                    "files_changed": step.get("files", []),
-                    "error": None,
-                    "note": "carried forward from previous run (commit on branch)",
-                })
+            execution_log["steps"].append(_carried_forward_entry(step, previous_entries))
             persist_execution_log(log_path, execution_log)  # #243
             continue
 
-        # Skip if any dependency failed/skipped
-        if any(d in failed_steps for d in deps):
-            step_result = {
-                "step_number": step_num,
-                "status": "skipped",
-                "files_changed": step.get("files", []),
-                "error": "Dependency failed or was skipped",
-            }
-            execution_log["steps"].append(step_result)
+        if any(d in failed_steps for d in step.get("depends_on", [])):
+            execution_log["steps"].append(
+                {
+                    "step_number": step_num,
+                    "status": "skipped",
+                    "files_changed": step.get("files", []),
+                    "error": "Dependency failed or was skipped",
+                }
+            )
             failed_steps.add(step_num)
             persist_execution_log(log_path, execution_log)  # #243
             continue
 
         print(f"Executing step {step_num}: {step.get('description', '')}", file=sys.stderr)
-        # #235: refuse to run if the worktree has pre-existing dirty
-        # state in any of this step's target files — otherwise the
-        # user's uncommitted work would be silently committed as if
-        # the runner authored it.
+        # #235: refuse to run if the worktree has pre-existing dirty state in
+        # any of this step's target files — otherwise the operator's
+        # uncommitted work is committed as if the runner authored it.
         try:
-            step_files = step.get("files", [])
             if step.get("action") not in ("test", "verify"):
-                assert_files_clean(step_files)
+                assert_files_clean(step.get("files", []))
         except RuntimeError as e:
-            step_result = {
-                "step_number": step_num,
-                "status": "failed",
-                "files_changed": step.get("files", []),
-                "error": str(e),
-            }
-            execution_log["steps"].append(step_result)
+            execution_log["steps"].append(
+                {
+                    "step_number": step_num,
+                    "status": "failed",
+                    "files_changed": step.get("files", []),
+                    "error": str(e),
+                }
+            )
             failed_steps.add(step_num)
-            aborted = True
-            for s in sorted_steps:
-                if s["step_number"] > step_num:
-                    execution_log["steps"].append({
-                        "step_number": s["step_number"],
-                        "status": "skipped",
-                        "files_changed": s.get("files", []),
-                        "error": "Runner aborted",
-                    })
+            _mark_remaining_skipped(execution_log, sorted_steps, after=step_num)
+            execution_log["status"] = "aborted"
             persist_execution_log(log_path, execution_log)  # #243
-            break
-        resolved_model = step.get("model") or default_model
-        # #244: write a 'started' stub entry BEFORE the subprocess call
-        # and persist it. If the runner is interrupted mid-step, this
-        # marker survives and validate_resume_state() surfaces it on
-        # the next run so the operator can hand-reconcile instead of
-        # silently re-running the step from scratch.
-        started_stub = {
-            "step_number": step_num,
-            "status": "started",
-            "files_changed": step.get("files", []),
-            "error": None,
-        }
-        execution_log["steps"].append(started_stub)
+            return execution_log
+
+        # #244: a 'started' stub written and persisted BEFORE the subprocess
+        # call. If the runner is interrupted mid-step it survives, and
+        # validate_resume_state() surfaces it next run so the operator
+        # reconciles instead of silently re-running the step.
+        execution_log["steps"].append(
+            {
+                "step_number": step_num,
+                "status": "started",
+                "files_changed": step.get("files", []),
+                "error": None,
+            }
+        )
         persist_execution_log(log_path, execution_log)
-        # Execute-then-commit loop. T-2026-119: when commit_files finds no
-        # diff (subprocess succeeded but made no file edits), retry the step
-        # with an augmented prompt up to MAX_NO_CHANGE_RETRIES times before
-        # aborting. The retry re-runs execute_step because the subprocess is
-        # the only thing that can actually write the files.
-        retry_hint = ""
-        no_change_attempts = 0
-        commit_error = None  # non-None means abort after this iteration
-        while True:
-            # #236: snapshot worktree state before the step so we can detect
-            # writes to paths the step didn't declare in step.files.
-            pre_state = snapshot_worktree_state()
-            step_result = execute_step(step, spec, resolved_model, retry_hint=retry_hint)
-            # Check for unexpected writes on any non-test/verify step that
-            # succeeded — test/verify steps shell out and shouldn't write
-            # files at all, but they're also not subject to the step.files
-            # contract, so we skip the check for them.
-            if (step_result["status"] == "passed"
-                    and step.get("action") not in ("test", "verify")):
-                try:
-                    assert_no_unexpected_writes(
-                        pre_state, snapshot_worktree_state(),
-                        step.get("files", []),
-                    )
-                except RuntimeError as e:
-                    step_result["status"] = "failed"
-                    step_result["error"] = str(e)
-            # #244: overwrite the 'started' stub with the real step result
-            # now that execute_step has returned. We know the stub is the
-            # last appended entry because no other append happens between
-            # the started-stub write and here.
-            execution_log["steps"][-1] = step_result
-            # #243: persist the step result BEFORE the commit attempt, so a
-            # crash during commit_files leaves the log honest about what
-            # execute_step produced. Combined with validate_resume_state,
-            # this closes the drift window between git state and log state.
-            persist_execution_log(log_path, execution_log)
 
-            if step_result["status"] != "passed":
-                break
-
-            # Post-condition verification (#T-2026-122 phase 2).
-            # Runs before commit so we never commit a step whose declared
-            # post-state is wrong. Operates on live filesystem so a
-            # condition already satisfied by a prior step counts as met.
-            pc_failures = verify_post_conditions(step, Path.cwd())
-            if pc_failures:
-                step_result["status"] = "failed"
-                step_result["error"] = (
-                    "Post-condition(s) not satisfied after step: "
-                    + "; ".join(pc_failures)
-                )
-                execution_log["steps"][-1] = step_result
-                persist_execution_log(log_path, execution_log)
-                break
-
-            files = step.get("files", [])
-            if not files or step.get("action") in ("test", "verify"):
-                break
-
-            try:
-                commit_files(
-                    files,
-                    f"runner/{uuid} step {step_num}: {step.get('description', '')}",
-                    action=step.get("action", ""),
-                )
-                break  # success — leave the retry loop
-            except NoChangesError as e:
-                # Phase-2 path: if the step declared post_conditions and
-                # they're satisfied, the end-state is correct regardless
-                # of who produced it — accept as satisfied success without
-                # a new commit. This is the architecturally clean variant
-                # of the phase-1 subsumption heuristic.
-                if step.get("post_conditions"):
-                    # verify_post_conditions already ran above and returned
-                    # empty — we only reach the commit path when PCs pass.
-                    print(
-                        f"Step {step_num}: no new changes but declared "
-                        f"post-conditions already satisfied — accepting "
-                        f"as a no-op success.",
-                        file=sys.stderr,
-                    )
-                    step_result["subsumed_by"] = "post_conditions"
-                    execution_log["steps"][-1] = step_result
-                    persist_execution_log(log_path, execution_log)
-                    break
-                # Phase-1 fallback (no post_conditions declared): check
-                # whether prior steps on this branch already committed
-                # changes covering every file in step.files. If so, the
-                # subprocess correctly did nothing — planner over-decomposed
-                # (T-2026-122).
-                touched = files_touched_by_prior_steps(uuid, files)
-                if touched and all(touched.get(f) for f in files):
-                    subsuming = sorted({
-                        n for nums in touched.values() for n in nums
-                    })
-                    print(
-                        f"Step {step_num}: no new changes — target files "
-                        f"({', '.join(files)}) already modified by prior "
-                        f"step(s) {subsuming}. Marking subsumed.",
-                        file=sys.stderr,
-                    )
-                    step_result["subsumed_by"] = subsuming
-                    # status stays 'passed' so downstream
-                    # (approval, failed_steps) treats it as success; the
-                    # subsumed_by field is the audit trail.
-                    execution_log["steps"][-1] = step_result
-                    persist_execution_log(log_path, execution_log)
-                    break
-                no_change_attempts += 1
-                if no_change_attempts > MAX_NO_CHANGE_RETRIES:
-                    commit_error = str(e)
-                    break
-                print(
-                    f"Step {step_num}: subprocess produced no changes — "
-                    f"retrying ({no_change_attempts}/{MAX_NO_CHANGE_RETRIES}) "
-                    f"with Edit-tool nudge",
-                    file=sys.stderr,
-                )
-                retry_hint = (
-                    "IMPORTANT: A previous attempt made no file changes. "
-                    "You MUST use the Edit or Write tool to actually modify "
-                    f"the files listed above ({', '.join(files)}). Do not "
-                    "just describe or plan the change — execute the tool call."
-                )
-                continue
-            except RuntimeError as e:
-                commit_error = str(e)
-                break
+        step_result, commit_error = run_step_with_commit(
+            step,
+            spec,
+            step.get("model") or default_model,
+            uuid,
+            execution_log,
+            log_path,
+        )
 
         if commit_error is not None:
             print(f"Git error: {commit_error}", file=sys.stderr)
@@ -1140,46 +1128,68 @@ def main():
             step_result["error"] = commit_error
             execution_log["steps"][-1] = step_result
             failed_steps.add(step_num)
-            aborted = True
-            # Mark remaining as skipped
-            remaining = [s for s in sorted_steps if s["step_number"] > step_num]
-            for r in remaining:
-                execution_log["steps"].append({
-                    "step_number": r["step_number"],
-                    "status": "skipped",
-                    "files_changed": r.get("files", []),
-                    "error": "Runner aborted",
-                })
+            _mark_remaining_skipped(execution_log, sorted_steps, after=step_num)
+            execution_log["status"] = "aborted"
             persist_execution_log(log_path, execution_log)  # #243
-            break
-        elif step_result["status"] != "passed":
+            return execution_log
+
+        if step_result["status"] != "passed":
             failed_steps.add(step_num)
-            aborted = True
-            # Mark remaining as skipped
-            remaining_nums = {s["step_number"] for s in sorted_steps}
-            logged_nums = {s["step_number"] for s in execution_log["steps"]}
-            for s in sorted_steps:
-                if s["step_number"] not in logged_nums:
-                    execution_log["steps"].append({
-                        "step_number": s["step_number"],
-                        "status": "skipped",
-                        "files_changed": s.get("files", []),
-                        "error": "Runner aborted",
-                    })
+            _mark_remaining_skipped(execution_log, sorted_steps)
+            execution_log["status"] = "aborted"
             persist_execution_log(log_path, execution_log)  # #243
-            break
+            return execution_log
 
-    if aborted:
-        execution_log["status"] = "aborted"
+    return execution_log
 
-    # Final write — also picks up the top-level status flip above.
-    # Per-step writes happen inside the loop (#243) for durability.
+
+def main():
+    parser = argparse.ArgumentParser(description="Executor — runner stage 4")
+    parser.add_argument("plan", help="Path to plan JSON file")
+    args = parser.parse_args()
+
+    plan, uuid = load_plan(Path(args.plan))
+
+    # One branch per run. The orchestrator names it (APIARY_RUNNER_BRANCH) and,
+    # in detached mode, has already created the worktree on it; this stage used
+    # to `checkout -b runner/<uuid>` regardless, producing a second branch that
+    # nothing else in the pipeline knew about — the worktree branch was left
+    # pointing at master, the morning queue table joined on the wrong name, and
+    # each failed run consumed two max_unreviewed slots (review runner Bug 3).
+    # A standalone `python -m runner.executor <plan>` falls back to
+    # runner/<uuid>, which is what it always was.
+    branch = run_branch_from_env(uuid)
+    original_branch, switched = _ensure_on_branch(branch)
+
+    sorted_steps = topo_sort(plan.get("steps", []))
+
+    EXECUTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = EXECUTIONS_DIR / f"{uuid}.json"
+    completed_step_numbers, previous_entries = prepare_resume(uuid, sorted_steps, log_path)
+
+    execution_log = execute_plan(
+        sorted_steps=sorted_steps,
+        spec=plan.get("spec", {}),
+        default_model=plan.get("executor_model", "sonnet"),
+        uuid=uuid,
+        branch=branch,
+        completed_step_numbers=completed_step_numbers,
+        previous_entries=previous_entries,
+        log_path=log_path,
+    )
+
+    # Final write — per-step writes happen inside the loop (#243) for
+    # durability; this one also picks up the top-level status.
     persist_execution_log(log_path, execution_log)
 
-    if aborted:
+    if execution_log["status"] == "aborted":
         print(f"Runner aborted. Log: {log_path}", file=sys.stderr)
-        # Return to original branch
-        git("checkout", original_branch)
+        # Return to the branch we were on — but only if we actually left it.
+        # In detached mode the worktree was already on the run branch, and
+        # checking "back" to it here is what stranded the failed run's commits
+        # on a branch nobody named.
+        if switched:
+            git("checkout", original_branch)
         sys.exit(1)
 
     print(f"Branch: {branch}")

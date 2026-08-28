@@ -9,6 +9,7 @@ drives the same git invocation ``_run`` uses against a throwaway repo.
 
 Fixtures are fake credentials; ``.secretsallow`` exempts this file.
 """
+
 import os
 import subprocess
 import tempfile
@@ -17,15 +18,15 @@ from pathlib import Path
 
 from core.hooks.pre_push_secret_scan import (
     UNRESOLVED_CWD,
-    push_targets,
     PushTarget,
+    _shannon_entropy,
     iter_added_lines,
     outgoing_log_args,
     push_target,
+    push_targets,
     scan_diff,
     scan_line,
     scan_patch_series,
-    _shannon_entropy,
 )
 
 AWS_ID = "AKIA" + "IOSFODNN7EXAMPLE"
@@ -80,13 +81,13 @@ class ScanLineNegativeTest(unittest.TestCase):
         for line in (
             "This function pushes a commit to the remote.",
             "def get_token(): return self._token",
-            "api_key = your_api_key_here",          # placeholder name pattern
-            'password = "changeme"',                 # placeholder
-            "token: TODO",                           # placeholder / too short
-            "# AKIA is the AWS access-key prefix",   # AKIA without the body
-            "sk-",                                    # bare prefix, no body
-            'password_file = "/etc/secrets/pw"',     # about a credential, not one
-            "password = settings.db.password",       # a read, not a literal
+            "api_key = your_api_key_here",  # placeholder name pattern
+            'password = "changeme"',  # placeholder
+            "token: TODO",  # placeholder / too short
+            "# AKIA is the AWS access-key prefix",  # AKIA without the body
+            "sk-",  # bare prefix, no body
+            'password_file = "/etc/secrets/pw"',  # about a credential, not one
+            "password = settings.db.password",  # a read, not a literal
         ):
             with self.subTest(line=line):
                 self.assertEqual(scan_line(line), [])
@@ -104,12 +105,12 @@ class ScanLineNegativeTest(unittest.TestCase):
         # The full secret must never appear in the finding (it would re-leak
         # into the block reason / transcript).
         secret = "ghp_" + "z" * 36
-        (_rule, preview), = scan_line("t=" + secret)
+        ((_rule, preview),) = scan_line("t=" + secret)
         self.assertNotIn(secret, preview)
         self.assertIn("…", preview)
 
     def test_generic_preview_keeps_the_key_and_redacts_the_value(self):
-        (rule, preview), = scan_line('db_password = "n0tAr3alP4ssw0rd"')
+        ((rule, preview),) = scan_line('db_password = "n0tAr3alP4ssw0rd"')
         self.assertEqual(rule, "generic-assignment")
         self.assertTrue(preview.startswith("db_password = "))
         self.assertNotIn("n0tAr3alP4ssw0rd", preview)
@@ -122,7 +123,7 @@ class ScanDiffTest(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         path, lineno, rule, _preview = findings[0]
         self.assertEqual(path, "src/cfg.py")
-        self.assertEqual(lineno, 2)            # second added line
+        self.assertEqual(lineno, 2)  # second added line
         self.assertEqual(rule, "aws-access-key")
 
     def test_removed_lines_are_ignored(self):
@@ -143,21 +144,20 @@ class ScanDiffTest(unittest.TestCase):
             "+secret = ghp_" + "q" * 36 + "\n"
             " trailing context\n"
         )
-        (path, lineno, rule, _), = scan_diff(diff)
-        self.assertEqual(lineno, 41)           # 40 (context) then +1
+        ((path, lineno, rule, _),) = scan_diff(diff)
+        self.assertEqual(lineno, 41)  # 40 (context) then +1
         self.assertEqual(rule, "github-token")
 
     def test_quoted_path_header_is_unquoted(self):
         diff = '--- a/x\n+++ "b/we\\"ird.py"\n@@ -0,0 +1 @@\n+k = ' + AWS_ID + "\n"
-        (path, _, _, _), = scan_diff(diff)
+        ((path, _, _, _),) = scan_diff(diff)
         self.assertEqual(path, 'we"ird.py')
 
 
 class IterAddedLinesTest(unittest.TestCase):
     def test_strips_plus_and_tracks_path(self):
         rows = list(iter_added_lines(_diff("alpha", "beta", path="d/f.py")))
-        self.assertEqual([(p, c) for p, _, c in rows],
-                         [("d/f.py", "alpha"), ("d/f.py", "beta")])
+        self.assertEqual([(p, c) for p, _, c in rows], [("d/f.py", "alpha"), ("d/f.py", "beta")])
 
     def test_plus_plus_header_not_treated_as_added(self):
         # The "+++ b/file" header starts with + but must not be scanned.
@@ -177,10 +177,11 @@ class ScanPatchSeriesTest(unittest.TestCase):
         # base..HEAD diff shows nothing; the history being pushed still
         # carries it, so the per-commit scan must report it against A.
         log = (
-            f"{self.SHA_A}\n\n" + _diff(f"key = {AWS_ID}", path="cfg.py")
+            f"{self.SHA_A}\n\n"
+            + _diff(f"key = {AWS_ID}", path="cfg.py")
             + f"{self.SHA_B}\n\n"
             + "diff --git a/cfg.py b/cfg.py\n--- a/cfg.py\n+++ b/cfg.py\n"
-              f"@@ -1,1 +0,0 @@\n-key = {AWS_ID}\n"
+            f"@@ -1,1 +0,0 @@\n-key = {AWS_ID}\n"
         )
         findings = scan_patch_series(log)
         self.assertEqual(len(findings), 1)
@@ -189,8 +190,10 @@ class ScanPatchSeriesTest(unittest.TestCase):
 
     def test_same_secret_in_two_commits_is_reported_once(self):
         log = (
-            f"{self.SHA_A}\n\n" + _diff(f"key = {AWS_ID}", path="cfg.py")
-            + f"{self.SHA_B}\n\n" + _diff("x = 1", f"key = {AWS_ID}", path="cfg.py")
+            f"{self.SHA_A}\n\n"
+            + _diff(f"key = {AWS_ID}", path="cfg.py")
+            + f"{self.SHA_B}\n\n"
+            + _diff("x = 1", f"key = {AWS_ID}", path="cfg.py")
         )
         findings = scan_patch_series(log)
         self.assertEqual(len(findings), 1)
@@ -203,7 +206,9 @@ class ScanPatchSeriesTest(unittest.TestCase):
 
     def test_repo_allowlist_is_honoured(self):
         import re
+
         from core.secret_patterns import Allowlist
+
         log = f"{self.SHA_A}\n\n" + _diff(f"key = {AWS_ID}", path="tests/fixtures.py")
         by_path = Allowlist(paths=(re.compile(r"^tests/"),))
         by_line = Allowlist(lines=(re.compile("EXAMPLE"),))
@@ -224,9 +229,13 @@ class PushTargetTest(unittest.TestCase):
 
     def test_options_and_refspec_forms(self):
         self.assertEqual(push_target("git push -u origin HEAD").refs, ("HEAD",))
-        self.assertEqual(push_target("git push --force-with-lease origin +local:remote").refs, ("local",))
+        self.assertEqual(
+            push_target("git push --force-with-lease origin +local:remote").refs, ("local",)
+        )
         self.assertEqual(push_target("git push origin tag v1.2").refs, ("v1.2",))
-        self.assertEqual(push_target("git push origin :gone").refs, ())   # deletion → nothing outgoing
+        self.assertEqual(
+            push_target("git push origin :gone").refs, ()
+        )  # deletion → nothing outgoing
         self.assertEqual(push_target("git push origin --delete gone").refs, ())
         self.assertEqual(push_target("git push -d origin gone").refs, ())
         self.assertEqual(push_target("git push origin :gone main").refs, ("main",))
@@ -245,8 +254,14 @@ class PushTargetTest(unittest.TestCase):
         # scp-style and bare-path destinations are URLs too (no remote-tracking refs).
         # Backslash paths are eaten by posix shlex (L-2026-70); only the
         # forward-slash Windows form is testable here.
-        for dest in ("deploy@prod:/srv/app", "/srv/mirrors/publicdir", "../bare", "~/repos/x",
-                     "C:/repos/bare", "//nas/share/repo"):
+        for dest in (
+            "deploy@prod:/srv/app",
+            "/srv/mirrors/publicdir",
+            "../bare",
+            "~/repos/x",
+            "C:/repos/bare",
+            "//nas/share/repo",
+        ):
             with self.subTest(dest=dest):
                 t = push_target(f"git push {dest} main")
                 self.assertEqual((t.remote, t.url), (None, dest))
@@ -262,13 +277,20 @@ class PushTargetTest(unittest.TestCase):
         self.assertEqual(push_targets("gitk; echo done"), [])
 
     def test_unresolvable_cd_is_flagged_not_guessed(self):
-        for cmd in ('cd "$(git rev-parse --show-toplevel)" && git push origin main',
-                    "cd $REPO && git push", "cd `pwd`/x && git push",
-                    "cd ../clean; cd -; git push origin main", "popd; git push"):
+        for cmd in (
+            'cd "$(git rev-parse --show-toplevel)" && git push origin main',
+            "cd $REPO && git push",
+            "cd `pwd`/x && git push",
+            "cd ../clean; cd -; git push origin main",
+            "popd; git push",
+        ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(push_target(cmd).cwd, UNRESOLVED_CWD)
         # An absolute cd after a relative one replaces it; ~ expands.
-        self.assertEqual(push_target("cd a && cd /tmp/x && git push").cwd, "/tmp/x" if os.name != "nt" else "/tmp/x")
+        self.assertEqual(
+            push_target("cd a && cd /tmp/x && git push").cwd,
+            "/tmp/x" if os.name != "nt" else "/tmp/x",
+        )
         self.assertEqual(push_target("cd ~/proj && git push").cwd, os.path.expanduser("~/proj"))
         self.assertEqual(push_target("cd && git push").cwd, os.path.expanduser("~"))
 
@@ -290,7 +312,9 @@ class PushTargetTest(unittest.TestCase):
         # Regression: ``git push -q 2>&1 | tail`` parsed ``2>&1`` as the remote,
         # ``--remotes=2>&1`` matched nothing, and the whole history was
         # reported as outgoing.
-        self.assertEqual(push_target("git push -q 2>&1 | tail -2"), PushTarget(None, ("HEAD",), False, None))
+        self.assertEqual(
+            push_target("git push -q 2>&1 | tail -2"), PushTarget(None, ("HEAD",), False, None)
+        )
         self.assertEqual(push_target("git push origin main 2>/dev/null").remote, "origin")
         self.assertEqual(push_target("git push origin main >push.log").refs, ("main",))
         t = push_target("git push origin main > push.log")
@@ -310,9 +334,13 @@ class PushTargetTest(unittest.TestCase):
 
     def test_every_push_segment_is_parsed(self):
         ts = push_targets("git push origin main; git push upstream main")
-        self.assertEqual([(t.remote, t.refs) for t in ts], [("origin", ("main",)), ("upstream", ("main",))])
+        self.assertEqual(
+            [(t.remote, t.refs) for t in ts], [("origin", ("main",)), ("upstream", ("main",))]
+        )
         ts = push_targets("cd x && git push origin a && cd y && git push")
-        self.assertEqual([(t.cwd, t.remote) for t in ts], [("x", "origin"), (os.path.join("x", "y"), None)])
+        self.assertEqual(
+            [(t.cwd, t.remote) for t in ts], [("x", "origin"), (os.path.join("x", "y"), None)]
+        )
         self.assertEqual(push_targets("echo no push here"), [])
 
     def test_log_args_url_destination_uses_its_tips(self):
@@ -329,7 +357,9 @@ class PushTargetTest(unittest.TestCase):
         target = PushTarget("2>&1", ("HEAD",), False, None)
         args = outgoing_log_args(target, ["HEAD"], known_remotes=["origin"])
         self.assertEqual(args[-3:], ["HEAD", "--not", "--remotes"])
-        args = outgoing_log_args(PushTarget("origin", ("HEAD",), False, None), ["HEAD"], known_remotes=["origin"])
+        args = outgoing_log_args(
+            PushTarget("origin", ("HEAD",), False, None), ["HEAD"], known_remotes=["origin"]
+        )
         self.assertEqual(args[-1], "--remotes=origin")
         # Without the list the caller gets the old behaviour (pure, no git).
         args = outgoing_log_args(target, ["HEAD"])
@@ -348,8 +378,12 @@ class PushTargetTest(unittest.TestCase):
 
 def _git(args, cwd):
     return subprocess.run(
-        ["git", *args], cwd=str(cwd), capture_output=True, text=True,
-        encoding="utf-8", check=False,
+        ["git", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
     )
 
 
@@ -360,12 +394,16 @@ class OutgoingScanIntegrationTest(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        base = Path(self._tmp.name)
+        base = Path(self._tmp.name).resolve()
         self.remote = base / "remote.git"
         self.work = base / "work"
         _git(["init", "-q", "--bare", str(self.remote)], base)
         _git(["init", "-q", "-b", "main", str(self.work)], base)
-        for k, v in (("user.email", "t@example.com"), ("user.name", "T"), ("commit.gpgsign", "false")):
+        for k, v in (
+            ("user.email", "t@example.com"),
+            ("user.name", "T"),
+            ("commit.gpgsign", "false"),
+        ):
             _git(["config", k, v], self.work)
         _git(["remote", "add", "origin", str(self.remote)], self.work)
         self._commit("README.md", "hello\n", "init")
@@ -403,7 +441,7 @@ class OutgoingScanIntegrationTest(unittest.TestCase):
 
     def test_secret_already_on_remote_is_not_reported(self):
         self._commit("cfg.py", f"key = '{AWS_ID}'\n", "oops")
-        _git(["push", "-q", "origin", "main"], self.work)      # already leaked; not *this* push
+        _git(["push", "-q", "origin", "main"], self.work)  # already leaked; not *this* push
         self._commit("other.py", "x = 1\n", "clean")
         self.assertEqual(self._outgoing(), [])
 

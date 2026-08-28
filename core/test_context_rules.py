@@ -10,6 +10,7 @@ Two layers of coverage here:
 2. **Library unit tests** — frontmatter parsing, hash determinism, render +
    parse round-trip, drift detection, zone tamper detection.
 """
+
 import hashlib
 import sys
 import tempfile
@@ -20,7 +21,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from core import context_rules as cr  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Layer 4 — source files conform
@@ -43,8 +43,10 @@ class TestSourceFiles(unittest.TestCase):
         z1 = cr.render_managed_zone(rules)
         z2 = cr.render_managed_zone(rules)
         self.assertEqual(z1, z2)
-        self.assertEqual(hashlib.sha256(z1.encode("utf-8")).hexdigest(),
-                         hashlib.sha256(z2.encode("utf-8")).hexdigest())
+        self.assertEqual(
+            hashlib.sha256(z1.encode("utf-8")).hexdigest(),
+            hashlib.sha256(z2.encode("utf-8")).hexdigest(),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +56,7 @@ class TestSourceFiles(unittest.TestCase):
 
 class TestFrontmatter(unittest.TestCase):
     def _write(self, body: str) -> Path:
-        d = Path(self._tmp.name) / "behavioral"
+        d = Path(self._tmp.name).resolve() / "behavioral"
         d.mkdir(parents=True, exist_ok=True)
         p = d / "test_rule.md"
         p.write_text(body, encoding="utf-8")
@@ -89,9 +91,7 @@ class TestFrontmatter(unittest.TestCase):
             cr.load_rule(p)
 
     def test_missing_field(self):
-        p = self._write(
-            "---\nid: test_rule\ncategory: behavioral\nrequires: []\n---\nBody.\n"
-        )
+        p = self._write("---\nid: test_rule\ncategory: behavioral\nrequires: []\n---\nBody.\n")
         with self.assertRaises(cr.RuleParseError):
             cr.load_rule(p)
 
@@ -103,9 +103,7 @@ class TestFrontmatter(unittest.TestCase):
             cr.load_rule(p)
 
     def test_empty_body(self):
-        p = self._write(
-            "---\nid: test_rule\ntitle: T\ncategory: behavioral\nrequires: []\n---\n\n"
-        )
+        p = self._write("---\nid: test_rule\ntitle: T\ncategory: behavioral\nrequires: []\n---\n\n")
         with self.assertRaises(cr.RuleParseError):
             cr.load_rule(p)
 
@@ -184,12 +182,7 @@ class TestTamperDetection(unittest.TestCase):
 
     def test_stray_text_inside_zone(self):
         # Hand-craft a zone with junk text not enclosed in inner sentinels.
-        text = (
-            cr.OUTER_START
-            + "\n\nthis is not a rule\n\n"
-            + cr.OUTER_END
-            + "\n"
-        )
+        text = cr.OUTER_START + "\n\nthis is not a rule\n\n" + cr.OUTER_END + "\n"
         zone = cr.find_managed_zone(text)
         self.assertTrue(zone.stray_text)
 

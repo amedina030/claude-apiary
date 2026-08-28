@@ -97,6 +97,7 @@ class _StubProcWithLifecycle(_StubProc):
         class _Sock:
             def shutdown(self, how):
                 stub.calls.append("shutdown")
+
         return _Sock()
 
 
@@ -106,8 +107,10 @@ class StopReleasesPtyTests(unittest.TestCase):
         stub = _StubProcWithLifecycle()
         wrapper._proc = stub  # type: ignore[assignment]
         killed: list[int] = []
+
         def _kill(pid):
             killed.append((pid, stub.isalive()))
+
         with mock.patch.object(pty_wrapper, "_kill_process_tree", _kill):
             wrapper.stop()
         self.assertEqual(stub.calls, ["terminate(force=True)", "shutdown", "close(force=True)"])
@@ -122,10 +125,13 @@ class StopReleasesPtyTests(unittest.TestCase):
 
         class _EofProc:
             exitstatus = 7
+
             def read(self, n):
                 raise EOFError
+
             def isalive(self):
                 return False
+
         wrapper._proc = _EofProc()  # type: ignore[assignment]
         wrapper._stop.set()
         wrapper._read_loop()
@@ -148,12 +154,13 @@ class StopKillsGrandchildTest(unittest.TestCase):
         import sys
         import tempfile
         from pathlib import Path
+
         try:
             import winpty  # noqa: F401
         except ImportError:
             self.skipTest("pywinpty not installed")
         with tempfile.TemporaryDirectory() as td:
-            pidfile = Path(td) / "pid"
+            pidfile = Path(td).resolve() / "pid"
             code = (
                 "import os,time;open(r'%s','w',encoding='utf-8').write(str(os.getpid()));time.sleep(60)"
                 % str(pidfile)
@@ -172,7 +179,9 @@ class StopKillsGrandchildTest(unittest.TestCase):
             def alive() -> bool:
                 out = subprocess.run(
                     ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                    capture_output=True, text=True, check=False,
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 ).stdout
                 return str(pid) in out
 
@@ -308,8 +317,10 @@ class ResolveClaudeCommandTests(unittest.TestCase):
     def test_windows_prefers_real_exe_over_shim(self) -> None:
         wp, op = self._patch(
             os_name="nt",
-            which_map={"claude.exe": r"C:\Program Files\claude\claude.exe",
-                       "claude": r"C:\npm\claude.cmd"},
+            which_map={
+                "claude.exe": r"C:\Program Files\claude\claude.exe",
+                "claude": r"C:\npm\claude.cmd",
+            },
         )
         with wp, op:
             self.assertEqual(
@@ -318,9 +329,7 @@ class ResolveClaudeCommandTests(unittest.TestCase):
             )
 
     def test_posix_returns_path_as_is(self) -> None:
-        wp, op = self._patch(
-            os_name="posix", which_map={"claude": "/usr/local/bin/claude"}
-        )
+        wp, op = self._patch(os_name="posix", which_map={"claude": "/usr/local/bin/claude"})
         with wp, op:
             self.assertEqual(
                 pty_wrapper._resolve_claude_command("claude"),

@@ -7,6 +7,8 @@ framework_version: "1.0"
 last_verified: 2026-08-26
 ---
 
+> **Snapshot of 2026-08-26; superseded by the remediation — see CHANGELOG. Deleted at close-out (T-2026-271).**
+
 # Review: budgeter / harden / incubator
 
 Read-only staff review of three subsystems in `D:\Professional\claude-apiary` (2026-08-26, HEAD `1bee5e5`). Every non-test `.py`, every `commands/*.md` and `agents/*.md`, `docs/architecture/hook-lifecycle.md`, `docs/standards/code-style.md`, and the relevant README / `docs/reference` sections were read in full. Claims were verified by reading code, by grepping the whole repo for callers, by inspecting real data in `budgeter/data/` (26,507 log entries, 3,763 feedback records, 886 sessions, 2026-04-02 → 2026-08-26) and real Claude Code transcripts under `~/.claude/projects/`, and by running the existing tests (`poetry run pytest budgeter harden incubator -q` → **151 passed in 22s**). Two hook-crash reproductions were run against a throwaway project in the scratchpad with `APIARY_BUDGETER_TEST_ISOLATION=1`; nothing in the repo was mutated.

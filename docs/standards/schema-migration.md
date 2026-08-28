@@ -4,7 +4,7 @@ title: Schema Migration
 scope: project
 description: How to bump a runner stage-artifact schema version without breaking in-flight work
 framework_version: "1.0"
-last_verified: 2026-04-15
+last_verified: "2026-08-27"
 ---
 
 # Schema Migration
@@ -34,7 +34,7 @@ Required steps for any breaking change:
 
 ## What counts as "in-flight"
 
-Any artifact written to disk under `runner/plans/`, `runner/specs/`, `runner/executions/`, `runner/hardens/`, or `runner/reports/`. A plan that was written by version N's producer and has not yet been consumed by the next stage is in-flight and must either be accepted by the widened consumer or regenerated.
+Any artifact written to disk under `<state-dir>/runner/plans/`, `<state-dir>/runner/specs/`, `<state-dir>/runner/executions/`, `<state-dir>/runner/hardens/`, or `<state-dir>/runner/reports/`. A plan that was written by version N's producer and has not yet been consumed by the next stage is in-flight and must either be accepted by the widened consumer or regenerated.
 
 ## Example
 

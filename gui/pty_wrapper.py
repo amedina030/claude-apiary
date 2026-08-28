@@ -1,9 +1,10 @@
 """Hidden Claude Code subprocess hosted in a pty (Windows: pywinpty / `winpty` module).
 
 The pty wrapper does not parse pty stdout for messages — JSONL is the sole source
-of truth for rendered conversation. The pty stdout is mirrored to a small rolling
-buffer so the frontend can show interactive Claude Code UI (permission prompts,
-plan-mode banners, ESC-cancellable hints) that never reaches JSONL.
+of truth for rendered conversation. Stdout is streamed straight to the frontend's
+terminal pane so it can show interactive Claude Code UI (permission prompts,
+plan-mode banners, ESC-cancellable hints) that never reaches JSONL; nothing is
+buffered on the Python side.
 """
 
 from __future__ import annotations
@@ -14,9 +15,7 @@ import socket
 import subprocess
 import threading
 import time
-from collections import deque
 from typing import Callable, Optional, Sequence
-
 
 # Chunk size for send_text. Chosen well under MAX_CANON (4096 on Linux/macOS)
 # and the historical Windows ConPTY cooked-mode line-input limit. See
@@ -52,7 +51,9 @@ def _kill_process_tree(pid: int) -> None:
         try:
             subprocess.run(
                 [taskkill, "/PID", str(pid), "/T", "/F"],
-                capture_output=True, timeout=10, check=False,
+                capture_output=True,
+                timeout=10,
+                check=False,
                 # The windowed (console=False) build would otherwise flash a
                 # console for every tab close.
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -65,6 +66,7 @@ def _kill_process_tree(pid: int) -> None:
     if killpg and getpgid:
         try:
             import signal
+
             killpg(getpgid(pid), signal.SIGKILL)
         except (OSError, ProcessLookupError):
             pass
@@ -106,7 +108,7 @@ class PtyWrapper:
     """Spawn `claude` in a pty; stream stdout to a callback; forward bytes to stdin.
 
     Designed for the frontend to be the sole user-visible surface — pty stdout is
-    only mirrored for the pty output strip panel, not parsed for content.
+    only forwarded to the frontend's terminal pane, not parsed for content.
     """
 
     def __init__(
@@ -117,7 +119,6 @@ class PtyWrapper:
         dimensions: tuple[int, int] = (40, 120),
         on_stdout: Optional[Callable[[str], None]] = None,
         on_exit: Optional[Callable[[int], None]] = None,
-        ring_size: int = 4096,
         capture=None,
     ) -> None:
         self.argv = list(argv) if argv else ["claude"]
@@ -126,11 +127,9 @@ class PtyWrapper:
         self.dimensions = dimensions
         self.on_stdout = on_stdout or (lambda _s: None)
         self.on_exit = on_exit or (lambda _code: None)
-        self._ring: deque[str] = deque(maxlen=ring_size)
         self._proc = None
         self._reader_thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
-        self._lock = threading.Lock()
         # Monotonic timestamp of the most recent non-empty stdout chunk. Used by
         # wait_for_quiet() to time a submit CR after a bracketed paste. 0.0 means
         # no output has been seen yet.
@@ -139,10 +138,6 @@ class PtyWrapper:
         # pre-decode so captures preserve exact terminal fidelity for the
         # prompt-detector fixtures.
         self._capture = capture
-
-    @property
-    def buffer(self) -> str:
-        return "".join(self._ring)
 
     def is_alive(self) -> bool:
         try:
@@ -251,8 +246,6 @@ class PtyWrapper:
                     pass
             if isinstance(chunk, bytes):
                 chunk = chunk.decode("utf-8", errors="replace")
-            with self._lock:
-                self._ring.append(chunk)
             try:
                 self.on_stdout(chunk)
             except Exception:
@@ -291,7 +284,7 @@ class PtyWrapper:
             return True
         try:
             for i in range(0, len(text), _SEND_CHUNK_SIZE):
-                proc.write(text[i:i + _SEND_CHUNK_SIZE])
+                proc.write(text[i : i + _SEND_CHUNK_SIZE])
             return True
         except Exception:
             return False

@@ -17,11 +17,8 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Apiary runtime data (kept out of git; per-machine state)
-.apiary/scribe/*/index.jsonl.lock
-.apiary/scribe/*/next_seq.lock
-.apiary/refiner/tmp/
-.apiary/budgeter/tmp/
-.apiary/budgeter/data/
-.apiary/harden/tmp/
-.apiary/runner/
+# Apiary state needs no rules here: this repo carries no local .apiary/ dir.
+# Its scribe notes, budgeter data and so on live centrally under the main
+# apiary's .repos/<name>-<id>/ store. The per-repo apiary install appends the
+# .claude/ rules this repo does need (launcher and settings ignored, repo-owned
+# slash commands still trackable) to the bottom of this file.

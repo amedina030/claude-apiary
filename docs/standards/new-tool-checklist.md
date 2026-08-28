@@ -2,9 +2,9 @@
 type: standard
 title: New Tool Checklist
 scope: project
-description: What a new tool needs — directory structure, hooks, commands, tests, docs, and setup.py integration
+description: What a new tool needs — directory structure, hooks, commands, tests, docs, and install integration
 framework_version: "1.0"
-last_verified: 2026-04-07
+last_verified: 2026-08-26
 ---
 
 # New Tool Checklist
@@ -32,32 +32,32 @@ When adding a new top-level tool to the project (like budgeter, scribe, or harde
 ### 1. Core functionality
 - [ ] Main Python module(s) under `<tool>/`
 - [ ] Use `core/` utilities — don't reinvent flags, config, file locking, or hook registration
-- [ ] Stdlib only — no external dependencies
+- [ ] Stdlib only at runtime — a hook or git hook runs under the system interpreter, not the Poetry venv
 
 ### 2. Hooks (if applicable)
-- [ ] Hook scripts under `<tool>/hooks/`
-- [ ] Each hook has a silent try/except wrapper — hooks must not crash
-- [ ] Registered in `setup.py` via `core/hooks_lib.py`
+- [ ] Hook modules under `<tool>/hooks/`, each exposing `run(payload) -> HookResult | None`
+- [ ] `run_standalone(run, ...)` shim so `python <hook>.py` still works
+- [ ] Registered in `_registry()` in `core/hooks/dispatch.py` with a matcher (see [Adding a Hook](../guides/adding-a-hook.md))
 
 ### 3. Slash commands
 - [ ] Command markdown files under `<tool>/commands/`
 - [ ] Each command file defines: name, description, what it does, any arguments
-- [ ] Copied to `~/.claude/commands/` by `setup.py`
+- [ ] Copied to `<repo>/.claude/commands/` by `apiary install`
 
 ### 4. Configuration (if applicable)
 - [ ] Default config at `<tool>/config.json`
-- [ ] Loaded via `core/config.py` with defaults fallback
+- [ ] Loaded with a stdlib `json` read and an in-module defaults fallback
 - [ ] Per-project override support if needed (`.claude/<tool>.json`)
 
 ### 5. Tests
 - [ ] Test file: `<tool>/test_<module>.py`
-- [ ] Uses `unittest` and `tempfile.TemporaryDirectory()`
+- [ ] Unittest-style classes run by pytest (no pytest-only API), isolated with `tempfile.TemporaryDirectory()`
 - [ ] Isolated from real user data
 - [ ] Covers core logic and edge cases
 
-### 6. Setup integration
-- [ ] `setup.py` registers hooks (if any) in `settings.json`
-- [ ] `setup.py` copies commands and agents to `~/.claude/`
+### 6. Install integration
+- [ ] Hooks (if any) registered in the dispatcher's `_registry()`; `core/hooks_factory.py` registers only the dispatcher, one entry per event
+- [ ] `apiary install` copies commands to `<repo>/.claude/commands/`
 - [ ] `poetry run apiary doctor` validates the new tool's installation
 - [ ] Uninstall instructions added to `SETUP.md`
 
@@ -68,10 +68,9 @@ When adding a new top-level tool to the project (like budgeter, scribe, or harde
 - [ ] Update `docs/reference/config-files.md` if new config added
 - [ ] Update `docs/reference/file-storage.md` if new runtime data locations
 - [ ] Update `docs/_index.md` if new docs created
-- [ ] Update `README.md` tool listing and repository structure
+- [ ] Update the `README.md` tool listing
 - [ ] Run `python docs/check.py` to verify conformance
 
 ### 8. CLAUDE.md rules (if needed)
-- [ ] Add behavioral rules to the tool's own `CLAUDE.md`
-- [ ] Document that users need to append rules to `~/.claude/CLAUDE.md`
-- [ ] `setup.py` warns if rules are missing
+- [ ] Add the rule under `context-rules/<category>/<id>.md`
+- [ ] `apiary install` renders it into the managed zone of `<repo>/CLAUDE.md`

@@ -56,7 +56,7 @@ When extracting observations during `/wrapup`, **err on the side of fewer high-q
 
 `compass/synthesize.py` reads active observations + previous `personality.md` + `corrections.md` and asks headless `claude -p` to produce a new `personality.md`. Two trigger paths:
 
-- **Weekly cron**: `runner/cron_registry.json` has `compass-weekly-synthesis` running daily at 03:00 with `--cron`, which self-throttles to 7 days (skips if `personality.md` was updated within the last week).
+- **Weekly cron**: `cron_registry/<hostname>.json` (one file per machine) has `compass-weekly-synthesis` running daily at 03:00 with `--cron`, which self-throttles to 7 days (skips if `personality.md` was updated within the last week).
 - **Manual**: `/compass-sync` slash command for "I had a big shift, sync now."
 
 The Windows Task Scheduler backend only supports `daily`, which is why the daily-with-throttle pattern is used instead of a true weekly schedule.
@@ -95,6 +95,35 @@ Don't use corrections to encode rules — those go in auto-memory feedback.
 - **`personality.md` doesn't grow** — each synthesis rewrites it. Bounded by design.
 
 Archive sweep: `python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/observations.py archive [--apply]` (dry-run by default).
+
+---
+
+## Measurement — compass is an experiment, and it is being scored
+
+Compass is kept on the condition that it is measured (review §5a-H). Three
+instruments exist; the full design, the metric definition, the honesty
+caveats and the **proposed keep/delete rule** live in
+`docs/architecture/compass-measurement.md`.
+
+- **`compass/evaluate.py offline`** — leave-one-out over the observation
+  files: does a profile synthesized from the *other* sessions predict a
+  held-out session's per-dimension labels? Reports accuracy against a
+  majority and a random baseline. **Lift over majority is the number that
+  matters**, and this measures the profile's *internal consistency*, not
+  whether injecting it changes behaviour. Default run uses a deterministic
+  stub and calls no model; `--model` costs one `claude -p` per fold and
+  needs `--yes`.
+- **`compass/evaluate.py ab`** — the real test. Each session is assigned to
+  arm `on` (profile injected) or `off` (not), recorded as `compass_arm` in
+  its identity file, and the arms are compared against budgeter outcome
+  proxies. **Off by default** (`compass/config.json` `ab_enabled: false`), so
+  today every session is in arm `on` and nothing has changed.
+- **`apiary doctor compass`** — observation counts, synthesis age (warns
+  above 14 days), profile size, arm counts, last headline. Report-only.
+
+When touching this subsystem: `label_vocabulary.json` and `config.json` are
+part of a live experiment. Editing the vocabulary changes the metric; editing
+`ab_seed` re-rolls the split. Neither is a routine edit.
 
 ---
 

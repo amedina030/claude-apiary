@@ -40,17 +40,27 @@ from core.git_hooks import (  # noqa: E402
     _classify,
     classify,
     configured_hooks_path,
-    current_repo,
     hook_path,
     hooks_dir,
     install,
     report,
     uninstall,
 )
+from core.utils.gitutil import git_root  # noqa: E402
 
 __all__ = [
-    "HOOK_SOURCE", "OWNED_MARKER", "classify", "_classify", "configured_hooks_path",
-    "current_repo", "hook_path", "hooks_dir", "install", "report", "uninstall", "main",
+    "HOOK_SOURCE",
+    "OWNED_MARKER",
+    "classify",
+    "_classify",
+    "configured_hooks_path",
+    "git_root",
+    "hook_path",
+    "hooks_dir",
+    "install",
+    "report",
+    "uninstall",
+    "main",
 ]
 
 
@@ -73,7 +83,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     start = (args.repo or Path.cwd()).expanduser()
-    repo = current_repo(start)
+    repo = git_root(start)
     if repo is None:
         print(f"error: {start} is not inside a git repository", file=sys.stderr)
         return 1

@@ -43,19 +43,18 @@ def _render(size: int) -> Image.Image:
     # reads well at 16px (where each hex is ~5 device px across).
     margin = s * 0.08
     work = s - 2 * margin
-    r = work * 0.21              # hex circumscribed radius
+    r = work * 0.21  # hex circumscribed radius
     apothem = r * math.sqrt(3) / 2
-    gap = r * 0.18               # visible space between adjacent hexes
+    gap = r * 0.18  # visible space between adjacent hexes
 
     # Centers form an equilateral triangle. Distance between centers is
     # 2*apothem + gap (so opposing flat edges have `gap` between them).
     d = 2 * apothem + gap
     triangle_h = d * math.sqrt(3) / 2
 
-    cluster_h = triangle_h + 2 * r        # top vertex of top hex to bottom flat of bottom row
-    cluster_w = d + 2 * apothem
+    cluster_h = triangle_h + 2 * r  # top vertex of top hex to bottom flat of bottom row
     cx0 = s / 2
-    cy0 = (s - cluster_h) / 2 + r          # vertical center of the top hex
+    cy0 = (s - cluster_h) / 2 + r  # vertical center of the top hex
 
     centers = [
         (cx0, cy0),

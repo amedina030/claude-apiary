@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for runner/target_repo.py."""
+
 import os
 import subprocess
 import tempfile
@@ -14,7 +15,8 @@ def _git_init(path: Path) -> None:
     """Initialize a bare-minimum git repo so resolve_target_repo accepts it."""
     subprocess.run(
         ["git", "init", "--quiet", str(path)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -55,7 +57,8 @@ class TestChooseTargetRepo(_EnvIsolation):
         intake = {"target_repo": "/from/intake"}
         with mock.patch.object(target_repo, "cfg", return_value="/from/config"):
             chosen = target_repo.choose_target_repo(
-                cli_override="/from/cli", intake=intake,
+                cli_override="/from/cli",
+                intake=intake,
             )
         self.assertEqual(chosen, Path("/from/cli"))
 
@@ -111,7 +114,7 @@ class TestResolveTargetRepo(_EnvIsolation):
 
     def test_resolves_real_git_repo(self):
         with tempfile.TemporaryDirectory() as td:
-            repo = Path(td) / "scratch_repo"
+            repo = Path(td).resolve() / "scratch_repo"
             repo.mkdir()
             _git_init(repo)
             resolved = target_repo.resolve_target_repo(cli_override=repo)
@@ -132,7 +135,7 @@ class TestResolveTargetRepo(_EnvIsolation):
 
     def test_file_path_raises(self):
         with tempfile.TemporaryDirectory() as td:
-            f = Path(td) / "not_a_dir"
+            f = Path(td).resolve() / "not_a_dir"
             f.write_text("hello", encoding="utf-8")
             with self.assertRaises(ValueError) as ctx:
                 target_repo.resolve_target_repo(cli_override=f)
@@ -140,7 +143,7 @@ class TestResolveTargetRepo(_EnvIsolation):
 
     def test_dir_without_git_raises(self):
         with tempfile.TemporaryDirectory() as td:
-            d = Path(td) / "empty_dir"
+            d = Path(td).resolve() / "empty_dir"
             d.mkdir()
             with self.assertRaises(ValueError) as ctx:
                 target_repo.resolve_target_repo(cli_override=d)
@@ -150,7 +153,7 @@ class TestResolveTargetRepo(_EnvIsolation):
         # Worktrees and submodules use a .git FILE, not a dir. The
         # validator must accept that.
         with tempfile.TemporaryDirectory() as td:
-            d = Path(td) / "git_via_file"
+            d = Path(td).resolve() / "git_via_file"
             d.mkdir()
             (d / ".git").write_text("gitdir: /elsewhere\n", encoding="utf-8")
             resolved = target_repo.resolve_target_repo(cli_override=d)
@@ -183,14 +186,14 @@ class TestActiveTargetEnv(unittest.TestCase):
 
     def test_env_var_feeds_choose_target_repo(self):
         with tempfile.TemporaryDirectory() as td:
-            target_repo.set_active_target(Path(td))
+            target_repo.set_active_target(Path(td).resolve())
             with mock.patch.object(target_repo, "cfg", return_value=None):
                 chosen = target_repo.choose_target_repo()
             self.assertEqual(chosen, Path(td).resolve())
 
     def test_env_var_feeds_path_helpers(self):
         with tempfile.TemporaryDirectory() as td:
-            target_repo.set_active_target(Path(td))
+            target_repo.set_active_target(Path(td).resolve())
             self.assertEqual(
                 target_repo.intake_dir(),
                 Path(td).resolve() / ".apiary" / "runner" / "intake",
@@ -254,17 +257,23 @@ class TestArtifactPathHelpers(_EnvIsolation):
                     root / subdir,
                 )
 
-    def test_run_history_and_overnight_are_files(self):
+    def test_run_history_is_a_file(self):
         t = Path("/tmp/some-target").resolve()
         root = target_repo.artifacts_root(t)
         self.assertEqual(target_repo.run_history_path(t), root / "run_history.jsonl")
-        self.assertEqual(target_repo.overnight_log_path(t), root / "overnight.jsonl")
 
-    def test_worktrees_dir_sibling_of_runner(self):
+    def test_worktrees_dir_is_the_path_detached_lib_uses(self):
+        """One definition of where live worktrees go. This helper used to
+        say `.apiary/runner-worktrees` while detached_lib created them in
+        `.runner-worktrees`, so prune scanned an empty directory forever
+        (review runner Bug 4)."""
+        from runner import detached_lib
+
         t = Path("/tmp/some-target").resolve()
+        self.assertEqual(target_repo.worktrees_dir(t), t / ".runner-worktrees")
         self.assertEqual(
             target_repo.worktrees_dir(t),
-            t / ".apiary" / "runner-worktrees",
+            detached_lib.worktrees_dir_for(t),
         )
         self.assertNotEqual(
             target_repo.worktrees_dir(t).parent,

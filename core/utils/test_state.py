@@ -1,4 +1,5 @@
 """Tests for the centralized state resolver in core/utils/state.py."""
+
 from __future__ import annotations
 
 import json
@@ -8,30 +9,24 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from core import testing
 from core.utils import state
 
-
-def _git_init(path: Path) -> None:
-    """Initialize a fresh git repo at *path* with a single empty commit so
-    ``git rev-parse --show-toplevel`` resolves to it. Tests rely on the
-    resolver detecting a real git repo, not a directory that happens to
-    have a .git folder."""
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
-         "commit", "--allow-empty", "-q", "-m", "init"],
-        cwd=path, check=True,
-    )
+# A fresh git repo with a single empty commit, so
+# ``git rev-parse --show-toplevel`` resolves to it — the resolver has to see a
+# real repo, not a directory that happens to hold a .git folder.
+_git_init = testing.init_git_repo
 
 
 class StateResolverTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.apiary = self.root / "apiary"
         self.apiary.mkdir()
         # Apiary repo needs to look real enough for resolve_apiary_repo
@@ -55,7 +50,9 @@ class StateResolverTests(unittest.TestCase):
         self.assertTrue(state_dir.name.startswith("foo-"))
 
         # Registry has the entry
-        registry = json.loads((self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8"))
+        registry = json.loads(
+            (self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8")
+        )
         self.assertEqual(len(registry), 1)
         only_id, entry = next(iter(registry.items()))
         self.assertEqual(entry["name"], "foo")
@@ -82,6 +79,7 @@ class StateResolverTests(unittest.TestCase):
 
         # Sleep a touch so the timestamp can move forward
         import time
+
         time.sleep(1.1)
 
         second = state.resolve_target_state_dir(cwd=target, apiary_repo=self.apiary)
@@ -106,7 +104,9 @@ class StateResolverTests(unittest.TestCase):
         self.assertTrue(sa.name.startswith("foo-"))
         self.assertTrue(sb.name.startswith("foo-"))
         # Registry has two distinct entries pointing at distinct paths
-        registry = json.loads((self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8"))
+        registry = json.loads(
+            (self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8")
+        )
         self.assertEqual(len(registry), 2)
         paths = {Path(e["real_path"]) for e in registry.values()}
         self.assertEqual(paths, {a.resolve(), b.resolve()})
@@ -143,7 +143,9 @@ class StateResolverTests(unittest.TestCase):
         target = self._make_target("foo")
         with self.assertRaises(RuntimeError) as ctx:
             state.resolve_target_state_dir(
-                cwd=target, apiary_repo=self.apiary, auto_register=False,
+                cwd=target,
+                apiary_repo=self.apiary,
+                auto_register=False,
             )
         self.assertIn("not registered", str(ctx.exception).lower())
 
@@ -172,7 +174,9 @@ class StateResolverTests(unittest.TestCase):
         (self.apiary / "VERSION").write_text("0.1.0\n", encoding="utf-8")
 
         state.resolve_target_state_dir(cwd=target, apiary_repo=self.apiary)
-        registry = json.loads((self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8"))
+        registry = json.loads(
+            (self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8")
+        )
         only_id, entry = next(iter(registry.items()))
         self.assertEqual(entry["uid"], int(only_id))
         self.assertEqual(entry["version"], "0.1.0")
@@ -182,7 +186,9 @@ class StateResolverTests(unittest.TestCase):
         # No VERSION file in self.apiary at this point.
         target = self._make_target("foo")
         state.resolve_target_state_dir(cwd=target, apiary_repo=self.apiary)
-        registry = json.loads((self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8"))
+        registry = json.loads(
+            (self.apiary / ".repos" / "registry.json").read_text(encoding="utf-8")
+        )
         _, entry = next(iter(registry.items()))
         self.assertEqual(entry["version"], state.DEFAULT_APIARY_VERSION)
 
@@ -194,6 +200,31 @@ class StateResolverTests(unittest.TestCase):
         self.assertEqual(state._safe_name("..."), "repo")
         self.assertEqual(state._safe_name(""), "repo")
         self.assertEqual(state._safe_name("ok-name_v2"), "ok-name_v2")
+
+
+class ReserveUidTests(unittest.TestCase):
+    """``reserve_uid`` keeps the monotonic contract when a uid is re-adopted.
+
+    ``apiary install`` re-adopts the uid in a repo's self-pointer when the
+    registry entry has been lost (Bug 4). The counter is usually lost with it,
+    so without raising it the next allocation would hand the same uid to a
+    different repo — two repos, one state dir.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.apiary = Path(self._tmp.name).resolve()
+
+    def test_raises_a_lost_counter_above_the_reserved_uid(self):
+        state.reserve_uid(self.apiary, 7)
+        self.assertEqual(state.allocate_next_id(self.apiary), 8)
+
+    def test_never_lowers_the_counter(self):
+        for _ in range(9):
+            state.allocate_next_id(self.apiary)
+        state.reserve_uid(self.apiary, 2)
+        self.assertEqual(state.allocate_next_id(self.apiary), 10)
 
 
 class EnvHelperTests(unittest.TestCase):
@@ -223,7 +254,7 @@ class PinModelHelperTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.repo = Path(self._tmp.name)
+        self.repo = Path(self._tmp.name).resolve()
 
     def test_pin_dir_is_under_dot_claude_apiary(self):
         self.assertEqual(state.pin_dir(self.repo), self.repo / ".claude" / "apiary")
@@ -246,7 +277,9 @@ class PinModelHelperTests(unittest.TestCase):
         self.assertEqual(loaded["schema_version"], state.PIN_SCHEMA_VERSION)
 
     def test_version_round_trip(self):
-        state.write_version(self.repo, {"apiary_version": "0.1.0", "pinned_at": "2026-05-05T00:00:00Z"})
+        state.write_version(
+            self.repo, {"apiary_version": "0.1.0", "pinned_at": "2026-05-05T00:00:00Z"}
+        )
         loaded = state.read_version(self.repo)
         self.assertEqual(loaded["apiary_version"], "0.1.0")
         self.assertEqual(loaded["schema_version"], state.PIN_SCHEMA_VERSION)
@@ -276,9 +309,268 @@ class PinModelHelperTests(unittest.TestCase):
         # If a future migration writes schema_version=2, the helper should
         # not silently downgrade it. The {schema_version: 1, **payload}
         # spread lets the caller's value win.
-        state.write_self_pointer(self.repo, {"schema_version": 2, "uid": 1, "name": "x", "real_path": "/p"})
+        state.write_self_pointer(
+            self.repo, {"schema_version": 2, "uid": 1, "name": "x", "real_path": "/p"}
+        )
         loaded = state.read_self_pointer(self.repo)
         self.assertEqual(loaded["schema_version"], 2)
+
+
+class MainApiaryUidTests(unittest.TestCase):
+    """One constant, not a literal ``1`` in drift/cascade/install."""
+
+    def test_uid_is_one(self):
+        self.assertEqual(state.MAIN_APIARY_UID, 1)
+
+    def test_drift_and_cascade_read_the_shared_constant(self):
+        from core import cascade, drift
+
+        self.assertIs(drift.state.MAIN_APIARY_UID, state.MAIN_APIARY_UID)
+        self.assertIs(cascade.state.MAIN_APIARY_UID, state.MAIN_APIARY_UID)
+
+
+class ResolveStateDirTests(unittest.TestCase):
+    """The one state-dir resolver: env -> pins -> breadcrumb -> in-repo."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.apiary = self.root / "apiary"
+        (self.apiary / ".repos").mkdir(parents=True)
+        self.repo = self.root / "target"
+        self.repo.mkdir()
+        _git_init(self.repo)
+        # Every test starts with the launcher env var absent.
+        self._env = mock.patch.dict(os.environ, {state.TARGET_STATE_DIR_ENV: ""}, clear=False)
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        os.environ.pop(state.TARGET_STATE_DIR_ENV, None)
+
+    def _register(self, name: str = "target", uid: int = 7) -> Path:
+        """Give the repo real pins and create the state dir they name."""
+        state_dir = self.apiary / ".repos" / f"{name}-{uid}"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        state.write_main_apiary_pointer(
+            self.repo,
+            {
+                "main_apiary_path": str(self.apiary),
+                "main_apiary_uid": state.MAIN_APIARY_UID,
+            },
+        )
+        state.write_self_pointer(self.repo, {"uid": uid, "name": name, "real_path": str(self.repo)})
+        return state_dir
+
+    # --- precedence ---------------------------------------------------
+
+    def test_env_var_wins_over_everything(self):
+        self._register()
+        env_dir = self.root / "from-env"
+        with mock.patch.dict(os.environ, {state.TARGET_STATE_DIR_ENV: str(env_dir)}):
+            self.assertEqual(
+                state.resolve_state_dir(self.repo, subdir="scribe"),
+                env_dir / "scribe",
+            )
+
+    def test_use_env_false_ignores_the_launcher_variable(self):
+        expected = self._register()
+        env_dir = self.root / "from-env"
+        with mock.patch.dict(os.environ, {state.TARGET_STATE_DIR_ENV: str(env_dir)}):
+            self.assertEqual(
+                state.resolve_state_dir(self.repo, subdir="scribe", use_env=False),
+                expected / "scribe",
+            )
+
+    def test_pins_resolve_to_the_centralized_state_dir(self):
+        expected = self._register()
+        self.assertEqual(
+            state.resolve_state_dir(self.repo, subdir="compass"),
+            expected / "compass",
+        )
+
+    def test_pins_are_ignored_when_the_state_dir_does_not_exist(self):
+        # Pin files can outlive the directory they name (main-apiary moved,
+        # state pruned). Falling through beats returning a dead path.
+        state.write_main_apiary_pointer(self.repo, {"main_apiary_path": str(self.apiary)})
+        state.write_self_pointer(
+            self.repo, {"uid": 99, "name": "gone", "real_path": str(self.repo)}
+        )
+        self.assertEqual(
+            state.resolve_state_dir(self.repo, subdir="scribe"),
+            self.repo / ".apiary" / "scribe",
+        )
+
+    def test_legacy_breadcrumb_is_used_when_there_are_no_pins(self):
+        legacy = self.apiary / ".repos" / "target-3"
+        legacy.mkdir(parents=True)
+        state._write_pointer(self.repo, self.apiary, "target-3")
+        self.assertEqual(
+            state.resolve_state_dir(self.repo, subdir="scribe"),
+            legacy / "scribe",
+        )
+
+    def test_falls_back_to_the_in_repo_layout(self):
+        self.assertEqual(
+            state.resolve_state_dir(self.repo, subdir="research"),
+            self.repo / ".apiary" / "research",
+        )
+
+    def test_legacy_in_repo_false_returns_none_instead(self):
+        self.assertIsNone(
+            state.resolve_state_dir(self.repo, subdir="sessions", legacy_in_repo=False)
+        )
+
+    # --- start vs repo, and the no-repo cases -------------------------
+
+    def test_start_inside_the_repo_resolves_via_git(self):
+        nested = self.repo / "deep" / "deeper"
+        nested.mkdir(parents=True)
+        self.assertEqual(
+            state.resolve_state_dir(nested, subdir="scribe"),
+            self.repo / ".apiary" / "scribe",
+        )
+
+    def test_repo_argument_skips_git_entirely(self):
+        plain = self.root / "not-a-repo"
+        plain.mkdir()
+        with mock.patch(
+            "core.utils.state.git_root", side_effect=AssertionError("git must not run")
+        ):
+            self.assertEqual(
+                state.resolve_state_dir(repo=plain, subdir="scribe"),
+                plain / ".apiary" / "scribe",
+            )
+
+    def test_outside_a_git_repo_returns_none_by_default(self):
+        plain = self.root / "plain"
+        plain.mkdir()
+        self.assertIsNone(state.resolve_state_dir(plain, subdir="scribe"))
+
+    def test_cwd_fallback_serves_the_knowledge_stores_outside_a_repo(self):
+        plain = self.root / "plain"
+        plain.mkdir()
+        self.assertEqual(
+            state.resolve_state_dir(plain, subdir="captures", cwd_fallback=True),
+            plain / ".apiary" / "captures",
+        )
+
+    # --- require_exists -----------------------------------------------
+
+    def test_require_exists_skips_a_subdir_that_is_not_there(self):
+        self._register()
+        self.assertIsNone(
+            state.resolve_state_dir(
+                repo=self.repo, subdir="scribe", use_env=False, require_exists=True
+            )
+        )
+
+    def test_require_exists_returns_the_subdir_once_it_exists(self):
+        state_dir = self._register()
+        (state_dir / "scribe").mkdir()
+        self.assertEqual(
+            state.resolve_state_dir(
+                repo=self.repo, subdir="scribe", use_env=False, require_exists=True
+            ),
+            state_dir / "scribe",
+        )
+
+    def test_no_subdir_returns_the_state_dir_itself(self):
+        expected = self._register()
+        self.assertEqual(state.resolve_state_dir(self.repo), expected)
+
+    def test_find_state_dir_agrees_with_the_pins_branch(self):
+        expected = self._register()
+        self.assertEqual(state.find_state_dir(self.repo), expected)
+
+
+class ResolveApiaryRepoTests(unittest.TestCase):
+    """``resolve_apiary_repo`` must not prefer the source tree it happens to
+    be running from over the registered main repo — a worktree of
+    main-apiary used to become "main-apiary" and grow its own ``.repos/``."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.main = self.root / "main-apiary"
+        (self.main / "core").mkdir(parents=True)
+        (self.main / "core" / "install.py").write_text("", encoding="utf-8")
+        (self.main / "VERSION").write_text("0.1.0\n", encoding="utf-8")
+        _git_init(self.main)
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"],
+            cwd=self.main,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "files"],
+            cwd=self.main,
+            check=True,
+            capture_output=True,
+        )
+        # Neutral cwd with no pin, and no launcher env var.
+        self.elsewhere = self.root / "elsewhere"
+        self.elsewhere.mkdir()
+        self._cwd = os.getcwd()
+        os.chdir(self.elsewhere)
+        self.addCleanup(os.chdir, self._cwd)
+        self._env = mock.patch.dict(os.environ, {}, clear=False)
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        os.environ.pop("APIARY_MAIN_REPO", None)
+
+    def _add_worktree(self) -> Path:
+        wt = self.root / "worktree"
+        subprocess.run(
+            ["git", "worktree", "add", "--detach", "-q", str(wt)],
+            cwd=self.main,
+            check=True,
+            capture_output=True,
+        )
+        return wt
+
+    def test_worktree_checkout_resolves_to_the_registered_main_repo(self):
+        wt = self._add_worktree()
+        self.assertTrue((wt / "core" / "install.py").is_file())  # looks like apiary
+        with mock.patch.object(state, "_REPO_ROOT", wt):
+            self.assertEqual(state.resolve_apiary_repo(), self.main)
+
+    def test_main_checkout_still_resolves_to_itself(self):
+        with mock.patch.object(state, "_REPO_ROOT", self.main):
+            self.assertEqual(state.resolve_apiary_repo(), self.main)
+
+    def test_pin_outranks_the_source_tree(self):
+        # A relocated main-apiary: the source tree we run from is a stale
+        # copy, the pin in the cwd names the live one.
+        other = self.root / "live-apiary"
+        (other / "core").mkdir(parents=True)
+        (other / "core" / "install.py").write_text("", encoding="utf-8")
+        (other / "VERSION").write_text("0.1.0\n", encoding="utf-8")
+        state.write_main_apiary_pointer(
+            self.elsewhere,
+            {
+                "main_apiary_path": str(other),
+                "main_apiary_uid": state.MAIN_APIARY_UID,
+            },
+        )
+        with mock.patch.object(state, "_REPO_ROOT", self.main):
+            self.assertEqual(state.resolve_apiary_repo(), other)
+
+    def test_explicit_argument_and_env_var_still_win(self):
+        elsewhere = self.root / "explicit"
+        elsewhere.mkdir()
+        with mock.patch.object(state, "_REPO_ROOT", self.main):
+            self.assertEqual(state.resolve_apiary_repo(elsewhere), elsewhere)
+            with mock.patch.dict(os.environ, {"APIARY_MAIN_REPO": str(elsewhere)}):
+                self.assertEqual(state.resolve_apiary_repo(), elsewhere)
+
+    def test_raises_when_nothing_resolves(self):
+        not_apiary = self.root / "random"
+        not_apiary.mkdir()
+        with mock.patch.object(state, "_REPO_ROOT", not_apiary):
+            with self.assertRaises(RuntimeError):
+                state.resolve_apiary_repo()
 
 
 if __name__ == "__main__":

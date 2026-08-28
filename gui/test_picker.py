@@ -13,7 +13,7 @@ from gui import picker
 class ListDirectoryTests(unittest.TestCase):
     def test_lists_subdirectories_only(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
+            root = Path(td).resolve()
             (root / "alpha").mkdir()
             (root / "beta").mkdir()
             (root / "file.txt").write_text("x", encoding="utf-8")
@@ -25,7 +25,7 @@ class ListDirectoryTests(unittest.TestCase):
 
     def test_sort_is_case_insensitive(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
+            root = Path(td).resolve()
             (root / "Banana").mkdir()
             (root / "apple").mkdir()
             (root / "Cherry").mkdir()

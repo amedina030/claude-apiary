@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for runner/validate_intake.py — field validation logic."""
+
 import subprocess
 import tempfile
 import unittest
@@ -12,7 +13,8 @@ def _git_init(path: Path) -> None:
     """Init a bare-minimum git repo so target_repo validation accepts it."""
     subprocess.run(
         ["git", "init", "--quiet", str(path)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -50,7 +52,7 @@ class TestTargetRepoField(unittest.TestCase):
 
     def test_valid_target_repo_passes(self):
         with tempfile.TemporaryDirectory() as td:
-            repo = Path(td) / "r"
+            repo = Path(td).resolve() / "r"
             repo.mkdir()
             _git_init(repo)
             intake = _base_intake()
@@ -77,7 +79,7 @@ class TestTargetRepoField(unittest.TestCase):
 
     def test_target_repo_not_a_directory_rejected(self):
         with tempfile.TemporaryDirectory() as td:
-            f = Path(td) / "file.txt"
+            f = Path(td).resolve() / "file.txt"
             f.write_text("x", encoding="utf-8")
             intake = _base_intake()
             intake["target_repo"] = str(f)

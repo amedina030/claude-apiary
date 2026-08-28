@@ -1,29 +1,65 @@
-[tool.poetry]
+[project]
 name = "claude-apiary"
 version = "0.1.0"
 description = "A toolkit extending Claude Code with budgeter, scribe, refiner, harden, and runner."
-authors = ["amedina030 <amedina030@gmail.com>"]
 readme = "README.md"
+authors = [{ name = "amedina030", email = "amedina030@gmail.com" }]
+requires-python = ">=3.11,<4.0"
+# The toolkit is stdlib-only on purpose: every tool has to be runnable from a
+# git hook, where `py -3`/`python3` resolves the system interpreter and not
+# the Poetry virtualenv. Optional components declare their deps in the
+# `gui` / `build` groups below.
+dependencies = []
+
+[project.scripts]
+# `apiary install --target <repo>`, `apiary doctor`, `apiary update`, etc.
+# See core/cli.py and docs/architecture/per-repo-install.md.
+apiary = "core.cli:main"
+
+[tool.poetry]
+# Every importable top-level package plus the data directories the CLI reads
+# at runtime. The list used to stop at seven entries, so `pip install .`
+# produced a distribution with no captures/compass/researcher/incubator and
+# no profiles for `apiary install` to resolve — invisible from a source
+# checkout because pytest runs from the repo root
+# (review subsystems/infra-docs-skills.md §1 "Dependency locking").
 packages = [
     { include = "core" },
     { include = "budgeter" },
     { include = "scribe" },
     { include = "runner" },
-    { include = "refiner" },
     { include = "harden" },
     { include = "gui" },
+    { include = "captures" },
+    { include = "compass" },
+    { include = "researcher" },
+    { include = "incubator" },
+    { include = "migrations" },
+    { include = "scripts" },
+    { include = "docs" },
 ]
-
-[tool.poetry.dependencies]
-python = "^3.11"
-
-[tool.poetry.scripts]
-# `apiary install --target <repo>`, `apiary doctor`, etc. See core/cli.py
-# and MIGRATION-PLAN.md §14.6.
-apiary = "core.cli:main"
+# Non-package data `core/install.py` reads out of the checkout: the version
+# pin it stamps into every bootstrapped repo, the profile family it merges
+# into settings.json, the CLAUDE.md context rules it renders, and `refiner/`,
+# which ships slash commands and no Python at all (poetry refuses to call it
+# a package, so it travels as data).
+include = [
+    { path = "VERSION", format = ["sdist", "wheel"] },
+    { path = "profiles/**/*", format = ["sdist", "wheel"] },
+    { path = "context-rules/**/*", format = ["sdist", "wheel"] },
+    { path = "refiner/**/*", format = ["sdist", "wheel"] },
+]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0,<9.0"
+# Lint + format, configured in [tool.ruff] below and gated in CI. Dev-group,
+# like pytest: nothing the toolkit ships at runtime imports it.
+ruff = ">=0.16,<0.17"
+# Coverage is reported, never gated — `--cov` is deliberately absent from
+# addopts so the default run stays fast. Ask for it explicitly:
+#   poetry run pytest --cov
+# Settings live in [tool.coverage.*] below.
+pytest-cov = ">=5.0,<8.0"
 
 # Optional gui/ component — see gui/README.md and decision D-2026-47.
 # Install with: poetry install --with gui
@@ -36,12 +72,119 @@ pywebview = ">=5.0,<6.0"
 # pythonnet 2.5.2 has no PEP-517 build backend and fails on Python ≥ 3.12 (its
 # bundled `tools/nuget/nuget.exe update -self` shells out and exits non-zero).
 # pythonnet 3.0.5 ships wheels for Python 3.7-3.13.
+#
+# The `sys_platform` markers are what let CI run `poetry install --with gui`
+# on ubuntu and macos: these two are Windows-only wheels, and pywebview's
+# GTK/Qt bindings are extras nobody asks for, so the group resolves
+# everywhere.
 pythonnet = { version = ">=3.0,<4.0", markers = "sys_platform == 'win32'", python = ">=3.11,<3.13" }
 pywinpty = { version = ">=2.0,<3.0", markers = "sys_platform == 'win32'" }
 watchdog = ">=4.0,<7.0"
 
+# Build-only tooling for the packaged GUI. Was installed ad hoc with
+# `poetry run pip install pyinstaller`, which left the one tool that decides
+# what an .exe contains unpinned and out of the lockfile.
+# Install with: poetry install --with gui --with build
+[tool.poetry.group.build]
+optional = true
+
+[tool.poetry.group.build.dependencies]
+# 6.x is the series the spec is written against (SPEC/workpath injection,
+# `PYZ(a.pure)` single-arg form). 7.x may change both. The python bound
+# mirrors the gui group's pythonnet pin: 6.x publishes no wheels past the
+# Python it was cut against, and there is no point building a bundle for an
+# interpreter the GUI's own deps refuse to install on.
+pyinstaller = { version = ">=6.0,<7.0", python = ">=3.11,<3.13" }
+
+# Lint + format. The rule set is the one review §5 Phase 4 asks for, and it is
+# deliberately narrow: pyflakes (`F`) and pycodestyle errors (`E`) for dead
+# code and syntax-adjacent mistakes, isort (`I`) for import order, plus three
+# rules that encode PORTABILITY.md rather than taste —
+#   PLW1514  `open()` with no `encoding=` (cp1252 on the Windows dev box, utf-8
+#            everywhere else: the repo's single most common cross-OS bug class)
+#   S602     `subprocess(..., shell=True)`
+#   S605     `os.system` / starting a process with a shell
+# Style opinions beyond that (naming, docstrings, complexity) stay out: the
+# house style lives in docs/standards/code-style.md and is reviewed, not linted.
+[tool.ruff]
+target-version = "py311"
+# 100, not ruff's default 88. Measured on the tree before this pass: 1,103
+# lines exceed 88 columns and only 268 exceed 100, so 100 keeps `ruff format`
+# a formatting pass instead of a rewrite of every wrapped call site.
+line-length = 100
+# `docs/` is excluded on purpose *for now* — it was mid-rewrite when this
+# landed and gets its own formatting pass. The rest are generated or foreign
+# trees: per-repo install state, centralized target state, scratch dirs.
+exclude = ["docs", ".claude", ".repos", ".apiary", "_tmp_*"]
+
+[tool.ruff.lint]
+# PLW1514 is still a preview rule in ruff 0.16. `explicit-preview-rules` keeps
+# preview mode from dragging in every other unstable rule: only the preview
+# rules named in `select` below are turned on.
+preview = true
+explicit-preview-rules = true
+select = ["E", "F", "I", "PLW1514", "S602", "S605"]
+# E402 (import not at top of file) is the one rule this repo cannot satisfy.
+# Every occurrence — 81 of them across 25 files, checked one by one — is the
+# `sys.path.insert(0, <repo root>)` bootstrap that docs/standards/code-style.md
+# mandates (file-structure step 4): hooks, the `apiary` CLI modules and
+# `scribe/api.py` are all entered by absolute path under a bare `python3`, so
+# the repo root has to be on `sys.path` *before* the first `from core import …`.
+# Moving those imports up is not a fix, it is an ImportError.
+#
+# E501 (line too long) is delegated to the formatter, which is the pairing
+# ruff itself recommends when `ruff format` runs: the formatter already wraps
+# every line it *can* wrap, so `ruff format --check` in CI is the real width
+# gate. What E501 reports on top of that is the residue the formatter will not
+# touch — 65 lines, all of them a single string literal, regex or comment:
+# the compass/ LLM prompts, the harden/ validator messages, argparse help
+# text, usage docstrings. Splitting those by hand edits message and prompt
+# *content* to satisfy a column count, which is a worse trade than the long
+# line. Both codes are ignored globally rather than per-file because both are
+# repo-wide patterns, not local exceptions.
+ignore = ["E402", "E501"]
+
+[tool.ruff.lint.isort]
+# Spelled out rather than left to ruff's directory sniffing: the checkout that
+# CI lints and the checkout a git hook lints are not always the repo root, and
+# a package silently reclassified as third-party reorders imports on one
+# machine and not the other. This list is `[tool.poetry] packages` plus
+# `refiner`, which ships no Python but is imported by name in docs examples.
+known-first-party = [
+    "core", "budgeter", "scribe", "runner", "harden", "gui", "captures",
+    "compass", "researcher", "incubator", "migrations", "scripts", "refiner",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests shell out on purpose: the git-repo fixtures, the launcher execution
+# tests and the hook end-to-end tests all drive real subprocesses. S602/S605
+# are about untrusted input reaching a shell; a test's input is the test.
+"**/test_*.py" = ["S602", "S605"]
+"core/testing.py" = ["S602", "S605"]
+
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
+
+# Report-only coverage. Nothing fails on a low number: the point is to see
+# which subsystems the 1,700-test suite never touches, not to defend a
+# percentage (review §5 Phase 4, "pytest-cov (report only)").
+[tool.coverage.run]
+branch = true
+source = [
+    "core", "budgeter", "scribe", "runner", "harden", "compass",
+    "researcher", "captures", "incubator", "gui", "refiner",
+]
+omit = ["*/test_*.py", "*/__pycache__/*", "*/.venv/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+skip_empty = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
 
 [build-system]
 requires = ["poetry-core"]

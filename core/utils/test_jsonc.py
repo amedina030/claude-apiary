@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for core.utils.jsonc — JSONC comment stripper + trailing-comma tolerance."""
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +9,6 @@ from core.utils.jsonc import JsoncParseError, load, loads
 
 
 class TestLoads(unittest.TestCase):
-
     def test_plain_json(self):
         self.assertEqual(loads('{"a": 1}'), {"a": 1})
 
@@ -86,16 +86,15 @@ class TestLoads(unittest.TestCase):
 
 
 class TestLoadFile(unittest.TestCase):
-
     def test_load_reads_file_and_parses(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "x.jsonc"
+            p = Path(tmp).resolve() / "x.jsonc"
             p.write_text('// hi\n{"a": 1,}', encoding="utf-8")
             self.assertEqual(load(p), {"a": 1})
 
     def test_load_carries_path_into_error(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "broken.jsonc"
+            p = Path(tmp).resolve() / "broken.jsonc"
             p.write_text('{"a": }', encoding="utf-8")
             with self.assertRaises(JsoncParseError) as cm:
                 load(p)

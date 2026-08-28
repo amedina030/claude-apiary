@@ -7,22 +7,27 @@ tested in isolation:
     apiary install --target <repo>     core/install.py
     apiary uninstall --target <repo>   core/uninstall.py
     apiary self-bootstrap              core/self_bootstrap.py
-    apiary doctor [check]              core/doctor.py
-    apiary mailbox                     core/mailbox.py
+    apiary doctor [check] [--fix]      core/doctor.py
     apiary cascade-fix                 core/cascade.py
-    apiary version                     prints <main-apiary>/VERSION
+    apiary update [--target]           core/update.py
+    apiary version [--all]             prints <main-apiary>/VERSION
 
 Run from inside a clone of main-apiary, or from a bootstrapped repo where
 the per-repo launcher resolves main-apiary via the pointer file. Either
 way the script needs to find main-apiary; pass ``--apiary-repo`` to override.
 
-See MIGRATION-PLAN.md §14.6 for the design decision behind a single CLI
-versus the legacy collection of standalone scripts.
+Exit codes: 0 on success, 1 when a check fails or a verb raises one of the
+user-facing errors in :func:`_user_facing_errors` (printed as a single line,
+never a traceback), 2 for an argparse usage error. Anything else is an apiary
+bug and still surfaces as a traceback.
+
+A single CLI replaces the legacy collection of standalone install
+scripts; see ``docs/architecture/per-repo-install.md``.
 """
+
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -33,17 +38,42 @@ if str(REPO_ROOT) not in sys.path:
 from core.utils import state
 
 
+def _user_facing_errors() -> tuple[type[BaseException], ...]:
+    """Exception types that mean "the input or the repo state is wrong".
+
+    ``InstallError`` / ``UninstallError`` cover a target that is not a git
+    repo, a tampered CLAUDE.md zone, an unreadable bootstrap_state, and the
+    refusal to uninstall main-apiary itself; ``ProfileError`` covers the whole
+    profile family (not found, ``extends`` cycle, bad ``$schema_version``,
+    JSONC parse error). Each carries a message that says what to fix, and used
+    to reach the user underneath a stack trace instead.
+
+    Imported here rather than at module scope so `apiary version` still pays
+    for nothing but its own import.
+    """
+    from core.apiary_profiles import ProfileError
+    from core.install import InstallError
+    from core.uninstall import UninstallError
+
+    return (InstallError, UninstallError, ProfileError)
+
+
 def _add_apiary_repo_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument(
-        "--apiary-repo", type=Path, default=None,
+        "--apiary-repo",
+        type=Path,
+        default=None,
         help="Path to main-apiary (default: resolved via pointer / launcher env).",
     )
 
 
 def _cmd_install(args: argparse.Namespace) -> int:
     from core import install as install_mod
+
     result = install_mod.install(
-        args.target, profile=args.profile, apiary_repo=args.apiary_repo,
+        args.target,
+        profile=args.profile,
+        apiary_repo=args.apiary_repo,
     )
     print(
         f"{'installed' if result.is_first_install else 're-applied'}: "
@@ -56,8 +86,11 @@ def _cmd_install(args: argparse.Namespace) -> int:
 
 def _cmd_uninstall(args: argparse.Namespace) -> int:
     from core import uninstall as uninstall_mod
+
     result = uninstall_mod.uninstall(
-        args.target, apiary_repo=args.apiary_repo, remove_data=args.remove_data,
+        args.target,
+        apiary_repo=args.apiary_repo,
+        remove_data=args.remove_data,
     )
     print(
         f"uninstalled: uid={result.uid} name={result.name}\n"
@@ -73,6 +106,7 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
 
 def _cmd_self_bootstrap(args: argparse.Namespace) -> int:
     from core import self_bootstrap as sb
+
     result = sb.self_bootstrap(args.apiary_repo)
     print(
         f"main-apiary bootstrapped at uid={result.uid} "
@@ -83,43 +117,26 @@ def _cmd_self_bootstrap(args: argparse.Namespace) -> int:
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
     from core import doctor
+
     forwarded: list[str] = []
     if args.subcommand:
         forwarded.append(args.subcommand)
+    if args.fix:
+        forwarded.append("--fix")
     if args.apiary_repo is not None:
         forwarded.extend(["--apiary-repo", str(args.apiary_repo)])
     return doctor.main(forwarded)
 
 
-def _cmd_mailbox(args: argparse.Namespace) -> int:
-    from core import mailbox
-    apiary = state.resolve_apiary_repo(args.apiary_repo)
-    if args.list:
-        pending = mailbox.list_pending(apiary)
-        print(f"{len(pending)} pending message(s)")
-        for p in pending:
-            msg = mailbox.read_message(p)
-            if msg:
-                print(f"  {p.name}: {msg['kind']} from_uid={msg['from_uid']} "
-                      f"new_path={msg.get('new_path')}")
-            else:
-                print(f"  {p.name}: <malformed>")
-        return 0
-    report = mailbox.process_pending(apiary)
-    print(f"processed {report['processed']} message(s)")
-    for entry in report["applied"]:
-        print(f"  applied: uid={entry['uid']} kind={entry['kind']} new_path={entry['new_path']}")
-    for err in report["errors"]:
-        print(f"  error: {err['file']} -> {err['reason']}")
-    return 0 if not report["errors"] else 1
-
-
 def _cmd_cascade(args: argparse.Namespace) -> int:
     from core import cascade as cascade_mod
+
     apiary = state.resolve_apiary_repo(args.apiary_repo).resolve()
     report = cascade_mod.cascade_fix(apiary)
-    print(f"cascade-fix at {apiary}: updated {len(report.updated)} repo(s); "
-          f"skipped {len(report.skipped)}")
+    print(
+        f"cascade-fix at {apiary}: updated {len(report.updated)} repo(s); "
+        f"skipped {len(report.skipped)}"
+    )
     for uid in report.updated:
         print(f"  updated uid={uid}")
     for uid, reason in report.skipped:
@@ -129,8 +146,38 @@ def _cmd_cascade(args: argparse.Namespace) -> int:
 
 def _cmd_version(args: argparse.Namespace) -> int:
     apiary = state.resolve_apiary_repo(args.apiary_repo)
-    print(state.read_apiary_version(apiary))
+    main_version = state.read_apiary_version(apiary)
+    if not args.all:
+        print(main_version)
+        return 0
+
+    from core import update as update_mod
+
+    print(f"main-apiary {main_version}  ({apiary})")
+    registry = state._load_registry(apiary)
+    if not registry:
+        print("  (no registered repos)")
+        return 0
+    for uid_str, entry in sorted(registry.items(), key=lambda kv: kv[0].rjust(6)):
+        if not isinstance(entry, dict):
+            continue
+        repo = Path(str(entry.get("real_path", "")))
+        pinned = update_mod.repo_version(repo, entry) or "?"
+        marker = "  " if pinned == main_version else "! "
+        print(f"  {marker}{entry.get('name', '?')} (uid={uid_str}) {pinned}  {repo}")
     return 0
+
+
+def _cmd_update(args: argparse.Namespace) -> int:
+    from core import update as update_mod
+
+    return update_mod.main(
+        [
+            *(["--target", str(args.target)] if args.target else []),
+            *(["--dry-run"] if args.dry_run else []),
+            *(["--apiary-repo", str(args.apiary_repo)] if args.apiary_repo else []),
+        ]
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -149,7 +196,8 @@ def main(argv: list[str] | None = None) -> int:
     p_uninstall = sub.add_parser("uninstall", help="remove apiary from a bootstrapped repo")
     p_uninstall.add_argument("--target", type=Path, required=True, help="target repo path")
     p_uninstall.add_argument(
-        "--remove-data", action="store_true",
+        "--remove-data",
+        action="store_true",
         help="also delete <main-apiary>/.repos/<slug>/ (per-target state)",
     )
     _add_apiary_repo_arg(p_uninstall)
@@ -161,18 +209,23 @@ def main(argv: list[str] | None = None) -> int:
 
     p_doctor = sub.add_parser("doctor", help="run consistency checks")
     from core import doctor as _doctor  # choices derived from the check registry
+
     p_doctor.add_argument(
-        "subcommand", nargs="?",
+        "subcommand",
+        nargs="?",
         choices=tuple(_doctor.CHECKS),
         help="single check to run; omit to run all",
     )
+    p_doctor.add_argument(
+        "--fix",
+        action="store_true",
+        help=(
+            "apply safe fixes for the named check (supported: "
+            f"{', '.join(_doctor.FIXES)}); requires a check name"
+        ),
+    )
     _add_apiary_repo_arg(p_doctor)
     p_doctor.set_defaults(func=_cmd_doctor)
-
-    p_mailbox = sub.add_parser("mailbox", help="process pending forwarding messages")
-    p_mailbox.add_argument("--list", action="store_true", help="list pending messages without processing")
-    _add_apiary_repo_arg(p_mailbox)
-    p_mailbox.set_defaults(func=_cmd_mailbox)
 
     p_cascade = sub.add_parser(
         "cascade-fix",
@@ -182,11 +235,38 @@ def main(argv: list[str] | None = None) -> int:
     p_cascade.set_defaults(func=_cmd_cascade)
 
     p_version = sub.add_parser("version", help="print main-apiary's pinned version")
+    p_version.add_argument(
+        "--all",
+        action="store_true",
+        help="also list every registered repo's pinned version (`!` marks drift)",
+    )
     _add_apiary_repo_arg(p_version)
     p_version.set_defaults(func=_cmd_version)
 
+    p_update = sub.add_parser(
+        "update",
+        help="run pending migrations/ in every bootstrapped repo and re-pin it",
+    )
+    p_update.add_argument(
+        "--target",
+        type=Path,
+        default=None,
+        help="update only this repo (default: every registered repo)",
+    )
+    p_update.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the migrations that would run; write nothing",
+    )
+    _add_apiary_repo_arg(p_update)
+    p_update.set_defaults(func=_cmd_update)
+
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except _user_facing_errors() as exc:
+        print(f"apiary {args.cmd}: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

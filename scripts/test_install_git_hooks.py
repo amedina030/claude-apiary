@@ -40,7 +40,7 @@ def _git(args, cwd, **kw):
 class _TempRepo(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.repo = Path(self._tmp.name)
+        self.repo = Path(self._tmp.name).resolve()
         _git(["init", "-q"], self.repo)
         _git(["config", "user.email", "t@example.com"], self.repo)
         _git(["config", "user.name", "T"], self.repo)

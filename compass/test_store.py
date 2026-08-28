@@ -1,9 +1,10 @@
 """Tests for compass.store — paths, dimensions, validation, archive policy."""
+
 import json
 import os
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from compass import store
@@ -30,15 +31,15 @@ class ValidateObservationTest(unittest.TestCase):
         self.assertEqual(store.validate_observation(self._payload()), [])
 
     def test_empty_observations_list_is_valid(self):
-        self.assertEqual(
-            store.validate_observation(self._payload(observations=[])), []
-        )
+        self.assertEqual(store.validate_observation(self._payload(observations=[])), [])
 
     def test_missing_session_id(self):
         payload = self._payload()
         del payload["session_id"]
-        self.assertIn("session_id missing or not a valid 8-char hex / UUID",
-                      store.validate_observation(payload))
+        self.assertIn(
+            "session_id missing or not a valid 8-char hex / UUID",
+            store.validate_observation(payload),
+        )
 
     def test_session_id_uppercase_hex_rejected(self):
         # Regex requires lowercase hex.
@@ -46,9 +47,7 @@ class ValidateObservationTest(unittest.TestCase):
         self.assertTrue(any("session_id" in e for e in errors))
 
     def test_filename_match_check_passes(self):
-        errors = store.validate_observation(
-            self._payload(), expected_session_id="deadbeef"
-        )
+        errors = store.validate_observation(self._payload(), expected_session_id="deadbeef")
         self.assertEqual(errors, [])
 
     def test_filename_match_check_fails(self):
@@ -115,16 +114,15 @@ class DimensionsTest(unittest.TestCase):
 class PathsTest(unittest.TestCase):
     def test_observation_path_uses_8char_short(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
+            tmp_path = Path(tmp).resolve()
             short = store.observation_path("deadbeef", start=tmp_path)
-            full = store.observation_path("deadbeef-1234-5678-9abc-def012345678",
-                                          start=tmp_path)
+            full = store.observation_path("deadbeef-1234-5678-9abc-def012345678", start=tmp_path)
             self.assertEqual(short.name, "deadbeef.json")
             self.assertEqual(full.name, "deadbeef.json")
 
     def test_archive_target_path_uses_iso_year_week(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
+            tmp_path = Path(tmp).resolve()
             src = store.observation_path("deadbeef", start=tmp_path)
             dt = datetime(2026, 1, 15, tzinfo=timezone.utc)  # ISO week 3
             dest = store.archive_target_path(src, now=dt, start=tmp_path)
@@ -133,7 +131,7 @@ class PathsTest(unittest.TestCase):
 
     def test_compass_dir_honors_target_state_env(self):
         with tempfile.TemporaryDirectory() as tmp:
-            state_dir = Path(tmp) / "claude-apiary-1"
+            state_dir = Path(tmp).resolve() / "claude-apiary-1"
             state_dir.mkdir()
             prev = os.environ.get(store.TARGET_STATE_DIR_ENV)
             os.environ[store.TARGET_STATE_DIR_ENV] = str(state_dir)
@@ -147,7 +145,7 @@ class PathsTest(unittest.TestCase):
 
     def test_compass_dir_falls_back_to_repo_root_without_env(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
+            tmp_path = Path(tmp).resolve()
             prev = os.environ.get(store.TARGET_STATE_DIR_ENV)
             if prev is not None:
                 del os.environ[store.TARGET_STATE_DIR_ENV]
@@ -165,7 +163,7 @@ class PathsTest(unittest.TestCase):
 class LoadObservationTest(unittest.TestCase):
     def test_load_valid_file(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
+            tmp_path = Path(tmp).resolve()
             data = {
                 "session_id": "deadbeef",
                 "captured_at": "2026-04-17T20:00:00Z",
@@ -177,13 +175,13 @@ class LoadObservationTest(unittest.TestCase):
 
     def test_load_invalid_json_returns_none(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "broken.json"
+            p = Path(tmp).resolve() / "broken.json"
             p.write_text("not json", encoding="utf-8")
             self.assertIsNone(store.load_observation(p))
 
     def test_load_invalid_schema_returns_none(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "bad.json"
+            p = Path(tmp).resolve() / "bad.json"
             p.write_text(json.dumps({"oops": True}), encoding="utf-8")
             self.assertIsNone(store.load_observation(p))
 
@@ -192,7 +190,7 @@ class ListActiveTest(unittest.TestCase):
     def setUp(self):
         self._orig_cwd = os.getcwd()
         self._tmp = tempfile.TemporaryDirectory()
-        self.repo = Path(self._tmp.name)
+        self.repo = Path(self._tmp.name).resolve()
         # Mimic a git repo so compass_dir resolves under us.
         os.chdir(self.repo)
         # Restore cwd before tempfile cleanup runs (Windows can't rmdir an in-use cwd).

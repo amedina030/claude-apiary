@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Tests for core.apiary_profiles — extends chain, deep merge, $replace, errors."""
+
 import tempfile
 import unittest
 from pathlib import Path
 
 from core.apiary_profiles import (
+    SUPPORTED_SCHEMA_VERSION,
     ProfileCycleError,
     ProfileMergeError,
     ProfileNotFoundError,
     ProfileSchemaError,
-    SUPPORTED_SCHEMA_VERSION,
     list_available,
     resolve,
 )
@@ -23,17 +24,15 @@ def _write(profiles_dir: Path, name: str, body: str) -> Path:
 
 
 class _ProfilesDir(unittest.TestCase):
-
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.profiles = Path(self._tmp.name)
+        self.profiles = Path(self._tmp.name).resolve()
 
     def tearDown(self):
         self._tmp.cleanup()
 
 
 class TestResolveBasic(_ProfilesDir):
-
     def test_single_profile_no_extends(self):
         _write(self.profiles, "solo", '{"$schema_version": 1, "x": 1}')
         result = resolve("solo", self.profiles)
@@ -45,7 +44,9 @@ class TestResolveBasic(_ProfilesDir):
 
     def test_extends_single_parent(self):
         _write(self.profiles, "base", '{"$schema_version": 1, "a": 1, "b": 2}')
-        _write(self.profiles, "child", '{"$schema_version": 1, "extends": ["base"], "b": 99, "c": 3}')
+        _write(
+            self.profiles, "child", '{"$schema_version": 1, "extends": ["base"], "b": 99, "c": 3}'
+        )
         result = resolve("child", self.profiles)
         self.assertEqual(result.profiles_applied, ["base", "child"])
         self.assertEqual(result.merged, {"a": 1, "b": 99, "c": 3})
@@ -73,7 +74,6 @@ class TestResolveBasic(_ProfilesDir):
 
 
 class TestDeepMerge(_ProfilesDir):
-
     def test_dicts_merge_recursively(self):
         _write(self.profiles, "base", '{"$schema_version": 1, "permissions": {"allow": ["A"]}}')
         _write(
@@ -110,7 +110,6 @@ class TestDeepMerge(_ProfilesDir):
 
 
 class TestReplaceWrapper(_ProfilesDir):
-
     def test_replace_replaces_list(self):
         _write(
             self.profiles,
@@ -159,7 +158,6 @@ class TestReplaceWrapper(_ProfilesDir):
 
 
 class TestErrors(_ProfilesDir):
-
     def test_missing_profile(self):
         _write(self.profiles, "exists", '{"$schema_version": 1}')
         with self.assertRaises(ProfileNotFoundError) as cm:
@@ -209,13 +207,12 @@ class TestErrors(_ProfilesDir):
             resolve("broken", self.profiles)
 
     def test_profile_not_a_dict(self):
-        _write(self.profiles, "x", '[1, 2, 3]')
+        _write(self.profiles, "x", "[1, 2, 3]")
         with self.assertRaises(ProfileSchemaError):
             resolve("x", self.profiles)
 
 
 class TestListAvailable(_ProfilesDir):
-
     def test_lists_only_jsonc(self):
         _write(self.profiles, "a", '{"$schema_version": 1}')
         _write(self.profiles, "b", '{"$schema_version": 1}')
@@ -227,7 +224,6 @@ class TestListAvailable(_ProfilesDir):
 
 
 class TestContentHashes(_ProfilesDir):
-
     def test_hashes_cover_all_applied_profiles(self):
         _write(self.profiles, "base", '{"$schema_version": 1}')
         _write(self.profiles, "mid", '{"$schema_version": 1, "extends": ["base"]}')
@@ -240,7 +236,6 @@ class TestContentHashes(_ProfilesDir):
 
 
 class TestSchemaVersionConstant(unittest.TestCase):
-
     def test_current_version_is_one(self):
         self.assertEqual(SUPPORTED_SCHEMA_VERSION, 1)
 

@@ -7,13 +7,13 @@
 - [Poetry](https://python-poetry.org/) (recommended) or pip
 - git (every bootstrapped repo must be a git repo — apiary uses `git rev-parse` to identify targets)
 
-No external runtime dependencies — dev dependencies (pytest) are managed via `pyproject.toml`.
+No external runtime dependencies — dev dependencies (`pytest`, `pytest-cov`) are managed via `pyproject.toml`. Coverage is report-only and off by default: `poetry run pytest --cov` when you want the numbers.
 
 ---
 
 ## Install Model
 
-Apiary uses a **per-repo opt-in** install. Each repo you want apiary to act on is bootstrapped individually; sessions in non-bootstrapped repos run as vanilla Claude Code with no apiary hooks, no managed CLAUDE.md zone, no budgeter logging. The single `~/.claude/apiary*` global install model was retired in 2026-05 — see `MIGRATION-PLAN.md` for the full design.
+Apiary uses a **per-repo opt-in** install. Each repo you want apiary to act on is bootstrapped individually; sessions in non-bootstrapped repos run as vanilla Claude Code with no apiary hooks, no managed CLAUDE.md zone, no budgeter logging. The single `~/.claude/apiary*` global install model was retired in 2026-05 — see [`docs/architecture/per-repo-install.md`](docs/architecture/per-repo-install.md) for the full design.
 
 What lives where after bootstrap:
 
@@ -119,9 +119,14 @@ python scripts/install_repo_hooks.py
 
 This installs `.git/hooks/pre-commit` and `.git/hooks/post-merge` into main-apiary's own `.git/hooks/`. Repo-local — unrelated to Claude Code hooks.
 
-The pre-commit hook chains two checks, and either one failing blocks the commit:
+The pre-commit hook chains three checks, and any one failing blocks the commit:
 
 - `docs/check.py` — framework doc conformance.
+- `docs/check_cli_claims.py` — every subcommand and flag documented in
+  `docs/reference/cli-tools.md` still exists in the tool's argparse, and every
+  real one is documented. It shells out to ~44 tools' `--help`, so it adds
+  ~15-20 s to a commit. The push gate (`core/hooks/pre_push_doc_conformer.py`)
+  runs the same check, so catching drift here is the cheap end of that loop.
 - `scripts/secret_scan.py --staged` — credentials in the staged diff (API keys,
   private keys, credential-shaped assignments), plus filenames that hold secrets
   by convention (`.env`, `id_rsa`, `*.pem`) even when `git add -f` bypasses
@@ -167,8 +172,8 @@ Hooks and slash commands are loaded at session start. Restart Claude Code after 
 Inside a bootstrapped repo:
 
 ```
-/budgeter-log     # start recording token usage
-/budgeter-warn    # enable expensive-call warnings
+/budgeter log            # start recording token usage
+/budgeter session-warn   # nudge to wrap up once the context gets long
 ```
 
 Toggles persist per-repo at `<repo>/.claude/apiary/flags/<flag-name>-enabled`.
@@ -263,7 +268,7 @@ poetry run apiary self-bootstrap                       # refresh main-apiary
 poetry run apiary doctor
 ```
 
-If main-apiary's pinned version (`<main-apiary>/VERSION`) advanced past a repo's pinned version (`<repo>/.claude/apiary/version.json`), `apiary doctor versions` flags it. The versioned migration runner under `<main-apiary>/migrations/` chains the upgrade scripts.
+If main-apiary's pinned version (`<main-apiary>/VERSION`) advanced past a repo's pinned version (`<repo>/.claude/apiary/version.json`), `apiary doctor versions` flags it, and `poetry run apiary update` chains the pending scripts under `<main-apiary>/migrations/` and re-pins each repo. `--dry-run` prints what would run; `--target <repo>` limits it to one.
 
 ---
 
@@ -281,7 +286,7 @@ poetry run apiary cascade-fix
 
 ## Moving a bootstrapped repo
 
-Open a Claude session inside the moved repo. The drift handler detects the move, queues an `update_path` message into main-apiary's mailbox at `<main-apiary>/.apiary/forwarding/<uid>.json`. On main-apiary's next session (or `apiary doctor mailbox --fix`), the registry's `real_path` is updated.
+Open a Claude session inside the moved repo. The drift handler detects the move and updates the repo's `self-pointer.json` and its `real_path` in `<main-apiary>/.repos/registry.json` in the same pass — nothing else to run. If the registry has no entry for the repo's uid (registry loss), the handler says so and re-running `apiary install --target <repo>` re-registers it.
 
 ---
 
@@ -338,14 +343,25 @@ Confirm `<repo>/.claude/apiary/launch.py` exists. If not, run `apiary install --
 **`apiary doctor` reports `pointers` issues**
 Main-apiary's self-pointer drifted. Run `apiary doctor pointers --fix` to update main-apiary's pointers and cascade-fix every bootstrapped repo's reference.
 
+**`apiary doctor` reports `pins` issues**
+A repo's `.claude/apiary/` pins disagree with the registry — usually a
+self-pointer `uid` left over from a registry that was lost or restored, which
+sends every tool's state to a directory nothing else knows about. Run
+`apiary doctor pins --fix` to rewrite the pins from the registry. The one
+finding it cannot fix for you is a uid 1 that is not main-apiary: pick which
+repo keeps the uid (`apiary uninstall` then `apiary install` the other one) —
+the drift handler treats uid 1 as main-apiary and rewrites other repos'
+pointers on its behalf.
+
 **`apiary doctor` reports `unreachable`**
 A registered repo's `real_path` no longer exists on disk. Either restore the repo, or `apiary uninstall --target <real_path>` (the registry entry is removed even if the path is gone, freeing the slug).
 
-**`/budgeter-log` toggle has no effect**
-Check `<repo>/.claude/apiary/flags/budgeter-log-enabled` exists when ON, is absent when OFF. The slash command creates/removes this file.
+**`/budgeter log` toggle has no effect**
+Check `<repo>/.claude/apiary/flags/budgeter-log-enabled` exists when ON, is absent when OFF. The slash command creates/removes this file via `core/flags.py`; run `python core/flags.py status budgeter-log` from inside the repo to see what the hooks see.
 
-**Warnings never firing**
-Warnings require at least `min_tasks` unique tasks in the log (default: 50). Run `/budgeter-log` and use the repo until you've accumulated enough history.
+**The session-length nudge never fires**
+Check `/budgeter session-warn` is ON, and note the nudge fires once per tier per session — the flag file at `<repo>/.claude/apiary/session-tmp/<session>_budgeter_session_len_soft_fired` records that. It is also skipped entirely in detached runner runs (`APIARY_RUNNER_SUBPROCESS=1`).
 
 **`setup.py --global` still in your muscle memory**
-That mode is gone. The redirect stub at `setup.py` will print the new commands.
+That mode is gone, and so is `setup.py`. Use `poetry run apiary self-bootstrap`
+for main-apiary and `poetry run apiary install --target <repo>` for anything else.

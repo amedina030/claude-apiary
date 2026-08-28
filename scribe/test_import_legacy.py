@@ -4,6 +4,7 @@ Runs against a fully-synthetic fixture under tests/fixtures/legacy_scribe/ (no
 real data). Pre-seeds the store so imported ids differ from legacy ids, making
 the supersedes-rewrite assertion meaningful.
 """
+
 import sys
 import tempfile
 import unittest
@@ -54,7 +55,7 @@ class TestImportLegacy(unittest.TestCase):
         new_l1 = self.id_map["L-2026-1"]
         self.assertNotEqual(new_l1, "L-2026-1")  # pre-seed shifted the ids
         learnings = self.store.list_learnings(status="all")
-        beta = next(l for l in learnings if l.get("orig_display_id") == "L-2026-2")
+        beta = next(e for e in learnings if e.get("orig_display_id") == "L-2026-2")
         self.assertEqual(beta.get("supersedes"), new_l1)
 
     def test_archived_note_lands_in_archive(self):
@@ -73,7 +74,9 @@ class TestImportLegacy(unittest.TestCase):
         self.assertEqual(rm.get("mission"), "projx")
 
     def test_dry_run_report_mentions_skip(self):
-        report = imp.equivalence_report(self.notes, self.counts, imp.count_skipped(FIXTURE), self.id_map)
+        report = imp.equivalence_report(
+            self.notes, self.counts, imp.count_skipped(FIXTURE), self.id_map
+        )
         self.assertIn("ticket", report)
         self.assertIn("skipped", report)
         self.assertIn("in=   1", report)  # one ticket skipped

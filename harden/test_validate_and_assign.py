@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Integration tests for harden/validate_and_assign.py — the combined
 validate + assign-IDs entry point used by the /harden orchestrator."""
+
 import json
 import subprocess
 import sys
@@ -16,7 +17,6 @@ def run(args: list, input_json: str) -> subprocess.CompletedProcess:
 
 
 class TestFindingsLensMode(unittest.TestCase):
-
     def test_lens_findings_get_lens_tagged_ids(self):
         findings = [
             {"severity": "high", "description": "SQLi in query", "location": "db.py:10"},
@@ -30,8 +30,14 @@ class TestFindingsLensMode(unittest.TestCase):
         self.assertEqual(out[0]["lens"], "security")
 
     def test_legacy_findings_still_get_plain_atk_ids(self):
-        findings = [{"category": "security", "severity": "high",
-                     "description": "SQLi", "location": "db.py:10"}]
+        findings = [
+            {
+                "category": "security",
+                "severity": "high",
+                "description": "SQLi",
+                "location": "db.py:10",
+            }
+        ]
         result = run(["findings", "--sanitize"], json.dumps(findings))
         self.assertEqual(result.returncode, 0, result.stderr)
         out = json.loads(result.stdout)
@@ -44,12 +50,21 @@ class TestFindingsLensMode(unittest.TestCase):
 
 
 class TestConsolidationCommand(unittest.TestCase):
-
     def test_accepted_get_con_ids(self):
         data = {
             "accepted": [
-                {"description": "a", "severity": "high", "location": "x.py:1", "source_ids": ["ATK-SEC-001"]},
-                {"description": "b", "severity": "low", "location": "y.py:2", "source_ids": ["ATK-COR-001"]},
+                {
+                    "description": "a",
+                    "severity": "high",
+                    "location": "x.py:1",
+                    "source_ids": ["ATK-SEC-001"],
+                },
+                {
+                    "description": "b",
+                    "severity": "low",
+                    "location": "y.py:2",
+                    "source_ids": ["ATK-COR-001"],
+                },
             ],
             "rejected": [],
         }
@@ -60,19 +75,37 @@ class TestConsolidationCommand(unittest.TestCase):
         self.assertEqual(out["accepted"][1]["id"], "CON-002")
 
     def test_coverage_gap_fails(self):
-        data = {"accepted": [{"description": "a", "severity": "high",
-                              "location": "x.py:1", "source_ids": ["ATK-SEC-001"]}],
-                "rejected": []}
+        data = {
+            "accepted": [
+                {
+                    "description": "a",
+                    "severity": "high",
+                    "location": "x.py:1",
+                    "source_ids": ["ATK-SEC-001"],
+                }
+            ],
+            "rejected": [],
+        }
         result = run(["consolidation", "--source-ids", "ATK-SEC-001,ATK-COR-002"], json.dumps(data))
         self.assertEqual(result.returncode, 1)
         self.assertIn("ATK-COR-002 not accounted for", result.stderr)
 
     def test_degrade_assigns_con_ids(self):
         merged = [
-            {"id": "ATK-SEC-001", "lens": "security", "severity": "high",
-             "description": "x", "location": "a.py:1"},
-            {"id": "ATK-COR-001", "lens": "correctness", "severity": "low",
-             "description": "y", "location": "a.py:1"},
+            {
+                "id": "ATK-SEC-001",
+                "lens": "security",
+                "severity": "high",
+                "description": "x",
+                "location": "a.py:1",
+            },
+            {
+                "id": "ATK-COR-001",
+                "lens": "correctness",
+                "severity": "low",
+                "description": "y",
+                "location": "a.py:1",
+            },
         ]
         result = run(["consolidation", "--degrade"], json.dumps(merged))
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -84,7 +117,12 @@ class TestConsolidationCommand(unittest.TestCase):
         # The defender addresses CON-NNN ids; validate_and_assign response is prefix-agnostic.
         data = {
             "responses": [
-                {"finding_ref": "CON-001", "action": "fixed", "description": "patched", "changes": []},
+                {
+                    "finding_ref": "CON-001",
+                    "action": "fixed",
+                    "description": "patched",
+                    "changes": [],
+                },
             ],
             "todos": [],
         }

@@ -14,6 +14,7 @@ approval) set ``APIARY_RUNNER_SUBPROCESS=1`` to skip injection — they
 are one-shot workers that don't use any of this context, and the
 injection is tens of KB of input tokens per spawn.
 """
+
 import datetime
 import json
 import os
@@ -24,12 +25,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.session import SessionId
-from core.hook_context import context_block, hook_allow, read_payload
+from core.hook_context import HookResult, context_block, run_standalone
 from core.sanitizer import sanitize_and_report
+from core.session import SessionId
 from core.startup import run_init, run_summary
-from core.utils.state import find_state_dir
-from scribe.notes import _git_repo_root
+from core.utils.gitutil import git_root
+from core.utils.state import find_state_dir, state_dir_from_env
 
 
 def _strip_frontmatter(md: str) -> str:
@@ -47,7 +48,8 @@ def _strip_frontmatter(md: str) -> str:
     body_start = md.find("\n", close + 1)
     if body_start == -1:
         return ""
-    return md[body_start + 1:].lstrip("\n")
+    return md[body_start + 1 :].lstrip("\n")
+
 
 # Sanitizer hit log lives in the umbrella state directory. With the
 # centralized .repos/ layout, this resolves to
@@ -55,10 +57,23 @@ def _strip_frontmatter(md: str) -> str:
 # back to <apiary-repo>/.apiary/hooks/ when the env var is not set so
 # the legacy in-repo layout still works during the migration window.
 def _hook_state_dir() -> Path:
-    env_dir = os.environ.get("APIARY_TARGET_STATE_DIR", "").strip()
-    if env_dir:
-        return Path(env_dir)
-    return PROJECT_ROOT / ".apiary"
+    return state_dir_from_env() or (PROJECT_ROOT / ".apiary")
+
+
+def _compass_arm_on(sid: SessionId) -> bool:
+    """Whether this session is in the compass A/B's injection arm.
+
+    True for every session while the experiment is disabled, which is the
+    shipped default — so this is a no-op until the owner turns the A/B on
+    (compass/config.json, docs/compass-measurement.md). Any failure means
+    "inject", so a broken config can never silently strip the profile.
+    """
+    try:
+        from compass.ab import ARM_OFF, arm_for_session
+
+        return arm_for_session(sid.short) != ARM_OFF
+    except Exception:
+        return True
 
 
 def _log_sanitizer_hits(site: str, hits: dict[str, int], session_id: str) -> None:
@@ -89,42 +104,29 @@ def _log_sanitizer_hits(site: str, hits: dict[str, int], session_id: str) -> Non
         pass
 
 
-def main():
-    try:
-        _run()
-    except Exception:
-        # Hooks must not crash — degrade to no context
-        hook_allow(event="UserPromptSubmit")
-
-
-def _run():
+def run(payload: dict):
+    """Build the first-message startup context block for this session."""
     # Runner subprocesses (auto_refine, auto_plan, etc.) set this env var
     # to skip the entire startup injection. Saves tens of KB of input tokens
     # per spawn — none of identity/notes/learnings/CLI-index is useful to a
     # one-shot runner worker.
     if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
-        hook_allow(event="UserPromptSubmit")
-        return
-
-    payload = read_payload()
+        return None
 
     raw_id = payload.get("session_id", "")
     if not raw_id:
-        hook_allow(event="UserPromptSubmit")
-        return
+        return None
 
     try:
         sid = SessionId(raw_id)
     except ValueError:
-        hook_allow(event="UserPromptSubmit")
-        return
+        return None
 
     # Run-once guard
     flag_file = sid.flag_path("startup_prompt_done")
     flag_file.parent.mkdir(parents=True, exist_ok=True)
     if flag_file.exists():
-        hook_allow(event="UserPromptSubmit")
-        return
+        return None
     flag_file.write_text("1", encoding="utf-8")
 
     parts = []
@@ -135,7 +137,7 @@ def _run():
     # on the session's cwd → registry → <state-dir>/scribe/. Sessions started
     # outside a git repo skip notes/summary/learnings injection rather than
     # falsely loading apiary's own state.
-    session_repo_root = _git_repo_root(Path(cwd))
+    session_repo_root = git_root(Path(cwd))
     skip_notes_injection = session_repo_root is None
 
     # --- 1. Init: identity ---
@@ -194,9 +196,10 @@ def _run():
             learnings_env = os.environ.copy()
             learnings_cwd = str(session_repo_root)
             result = subprocess.run(
-                [sys.executable, str(PROJECT_ROOT / "scribe" / "notes.py"),
-                 "learnings", "--index"],
-                capture_output=True, text=True, timeout=5,
+                [sys.executable, str(PROJECT_ROOT / "scribe" / "notes.py"), "learnings", "--index"],
+                capture_output=True,
+                text=True,
+                timeout=5,
                 cwd=learnings_cwd,
                 env=learnings_env,
             )
@@ -204,18 +207,29 @@ def _run():
                 scrubbed, hits = sanitize_and_report(result.stdout.strip())
                 _log_sanitizer_hits("learnings", hits, sid.full)
                 parts.append("")
-                parts.append("--- learnings index (run `python scribe/notes.py get L-X` for full body) ---")
+                parts.append(
+                    "--- learnings index (run `python scribe/notes.py get L-X` for full body) ---"
+                )
                 parts.append(scrubbed)
         except Exception:
             pass
 
     # --- 4. CLI index (compact; use cli_lookup.py for full details) ---
     try:
-        cli_index = (PROJECT_ROOT / "docs" / "reference" / "cli-index.md").read_text(encoding="utf-8")
+        cli_index = (PROJECT_ROOT / "docs" / "reference" / "cli-index.md").read_text(
+            encoding="utf-8"
+        )
         scrubbed, hits = sanitize_and_report(cli_index.strip())
         _log_sanitizer_hits("cli_index", hits, sid.full)
         parts.append("")
-        parts.append("--- cli-tools index (run `python docs/reference/cli_lookup.py <tool>` for full flags) ---")
+        # The launcher idiom, not a bare relative path: the session's cwd is
+        # the target repo, not main-apiary, so `python docs/...` only resolves
+        # in this one checkout (review §5 Phase 5).
+        parts.append(
+            '--- cli-tools index (run `python "$(git rev-parse --show-toplevel)'
+            '/.claude/apiary/launch.py" docs/reference/cli_lookup.py <tool>` '
+            "for full flags) ---"
+        )
         parts.append(scrubbed)
     except Exception:
         pass
@@ -227,13 +241,17 @@ def _run():
     # depending on the model remembering to invoke the skill. The skill remains
     # for on-demand reload (e.g. after /clear).
     try:
-        ctx_md = (PROJECT_ROOT / "core" / "commands" / "apiary-context.md").read_text(encoding="utf-8")
+        ctx_md = (PROJECT_ROOT / "core" / "commands" / "apiary-context.md").read_text(
+            encoding="utf-8"
+        )
         ctx_body = _strip_frontmatter(ctx_md.strip())
         if ctx_body:
             scrubbed, hits = sanitize_and_report(ctx_body)
             _log_sanitizer_hits("apiary_context", hits, sid.full)
             parts.append("")
-            parts.append("--- apiary toolkit rules (also available on demand via /apiary-context) ---")
+            parts.append(
+                "--- apiary toolkit rules (also available on demand via /apiary-context) ---"
+            )
             parts.append(scrubbed)
     except Exception:
         pass
@@ -243,7 +261,7 @@ def _run():
     # the profile that shapes tone/verbosity/autonomy is guaranteed loaded,
     # rather than relying on the skill's cat-if-exists snippet. find_state_dir
     # is read-only (no auto-registration), so it is safe to call from a hook.
-    if not skip_notes_injection:
+    if not skip_notes_injection and _compass_arm_on(sid):
         try:
             state_dir = find_state_dir(session_repo_root)
             if state_dir is not None:
@@ -262,8 +280,8 @@ def _run():
         except Exception:
             pass
 
-    hook_allow(context_block("startup", *parts), event="UserPromptSubmit")
+    return HookResult(context=context_block("startup", *parts))
 
 
 if __name__ == "__main__":
-    main()
+    run_standalone(run, event="UserPromptSubmit")

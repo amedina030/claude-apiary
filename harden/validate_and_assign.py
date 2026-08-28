@@ -11,6 +11,7 @@ Usage:
     validate_and_assign.py findings --file findings.json [--check-files] [--deep]
     validate_and_assign.py response --file response.json --expected-ids ATK-001,ATK-002 [--check-files]
 """
+
 import argparse
 import json
 import sys
@@ -33,11 +34,14 @@ def main():
     p_findings.add_argument("--check-files", action="store_true")
     p_findings.add_argument("--deep", action="store_true")
     p_findings.add_argument("--file", dest="file_path")
-    p_findings.add_argument("--sanitize", action="store_true",
-                            help="Auto-fix common issues before validation")
-    p_findings.add_argument("--lens",
-                            help="Per-lens attacker mode: validate against the lens "
-                                 "vocab and assign ATK-<CODE>-NNN IDs")
+    p_findings.add_argument(
+        "--sanitize", action="store_true", help="Auto-fix common issues before validation"
+    )
+    p_findings.add_argument(
+        "--lens",
+        help="Per-lens attacker mode: validate against the lens "
+        "vocab and assign ATK-<CODE>-NNN IDs",
+    )
 
     p_response = sub.add_parser("response", help="Validate and assign IDs to Defender response")
     p_response.add_argument("--expected-ids", required=True)
@@ -45,13 +49,18 @@ def main():
     p_response.add_argument("--file", dest="file_path")
 
     p_consolidation = sub.add_parser(
-        "consolidation", help="Validate Consolidator output and assign CON-NNN to accepted findings")
-    p_consolidation.add_argument("--source-ids",
-                                 help="Comma-separated ATK-<CODE>-NNN ids dispatched to the consolidator")
+        "consolidation", help="Validate Consolidator output and assign CON-NNN to accepted findings"
+    )
+    p_consolidation.add_argument(
+        "--source-ids", help="Comma-separated ATK-<CODE>-NNN ids dispatched to the consolidator"
+    )
     p_consolidation.add_argument("--check-files", action="store_true")
     p_consolidation.add_argument("--file", dest="file_path")
-    p_consolidation.add_argument("--degrade", action="store_true",
-                                 help="Fallback: dedup raw merged findings by location, then assign CON-NNN")
+    p_consolidation.add_argument(
+        "--degrade",
+        action="store_true",
+        help="Fallback: dedup raw merged findings by location, then assign CON-NNN",
+    )
 
     args = parser.parse_args()
     if not args.command:
@@ -60,14 +69,17 @@ def main():
 
     if args.command == "findings":
         if args.lens is not None and not is_valid_lens(args.lens):
-            print(f"ERROR: invalid lens '{args.lens}' (expected one of: "
-                  f"{', '.join(sorted(LENSES))})", file=sys.stderr)
+            print(
+                f"ERROR: invalid lens '{args.lens}' (expected one of: {', '.join(sorted(LENSES))})",
+                file=sys.stderr,
+            )
             sys.exit(1)
         raw, data = read_json_input(file_path=args.file_path)
         if args.sanitize:
             data = sanitize_findings(data, deep=args.deep, lens=args.lens)
-        errors = validate_findings(data, check_files=args.check_files, deep=args.deep,
-                                   lens=args.lens)
+        errors = validate_findings(
+            data, check_files=args.check_files, deep=args.deep, lens=args.lens
+        )
         report_errors(errors)
         prefix = f"ATK-{code_for(args.lens)}" if args.lens else "ATK"
         result = assign_ids(data, prefix)
@@ -76,7 +88,9 @@ def main():
     elif args.command == "response":
         expected = {id_.strip() for id_ in args.expected_ids.split(",") if id_.strip()}
         if not expected:
-            print("ERROR: --expected-ids must contain at least one non-empty ATK-ID", file=sys.stderr)
+            print(
+                "ERROR: --expected-ids must contain at least one non-empty ATK-ID", file=sys.stderr
+            )
             sys.exit(1)
 
         raw, data = read_json_input(file_path=args.file_path)

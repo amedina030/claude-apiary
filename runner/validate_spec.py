@@ -33,11 +33,11 @@ Exit 1 + prints error details on failure.
 Usage:
     validate_spec.py <path_to_spec.json>
 """
+
 import argparse
 import json
 import re
 import sys
-
 
 VAGUE_PATTERNS = re.compile(
     r"\b(works?\s+correctly|handles?\s+gracefully|functions?\s+properly|"
@@ -161,8 +161,7 @@ def validate(data: dict) -> list[str]:
         errors.append("Rule 4: shape.components must list at least one component")
     elif isinstance(components, list):
         valid_components = [
-            c for c in components
-            if isinstance(c, dict) and c.get("name") and c.get("description")
+            c for c in components if isinstance(c, dict) and c.get("name") and c.get("description")
         ]
         if not valid_components:
             errors.append(
@@ -181,9 +180,7 @@ def validate(data: dict) -> list[str]:
             if isinstance(item, dict):
                 reason = item.get("reason")
                 if not reason:
-                    errors.append(
-                        f"Rule 6: boundaries.out_of_scope[{i}] missing 'reason'"
-                    )
+                    errors.append(f"Rule 6: boundaries.out_of_scope[{i}] missing 'reason'")
                 elif _is_empty(reason):
                     errors.append(
                         f"Rule 6: boundaries.out_of_scope[{i}] 'reason' is empty or contains placeholder-like content: {reason!r}"
@@ -205,8 +202,7 @@ def validate(data: dict) -> list[str]:
         )
         if future_patterns.search(problem.strip()):
             errors.append(
-                "Rule 7: goal.problem should describe current pain, "
-                "not a desired future state"
+                "Rule 7: goal.problem should describe current pain, not a desired future state"
             )
 
     return errors
@@ -228,9 +224,7 @@ def validate_files_examined(data: dict) -> list[str]:
             continue
         extra_keys = set(entry.keys()) - _ALLOWED_ENTRY_KEYS
         if extra_keys:
-            errors.append(
-                f"files_examined[{i}] has unexpected keys: {sorted(extra_keys)}"
-            )
+            errors.append(f"files_examined[{i}] has unexpected keys: {sorted(extra_keys)}")
         path = entry.get("path")
         if not isinstance(path, str) or not path.strip():
             errors.append(f"files_examined[{i}].path must be a non-empty string")
@@ -242,10 +236,8 @@ def validate_files_examined(data: dict) -> list[str]:
             if not isinstance(sha, str):
                 errors.append(f"files_examined[{i}].sha must be a string or null")
             elif len(sha) > 64:
-                errors.append(
-                    f"files_examined[{i}].sha exceeds maximum length of 64 characters"
-                )
-            elif not re.fullmatch(r'[0-9a-fA-F]+', sha):
+                errors.append(f"files_examined[{i}].sha exceeds maximum length of 64 characters")
+            elif not re.fullmatch(r"[0-9a-fA-F]+", sha):
                 errors.append(f"files_examined[{i}].sha must be a hex string, got '{sha}'")
     return errors
 
@@ -271,7 +263,9 @@ def main():
     fe_errors = validate_files_examined(data)
 
     # Strip top-level metadata fields before validation
-    spec_data = {k: v for k, v in data.items() if k not in ("valid", "id", "intake_id", "files_examined")}
+    spec_data = {
+        k: v for k, v in data.items() if k not in ("valid", "id", "intake_id", "files_examined")
+    }
 
     errors = validate(spec_data)
     all_errors = fe_errors + errors

@@ -10,12 +10,12 @@ Exit 1 + prints error details on failure.
 Usage:
     validate_intake.py <path_to_intake.json>
 """
+
 import argparse
 import json
 import sys
 from datetime import datetime
 from pathlib import Path
-
 
 REQUIRED_FIELDS = ["id", "title", "problem", "description", "scope", "created_at"]
 MIN_LENGTH_FIELDS = {"problem": 20, "description": 20}
@@ -69,9 +69,7 @@ def validate(data: dict) -> list[str]:
     target_repo = data.get("target_repo")
     if target_repo is not None:
         if not isinstance(target_repo, str):
-            errors.append(
-                f"target_repo must be a string, got {type(target_repo).__name__}"
-            )
+            errors.append(f"target_repo must be a string, got {type(target_repo).__name__}")
         elif not target_repo.strip():
             errors.append("target_repo is empty")
         else:
@@ -81,9 +79,7 @@ def validate(data: dict) -> list[str]:
             elif not p.is_dir():
                 errors.append(f"target_repo path is not a directory: {p}")
             elif not (p / ".git").exists():
-                errors.append(
-                    f"target_repo path is not a git repository (no .git entry): {p}"
-                )
+                errors.append(f"target_repo path is not a git repository (no .git entry): {p}")
 
     return errors
 

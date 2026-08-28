@@ -7,13 +7,13 @@ How to get the runner executing tickets automatically. Two paths exist:
 ## Ticket lifecycle
 
 ```
-draft_ticket.py  -->  runner/backlog/<slug>.json   (has UUID from draft time)
+draft_ticket.py  -->  <state-dir>/runner/backlog/<slug>.json   (has UUID from draft time)
                           |
               +-----------+-----------+
               |                       |
         [detached picks it]     [promote.py <slug>]
         run.py --detached         |
-              |              runner/intake/<uuid>.json
+              |              <state-dir>/runner/intake/<uuid>.json
               |                   |
               |             [interactive run]
               |             run.py <intake-path>
@@ -38,7 +38,7 @@ Optional flags:
 
 | Flag | Default | Effect |
 |------|---------|--------|
-| `--token-cap N` | `config.json` `detached.token_cap` (2000000) | Max tokens per run |
+| `--token-cap N` | `config.json` `detached.token_cap` (10000000) | Max tokens per run |
 | `--max-unreviewed N` | `config.json` `detached.max_unreviewed` (5) | Skip if this many runner branches await review |
 | `--intake <path>` | (picks from backlog) | Override backlog selection with a specific intake file |
 
@@ -116,7 +116,7 @@ Edit `runner/config.json` before scheduling:
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `detached.token_cap` | 2000000 | Max tokens Claude may spend per detached run |
+| `detached.token_cap` | 10000000 | Max tokens Claude may spend per detached run |
 | `detached.max_unreviewed` | 5 | Blocks new runs when this many runner branches await review |
 
 ## Morning review
@@ -127,7 +127,7 @@ After overnight runs, inspect pending branches:
 python -m runner.queue
 ```
 
-Lists all `runner/*` branches joined with `overnight.jsonl` entries.
+Lists all `runner/*` branches joined with `run_history.jsonl` entries.
 
 ## Cleanup
 

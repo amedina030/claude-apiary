@@ -6,6 +6,7 @@ Usage:
     startup.py init --session-id X --first-message "..." --repo-dir /path
     startup.py summary --repo-dir /path
 """
+
 import argparse
 import json
 import re
@@ -17,21 +18,27 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.session import CLAUDE_DIR, SessionId
+from core.session import SessionId, load_history, sessions_dir
 from core.utils.project import get_project_key
-from scribe.notes import (
-    format_age, run_auto_archive, scribe_state_dir,
-    PROJECTS_DIR, _format_id,
-)
-from scribe.store import ScribeStore, TYPE_FOLDERS
+from scribe.formatting import format_age
+from scribe.formatting import format_id as _format_id
+from scribe.paths import PROJECTS_DIR, scribe_state_dir
+from scribe.policy import run_auto_archive
+from scribe.store import TYPE_FOLDERS, ScribeStore
 
-HISTORY_PATH = CLAUDE_DIR / ".session-history.json"
+
+def history_path() -> Path:
+    """Session history ring buffer, written by core/hooks/save_transcript.py."""
+    return sessions_dir() / "history.json"
+
+
 REGISTRY_PATH = PROJECT_ROOT / "core" / "config" / "session-registry.json"
 
 
 # ---------------------------------------------------------------------------
 # init command
 # ---------------------------------------------------------------------------
+
 
 def parse_identity(first_message):
     """Parse structured identity from first message, or return defaults."""
@@ -44,8 +51,8 @@ def parse_identity(first_message):
     if not first_message:
         return defaults
 
-    role_m = re.search(r'^role:\s*(.+)$', first_message, re.MULTILINE | re.IGNORECASE)
-    mission_m = re.search(r'^mission:\s*(.+)$', first_message, re.MULTILINE | re.IGNORECASE)
+    role_m = re.search(r"^role:\s*(.+)$", first_message, re.MULTILINE | re.IGNORECASE)
+    mission_m = re.search(r"^mission:\s*(.+)$", first_message, re.MULTILINE | re.IGNORECASE)
 
     if not role_m and not mission_m:
         return defaults
@@ -55,7 +62,7 @@ def parse_identity(first_message):
 
     wants_role = role
     wants_mission = mission
-    wants_m = re.search(r'^wants:\s*(.+)$', first_message, re.MULTILINE | re.IGNORECASE)
+    wants_m = re.search(r"^wants:\s*(.+)$", first_message, re.MULTILINE | re.IGNORECASE)
     if wants_m:
         parts = wants_m.group(1).strip().split(None, 1)
         wants_role = parts[0] if parts else role
@@ -78,6 +85,21 @@ def validate_registry(role, mission):
         return False
 
 
+def _compass_arm(session_short: str) -> str:
+    """The compass A/B arm to stamp into this session's identity file.
+
+    Imported lazily and failure-tolerantly: session start must not depend on
+    compass being importable, and a broken config must not cost the user a
+    session. Defaults to "on" — the pre-experiment behaviour.
+    """
+    try:
+        from compass import ab
+
+        return ab.arm_for_new_session(session_short)
+    except Exception:
+        return "on"
+
+
 def run_init(session_id: str, first_message: str, repo_dir: str) -> dict:
     """Run init logic and return result dict with identity."""
     identity = parse_identity(first_message)
@@ -91,7 +113,13 @@ def run_init(session_id: str, first_message: str, repo_dir: str) -> dict:
         "registered": registered,
         "wants_role": identity["wants_role"],
         "wants_mission": identity["wants_mission"],
+        # Which side of the compass A/B this session is on. Recorded here so
+        # a later `ab_seed` change cannot rewrite what already happened; the
+        # value is "on" for every session while the experiment is disabled,
+        # which is the shipped default (compass/config.json).
+        "compass_arm": _compass_arm(sid.short),
     }
+    identity_file.parent.mkdir(parents=True, exist_ok=True)
     identity_file.write_text(json.dumps(identity_data), encoding="utf-8")
 
     return {"identity": {**identity_data, "registered": registered}}
@@ -105,6 +133,7 @@ def cmd_init(args):
 # ---------------------------------------------------------------------------
 # summary command
 # ---------------------------------------------------------------------------
+
 
 def _matches_role_mission(note, role, mission):
     """Check if a note matches the given role/mission (or has no role/mission set)."""
@@ -149,18 +178,20 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
     if sd is None:
         sd = PROJECTS_DIR / project_key
 
-    # Prune stale notes before loading
-    archived_count = run_auto_archive(project_key, start=start)
+    store = ScribeStore(sd)
+
+    # Prune stale notes before loading. The rules live in scribe/policy.py —
+    # the same ones `notes.py add` and `notes.py tidy` apply.
+    archived_count = run_auto_archive(store)
 
     lines = []
     if archived_count:
         lines.append(f"[auto-archived {archived_count} notes]")
 
-    store = ScribeStore(sd)
-
     active_entries = store.list_notes(status="active")
     filtered_active = [
-        n for n in active_entries
+        n
+        for n in active_entries
         if n.get("status") not in ("done", "resolved", "dropped", "deferred")
         and _matches_role_mission(n, role, mission)
     ]
@@ -180,22 +211,17 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
         items.append(f"#{did} {ntype} ({age}) {summary}")
 
     learn_entries = store.list_learnings()
-    learning_count = sum(1 for l in learn_entries if _matches_role_mission(l, role, mission))
+    learning_count = sum(1 for e in learn_entries if _matches_role_mission(e, role, mission))
     review_marker = _review_staleness_marker(sd)
 
     handoffs = [n for n in filtered_active if n.get("type") == "handoff"]
     latest_handoff = None
     if handoffs:
         session_times = {}
-        if HISTORY_PATH.exists():
-            try:
-                history = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
-                for s in history:
-                    sid_short = s.get("session_id", "")[:8].lower()
-                    if sid_short and s.get("ended_at"):
-                        session_times[sid_short] = s["ended_at"]
-            except (OSError, json.JSONDecodeError):
-                pass
+        for s in load_history(history_path()):
+            sid_short = str(s.get("session_id", ""))[:8].lower()
+            if sid_short and s.get("ended_at"):
+                session_times[sid_short] = s["ended_at"]
 
         def handoff_sort_key(n):
             sid = n.get("session", n.get("session_id", ""))[:8].lower()
@@ -207,7 +233,12 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
         hid = _format_id(latest_handoff)
         hsid = latest_handoff.get("session", latest_handoff.get("session_id", "?"))
         summary_line = latest_handoff.get("summary", "")
-        handoff_md_path = sd / TYPE_FOLDERS["handoff"] / str(latest_handoff["year"]) / f"{latest_handoff['seq']}.md"
+        handoff_md_path = (
+            sd
+            / TYPE_FOLDERS["handoff"]
+            / str(latest_handoff["year"])
+            / f"{latest_handoff['seq']}.md"
+        )
         handoff_lines = [
             f"**Last session (#{hid}, {hsid}):** {summary_line}",
             f"  → {handoff_md_path}",
@@ -228,7 +259,9 @@ def run_summary(repo_dir: str, role: str = "user", mission: str = "general") -> 
         try:
             result = subprocess.run(
                 [sys.executable, str(check_script)],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=str(PROJECT_ROOT),
             )
             lines.append("")
@@ -247,6 +280,7 @@ def cmd_summary(args):
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main():
     parser = argparse.ArgumentParser(description="Session startup consolidation")

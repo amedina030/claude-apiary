@@ -7,6 +7,8 @@ framework_version: "1.0"
 last_verified: 2026-08-26
 ---
 
+> **Snapshot of 2026-08-26; superseded by the remediation — see CHANGELOG. Deleted at close-out (T-2026-271).**
+
 # Code review: `core/` (claude-apiary)
 
 Read-only review, 2026-08-26. Every non-test `.py` under `core/` was read in full (39 files, 6,746 lines); the 25 test files (3,822 lines) were skimmed for coverage quality. Design reference: `docs/architecture/per-repo-install.md`, `docs/standards/code-style.md`. Test run: `poetry run pytest core -q` → **309 passed in 74.5s**.

@@ -70,7 +70,7 @@ For each changed file, evaluate against the loaded standards. Check:
 **For new tools (new-tool-checklist.md):**
 - All checklist items addressed
 - Directory structure follows convention
-- setup.py integration complete
+- Install integration complete (`core/hooks_factory.py`, `apiary install`)
 - Docs updated
 
 ### 5. Report findings

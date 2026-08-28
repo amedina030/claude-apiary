@@ -1,9 +1,12 @@
 """Shared library for the context-rules system (#224).
 
 Loads rule files from `context-rules/<category>/<id>.md`, renders them
-into the managed zone format that gets injected into ~/.claude/CLAUDE.md,
-and parses an existing managed zone back into structured form for drift
-detection.
+into the managed zone format that `core/install.py` injects into a
+bootstrapped repo's `<repo>/CLAUDE.md`, and parses an existing managed
+zone back into structured form for drift detection.
+
+The renderer is path-agnostic — it takes and returns text; the caller
+owns the target file.
 
 Rule file format:
 
@@ -15,7 +18,7 @@ Rule file format:
     ---
     <body markdown>
 
-Managed zone format inside ~/.claude/CLAUDE.md:
+Managed zone format inside `<repo>/CLAUDE.md`:
 
     <!-- apiary-context-rules-start -->
     <!-- apiary-context-rule:<id> hash=<sha256> -->
@@ -24,9 +27,10 @@ Managed zone format inside ~/.claude/CLAUDE.md:
     ...
     <!-- apiary-context-rules-end -->
 
-Stdlib only — no PyYAML. Frontmatter is intentionally restricted to a flat
-key/value form so the parser stays small and deterministic.
+Stdlib only — no PyYAML. Frontmatter is read by ``core.frontmatter``, the one
+dialect the whole toolkit speaks (Phase 3.3).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -34,6 +38,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+from core import frontmatter
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RULES_DIR = REPO_ROOT / "context-rules"
@@ -48,9 +54,7 @@ _INNER_START_RE = re.compile(
     r"<!--\s*apiary-context-rule:(?P<id>[a-zA-Z0-9_\-]+)\s+hash=(?P<hash>[0-9a-f]{64})\s*-->"
 )
 _INNER_END_TEMPLATE = "<!-- /apiary-context-rule:{id} -->"
-_INNER_END_RE = re.compile(
-    r"<!--\s*/apiary-context-rule:(?P<id>[a-zA-Z0-9_\-]+)\s*-->"
-)
+_INNER_END_RE = re.compile(r"<!--\s*/apiary-context-rule:(?P<id>[a-zA-Z0-9_\-]+)\s*-->")
 
 REQUIRED_FRONTMATTER_FIELDS = ("id", "title", "category", "requires")
 
@@ -91,7 +95,7 @@ class InstalledRule:
 
 @dataclass
 class ManagedZone:
-    """Parsed view of the managed zone in ~/.claude/CLAUDE.md."""
+    """Parsed view of the managed zone in a repo's CLAUDE.md."""
 
     start: int  # char offset of OUTER_START
     end: int  # char offset just after OUTER_END
@@ -121,51 +125,17 @@ class RuleParseError(ValueError):
 
 
 def _parse_frontmatter(text: str, source: Path) -> tuple[dict, str]:
-    """Split a rule file into (frontmatter_dict, body). Body has trailing
-    newline normalized to exactly one.
+    """Split a rule file into (frontmatter_dict, body).
+
+    Dialect and error messages come from ``core.frontmatter``; the trailing
+    newline normalization (exactly one) is this module's own, because rule
+    bodies are hashed and the hash must not move with an editor's whitespace.
     """
-    if not text.startswith("---\n") and not text.startswith("---\r\n"):
-        raise RuleParseError(f"{source}: missing opening '---' frontmatter fence")
-
-    # Locate closing fence.
-    lines = text.splitlines(keepends=False)
-    if lines[0] != "---":
-        raise RuleParseError(f"{source}: malformed opening fence")
-    end_idx: Optional[int] = None
-    for i in range(1, len(lines)):
-        if lines[i] == "---":
-            end_idx = i
-            break
-    if end_idx is None:
-        raise RuleParseError(f"{source}: missing closing '---' frontmatter fence")
-
-    fm: dict = {}
-    for raw in lines[1:end_idx]:
-        line = raw.rstrip()
-        if not line or line.startswith("#"):
-            continue
-        if ":" not in line:
-            raise RuleParseError(f"{source}: bad frontmatter line: {raw!r}")
-        key, _, value = line.partition(":")
-        key = key.strip()
-        value = value.strip()
-        fm[key] = _coerce_value(value)
-
-    body_lines = lines[end_idx + 1 :]
-    body = "\n".join(body_lines).strip("\n") + "\n"
-    return fm, body
-
-
-def _coerce_value(value: str):
-    """Coerce a frontmatter value string into list/str."""
-    if value == "[]":
-        return []
-    if value.startswith("[") and value.endswith("]"):
-        inner = value[1:-1].strip()
-        if not inner:
-            return []
-        return [item.strip().strip('"').strip("'") for item in inner.split(",")]
-    return value.strip('"').strip("'")
+    try:
+        fm, body = frontmatter.parse(text, strict=True)
+    except frontmatter.FrontmatterError as exc:
+        raise RuleParseError(f"{source}: {exc}") from exc
+    return fm, body.strip("\n") + "\n"
 
 
 def load_rule(path: Path) -> Rule:
@@ -175,14 +145,10 @@ def load_rule(path: Path) -> Rule:
 
     missing = [f for f in REQUIRED_FRONTMATTER_FIELDS if f not in fm]
     if missing:
-        raise RuleParseError(
-            f"{path}: missing required frontmatter field(s): {', '.join(missing)}"
-        )
+        raise RuleParseError(f"{path}: missing required frontmatter field(s): {', '.join(missing)}")
 
     if fm["id"] != path.stem:
-        raise RuleParseError(
-            f"{path}: id '{fm['id']}' does not match filename stem '{path.stem}'"
-        )
+        raise RuleParseError(f"{path}: id '{fm['id']}' does not match filename stem '{path.stem}'")
 
     parent = path.parent.name
     if fm["category"] != parent:
@@ -291,9 +257,7 @@ def find_managed_zone(text: str) -> Optional[ManagedZone]:
         # Find matching end
         end_match = _INNER_END_RE.search(inner, body_start)
         if end_match is None:
-            raise ZoneTamperError(
-                f"rule '{rid}' is missing its closing sentinel"
-            )
+            raise ZoneTamperError(f"rule '{rid}' is missing its closing sentinel")
         if end_match.group("id") != rid:
             raise ZoneTamperError(
                 f"rule '{rid}' end sentinel id mismatch: got '{end_match.group('id')}'"
@@ -348,9 +312,7 @@ class DriftReport:
         return self.total == 0
 
 
-def compute_drift(
-    claude_md_text: str, source_rules: list[Rule] | None = None
-) -> DriftReport:
+def compute_drift(claude_md_text: str, source_rules: list[Rule] | None = None) -> DriftReport:
     """Compare claude_md_text's managed zone against source_rules.
 
     `not_installed` is reported relative to the *currently installed* set —

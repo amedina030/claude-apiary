@@ -14,16 +14,16 @@ from gui.tabs_state import TabEntry
 class TabsStateTests(unittest.TestCase):
     def test_missing_file_returns_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "tabs.json"
+            p = Path(tmp).resolve() / "tabs.json"
             entries, idx = tabs_state.load(p)
             self.assertEqual(entries, [])
             self.assertEqual(idx, -1)
 
     def test_round_trip_with_settings(self):
         with tempfile.TemporaryDirectory() as tmp:
-            state_file = Path(tmp) / "tabs.json"
-            cwd_a = Path(tmp) / "a"
-            cwd_b = Path(tmp) / "b"
+            state_file = Path(tmp).resolve() / "tabs.json"
+            cwd_a = Path(tmp).resolve() / "a"
+            cwd_b = Path(tmp).resolve() / "b"
             cwd_a.mkdir()
             cwd_b.mkdir()
             tabs_state.save(
@@ -42,7 +42,7 @@ class TabsStateTests(unittest.TestCase):
 
     def test_malformed_json_returns_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "tabs.json"
+            p = Path(tmp).resolve() / "tabs.json"
             p.write_text("{ not json", encoding="utf-8")
             entries, idx = tabs_state.load(p)
             self.assertEqual(entries, [])
@@ -50,18 +50,20 @@ class TabsStateTests(unittest.TestCase):
 
     def test_nonexistent_cwd_filtered_out(self):
         with tempfile.TemporaryDirectory() as tmp:
-            state_file = Path(tmp) / "tabs.json"
-            real = Path(tmp) / "real"
+            state_file = Path(tmp).resolve() / "tabs.json"
+            real = Path(tmp).resolve() / "real"
             real.mkdir()
-            fake = Path(tmp) / "ghost-that-never-existed"
+            fake = Path(tmp).resolve() / "ghost-that-never-existed"
             state_file.write_text(
-                json.dumps({
-                    "tabs": [
-                        {"cwd": str(real)},
-                        {"cwd": str(fake)},
-                    ],
-                    "active_idx": 1,
-                }),
+                json.dumps(
+                    {
+                        "tabs": [
+                            {"cwd": str(real)},
+                            {"cwd": str(fake)},
+                        ],
+                        "active_idx": 1,
+                    }
+                ),
                 encoding="utf-8",
             )
             entries, idx = tabs_state.load(state_file)
@@ -71,8 +73,8 @@ class TabsStateTests(unittest.TestCase):
 
     def test_active_idx_clamped_when_out_of_range(self):
         with tempfile.TemporaryDirectory() as tmp:
-            state_file = Path(tmp) / "tabs.json"
-            d = Path(tmp) / "d"
+            state_file = Path(tmp).resolve() / "tabs.json"
+            d = Path(tmp).resolve() / "d"
             d.mkdir()
             state_file.write_text(
                 json.dumps({"tabs": [{"cwd": str(d)}], "active_idx": 99}),
@@ -83,7 +85,7 @@ class TabsStateTests(unittest.TestCase):
 
     def test_empty_tabs_list_returns_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
-            state_file = Path(tmp) / "tabs.json"
+            state_file = Path(tmp).resolve() / "tabs.json"
             state_file.write_text(
                 json.dumps({"tabs": [], "active_idx": 0}),
                 encoding="utf-8",
@@ -95,8 +97,8 @@ class TabsStateTests(unittest.TestCase):
     def test_legacy_string_entries_upgrade(self):
         """Old string-only entries (pre T-2026-176) load with default settings."""
         with tempfile.TemporaryDirectory() as tmp:
-            state_file = Path(tmp) / "tabs.json"
-            d = Path(tmp) / "d"
+            state_file = Path(tmp).resolve() / "tabs.json"
+            d = Path(tmp).resolve() / "d"
             d.mkdir()
             state_file.write_text(
                 json.dumps({"tabs": [str(d)], "active_idx": 0}),
@@ -110,10 +112,10 @@ class TabsStateTests(unittest.TestCase):
 
     def test_save_survives_unwritable_parent(self):
         with tempfile.TemporaryDirectory() as tmp:
-            d = Path(tmp) / "ok"
+            d = Path(tmp).resolve() / "ok"
             d.mkdir()
             # Should not raise.
-            tabs_state.save([TabEntry(cwd=d)], 0, Path(tmp) / "tabs.json")
+            tabs_state.save([TabEntry(cwd=d)], 0, Path(tmp).resolve() / "tabs.json")
 
 
 if __name__ == "__main__":

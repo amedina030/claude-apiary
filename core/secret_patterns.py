@@ -179,9 +179,7 @@ PATTERNS: tuple[SecretPattern, ...] = (
 # Allowlist markers, honoured by both gates. The push gate shipped first with
 # the detect-secrets convention; the commit gate added its own. Each accepts
 # both, so a line silenced for one is silenced for the other.
-PRAGMA_RE = re.compile(
-    r"apiary:\s*allow-secret|pragma:\s*allowlist\s+secret", re.IGNORECASE
-)
+PRAGMA_RE = re.compile(r"apiary:\s*allow-secret|pragma:\s*allowlist\s+secret", re.IGNORECASE)
 
 GENERIC_RULE = "generic-assignment"
 GENERIC_HINT = "a credential-looking assignment"
@@ -235,13 +233,14 @@ def load_allowlist(root: Path) -> Allowlist:
             continue
         bucket = paths
         if entry.startswith(ALLOWLIST_LINE_PREFIX):
-            entry = entry[len(ALLOWLIST_LINE_PREFIX):].strip()
+            entry = entry[len(ALLOWLIST_LINE_PREFIX) :].strip()
             bucket = lines
         try:
             bucket.append(re.compile(entry))
         except re.error:
             print(f"{ALLOWLIST_FILENAME}: skipping invalid regex: {entry}", file=sys.stderr)
     return Allowlist(paths=tuple(paths), lines=tuple(lines))
+
 
 # ---------------------------------------------------------------------------
 # Generic ``key = value`` rule
@@ -364,17 +363,17 @@ def find_generic(line: str) -> Hit | None:
     for m in GENERIC_ASSIGN.finditer(line):
         key = m.group("key")
         if _KEY_EXCLUDE.search(key):
-            continue                        # password_file, token_url, ...
+            continue  # password_file, token_url, ...
         quoted = m.group("dq") is not None or m.group("sq") is not None
         value = m.group("dq") or m.group("sq") or m.group("bare")
         if PLACEHOLDER.match(value):
             continue
-        if value.isdigit():                 # port numbers, timeouts, ids
+        if value.isdigit():  # port numbers, timeouts, ids
             continue
         if len(value) >= 12 and shannon_entropy(value) < 2.5:
-            continue                        # xxxxxxxxxxxx, abababababab
+            continue  # xxxxxxxxxxxx, abababababab
         if "://" in value:
-            continue                        # an endpoint, not a credential
+            continue  # an endpoint, not a credential
         # Indirection is judged on the value itself for a quoted literal —
         # what follows the closing quote (a comment mentioning get_config())
         # can't make the literal safe. A bare value is an expression, so the
@@ -382,21 +381,24 @@ def find_generic(line: str) -> Hit | None:
         if quoted:
             region = value
         else:
-            region = _TRAILING_COMMENT.sub("", line[m.start("bare"):])
+            region = _TRAILING_COMMENT.sub("", line[m.start("bare") :])
             if _IDENTIFIER.fullmatch(value) or _BARE_READ.match(region):
-                continue                    # `x = other_var`, `x = cfg.pw`
+                continue  # `x = other_var`, `x = cfg.pw`
         if INDIRECTION.search(region):
             continue
         if not quoted and not looks_like_a_credential(value):
-            continue                        # bare word in prose, not a secret
+            continue  # bare word in prose, not a secret
         # A bare `token` key is the most ambiguous word in the list — lexer
         # tokens, search tokens, UI tokens. Without a qualifying prefix
         # (`auth_`, `api_`, `access_`), a quoted plain word is not a credential.
         if quoted and key.lower() in ("token", "tokens") and not looks_like_a_credential(value):
             continue
-        start = m.start("dq") if m.group("dq") is not None else (
-            m.start("sq") if m.group("sq") is not None else m.start("bare"))
-        return Hit(GENERIC_RULE, value, line[m.start():start])
+        start = (
+            m.start("dq")
+            if m.group("dq") is not None
+            else (m.start("sq") if m.group("sq") is not None else m.start("bare"))
+        )
+        return Hit(GENERIC_RULE, value, line[m.start() : start])
     return None
 
 
@@ -410,7 +412,7 @@ def find(line: str) -> Hit | None:
         m = pattern.regex.search(line)
         if m:
             if "v" in m.groupdict() and m.group("v") is not None:
-                return Hit(pattern.name, m.group("v"), line[m.start():m.start("v")])
+                return Hit(pattern.name, m.group("v"), line[m.start() : m.start("v")])
             return Hit(pattern.name, m.group(0), "")
     return None
 

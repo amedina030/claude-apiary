@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -273,13 +274,15 @@ class TokenUsageTests(unittest.TestCase):
         a = TokenUsage(input=1, output=2, cache_read=3, cache_write=4)
         b = TokenUsage(input=10, output=20, cache_read=30, cache_write=40)
         a.add(b)
-        self.assertEqual(a.to_dict(), {"input": 11, "output": 22, "cache_read": 33, "cache_write": 44})
+        self.assertEqual(
+            a.to_dict(), {"input": 11, "output": 22, "cache_read": 33, "cache_write": 44}
+        )
 
 
 class TranscriptTailTests(unittest.TestCase):
     def test_replays_existing_then_tails_appended(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "session.jsonl"
+            p = Path(tmp).resolve() / "session.jsonl"
             existing = [
                 json.dumps(
                     {
@@ -335,19 +338,30 @@ class TranscriptTailTests(unittest.TestCase):
         tail that byte count. A record written between the read and the
         tail start must be rendered exactly once; the replayed one never."""
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "session.jsonl"
-            first = json.dumps({"type": "user", "promptId": "p1",
-                                "message": {"role": "user", "content": "already replayed"}})
+            p = Path(tmp).resolve() / "session.jsonl"
+            first = json.dumps(
+                {
+                    "type": "user",
+                    "promptId": "p1",
+                    "message": {"role": "user", "content": "already replayed"},
+                }
+            )
             p.write_text(first + "\n", encoding="utf-8")
             raw = p.read_bytes()
             # Claude appends before the tail thread starts.
-            gap = json.dumps({"type": "user", "promptId": "p2",
-                              "message": {"role": "user", "content": "in the gap"}})
+            gap = json.dumps(
+                {
+                    "type": "user",
+                    "promptId": "p2",
+                    "message": {"role": "user", "content": "in the gap"},
+                }
+            )
             with p.open("a", encoding="utf-8") as f:
                 f.write(gap + "\n")
             received: list[Message] = []
-            tail = TranscriptTail(p, on_message=received.append, poll_interval=0.05,
-                                  start_at=len(raw))
+            tail = TranscriptTail(
+                p, on_message=received.append, poll_interval=0.05, start_at=len(raw)
+            )
             tail.start()
             try:
                 deadline = time.time() + 2.0
@@ -360,15 +374,20 @@ class TranscriptTailTests(unittest.TestCase):
 
     def test_multibyte_utf8_survives_byte_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "session.jsonl"
+            p = Path(tmp).resolve() / "session.jsonl"
             p.write_text("", encoding="utf-8")
             received: list[Message] = []
             tail = TranscriptTail(p, on_message=received.append, poll_interval=0.05)
             tail.start()
             try:
-                rec = json.dumps({"type": "user", "promptId": "p1",
-                                  "message": {"role": "user", "content": "héllo — ✓ 日本"}},
-                                 ensure_ascii=False)
+                rec = json.dumps(
+                    {
+                        "type": "user",
+                        "promptId": "p1",
+                        "message": {"role": "user", "content": "héllo — ✓ 日本"},
+                    },
+                    ensure_ascii=False,
+                )
                 with p.open("a", encoding="utf-8") as f:
                     f.write(rec + "\n")
                 deadline = time.time() + 2.0
@@ -380,9 +399,14 @@ class TranscriptTailTests(unittest.TestCase):
 
     def test_truncated_file_is_reparsed_from_the_top(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "session.jsonl"
-            long_rec = json.dumps({"type": "user", "promptId": "p1",
-                                   "message": {"role": "user", "content": "x" * 500}})
+            p = Path(tmp).resolve() / "session.jsonl"
+            long_rec = json.dumps(
+                {
+                    "type": "user",
+                    "promptId": "p1",
+                    "message": {"role": "user", "content": "x" * 500},
+                }
+            )
             p.write_text(long_rec + "\n", encoding="utf-8")
             received: list[Message] = []
             tail = TranscriptTail(p, on_message=received.append, poll_interval=0.05)
@@ -393,8 +417,13 @@ class TranscriptTailTests(unittest.TestCase):
                     time.sleep(0.05)
                 self.assertEqual(len(received), 1)
                 # Rewritten shorter (/clear, compaction): the old offset is past EOF.
-                short_rec = json.dumps({"type": "user", "promptId": "p2",
-                                        "message": {"role": "user", "content": "fresh"}})
+                short_rec = json.dumps(
+                    {
+                        "type": "user",
+                        "promptId": "p2",
+                        "message": {"role": "user", "content": "fresh"},
+                    }
+                )
                 p.write_text(short_rec + "\n", encoding="utf-8")
                 deadline = time.time() + 2.0
                 while time.time() < deadline and len(received) < 2:
@@ -405,7 +434,7 @@ class TranscriptTailTests(unittest.TestCase):
 
     def test_partial_line_buffered_until_newline(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "session.jsonl"
+            p = Path(tmp).resolve() / "session.jsonl"
             p.write_text("", encoding="utf-8")
             received: list[Message] = []
             tail = TranscriptTail(p, on_message=received.append, poll_interval=0.05)
@@ -438,7 +467,7 @@ class TranscriptTailTests(unittest.TestCase):
 class FindActiveSessionTests(unittest.TestCase):
     def test_picks_most_recently_modified(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / "a").mkdir()
             (root / "b").mkdir()
             old = root / "a" / "old.jsonl"
@@ -450,11 +479,11 @@ class FindActiveSessionTests(unittest.TestCase):
 
     def test_returns_none_when_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertIsNone(find_active_session_jsonl(Path(tmp)))
+            self.assertIsNone(find_active_session_jsonl(Path(tmp).resolve()))
 
     def test_excludes_pre_existing_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / "a").mkdir()
             parent = root / "a" / "parent.jsonl"
             parent.write_text("{}\n", encoding="utf-8")
@@ -469,7 +498,7 @@ class FindActiveSessionTests(unittest.TestCase):
 
     def test_min_ctime_filters_old_files(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / "a").mkdir()
             old = root / "a" / "old.jsonl"
             old.write_text("{}\n", encoding="utf-8")
@@ -487,7 +516,7 @@ class FindActiveSessionTests(unittest.TestCase):
 class SnapshotExistingJsonlsTests(unittest.TestCase):
     def test_returns_set_of_present_jsonls(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / "p1").mkdir()
             (root / "p2").mkdir()
             a = root / "p1" / "a.jsonl"
@@ -501,9 +530,11 @@ class SnapshotExistingJsonlsTests(unittest.TestCase):
 class SessionDiscoveryTests(unittest.TestCase):
     def test_fires_on_switch(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             switches: list[Path] = []
-            disc = SessionDiscovery(on_switch=switches.append, projects_root=root, poll_interval=0.05)
+            disc = SessionDiscovery(
+                on_switch=switches.append, projects_root=root, poll_interval=0.05
+            )
             disc.start()
             try:
                 first = root / "first.jsonl"
@@ -526,7 +557,7 @@ class SessionDiscoveryTests(unittest.TestCase):
     def test_pin_excludes_pre_spawn_jsonls_even_when_modified(self):
         """The whole point of the pin: writes to the parent terminal's JSONL must not flap us back."""
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             parent = root / "parent.jsonl"
             parent.write_text("{}\n", encoding="utf-8")
             pre_existing = {parent}
@@ -568,7 +599,7 @@ class SessionDiscoveryTests(unittest.TestCase):
         """Once locked onto the first matching JSONL, later post-spawn JSONLs (subagent
         sidechains, etc.) must not steal focus."""
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             switches: list[Path] = []
             disc = SessionDiscovery(
                 on_switch=switches.append,
@@ -601,12 +632,14 @@ class SessionDiscoveryTests(unittest.TestCase):
 
     def test_set_pin_after_start_takes_effect(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             parent = root / "parent.jsonl"
             parent.write_text("{}\n", encoding="utf-8")
 
             switches: list[Path] = []
-            disc = SessionDiscovery(on_switch=switches.append, projects_root=root, poll_interval=0.05)
+            disc = SessionDiscovery(
+                on_switch=switches.append, projects_root=root, poll_interval=0.05
+            )
             disc.start()
             try:
                 # Without pin, parent gets picked up.
@@ -632,11 +665,15 @@ class SessionDiscoveryTests(unittest.TestCase):
             finally:
                 disc.stop()
 
+    @unittest.skipUnless(
+        os.name == "nt",
+        "min_ctime pinning assumes st_ctime is creation time; off Windows it is inode-change time, so touching the old JSONL re-latches it (review gui #8, T-2026-292)",
+    )
     def test_re_pin_after_lock_unlatches_for_new_jsonl(self):
         """Models the /clear flow: discovery locked onto JSONL A via lock_after_first,
         then set_pin bumps min_ctime so a fresh post-clear JSONL B takes over."""
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             first = root / "pre-clear.jsonl"
             first.write_text("{}\n", encoding="utf-8")
 

@@ -19,7 +19,8 @@ from gui.permission_bridge import PermissionBridge
 def _post(url: str, payload: dict, timeout: float = 5.0) -> tuple[int, dict]:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        url, data=data,
+        url,
+        data=data,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
@@ -41,17 +42,21 @@ class PermissionBridgeTests(unittest.TestCase):
             self.received.append((pid, payload))
             if decider is None:
                 return
+
             # Resolve on a bg thread so we don't block the handler.
             def worker():
                 decision = decider(payload)
                 self.bridge.resolve(pid, decision)
+
             threading.Thread(target=worker, daemon=True).start()
 
         self.bridge = PermissionBridge(on_request, timeout_seconds=timeout_seconds)
         return self.bridge.start()
 
     def test_roundtrip_allow_decision(self):
-        url = self._boot(lambda payload: {"behavior": "allow", "updatedInput": payload.get("input", {})})
+        url = self._boot(
+            lambda payload: {"behavior": "allow", "updatedInput": payload.get("input", {})}
+        )
         status, body = _post(url, {"tool_name": "Edit", "input": {"file_path": "/x"}})
         self.assertEqual(status, 200)
         self.assertEqual(body["behavior"], "allow")
@@ -82,7 +87,8 @@ class PermissionBridgeTests(unittest.TestCase):
     def test_400_on_invalid_json(self):
         url = self._boot(decider=None)
         req = urllib.request.Request(
-            url, data=b"not json at all",
+            url,
+            data=b"not json at all",
             headers={"Content-Type": "application/json"},
             method="POST",
         )
@@ -100,6 +106,7 @@ class PermissionBridgeTests(unittest.TestCase):
         url = self._boot(decider=None, timeout_seconds=30.0)
 
         result: dict = {}
+
         def caller():
             try:
                 _, body = _post(url, {"tool_name": "Edit", "input": {}}, timeout=10.0)

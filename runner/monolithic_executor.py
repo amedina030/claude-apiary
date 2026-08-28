@@ -40,6 +40,7 @@ and either self-corrects or continues — the orchestrator can no longer
 guarantee early abort. Operators reading the post-hoc execution log
 must treat it as an after-the-fact reconstruction, not a live trace.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -48,20 +49,21 @@ import sys
 from pathlib import Path
 
 from .config_loader import get as cfg
-from .claude_subprocess import run_claude as _spawn_claude
 from .executor import (
     EXECUTIONS_DIR,
-    branch_exists,
-    create_branch,
-    get_current_branch,
-    git,
-    snapshot_worktree_state,
-    _porcelain_path,
+    _ensure_on_branch,
     _norm_rel,
-    verify_post_conditions,
     persist_execution_log,
+    verify_post_conditions,
 )
-from .git_lib import format_git_error as _format_git_error
+from .git_lib import git, run_branch_from_env
+from .schema_versions import (
+    EXECUTION_SCHEMA_VERSION,
+    PLAN_SCHEMA_VERSION,
+    assert_schema_version,
+)
+from .stage_lib import check_uuid_safe
+from .stage_lib import run_claude as _spawn_claude
 
 MONOLITHIC_TIMEOUT = cfg("monolithic_executor", "timeout_seconds", 1800)
 
@@ -104,27 +106,27 @@ def build_monolithic_prompt(plan: dict) -> str:
         "",
         "## Commit protocol (CRITICAL — the orchestrator parses these)",
         "",
-        f"After each create/modify/delete step, run:",
-        f"    git add <exact files from step.files>",
-        f"    git commit -m \"runner/{uuid} step <N>: <step description>\"",
+        "After each create/modify/delete step, run:",
+        "    git add <exact files from step.files>",
+        f'    git commit -m "runner/{uuid} step <N>: <step description>"',
         "",
         "The subject line MUST start with "
         f"'runner/{uuid} step <N>: '. Any deviation and the orchestrator "
         "will record the step as missing.",
         "",
         "Rules:",
-        f"- Steps run in ``step_number`` order.",
-        f"- A file-mutating step (action=create/modify/delete) produces "
-        f"EXACTLY one commit, touching ONLY its declared files. No "
-        f"commits outside this loop.",
-        f"- Test steps (action=test): run code_spec as a shell command. "
-        f"Non-zero exit is fatal — stop and explain.",
-        f"- Verify steps (action=verify): inspect the files and include "
-        f"a line 'verify <N>: PASS' or 'verify <N>: FAIL <reason>' in "
-        f"your final response.",
-        f"- If a step's work is already done (e.g. a prior step naturally "
-        f"included it), SKIP its commit and move on — do not create an "
-        f"empty commit.",
+        "- Steps run in ``step_number`` order.",
+        "- A file-mutating step (action=create/modify/delete) produces "
+        "EXACTLY one commit, touching ONLY its declared files. No "
+        "commits outside this loop.",
+        "- Test steps (action=test): run code_spec as a shell command. "
+        "Non-zero exit is fatal — stop and explain.",
+        "- Verify steps (action=verify): inspect the files and include "
+        "a line 'verify <N>: PASS' or 'verify <N>: FAIL <reason>' in "
+        "your final response.",
+        "- If a step's work is already done (e.g. a prior step naturally "
+        "included it), SKIP its commit and move on — do not create an "
+        "empty commit.",
         "",
         "## Steps",
         "",
@@ -148,19 +150,20 @@ def build_monolithic_prompt(plan: dict) -> str:
         pcs = step.get("post_conditions") or []
         if pcs:
             parts.append("")
-            parts.append("**Post-conditions (orchestrator verifies these "
-                         "after the run):**")
+            parts.append("**Post-conditions (orchestrator verifies these after the run):**")
             for pc in pcs:
                 parts.append(f"- {json.dumps(pc)}")
         parts.append("")
 
-    parts.extend([
-        "## After all steps",
-        "",
-        "When every step is committed (or intentionally skipped as "
-        "subsumed), return a brief summary of what you did. Do not ask "
-        "questions; this is an unattended run.",
-    ])
+    parts.extend(
+        [
+            "## After all steps",
+            "",
+            "When every step is committed (or intentionally skipped as "
+            "subsumed), return a brief summary of what you did. Do not ask "
+            "questions; this is an unattended run.",
+        ]
+    )
 
     return "\n".join(parts)
 
@@ -209,7 +212,7 @@ def reconstruct_step_results(plan: dict, base_ref: str) -> list[dict]:
     for sha, subject in commits:
         if not subject.startswith(prefix):
             continue
-        rest = subject[len(prefix):]
+        rest = subject[len(prefix) :]
         num_str = rest.split(":", 1)[0].strip()
         try:
             n = int(num_str)
@@ -261,13 +264,8 @@ def reconstruct_step_results(plan: dict, base_ref: str) -> list[dict]:
                 entry["status"] = "passed"
                 entry["subsumed_by"] = "no_commit"
             else:
-                entry["error"] = (
-                    "No matching commit found and post-conditions "
-                    + (
-                        f"unmet ({'; '.join(pc_failures)})"
-                        if pc_failures
-                        else "not declared"
-                    )
+                entry["error"] = "No matching commit found and post-conditions " + (
+                    f"unmet ({'; '.join(pc_failures)})" if pc_failures else "not declared"
                 )
 
         # Always evaluate declared post_conditions once more on the
@@ -276,10 +274,7 @@ def reconstruct_step_results(plan: dict, base_ref: str) -> list[dict]:
         pc_failures = verify_post_conditions(step, Path.cwd())
         if pc_failures and entry["status"] == "passed":
             entry["status"] = "failed"
-            entry["error"] = (
-                "Post-condition(s) not satisfied after run: "
-                + "; ".join(pc_failures)
-            )
+            entry["error"] = "Post-condition(s) not satisfied after run: " + "; ".join(pc_failures)
 
         results.append(entry)
 
@@ -287,7 +282,8 @@ def reconstruct_step_results(plan: dict, base_ref: str) -> list[dict]:
 
 
 def detect_global_unexpected_writes(
-    plan: dict, base_ref: str,
+    plan: dict,
+    base_ref: str,
 ) -> list[str]:
     """Return paths touched on the branch that no step declared in its
     files list. Post-hoc equivalent of assert_no_unexpected_writes.
@@ -301,15 +297,13 @@ def detect_global_unexpected_writes(
     result = git("diff", "--name-only", f"{base_ref}..HEAD")
     if result.returncode != 0:
         return []
-    touched = [
-        _norm_rel(ln) for ln in result.stdout.splitlines() if ln.strip()
-    ]
+    touched = [_norm_rel(ln) for ln in result.stdout.splitlines() if ln.strip()]
     return sorted({p for p in touched if p not in allowed})
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Chained executor — runner stage 4 (single-subprocess variant)"
+        description="Monolithic executor — runner stage 4 (single-subprocess variant)"
     )
     parser.add_argument("plan", help="Path to plan JSON file")
     args = parser.parse_args()
@@ -325,42 +319,29 @@ def main():
         print(f"Invalid plan JSON: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Same gate the per-step executor applies (executor.main). Without it a
+    # plan written by an older auto_plan would be executed silently against
+    # today's field expectations.
+    try:
+        assert_schema_version(plan, "plan", PLAN_SCHEMA_VERSION)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+
     if not plan.get("valid", False):
         print("Plan is not valid — cannot execute", file=sys.stderr)
         sys.exit(1)
 
-    uuid = plan.get("uuid", plan_path.stem)
-    if not isinstance(uuid, str):
-        print("Plan uuid field is not a string", file=sys.stderr)
-        sys.exit(1)
-    uuid = uuid.strip()
-    if (
-        not uuid
-        or "\\" in uuid
-        or "\x00" in uuid
-        or uuid in (".", "..")
-        or Path(uuid) != Path(Path(uuid).name)
-        or not Path(uuid).name
-    ):
-        print("Plan uuid contains invalid characters", file=sys.stderr)
+    try:
+        uuid = check_uuid_safe(plan.get("uuid", plan_path.stem), "Plan uuid")
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
         sys.exit(1)
 
-    branch = f"runner/{uuid}"
-    original_branch = get_current_branch()
-
-    if branch_exists(branch):
-        print(f"Branch {branch} already exists, checking out", file=sys.stderr)
-        r = git("checkout", branch)
-        if r.returncode != 0:
-            print(_format_git_error(
-                f"checking out branch '{branch}'", r), file=sys.stderr)
-            sys.exit(1)
-    else:
-        try:
-            create_branch(branch)
-        except RuntimeError as e:
-            print(str(e), file=sys.stderr)
-            sys.exit(1)
+    # One branch per run, named by the orchestrator — see executor._ensure_on_branch
+    # and review runner Bug 3.
+    branch = run_branch_from_env(uuid)
+    original_branch, switched = _ensure_on_branch(branch)
 
     # Remember the branch's base commit so we can diff and log-walk later.
     head_before = git("rev-parse", "HEAD").stdout.strip()
@@ -372,7 +353,11 @@ def main():
     log_path = EXECUTIONS_DIR / f"{uuid}.json"
     transcript_path = EXECUTIONS_DIR / f"{uuid}.transcript.json"
 
+    # schema_version is mandatory: auto_harden and approval both call
+    # assert_schema_version on this artifact and exit 1 when it is absent
+    # (review runner Bug 1 — every default-mode run died at stage 5).
     execution_log = {
+        "schema_version": EXECUTION_SCHEMA_VERSION,
         "uuid": uuid,
         "branch": branch,
         "mode": "monolithic",
@@ -381,9 +366,11 @@ def main():
     }
     persist_execution_log(log_path, execution_log)
 
-    print(f"Chained executor: running plan with {len(plan.get('steps', []))} "
-          f"steps in one subprocess (timeout {MONOLITHIC_TIMEOUT}s)",
-          file=sys.stderr)
+    print(
+        f"Monolithic executor: running plan with {len(plan.get('steps', []))} "
+        f"steps in one subprocess (timeout {MONOLITHIC_TIMEOUT}s)",
+        file=sys.stderr,
+    )
 
     rc, stdout, stderr = _spawn_claude(prompt, timeout=MONOLITHIC_TIMEOUT, model=model)
 
@@ -403,12 +390,12 @@ def main():
     if rc != 0:
         execution_log["status"] = "aborted"
         execution_log["error"] = (
-            f"Chained subprocess exited rc={rc}. "
-            f"stderr: {stderr.strip()[:500]}"
+            f"Monolithic subprocess exited rc={rc}. stderr: {stderr.strip()[:500]}"
         )
         persist_execution_log(log_path, execution_log)
         print(f"Runner aborted. Log: {log_path}", file=sys.stderr)
-        git("checkout", original_branch)
+        if switched:
+            git("checkout", original_branch)
         sys.exit(1)
 
     # Reconstruct per-step results from git history + post_conditions.
@@ -424,11 +411,11 @@ def main():
     persist_execution_log(log_path, execution_log)
 
     if aborted:
-        print(f"Runner aborted (post-hoc verification failed). "
-              f"Log: {log_path}", file=sys.stderr)
+        print(f"Runner aborted (post-hoc verification failed). Log: {log_path}", file=sys.stderr)
         if unexpected:
             print(f"Unexpected writes: {unexpected}", file=sys.stderr)
-        git("checkout", original_branch)
+        if switched:
+            git("checkout", original_branch)
         sys.exit(1)
 
     print(f"Branch: {branch}")

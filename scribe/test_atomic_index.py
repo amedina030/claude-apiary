@@ -1,9 +1,11 @@
 """Atomic index-write guarantees (parity spec §5.1).
 
 A kill mid-write must never corrupt index.jsonl: the file is written to a temp
-sibling then os.replace'd, so an interrupted write leaves the prior file intact
-and no torn line.
+sibling then os.replace'd — by ``core.utils.atomic.write_text_atomic``, the one
+copy of that pattern — so an interrupted write leaves the prior file intact and
+no torn line.
 """
+
 import sys
 import tempfile
 import unittest
@@ -37,7 +39,7 @@ class TestAtomicIndex(unittest.TestCase):
         year_dir = self._year_dir(a)
         idx = year_dir / "index.jsonl"
         before = idx.read_text(encoding="utf-8")
-        with mock.patch("scribe.store.os.replace", side_effect=OSError("boom")):
+        with mock.patch("core.utils.atomic.os.replace", side_effect=OSError("boom")):
             with self.assertRaises(OSError):
                 ScribeStore._write_index(year_dir, [{"seq": 99, "display_id": "T-2026-99"}])
         self.assertEqual(idx.read_text(encoding="utf-8"), before)

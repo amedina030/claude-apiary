@@ -1,8 +1,9 @@
 """Cascade-fix — when main-apiary moves, rewrite every bootstrapped repo's
 ``main-apiary-pointer.json`` to the new location.
 
-Per MIGRATION-PLAN.md §7.3, §13.1, §13.2: main-apiary's drift handler is
-the only code path that writes into other repos' files. Every other code
+Main-apiary's drift handler is the only code path that writes into
+other bootstrapped repos' files (see
+``docs/architecture/per-repo-install.md``). Every other code
 path is read-only with respect to bootstrapped repos. The cascade closes
 the loop when main-apiary itself moves — without it, bootstrapped repos
 would point at a stale path forever.
@@ -13,6 +14,7 @@ Invoked from:
   own startup).
 - ``apiary doctor pointers --fix`` (manual operator trigger).
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -30,8 +32,9 @@ from core.utils.filelock import FileLock
 @dataclasses.dataclass
 class CascadeReport:
     """Summary of a cascade-fix run."""
+
     new_main_apiary_path: Path
-    updated: list[int]    # uids whose main-apiary-pointer was rewritten
+    updated: list[int]  # uids whose main-apiary-pointer was rewritten
     skipped: list[tuple[int, str]]  # (uid, reason) — repo gone, no pin file, etc.
 
 
@@ -39,7 +42,8 @@ def cascade_fix(new_main_apiary_path: Path) -> CascadeReport:
     """Rewrite every bootstrapped repo's ``main-apiary-pointer.json`` to
     point at *new_main_apiary_path*.
 
-    Skips main-apiary's own entry (uid 1) and any registry entry whose
+    Skips main-apiary's own entry (``state.MAIN_APIARY_UID``) and any
+    registry entry whose
     ``real_path`` no longer exists or no longer has a per-repo pin file.
     Skipped entries are returned in the report so the caller can surface
     them; ``apiary doctor unreachable`` covers persistent gone-repo state.
@@ -54,7 +58,7 @@ def cascade_fix(new_main_apiary_path: Path) -> CascadeReport:
                 uid = int(uid_str)
             except ValueError:
                 continue
-            if uid == 1:
+            if uid == state.MAIN_APIARY_UID:
                 continue  # main-apiary's own entry; updated by the caller
             real_path = entry.get("real_path", "")
             if not real_path:

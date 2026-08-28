@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for harden/validate_findings.py and harden/validate_response.py."""
+
 import json
 import subprocess
 import sys
@@ -11,8 +12,13 @@ RESPONSE_SCRIPT = str(Path(__file__).parent / "validate_response.py")
 PYTHON = sys.executable
 
 
-def run_validate_findings(input_json: str, check_files: bool = False, deep: bool = False,
-                          lens: str = None, sanitize: bool = False) -> subprocess.CompletedProcess:
+def run_validate_findings(
+    input_json: str,
+    check_files: bool = False,
+    deep: bool = False,
+    lens: str = None,
+    sanitize: bool = False,
+) -> subprocess.CompletedProcess:
     cmd = [PYTHON, FINDINGS_SCRIPT]
     if check_files:
         cmd.append("--check-files")
@@ -35,7 +41,9 @@ def make_lens_finding(**overrides):
     return base
 
 
-def run_validate_response(input_json: str, expected_ids: str, check_files: bool = False) -> subprocess.CompletedProcess:
+def run_validate_response(
+    input_json: str, expected_ids: str, check_files: bool = False
+) -> subprocess.CompletedProcess:
     cmd = [PYTHON, RESPONSE_SCRIPT, "--expected-ids", expected_ids]
     if check_files:
         cmd.append("--check-files")
@@ -71,7 +79,6 @@ def make_response(**overrides):
 
 
 class TestValidateFindings(unittest.TestCase):
-
     def test_valid_finding_passes(self):
         result = run_validate_findings(json.dumps([make_finding()]))
         self.assertEqual(result.returncode, 0)
@@ -181,14 +188,20 @@ class TestValidateFindings(unittest.TestCase):
 
 
 class TestValidateFindingsLensMode(unittest.TestCase):
-
     def test_lens_finding_without_category_passes(self):
         result = run_validate_findings(json.dumps([make_lens_finding()]), lens="resilience")
         self.assertEqual(result.returncode, 0)
 
     def test_all_seven_lenses_valid(self):
-        for lens in ("correctness", "security", "robustness", "resilience",
-                     "complexity", "architecture", "testing"):
+        for lens in (
+            "correctness",
+            "security",
+            "robustness",
+            "resilience",
+            "complexity",
+            "architecture",
+            "testing",
+        ):
             result = run_validate_findings(json.dumps([make_lens_finding()]), lens=lens)
             self.assertEqual(result.returncode, 0, f"Lens '{lens}' should be valid")
 
@@ -227,7 +240,6 @@ class TestValidateFindingsLensMode(unittest.TestCase):
 
 
 class TestValidateResponse(unittest.TestCase):
-
     def test_valid_response_passes(self):
         result = run_validate_response(json.dumps(make_response()), "ATK-001")
         self.assertEqual(result.returncode, 0)
@@ -249,8 +261,18 @@ class TestValidateResponse(unittest.TestCase):
     def test_all_expected_ids_addressed(self):
         data = {
             "responses": [
-                {"finding_ref": "ATK-001", "action": "fixed", "description": "Fixed it", "changes": []},
-                {"finding_ref": "ATK-002", "action": "deferred", "description": "Deferred", "changes": []},
+                {
+                    "finding_ref": "ATK-001",
+                    "action": "fixed",
+                    "description": "Fixed it",
+                    "changes": [],
+                },
+                {
+                    "finding_ref": "ATK-002",
+                    "action": "deferred",
+                    "description": "Deferred",
+                    "changes": [],
+                },
             ],
             "todos": [],
         }

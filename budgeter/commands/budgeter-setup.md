@@ -1,3 +1,9 @@
+---
+name: budgeter-setup
+description: Bootstrap apiary into the current repo so budgeter and the rest of the toolkit work here
+user-invocable: true
+---
+
 # Budgeter Setup
 
 Bootstrap apiary into the current repo so budgeter (and the rest of the

@@ -26,7 +26,7 @@ Walk the user through the project's learning corpus, one tag group at a time, so
       python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py get <ID>
       ```
 
-   b. Ask (via `AskUserQuestion` when possible) what to do with the group:
+   b. Ask, in plain prose (no multiple-choice picker), what to do with the group:
       - **Keep all** — nothing to change, move to next tag.
       - **Review individually** — walk through each entry and ask per-entry action.
       - **Archive all** — archive every learning in this group (rare; useful for retired tech).
@@ -45,25 +45,26 @@ Walk the user through the project's learning corpus, one tag group at a time, so
         python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py supersede <old-ID> --content "<new content>"
         ```
 
-        (Omit `--tags` and `--area` — they'll be inferred via `claude -p`, same as a regular learn.)
+        (Add `--infer` if you want `--tags`/`--area` inferred via `claude -p`; without it the replacement is written untagged and `retrotag` can pick it up later.)
 
       - **Merge** — combine two related learnings into one. Two step flow:
         1. Write a new learning that captures both insights: `notes.py learn --content "<merged content>"`.
         2. Archive the two originals: `notes.py archive-learning <old-ID-1>` and `notes.py archive-learning <old-ID-2>`.
 
-4. Handle the `untagged` group specially — prompt the user whether to auto-tag it via the retrotag script instead of walking one-by-one:
+4. Handle the `untagged` group specially — prompt the user whether to auto-tag it in one pass instead of walking one-by-one. `retrotag` calls a model once per untagged learning, so offer `--dry-run` first if the group is large:
 
    ```bash
-   python scripts/retrotag_learnings.py
+   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py retrotag --dry-run
+   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py retrotag
    ```
 
 5. When every tag group has been processed, stamp the review timestamp so the startup nudge quiets down:
 
    ```bash
-   python -c "from pathlib import Path; from scribe.notes import scribe_state_dir; p = scribe_state_dir() / 'learnings' / 'last_review'; p.parent.mkdir(parents=True, exist_ok=True); p.write_text('', encoding='utf-8'); import os, time; os.utime(p)"
+   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py mark-reviewed
    ```
 
-   The python form above is preferred — it resolves the per-target state dir via the registry, so it works regardless of cwd.
+   Always go through the launcher: it exports `APIARY_TARGET_STATE_DIR`, so the marker lands in the per-target state dir the startup banner actually reads.
 
 6. Report the summary to the user: N kept, M archived, K superseded.
 

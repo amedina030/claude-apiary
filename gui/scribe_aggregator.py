@@ -16,31 +16,29 @@ from __future__ import annotations
 import json
 import sys
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
 # core.utils.state lives one directory up; mirror the import-path pattern
 # used by other gui modules (sys.path insert + repo-root-relative import).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from core.utils.state import (  # noqa: E402
-    find_state_dir, read_main_apiary_pointer, read_self_pointer,
-)
+from core.utils.state import resolve_state_dir  # noqa: E402
 
 
 @dataclass
 class NoteEntry:
-    repo: str            # absolute path of the repo this note lives in
-    repo_label: str      # display label (basename) for grouping
-    type: str            # "todo" | "decision" | etc — derived from folder name (singularized)
-    folder: str          # raw scribe subfolder name (e.g. "todos", "decisions")
+    repo: str  # absolute path of the repo this note lives in
+    repo_label: str  # display label (basename) for grouping
+    type: str  # "todo" | "decision" | etc — derived from folder name (singularized)
+    folder: str  # raw scribe subfolder name (e.g. "todos", "decisions")
     display_id: str
     summary: str
-    brief_summary: str   # one-sentence headline for sidebar display (may be "")
+    brief_summary: str  # one-sentence headline for sidebar display (may be "")
     status: str
     timestamp: str
     has_body: bool
-    body_path: str       # absolute path to the .md body file, "" if no body
+    body_path: str  # absolute path to the .md body file, "" if no body
 
     def to_dict(self) -> dict:
         return {
@@ -78,38 +76,25 @@ _SKIP_FOLDERS = {"memory", "backup", "backups", "archive"}
 
 
 def _resolve_scribe_root(repo: Path) -> Optional[Path]:
-    """Find this target's scribe state directory.
+    """Find this target's scribe state directory, or None.
 
-    Resolution order:
-      1. Per-repo pin model (post-2026-05 migration): read
-         ``<repo>/.claude/apiary/{main-apiary-pointer,self-pointer}.json``
-         to construct ``<main_apiary>/.repos/<name>-<uid>/scribe/``.
-      2. Legacy ``<repo>/.apiary/pointer`` breadcrumb (pre-migration
-         centralized layout): ``find_state_dir`` reads it and returns
-         the centralized state dir if present.
-      3. In-repo fallback ``<repo>/.apiary/scribe/`` for un-bootstrapped
-         targets that still keep their state in-tree.
+    ``resolve_state_dir`` owns the precedence (pins →
+    ``.apiary/pointer`` breadcrumb → in-repo ``.apiary/``). Two arguments
+    matter here and nowhere else:
 
-    Returns None when none of the three resolve to a directory.
+    * ``use_env=False`` — the aggregator scans *several* repos in one
+      process, so the launcher's ``APIARY_TARGET_STATE_DIR`` (which names
+      whichever repo started the GUI) would hand every repo the same
+      answer.
+    * ``require_exists=True`` — a repo with no notes yet is "nothing to
+      show", not an empty directory to create.
     """
-    main_pointer = read_main_apiary_pointer(repo)
-    self_pointer = read_self_pointer(repo)
-    if main_pointer is not None and self_pointer is not None:
-        main_apiary_path = main_pointer.get("main_apiary_path", "")
-        name = self_pointer.get("name") or ""
-        uid = self_pointer.get("uid")
-        if main_apiary_path and name and uid is not None:
-            candidate = Path(main_apiary_path) / ".repos" / f"{name}-{uid}" / "scribe"
-            if candidate.is_dir():
-                return candidate
-
-    state_dir = find_state_dir(repo)
-    if state_dir is not None:
-        candidate = state_dir / "scribe"
-        if candidate.is_dir():
-            return candidate
-    legacy = repo / ".apiary" / "scribe"
-    return legacy if legacy.is_dir() else None
+    return resolve_state_dir(
+        repo=repo,
+        subdir="scribe",
+        use_env=False,
+        require_exists=True,
+    )
 
 
 def _scan_repo(repo: Path) -> list[NoteEntry]:

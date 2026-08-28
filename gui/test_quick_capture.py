@@ -37,7 +37,7 @@ class QuickNoteTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.repo = self.root / "repo"
         self.repo.mkdir()
         # A ScribeStore on a temp dir, so writes are real but isolated.
@@ -83,9 +83,7 @@ class QuickNoteTests(unittest.TestCase):
         # scribe's own fallback derives main-apiary from __file__, which points
         # inside the bundle in a frozen build (the T-2026-248 failure). The GUI
         # must hand it the source/frozen-aware root instead.
-        with mock.patch.object(
-            gui_app.scribe_api, "open_store", return_value=self.store
-        ) as opener:
+        with mock.patch.object(gui_app.scribe_api, "open_store", return_value=self.store) as opener:
             self.bridge.add_quick_note("thought")
         self.assertIn("apiary_repo", opener.call_args.kwargs)
         self.assertIsNotNone(opener.call_args.kwargs["apiary_repo"])
@@ -143,9 +141,7 @@ class QuickNoteTests(unittest.TestCase):
         self.assertIn("KeyError", res["error"])
 
     def test_write_failure_is_reported_not_raised(self):
-        with mock.patch.object(
-            gui_app.scribe_api, "open_store", side_effect=OSError("disk gone")
-        ):
+        with mock.patch.object(gui_app.scribe_api, "open_store", side_effect=OSError("disk gone")):
             res = self.bridge.add_quick_note("thought")
         self.assertFalse(res["ok"])
         self.assertIn("disk gone", res["error"])

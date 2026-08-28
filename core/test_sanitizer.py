@@ -4,6 +4,7 @@ Test inputs are constructed from byte codes via ``_p()`` so that this
 source file, like the sanitizer it tests, stays free of literal trigger
 sequences. A dedicated self-check at the bottom enforces that property.
 """
+
 import pathlib
 import sys
 import unittest
@@ -20,13 +21,13 @@ def _p(*codes: int) -> str:
 
 class SanitizerTest(unittest.TestCase):
     def test_path_traversal_unix_replaced(self):
-        raw = "see " + _p(0x2e, 0x2e, 0x2f) + "etc/passwd for details"
+        raw = "see " + _p(0x2E, 0x2E, 0x2F) + "etc/passwd for details"
         out = sanitize_injected_text(raw)
         self.assertIn("<scrubbed:path-traversal-unix>", out)
-        self.assertNotIn(_p(0x2e, 0x2e, 0x2f), out)
+        self.assertNotIn(_p(0x2E, 0x2E, 0x2F), out)
 
     def test_path_traversal_win_replaced(self):
-        raw = "file at " + _p(0x2e, 0x2e, 0x5c) + "config"
+        raw = "file at " + _p(0x2E, 0x2E, 0x5C) + "config"
         out = sanitize_injected_text(raw)
         self.assertIn("<scrubbed:path-traversal-win>", out)
 
@@ -36,38 +37,46 @@ class SanitizerTest(unittest.TestCase):
         self.assertIn("<scrubbed:url-encoded-traversal>", out)
 
     def test_destructive_shell_replaced(self):
-        raw = "do not run " + _p(0x72, 0x6d, 0x20, 0x2d, 0x72, 0x66) + " /"
+        raw = "do not run " + _p(0x72, 0x6D, 0x20, 0x2D, 0x72, 0x66) + " /"
         out = sanitize_injected_text(raw)
         self.assertIn("<scrubbed:destructive-shell-rm>", out)
 
     def test_destructive_shell_case_insensitive(self):
-        raw = "RM " + _p(0x2d, 0x52, 0x46) + " foo"
+        raw = "RM " + _p(0x2D, 0x52, 0x46) + " foo"
         out = sanitize_injected_text(raw)
         # Case-insensitive match on the uppercase variant
         self.assertIn("<scrubbed:destructive-shell-rm>", out.replace("RM", "rm"))
 
     def test_fork_bomb_replaced(self):
-        raw = "the classic " + _p(0x3a, 0x28, 0x29, 0x7b) + " :|:& };:"
+        raw = "the classic " + _p(0x3A, 0x28, 0x29, 0x7B) + " :|:& };:"
         out = sanitize_injected_text(raw)
         self.assertIn("<scrubbed:fork-bomb>", out)
 
     def test_sql_drop_table_replaced(self):
-        raw = "never " + _p(0x44, 0x52, 0x4f, 0x50, 0x20, 0x54, 0x41, 0x42, 0x4c, 0x45) + " users"
+        raw = "never " + _p(0x44, 0x52, 0x4F, 0x50, 0x20, 0x54, 0x41, 0x42, 0x4C, 0x45) + " users"
         out = sanitize_injected_text(raw)
         self.assertIn("<scrubbed:sql-drop-table>", out)
 
     def test_sql_union_select_replaced(self):
-        raw = "injection via " + _p(0x75, 0x6e, 0x69, 0x6f, 0x6e, 0x20, 0x73, 0x65, 0x6c, 0x65, 0x63, 0x74) + " 1,2,3"
+        raw = (
+            "injection via "
+            + _p(0x75, 0x6E, 0x69, 0x6F, 0x6E, 0x20, 0x73, 0x65, 0x6C, 0x65, 0x63, 0x74)
+            + " 1,2,3"
+        )
         out = sanitize_injected_text(raw)
         self.assertIn("<scrubbed:sql-union-select>", out)
 
     def test_xss_script_tag_replaced(self):
-        raw = "xss via " + _p(0x3c, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74) + ">alert(1)</script>"
+        raw = "xss via " + _p(0x3C, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74) + ">alert(1)</script>"
         out = sanitize_injected_text(raw)
         self.assertIn("<scrubbed:xss-script-tag>", out)
 
     def test_xss_javascript_uri_replaced(self):
-        raw = "link was " + _p(0x6a, 0x61, 0x76, 0x61, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x3a) + "alert(1)"
+        raw = (
+            "link was "
+            + _p(0x6A, 0x61, 0x76, 0x61, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x3A)
+            + "alert(1)"
+        )
         out = sanitize_injected_text(raw)
         self.assertIn("<scrubbed:xss-javascript-uri>", out)
 
@@ -82,16 +91,25 @@ class SanitizerTest(unittest.TestCase):
         self.assertIsNone(sanitize_injected_text(None))
 
     def test_idempotent(self):
-        raw = "danger " + _p(0x2e, 0x2e, 0x2f) + " here and " + _p(0x72, 0x6d, 0x20, 0x2d, 0x72, 0x66) + " too"
+        raw = (
+            "danger "
+            + _p(0x2E, 0x2E, 0x2F)
+            + " here and "
+            + _p(0x72, 0x6D, 0x20, 0x2D, 0x72, 0x66)
+            + " too"
+        )
         once = sanitize_injected_text(raw)
         twice = sanitize_injected_text(once)
         self.assertEqual(once, twice)
 
     def test_multiple_patterns_in_one_input(self):
         raw = (
-            "first " + _p(0x2e, 0x2e, 0x2f) + " then "
-            + _p(0x72, 0x6d, 0x20, 0x2d, 0x72, 0x66) + " and finally "
-            + _p(0x3c, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74)
+            "first "
+            + _p(0x2E, 0x2E, 0x2F)
+            + " then "
+            + _p(0x72, 0x6D, 0x20, 0x2D, 0x72, 0x66)
+            + " and finally "
+            + _p(0x3C, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74)
         )
         out = sanitize_injected_text(raw)
         self.assertIn("<scrubbed:path-traversal-unix>", out)
@@ -99,21 +117,23 @@ class SanitizerTest(unittest.TestCase):
         self.assertIn("<scrubbed:xss-script-tag>", out)
 
     def test_report_counts_single_hit(self):
-        raw = "see " + _p(0x2e, 0x2e, 0x2f) + "x"
+        raw = "see " + _p(0x2E, 0x2E, 0x2F) + "x"
         scrubbed, hits = sanitize_and_report(raw)
         self.assertEqual(hits, {"path-traversal-unix": 1})
         self.assertIn("<scrubbed:path-traversal-unix>", scrubbed)
 
     def test_report_counts_multiple_hits_same_label(self):
-        raw = _p(0x2e, 0x2e, 0x2f) + " and " + _p(0x2e, 0x2e, 0x2f) + " again"
+        raw = _p(0x2E, 0x2E, 0x2F) + " and " + _p(0x2E, 0x2E, 0x2F) + " again"
         _, hits = sanitize_and_report(raw)
         self.assertEqual(hits, {"path-traversal-unix": 2})
 
     def test_report_counts_multiple_labels(self):
         raw = (
-            _p(0x2e, 0x2e, 0x2f) + " and "
-            + _p(0x72, 0x6d, 0x20, 0x2d, 0x72, 0x66) + " and "
-            + _p(0x3c, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74)
+            _p(0x2E, 0x2E, 0x2F)
+            + " and "
+            + _p(0x72, 0x6D, 0x20, 0x2D, 0x72, 0x66)
+            + " and "
+            + _p(0x3C, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74)
         )
         _, hits = sanitize_and_report(raw)
         self.assertEqual(
@@ -142,15 +162,15 @@ class SanitizerTest(unittest.TestCase):
         trigger patterns back into the API and defeat the whole point.
         """
         forbidden = [
-            _p(0x2e, 0x2e, 0x2f),
-            _p(0x2e, 0x2e, 0x5c),
+            _p(0x2E, 0x2E, 0x2F),
+            _p(0x2E, 0x2E, 0x5C),
             _p(0x25, 0x32, 0x65, 0x25, 0x32, 0x65, 0x25, 0x32, 0x66),
-            _p(0x72, 0x6d, 0x20, 0x2d, 0x72, 0x66),
-            _p(0x3a, 0x28, 0x29, 0x7b),
-            _p(0x64, 0x72, 0x6f, 0x70, 0x20, 0x74, 0x61, 0x62, 0x6c, 0x65),
-            _p(0x75, 0x6e, 0x69, 0x6f, 0x6e, 0x20, 0x73, 0x65, 0x6c, 0x65, 0x63, 0x74),
-            _p(0x3c, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74),
-            _p(0x6a, 0x61, 0x76, 0x61, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x3a),
+            _p(0x72, 0x6D, 0x20, 0x2D, 0x72, 0x66),
+            _p(0x3A, 0x28, 0x29, 0x7B),
+            _p(0x64, 0x72, 0x6F, 0x70, 0x20, 0x74, 0x61, 0x62, 0x6C, 0x65),
+            _p(0x75, 0x6E, 0x69, 0x6F, 0x6E, 0x20, 0x73, 0x65, 0x6C, 0x65, 0x63, 0x74),
+            _p(0x3C, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74),
+            _p(0x6A, 0x61, 0x76, 0x61, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x3A),
         ]
         targets = [
             _HERE / "sanitizer.py",
@@ -160,7 +180,8 @@ class SanitizerTest(unittest.TestCase):
             content = target.read_text(encoding="utf-8").lower()
             for f in forbidden:
                 self.assertNotIn(
-                    f, content,
+                    f,
+                    content,
                     f"{target.name} contains a literal trigger pattern; "
                     f"construct it via _pat() / _p() instead.",
                 )

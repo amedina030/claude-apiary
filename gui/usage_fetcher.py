@@ -39,7 +39,6 @@ import urllib.request
 from pathlib import Path
 from typing import Callable, Optional
 
-
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 OAUTH_BETA_HEADER = "oauth-2025-04-20"
 CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
@@ -112,9 +111,7 @@ class UsagePoller:
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop.clear()
-        self._thread = threading.Thread(
-            target=self._run, name="usage-poller", daemon=True
-        )
+        self._thread = threading.Thread(target=self._run, name="usage-poller", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:

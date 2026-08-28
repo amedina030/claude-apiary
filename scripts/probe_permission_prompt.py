@@ -18,6 +18,7 @@ prompts).
 
     poetry run python scripts/probe_permission_prompt.py D:/path/to/bootstrapped-repo
 """
+
 import argparse
 import json
 import os
@@ -34,29 +35,49 @@ class ProbeError(RuntimeError):
 
 
 def scrubbed_env() -> dict:
-    return {k: v for k, v in os.environ.items()
-            if not (k == "CLAUDECODE" or k.startswith("CLAUDE_CODE_"))}
+    return {
+        k: v
+        for k, v in os.environ.items()
+        if not (k == "CLAUDECODE" or k.startswith("CLAUDE_CODE_"))
+    }
 
 
 def run_probe(repo: str, model: str, timeout: int) -> dict:
     claude = shutil.which("claude")
     if not claude:
         raise ProbeError("claude CLI not found on PATH")
-    cmd = [claude, "-p",
-           "Use the Bash tool to run exactly this command, then reply with only its output: "
-           + PROBE_COMMAND,
-           "--permission-mode", "manual", "--output-format", "json",
-           "--max-turns", "2", "--model", model]
+    cmd = [
+        claude,
+        "-p",
+        "Use the Bash tool to run exactly this command, then reply with only its output: "
+        + PROBE_COMMAND,
+        "--permission-mode",
+        "manual",
+        "--output-format",
+        "json",
+        "--max-turns",
+        "2",
+        "--model",
+        model,
+    ]
     try:
-        r = subprocess.run(cmd, cwd=repo, env=scrubbed_env(), capture_output=True,
-                           text=True, encoding="utf-8", timeout=timeout)
+        r = subprocess.run(
+            cmd,
+            cwd=repo,
+            env=scrubbed_env(),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=timeout,
+        )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ProbeError(f"could not run claude: {exc}")
     try:
         return json.loads(r.stdout)
     except json.JSONDecodeError:
-        raise ProbeError(f"claude did not return JSON (exit {r.returncode}):\n"
-                         f"{r.stdout[:800]}\n{r.stderr[:800]}")
+        raise ProbeError(
+            f"claude did not return JSON (exit {r.returncode}):\n{r.stdout[:800]}\n{r.stderr[:800]}"
+        )
 
 
 def main(argv=None) -> int:

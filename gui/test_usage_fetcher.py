@@ -15,43 +15,43 @@ from gui import usage_fetcher
 class ReadAccessTokenTests(unittest.TestCase):
     def test_missing_file(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "no-such.json"
+            p = Path(tmp).resolve() / "no-such.json"
             self.assertIsNone(usage_fetcher._read_access_token(p))
 
     def test_malformed_json(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "c.json"
+            p = Path(tmp).resolve() / "c.json"
             p.write_text("{ not json", encoding="utf-8")
             self.assertIsNone(usage_fetcher._read_access_token(p))
 
     def test_missing_oauth_key(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "c.json"
+            p = Path(tmp).resolve() / "c.json"
             p.write_text(json.dumps({"other": 1}), encoding="utf-8")
             self.assertIsNone(usage_fetcher._read_access_token(p))
 
     def test_empty_token(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "c.json"
+            p = Path(tmp).resolve() / "c.json"
             p.write_text(json.dumps({"claudeAiOauth": {"accessToken": ""}}), encoding="utf-8")
             self.assertIsNone(usage_fetcher._read_access_token(p))
 
     def test_happy_path(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "c.json"
+            p = Path(tmp).resolve() / "c.json"
             p.write_text(json.dumps({"claudeAiOauth": {"accessToken": "abc"}}), encoding="utf-8")
             self.assertEqual(usage_fetcher._read_access_token(p), "abc")
 
 
 class FetchUsageTests(unittest.TestCase):
     def _write_creds(self, tmp: str, token: str = "tok") -> Path:
-        p = Path(tmp) / "c.json"
+        p = Path(tmp).resolve() / "c.json"
         p.write_text(json.dumps({"claudeAiOauth": {"accessToken": token}}), encoding="utf-8")
         return p
 
     def test_no_token_returns_none(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "missing.json"
+            p = Path(tmp).resolve() / "missing.json"
             self.assertIsNone(usage_fetcher.fetch_usage(p))
 
     def test_happy_path(self):
@@ -63,8 +63,10 @@ class FetchUsageTests(unittest.TestCase):
         class FakeResp:
             def read(self_inner):
                 return json.dumps(payload).encode("utf-8")
+
             def __enter__(self_inner):
                 return self_inner
+
             def __exit__(self_inner, *a):
                 return False
 
@@ -95,8 +97,10 @@ class FetchUsageTests(unittest.TestCase):
         class FakeResp:
             def read(self_inner):
                 return b"not json"
+
             def __enter__(self_inner):
                 return self_inner
+
             def __exit__(self_inner, *a):
                 return False
 

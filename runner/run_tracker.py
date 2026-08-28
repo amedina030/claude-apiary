@@ -5,16 +5,15 @@ persists across cron invocations.  The tracker records cumulative token
 spend and attempt count so the orchestrator can enforce cross-run caps
 and detect which stage to resume from.
 """
+
 import datetime
 import json
 from pathlib import Path
 
 from .target_repo import (
-    artifacts_root,
     executions_dir,
     hardens_dir,
     plans_dir,
-    reports_dir,
     runs_dir,
     specs_dir,
 )
@@ -63,12 +62,14 @@ def record_attempt(
     if last_stage_completed is not None:
         tracker["last_stage_completed"] = last_stage_completed
 
-    tracker["attempts"].append({
-        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "tokens": tokens_this_run,
-        "exit_status": exit_status,
-        "stages_completed": stages_completed,
-    })
+    tracker["attempts"].append(
+        {
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "tokens": tokens_this_run,
+            "exit_status": exit_status,
+            "stages_completed": stages_completed,
+        }
+    )
 
     save(uuid, tracker)
     return tracker
@@ -77,10 +78,10 @@ def record_attempt(
 # Maps each artifact key to the dir-returning helper and the stage to
 # resume from. Latest-to-earliest order so we resume as late as possible.
 _ARTIFACT_RESUME_MAP = [
-    (hardens_dir,    "approval"),
+    (hardens_dir, "approval"),
     (executions_dir, "auto_harden"),
-    (plans_dir,      "executor"),
-    (specs_dir,      "auto_plan"),
+    (plans_dir, "executor"),
+    (specs_dir, "auto_plan"),
 ]
 
 

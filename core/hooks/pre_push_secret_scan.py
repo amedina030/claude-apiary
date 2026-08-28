@@ -34,6 +34,7 @@ not run: a security control that quietly stops working is worse than one that
 is loudly broken. Runner subprocesses are exempt (consistent with the other
 core hooks, #228).
 """
+
 from __future__ import annotations
 
 import os
@@ -102,16 +103,17 @@ def _compose_cwd(base: str | None, extra: str | None) -> str | None:
         return UNRESOLVED_CWD
     return os.path.join(base, extra)
 
+
 SCAN_TIMEOUT_SECONDS = 120
 
 
 class PushTarget(NamedTuple):
     """What a ``git push`` command line is about to send."""
 
-    remote: str | None      # named remote, or None for "default"/URL
-    refs: tuple[str, ...]   # local refs to scan; ("HEAD",) when unnamed
-    everything: bool        # --all / --mirror / --branches
-    cwd: str | None         # from `git -C <dir>`, if given
+    remote: str | None  # named remote, or None for "default"/URL
+    refs: tuple[str, ...]  # local refs to scan; ("HEAD",) when unnamed
+    everything: bool  # --all / --mirror / --branches
+    cwd: str | None  # from `git -C <dir>`, if given
     url: str | None = None  # URL / path destination (no configured remote to diff against)
 
 
@@ -339,13 +341,13 @@ def push_targets(command: str) -> list[PushTarget]:
                     j += 2
                     continue
                 src = spec.lstrip("+").split(":", 1)[0]
-                if src and not deleting:    # ":ref" / --delete: nothing outgoing
+                if src and not deleting:  # ":ref" / --delete: nothing outgoing
                     refs.append(src)
                 j += 1
         if specs or deleting:
-            out_refs = tuple(refs)          # explicit specs; may be all deletions
+            out_refs = tuple(refs)  # explicit specs; may be all deletions
         else:
-            out_refs = ("HEAD",)            # unqualified push sends HEAD
+            out_refs = ("HEAD",)  # unqualified push sends HEAD
         targets.append(PushTarget(remote, out_refs, everything, cwd, url))
     return targets
 
@@ -372,47 +374,79 @@ def outgoing_log_args(
     if target.url:
         exclude = list(destination_tips or [])
         return [
-            "-c", "core.quotepath=false",
-            "log", "-p", "--no-color", "--no-ext-diff", "--no-textconv", "--format=%H",
-            *refs, *(["--not", *exclude] if exclude else []),
+            "-c",
+            "core.quotepath=false",
+            "log",
+            "-p",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--format=%H",
+            *refs,
+            *(["--not", *exclude] if exclude else []),
         ]
     remote = target.remote
     if known_remotes is not None and remote not in known_remotes:
         remote = None
     remotes = f"--remotes={remote}" if remote else "--remotes"
     return [
-        "-c", "core.quotepath=false",
-        "log", "-p", "--no-color", "--no-ext-diff", "--no-textconv", "--format=%H",
-        *refs, "--not", remotes,
+        "-c",
+        "core.quotepath=false",
+        "log",
+        "-p",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--format=%H",
+        *refs,
+        "--not",
+        remotes,
     ]
 
 
-def main():
-    """Entry point. Fail-open only on internal errors *before* the scan."""
+class _Block(Exception):
+    """A gate decision raised from deep inside the scan.
+
+    ``_scan_target`` and its helpers decide to block several call-frames down.
+    They used to be handed ``hook_context.hook_block`` (print + ``sys.exit(2)``),
+    which cannot work in the in-process dispatcher — one gate would take the
+    whole chain down. They are handed :func:`_block` instead, and ``run``
+    turns the raised reason into a ``HookResult``.
+    """
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _block(reason: str):
+    raise _Block(reason)
+
+
+def run(payload: dict):  # pragma: no cover — the pure pieces are tested;
+    #                      this is the shell.
+    """Block a ``git push`` whose outgoing commits add a secret."""
+    from core.hook_context import HookResult
+
     try:
-        _run()
-    except Exception:
-        from core.hook_context import hook_allow
-        hook_allow()
+        return _scan(payload)
+    except _Block as blocked:
+        return HookResult(block_reason=blocked.reason)
 
 
-def _run():  # pragma: no cover — the pure pieces are tested; this is the shell.
-    from core.hook_context import hook_allow, hook_block, read_payload
+def _scan(payload: dict):  # pragma: no cover — subprocess shell.
+    from core.hook_context import HookResult
 
     if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
-        hook_allow()
-        return
+        return None
 
-    payload = read_payload()
     if (payload.get("tool_name") or "") != "Bash":
-        hook_allow()
-        return
+        return None
 
     tool_input = payload.get("tool_input") or {}
     command = tool_input.get("command") if isinstance(tool_input, dict) else ""
     if not command or not command_pushes(command):
-        hook_allow()
-        return
+        return None
 
     base_cwd = payload.get("cwd") or os.getcwd()
     findings = []
@@ -421,43 +455,49 @@ def _run():  # pragma: no cover — the pure pieces are tested; this is the shel
     targets = push_targets(command) or [PushTarget(None, ("HEAD",), False, None)]
     for target in targets:
         if not target.refs and not target.everything:
-            continue                        # deletions only — nothing outgoing
+            continue  # deletions only — nothing outgoing
         if target.cwd == UNRESOLVED_CWD:
-            hook_block(
+            _block(
                 "Push blocked: the secret scan cannot follow a `cd` whose target "
                 "is computed (`cd $(...)`, `cd $VAR`, `cd -`, `popd`), so it "
                 "cannot tell which repo this push leaves from. Run the push "
                 "from inside the repo, or use `git -C <dir> push`."
             )
-        found = _scan_target(target, base_cwd, hook_block)
-        if found is None:                   # git unusable: fail open — unless
-            if findings:                    # an earlier target already found something
+        found = _scan_target(target, base_cwd, _block)
+        if found is None:  # git unusable: fail open — unless
+            if findings:  # an earlier target already found something
                 break
-            hook_allow()
-            return
+            return None
         findings.extend(found)
     if not findings:
-        hook_allow()
-        return
+        return None
 
-    lines = [f"  {path}:{lineno}  @{sha[:8]}  [{rule}]  {preview}"
-             for sha, path, lineno, rule, preview in findings]
-    hook_block(
-        "Push blocked: possible secret(s) in the outgoing commits. The values "
-        "below are about to leave your machine — verify each, then remove or "
-        "rotate it before pushing. A secret that was later deleted is still in "
-        "the history being pushed; rewrite the commits, don't just remove the line.\n\n"
-        + "\n".join(lines)
-        + "\n\nIf a hit is an intentional fixture/example, append "
-        "'apiary:allow-secret' (or 'pragma: allowlist secret') to that line, "
-        "or add a path regex for the file to the repo-root .secretsallow."
+    lines = [
+        f"  {path}:{lineno}  @{sha[:8]}  [{rule}]  {preview}"
+        for sha, path, lineno, rule, preview in findings
+    ]
+    return HookResult(
+        block_reason=(
+            "Push blocked: possible secret(s) in the outgoing commits. The values "
+            "below are about to leave your machine — verify each, then remove or "
+            "rotate it before pushing. A secret that was later deleted is still in "
+            "the history being pushed; rewrite the commits, don't just remove the line.\n\n"
+            + "\n".join(lines)
+            + "\n\nIf a hit is an intentional fixture/example, append "
+            "'apiary:allow-secret' (or 'pragma: allowlist secret') to that line, "
+            "or add a path regex for the file to the repo-root .secretsallow."
+        )
     )
 
 
 def _scan_target(target, base_cwd, hook_block):  # pragma: no cover — shell
     """Scan one push target. Returns its findings, or None when git itself is
     unusable (the caller decides whether to fail open). Blocks (never
-    returns) on a scan that could not complete."""
+    returns) on a scan that could not complete.
+
+    *hook_block* is injected — :func:`_block` in production — so the gate's
+    deep decisions surface as a value the dispatcher can act on rather than a
+    ``sys.exit`` that would kill every hook after it."""
     cwd = base_cwd
     if target.cwd:
         cwd = str((Path(cwd) / target.cwd).resolve())
@@ -465,8 +505,12 @@ def _scan_target(target, base_cwd, hook_block):  # pragma: no cover — shell
     def _git(*args, timeout=30):
         return subprocess.run(
             ["git", "-C", str(cwd), *args],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=timeout, check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
         )
 
     # Everything up to here is "is this even a push we can inspect?" — git
@@ -474,8 +518,7 @@ def _scan_target(target, base_cwd, hook_block):  # pragma: no cover — shell
     # real git call on, a scan that doesn't complete blocks.
     try:
         verified = [
-            r for r in target.refs
-            if _git("rev-parse", "--verify", "--quiet", r).returncode == 0
+            r for r in target.refs if _git("rev-parse", "--verify", "--quiet", r).returncode == 0
         ]
     except (OSError, subprocess.SubprocessError):
         return None
@@ -512,7 +555,7 @@ def _scan_target(target, base_cwd, hook_block):  # pragma: no cover — shell
         if top.returncode == 0 and top.stdout.strip():
             allowlist = secret_patterns.load_allowlist(Path(top.stdout.strip()))
     except (OSError, subprocess.SubprocessError):
-        pass                                # no allowlist → strictest scan
+        pass  # no allowlist → strictest scan
 
     return scan_patch_series(log.stdout, allowlist)
 
@@ -533,5 +576,8 @@ def _destination_tips(_git, url: str) -> list[str]:  # pragma: no cover — netw
             tips.append(sha)
     return sorted(set(tips))
 
+
 if __name__ == "__main__":  # pragma: no cover
-    main()
+    from core.hook_context import run_standalone
+
+    run_standalone(run)

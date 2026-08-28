@@ -11,6 +11,7 @@ Usage:
     round_counter.py defender --session-id <id> --set <agent_id>  # store defender ID
     round_counter.py defender --session-id <id> --get             # retrieve defender ID
 """
+
 import argparse
 import json
 import os

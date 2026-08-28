@@ -14,7 +14,7 @@
     "max_retries_per_step": 2,
     "max_no_change_retries": 2,
     "timeout": 900,
-    "mode": "monolithic"
+    "mode": "per_step"
   },
   "monolithic_executor": {
     "timeout_seconds": 1800

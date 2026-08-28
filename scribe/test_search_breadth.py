@@ -4,6 +4,7 @@ Notes search matches display_id, summary, brief_summary, session, tags, and
 the body; learnings search matches summary, tags, and body. Body is read
 lazily — only when a search term is supplied.
 """
+
 import sys
 import tempfile
 import unittest

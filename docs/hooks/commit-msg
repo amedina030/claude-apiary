@@ -1,0 +1,31 @@
+#!/bin/bash
+# commit-msg hook for main-apiary's own checkout.
+#
+# Runs the change-map gate (docs/change_map.py) with THIS commit's message, so
+# a `docs: unchanged` trailer can waive it.
+#
+# Why not in pre-commit: at pre-commit time git has not written the message
+# yet — `.git/COMMIT_EDITMSG` still holds the *previous* commit's text, so the
+# trailer would be read one commit late. commit-msg is handed the real message
+# file as $1 and still sees the staged changeset, which is what the check needs.
+#
+# `docs/hooks/pre-commit` runs the same check without a message, where the
+# escape is `APIARY_DOCS_UNCHANGED=1`. Both are cheap (no subprocess per tool).
+#
+# Installed by: python scripts/install_repo_hooks.py
+# Source: docs/hooks/commit-msg
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+_is_py3() { "$@" -c 'import sys; sys.exit(0 if sys.version_info[0]==3 else 1)' >/dev/null 2>&1; }
+if [ -n "$APIARY_PYTHON" ]; then
+    PY=("$APIARY_PYTHON")
+elif command -v py      >/dev/null 2>&1 && _is_py3 py -3;   then PY=(py -3)
+elif command -v python3 >/dev/null 2>&1 && _is_py3 python3; then PY=(python3)
+elif command -v python  >/dev/null 2>&1 && _is_py3 python;  then PY=(python)
+else
+    echo "commit-msg: no Python 3 found — set APIARY_PYTHON to your interpreter" >&2
+    exit 1
+fi
+
+"${PY[@]}" "$REPO_ROOT/docs/change_map.py" --staged --message "$1"

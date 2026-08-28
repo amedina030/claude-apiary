@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Install main-apiary's own .git/hooks/{pre-commit, post-merge} scripts.
+"""Install main-apiary's own .git/hooks/{pre-commit, commit-msg, post-merge} scripts.
 
 These are repo-local git hooks that run on commits/merges in the apiary
 checkout itself — not Claude Code hooks, and unrelated to the per-repo
 install model. They live in main-apiary's ``.git/hooks/`` and reference
 sources in ``docs/hooks/`` and ``runner/hooks/``.
 
-Pulled out of ``setup.py`` during the per-repo migration so setup.py
-could be reduced to a thin redirect stub (``--global`` is gone — see
-``MIGRATION-PLAN.md`` §10 phase 5).
+Split out of the old unified installer during the per-repo migration;
+the Claude Code side of the install now lives in ``core/install.py``
+(see ``docs/architecture/per-repo-install.md``).
 
 Usage::
 
     python scripts/install_repo_hooks.py
 """
+
 from __future__ import annotations
 
 import shutil
@@ -45,10 +46,13 @@ def _git_hooks_dir() -> Path:
 def install_pre_commit_hook() -> None:
     """Install ``docs/hooks/pre-commit`` into ``.git/hooks/pre-commit``.
 
-    The hook chains two checks before a commit: ``docs/check.py`` (framework
-    doc conformance) and ``scripts/secret_scan.py --staged`` (credentials in
-    the staged diff). Either failing blocks. Skipped silently if
-    ``.git/hooks/`` doesn't exist (e.g. on a sparse checkout).
+    The hook chains the commit-time gates: ``docs/check.py`` (framework doc
+    conformance), ``docs/check_cli_claims.py`` (cli-tools.md vs each tool's
+    real argparse), the generated-table checks (``docs/generate_cli_docs.py``,
+    ``docs/generate_reference.py``), ``docs/change_map.py --staged`` (mapped
+    code needs its doc), ``scripts/secret_scan.py --staged`` and ``ruff check``
+    on the staged .py files. Any one failing blocks. Skipped silently if ``.git/hooks/``
+    doesn't exist (e.g. on a sparse checkout).
 
     Conflict policy: a pre-commit hook that doesn't reference ``docs/check.py``
     is treated as somebody else's and left alone. An older apiary hook (doc
@@ -75,6 +79,33 @@ def install_pre_commit_hook() -> None:
     shutil.copy2(source, target)
     target.chmod(target.stat().st_mode | 0o755)  # no-op on Windows
     print(f"  Pre-commit hook  : {target}")
+
+
+def install_commit_msg_hook() -> None:
+    """Install ``docs/hooks/commit-msg`` into ``.git/hooks/commit-msg``.
+
+    It reads the ``docs: unchanged`` trailer that waives the change-map check
+    (git has not written the message yet when pre-commit runs). Same conflict
+    policy as pre-commit: a commit-msg hook that does not mention
+    ``change_map`` is somebody else's and is left alone.
+    """
+    git_hooks_dir = _git_hooks_dir()
+    if not git_hooks_dir.is_dir():
+        print(f"  Commit-msg hook  : skipped ({git_hooks_dir} not found)")
+        return
+    source = DOCS_DIR / "hooks" / "commit-msg"
+    if not source.is_file():
+        print(f"  Commit-msg hook  : skipped ({source} not found)")
+        return
+    target = git_hooks_dir / "commit-msg"
+    if target.exists():
+        content = target.read_text(encoding="utf-8")
+        if "change_map" not in content and "docs: unchanged" not in content:
+            print(f"  Commit-msg hook  : WARNING — {target} already exists (not ours), skipping")
+            return
+    shutil.copy2(source, target)
+    target.chmod(target.stat().st_mode | 0o755)  # no-op on Windows
+    print(f"  Commit-msg hook  : {target}")
 
 
 def install_post_merge_hook() -> None:
@@ -110,6 +141,7 @@ def install_post_merge_hook() -> None:
 def main() -> int:
     print(f"Installing repo-local git hooks into {REPO_ROOT / '.git' / 'hooks'}")
     install_pre_commit_hook()
+    install_commit_msg_hook()
     install_post_merge_hook()
     return 0
 

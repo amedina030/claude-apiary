@@ -4,6 +4,7 @@ What changes: nothing. This file exists so future migration authors have a
 working template to copy.
 Idempotent: yes (a no-op is trivially idempotent).
 """
+
 from __future__ import annotations
 
 from pathlib import Path

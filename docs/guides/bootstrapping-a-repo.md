@@ -4,7 +4,7 @@ title: Bootstrapping a Repo
 scope: project
 description: Apply an apiary profile to a new or existing repo's .claude/settings.json, and how to author a new profile
 framework_version: "1.0"
-last_verified: 2026-06-11
+last_verified: "2026-08-27"
 ---
 
 # Bootstrapping a Repo
@@ -125,7 +125,7 @@ Non-TTY stdin without `--force` is a hard error, same as the re-run drift path.
 
 On any run after the first, the bootstrap:
 
-1. Loads `.apiary/bootstrap_state.json`.
+1. Loads `<main-apiary>/.repos/<name>-<uid>/bootstrap_state.json` (the same path the table above names).
 2. Computes the new merge.
 3. If the new merge equals the current `.claude/settings.json`, quietly re-writes state and exits 0.
 4. If it differs, prints a per-key before/after diff and prompts `y/N`.
@@ -150,6 +150,6 @@ If the target already has registered state under `<apiary>/.repos/<name>-<id>/` 
 ## Related
 
 - [File Storage — Bootstrap state](../reference/file-storage.md#bootstrap-state)
-- [CLI Tools — `core/apiary_bootstrap.py`](../reference/cli-tools.md#coreapiary_bootstrappy)
+- [CLI Tools — `apiary install`](../reference/cli-tools.md#apiary)
 - `core/apiary_profiles.py` — profile loader + deep merge + `$replace` implementation
 - `core/utils/jsonc.py` — JSONC parser (stdlib-only comment stripper)

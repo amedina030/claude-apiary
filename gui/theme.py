@@ -18,7 +18,6 @@ from typing import Callable, Optional
 
 from gui.paths import state_dir
 
-
 THEME_DIR = state_dir()
 THEME_PATH = THEME_DIR / "theme.json"
 LAUNCH_PATH = THEME_DIR / "launch.json"

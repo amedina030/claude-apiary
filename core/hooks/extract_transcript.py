@@ -15,6 +15,7 @@ Output: JSONL to stdout — one {"role": ..., "text": ...} per line.
         With --summary, emits a single {"type": "summary", ...} line followed
         by up to 6 sample {"role": ..., "text": ...} lines.
 """
+
 import argparse
 import json
 import sys
@@ -70,8 +71,11 @@ def extract_conversation(session_entries):
             if not _is_startup_noise(text):
                 messages.append({"role": role, "text": text})
         elif isinstance(content, list):
-            texts = [b.get("text", "") for b in content
-                     if isinstance(b, dict) and b.get("type") == "text"]
+            texts = [
+                b.get("text", "")
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
             text = " ".join(t for t in texts if t).strip()
             if text and not _is_startup_noise(text):
                 messages.append({"role": role, "text": text})
@@ -88,14 +92,14 @@ def _truncate(msg, max_chars):
 def main():
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("transcript_path")
-    parser.add_argument("--summary", action="store_true",
-                        help="Emit stats header + first/last 3 messages only")
-    parser.add_argument("--head", type=int, default=None,
-                        help="Emit only first N messages")
-    parser.add_argument("--tail", type=int, default=None,
-                        help="Emit only last N messages")
-    parser.add_argument("--max-chars", type=int, default=None,
-                        help="Truncate each message's text to N chars")
+    parser.add_argument(
+        "--summary", action="store_true", help="Emit stats header + first/last 3 messages only"
+    )
+    parser.add_argument("--head", type=int, default=None, help="Emit only first N messages")
+    parser.add_argument("--tail", type=int, default=None, help="Emit only last N messages")
+    parser.add_argument(
+        "--max-chars", type=int, default=None, help="Truncate each message's text to N chars"
+    )
     args = parser.parse_args()
 
     entries = read_session_jsonl(args.transcript_path)
@@ -119,9 +123,9 @@ def main():
         return
 
     if args.head is not None:
-        conversation = conversation[:args.head]
+        conversation = conversation[: args.head]
     if args.tail is not None:
-        conversation = conversation[-args.tail:]
+        conversation = conversation[-args.tail :]
 
     for msg in conversation:
         print(json.dumps(_truncate(msg, args.max_chars)))

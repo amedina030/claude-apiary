@@ -196,12 +196,48 @@ class ReconcileTests(unittest.TestCase):
 
 class SectionClassificationTests(unittest.TestCase):
     def test_skip_headers_are_not_tool_sections(self):
-        self.assertFalse(cc.is_tool_section("apiary"))
+        self.assertFalse(cc.is_tool_section("setup.py"))
         self.assertFalse(cc.is_tool_section("runner/config_loader.py"))
         self.assertFalse(cc.is_tool_section("Test scripts"))
 
     def test_repo_relative_py_paths_are_tool_sections(self):
         self.assertTrue(cc.is_tool_section("scribe/notes.py"))
+
+    def test_bare_name_without_a_path_is_not_a_tool_section(self):
+        self.assertFalse(cc.is_tool_section("notes.py"))
+        self.assertFalse(cc.is_tool_section("Some prose heading"))
+
+
+class ConsoleScriptTests(unittest.TestCase):
+    """Console scripts are named by command, not by path — they still reconcile."""
+
+    def test_console_scripts_are_tool_sections(self):
+        for header in cc.CONSOLE_SCRIPTS:
+            with self.subTest(header=header):
+                self.assertTrue(cc.is_tool_section(header))
+
+    def test_every_console_script_maps_to_a_file_that_exists(self):
+        for header, rel_path in cc.CONSOLE_SCRIPTS.items():
+            with self.subTest(header=header):
+                self.assertTrue(
+                    (cc.REPO_ROOT / rel_path).is_file(),
+                    f"{header} maps to missing {rel_path}",
+                )
+
+    def test_apiary_resolves_to_core_cli_and_introspects(self):
+        # `REPO_ROOT / "apiary"` is not a file, so introspection only works
+        # through the mapping. Two subprocesses, not a full introspect().
+        base, top_help = cc.resolve_base(cc.CONSOLE_SCRIPTS["apiary"])
+        self.assertIn("doctor", cc.help_subcommands(top_help))
+        doctor_help = cc._run_help(base + ["doctor"]).stdout
+        self.assertIn("--fix", cc.help_flags(doctor_help))
+
+    def test_bare_console_script_name_has_no_file_to_introspect(self):
+        with self.assertRaises(cc.CannotIntrospect):
+            cc.resolve_base("apiary")
+
+    def test_console_scripts_and_skip_headers_do_not_overlap(self):
+        self.assertEqual(set(cc.CONSOLE_SCRIPTS) & cc.SKIP_HEADERS, set())
 
 
 if __name__ == "__main__":

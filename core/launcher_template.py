@@ -4,13 +4,14 @@ The launcher is a tiny shim copied into ``<repo>/.claude/apiary/launch.py``
 by ``apiary install --target <repo>``. It reads the repo's
 ``main-apiary-pointer.json`` to find main-apiary, then dispatches to the
 named script under main-apiary with the caller's cwd intact. See
-MIGRATION-PLAN.md §7.7 for the full contract.
+``docs/architecture/per-repo-install.md`` for the full contract.
 
 This template is rendered to a file rather than imported because each
 bootstrapped repo carries its own copy under ``.claude/apiary/``. The
 rendered file has no dependency on apiary being importable — it only
 needs Python's stdlib.
 """
+
 from __future__ import annotations
 
 # The literal text written to <repo>/.claude/apiary/launch.py. Edit here
@@ -24,15 +25,24 @@ main-apiary and the per-target state directory, then dispatches to a script
 inside main-apiary. Exits 0 (silently) when main-apiary is unreachable so
 a missing checkout never blocks Claude Code session startup.
 
+The target runs IN THIS PROCESS via runpy, not as a second interpreter
+(review X-1). Spawning `[sys.executable, script]` doubled every hook's cost —
+~140-360 ms of Python startup per hook, ~18 starts per Bash tool call. Env
+vars are therefore set on os.environ (the target reads the same process's
+environment) and the target's SystemExit is propagated as this script's exit
+code, so exit-2 gates still block.
+
 Env vars set for the dispatched script:
 - APIARY_MAIN_REPO        — main-apiary's absolute path
+- APIARY_TARGET_REPO      — the repo this launcher belongs to
 - APIARY_TARGET_STATE_DIR — <main-apiary>/.repos/<name>-<uid>/, the
   per-target state dir scribe / runner / compass / etc. read.
 """
 import json
 import os
-import subprocess
+import runpy
 import sys
+import traceback
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -76,8 +86,8 @@ def _resolve_state_dir(main_apiary: Path) -> Path | None:
 def main() -> int:
     main_apiary = _resolve_main_apiary()
     if main_apiary is None or not main_apiary.is_dir():
-        # Loud-warn-and-skip per MIGRATION-PLAN.md §7.1 / D32. Hooks must
-        # always exit 0 — a non-zero exit here would block tool calls.
+        # Loud-warn-and-skip. Hooks must always exit 0 — a non-zero exit
+        # here would block tool calls.
         print(
             f"[apiary] main-apiary not reachable via {MAIN_POINTER}; "
             "running as vanilla Claude session.",
@@ -99,26 +109,49 @@ def main() -> int:
 
     script = main_apiary / sys.argv[1]
     if not script.is_file():
-        print(f"[apiary] script not found: {script}", file=sys.stderr)
+        # A settings.json entry outlived the script it points at — normally
+        # a hook apiary deleted, in a repo that has not been re-bootstrapped.
+        # Say so once, on stderr, and exit 0: a non-zero exit or a traceback
+        # here would surface as a hook error on every tool call.
+        print(
+            f"[apiary] hook script removed: {script} — re-run apiary install",
+            file=sys.stderr,
+        )
+        # An exit-0 hook with EMPTY stdout is shown as a "hook error" notice;
+        # `{}` is the documented "no opinion" response.
+        print("{}")
         return 0  # do not block
 
-    env = os.environ.copy()
-    env["APIARY_MAIN_REPO"] = str(main_apiary)
+    os.environ["APIARY_MAIN_REPO"] = str(main_apiary)
+    # The repo this launcher belongs to, so CLI tools invoked through it (e.g.
+    # the /budgeter skill) resolve the SAME repo the hooks do, even when the
+    # tool shell\'s cwd has wandered into a sibling checkout.
+    os.environ["APIARY_TARGET_REPO"] = str(Path(__file__).resolve().parents[2])
     state_dir = _resolve_state_dir(main_apiary)
     if state_dir is not None:
-        env["APIARY_TARGET_STATE_DIR"] = str(state_dir)
-    return subprocess.run(
-        [sys.executable, str(script), *sys.argv[2:]],
-        env=env,
-    ).returncode
+        os.environ["APIARY_TARGET_STATE_DIR"] = str(state_dir)
+
+    # The target sees its own argv, as it would when spawned.
+    sys.argv = [str(script), *sys.argv[2:]]
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+    except SystemExit as exc:
+        code = exc.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        print(code, file=sys.stderr)
+        return 1
+    except BaseException:
+        # In-process now, so an uncaught error would otherwise surface as this
+        # launcher\'s traceback. Print it (same text the spawned child printed)
+        # and exit 1 — never 2, which Claude Code reads as "block the call".
+        traceback.print_exc()
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
 '''
-
-
-def render() -> str:
-    """Return the launcher source as a string. One-liner today; here so
-    callers don't depend on the module-level constant name."""
-    return LAUNCHER_PY

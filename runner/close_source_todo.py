@@ -16,6 +16,7 @@ script can't figure out what to do.
 
 Stdlib only, per docs/standards/code-style.md.
 """
+
 from __future__ import annotations
 
 import json
@@ -34,14 +35,16 @@ NOTES_SCRIPT = SCRIPT_DIR.parent / "scribe" / "notes.py"
 # ``T-`` (todos) — closing handoffs/decisions/contexts would be weird.
 _TODO_ID_RE = re.compile(r"^T-\d{4}-\d+$")
 
-_RUNNER_SUBJECT_RE = re.compile(
-    r"^runner/(?P<uuid>[A-Za-z0-9][\w-]*) step \d+:"
-)
+_RUNNER_SUBJECT_RE = re.compile(r"^runner/(?P<uuid>[A-Za-z0-9][\w-]*) step \d+:")
 
 
 def _git(*args) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", *args], capture_output=True, text=True, cwd=str(SCRIPT_DIR.parent),
+        ["git", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=str(SCRIPT_DIR.parent),
     )
 
 
@@ -116,7 +119,10 @@ def close_todo(todo_id: str) -> bool:
     try:
         result = subprocess.run(
             [sys.executable, str(NOTES_SCRIPT), "done", todo_id],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -140,8 +146,7 @@ def main():
         if not source or not _TODO_ID_RE.match(source):
             continue
         if close_todo(source):
-            print(f"[post-merge] Closed {source} (runner {uuid[:8]} merged).",
-                  file=sys.stderr)
+            print(f"[post-merge] Closed {source} (runner {uuid[:8]} merged).", file=sys.stderr)
     return 0
 
 

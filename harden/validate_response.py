@@ -13,8 +13,8 @@ Usage:
     echo '<json>' | validate_response.py --expected-ids ATK-001,ATK-002 [--check-files]
     validate_response.py --file response.json --expected-ids ATK-001,ATK-002 [--check-files]
 """
+
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -67,7 +67,9 @@ def validate(data: dict, expected_ids: set, check_files: bool = False) -> list[s
                 field_errors.add(field)
             elif not isinstance(val, str):
                 # ATK-007: non-string values are invalid
-                errors.append(f"{label}: field '{field}' must be a string, got {type(val).__name__}")
+                errors.append(
+                    f"{label}: field '{field}' must be a string, got {type(val).__name__}"
+                )
                 field_errors.add(field)
             elif not val.strip():
                 errors.append(f"{label}: field '{field}' is empty")
@@ -80,15 +82,21 @@ def validate(data: dict, expected_ids: set, check_files: bool = False) -> list[s
             # Only emit enum error if REQUIRED_FIELDS didn't already flag this field
             if isinstance(action, str) and action.strip():
                 if action not in VALID_ACTIONS:
-                    errors.append(f"{label}: invalid action '{action}' (expected: {', '.join(sorted(VALID_ACTIONS))})")
+                    errors.append(
+                        f"{label}: invalid action '{action}' (expected: {', '.join(sorted(VALID_ACTIONS))})"
+                    )
             else:
-                errors.append(f"{label}: field 'action' must be one of: {', '.join(sorted(VALID_ACTIONS))}")
+                errors.append(
+                    f"{label}: field 'action' must be one of: {', '.join(sorted(VALID_ACTIONS))}"
+                )
 
         # ATK-013: detect and reject duplicate finding_refs
         finding_ref = resp.get("finding_ref")
         if isinstance(finding_ref, str):
             if finding_ref in addressed_ids:
-                errors.append(f"{label}: duplicate finding_ref '{finding_ref}' — each ATK-ID must be addressed exactly once")
+                errors.append(
+                    f"{label}: duplicate finding_ref '{finding_ref}' — each ATK-ID must be addressed exactly once"
+                )
             else:
                 addressed_ids.add(finding_ref)
 
@@ -120,7 +128,9 @@ def validate(data: dict, expected_ids: set, check_files: bool = False) -> list[s
     if missing:
         found_refs = sorted(addressed_ids) if addressed_ids else []
         found_summary = (
-            f" (found refs: {', '.join(found_refs)})" if found_refs else " (no finding_refs found in responses)"
+            f" (found refs: {', '.join(found_refs)})"
+            if found_refs
+            else " (no finding_refs found in responses)"
         )
         for mid in sorted(missing):
             errors.append(f"Finding {mid} not addressed in any response{found_summary}")
@@ -137,7 +147,9 @@ def validate(data: dict, expected_ids: set, check_files: bool = False) -> list[s
             content = todo.get("content", "")
             # ATK-009: reject non-string content
             if not isinstance(content, str):
-                errors.append(f"todos[{i}]: 'content' must be a string, got {type(content).__name__}")
+                errors.append(
+                    f"todos[{i}]: 'content' must be a string, got {type(content).__name__}"
+                )
             elif not content.strip():
                 errors.append(f"todos[{i}]: empty 'content' field")
 
@@ -146,12 +158,15 @@ def validate(data: dict, expected_ids: set, check_files: bool = False) -> list[s
 
 def main():
     parser = argparse.ArgumentParser(description="Validate harden Defender response")
-    parser.add_argument("--expected-ids", required=True,
-                        help="Comma-separated list of ATK-IDs that must be addressed")
-    parser.add_argument("--check-files", action="store_true",
-                        help="Verify that referenced files exist")
-    parser.add_argument("--file", dest="file_path",
-                        help="Read JSON from file instead of stdin")
+    parser.add_argument(
+        "--expected-ids",
+        required=True,
+        help="Comma-separated list of ATK-IDs that must be addressed",
+    )
+    parser.add_argument(
+        "--check-files", action="store_true", help="Verify that referenced files exist"
+    )
+    parser.add_argument("--file", dest="file_path", help="Read JSON from file instead of stdin")
     args = parser.parse_args()
 
     # ATK-003: require at least one valid ID
@@ -160,7 +175,10 @@ def main():
         print("ERROR: --expected-ids must contain at least one non-empty ATK-ID", file=sys.stderr)
         sys.exit(1)
     if len(expected) > MAX_EXPECTED_IDS:
-        print(f"ERROR: --expected-ids exceeds maximum allowed count ({MAX_EXPECTED_IDS})", file=sys.stderr)
+        print(
+            f"ERROR: --expected-ids exceeds maximum allowed count ({MAX_EXPECTED_IDS})",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     raw, data = read_json_input(file_path=args.file_path)

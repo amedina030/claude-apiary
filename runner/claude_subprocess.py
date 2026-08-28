@@ -18,9 +18,8 @@ Centralizes the spawn so every runner subprocess:
      as a temporary escape hatch if the allowlist breaks a legitimate
      need.
 
-The startup hooks (core/hooks/startup_prompt_hook.py and
-core/hooks/startup_hook.py) check the env var on entry and short-circuit
-to a no-context allow when it is set.
+The startup hook (core/hooks/startup_prompt_hook.py) checks the env var
+on entry and short-circuits to a no-context allow when it is set.
 
 Module-level constants
 ----------------------
@@ -32,8 +31,10 @@ ALLOW_ALL_ENV_VAR : str
     Name of the escape-hatch env var. If set to "1" in the parent env,
     the full parent environment is forwarded (legacy behavior).
 """
-import os
+
 import json
+import os
+import shutil
 import subprocess
 
 from .config_loader import get as cfg
@@ -41,29 +42,88 @@ from .cost_emit import emit_usage_xml
 
 RUNNER_SUBPROCESS_ENV_VAR = "APIARY_RUNNER_SUBPROCESS"
 ALLOW_ALL_ENV_VAR = "APIARY_RUNNER_ALLOW_ALL_ENV"
+CLAUDE_BIN_ENV_VAR = "APIARY_CLAUDE_BIN"
+
+
+def resolve_claude_bin(env: dict[str, str] | None = None) -> str:
+    """Return the executable to spawn for `claude`.
+
+    Precedence: ``APIARY_CLAUDE_BIN`` (an explicit path, for operators whose
+    CLI is installed under another name), then ``shutil.which`` against the
+    subprocess's own ``PATH``, then the bare name.
+
+    ``which`` rather than a bare ``"claude"`` because on Windows a bare name
+    is resolved by ``CreateProcess``, which only ever appends ``.exe`` — an
+    npm-installed ``claude.cmd`` is invisible to it, and the runner would
+    report ``could not launch claude subprocess`` on a machine where
+    ``claude`` works fine in a shell. ``which`` honours ``PATHEXT``, so both
+    installs work, and the resolution follows the *subprocess's* PATH rather
+    than the parent's.
+    """
+    lookup = env if env is not None else os.environ
+    override = (lookup.get(CLAUDE_BIN_ENV_VAR) or "").strip()
+    if override:
+        return override
+    found = shutil.which("claude", path=lookup.get("PATH"))
+    return found or "claude"
+
 
 # System-essential vars, named explicitly per platform. Missing any of
 # these from a claude subprocess would typically break basic operation
 # (PATH lookup, HOME-relative config, locale, temp dirs).
-_POSIX_SYSTEM_VARS = frozenset({
-    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR",
-    "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
-})
-_WINDOWS_SYSTEM_VARS = frozenset({
-    "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC",
-    "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
-    "PROGRAMFILES", "PROGRAMFILES(X86)", "COMMONPROGRAMFILES",
-    "TEMP", "TMP",
-    "USERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
-})
+_POSIX_SYSTEM_VARS = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TERM",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "LC_MESSAGES",
+    }
+)
+_WINDOWS_SYSTEM_VARS = frozenset(
+    {
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "WINDIR",
+        "COMSPEC",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "COMMONPROGRAMFILES",
+        "TEMP",
+        "TMP",
+        "USERNAME",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+    }
+)
 
 # HTTP(S) proxy vars — claude CLI's network stack reads these. Listed
 # in both cases because Windows env var names are case-insensitive but
 # subprocess inherits them with their original casing.
-_PROXY_VARS = frozenset({
-    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
-    "http_proxy", "https_proxy", "no_proxy", "all_proxy",
-})
+_PROXY_VARS = frozenset(
+    {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "all_proxy",
+    }
+)
 
 # Any var starting with one of these prefixes is forwarded. Covers
 # claude CLI config (ANTHROPIC_API_KEY, CLAUDE_*), apiary's own runtime
@@ -71,8 +131,9 @@ _PROXY_VARS = frozenset({
 _ALLOWED_PREFIXES = ("ANTHROPIC_", "CLAUDE_", "APIARY_")
 
 
-def _build_subprocess_env(parent_env: dict[str, str] | None = None,
-                          *, is_windows: bool | None = None) -> dict[str, str]:
+def _build_subprocess_env(
+    parent_env: dict[str, str] | None = None, *, is_windows: bool | None = None
+) -> dict[str, str]:
     """Build the env dict for a runner-spawned claude subprocess.
 
     Forwards only allowlisted vars from ``parent_env`` (defaults to
@@ -101,6 +162,7 @@ def _build_subprocess_env(parent_env: dict[str, str] | None = None,
             env[name] = value
     env[RUNNER_SUBPROCESS_ENV_VAR] = "1"
     return env
+
 
 # Maximum bytes buffered from stdout/stderr before we truncate.  Prevents
 # unbounded memory growth for unexpectedly large subprocess outputs.
@@ -132,8 +194,15 @@ DEFAULT_DISALLOWED_TOOLS = (
 #   {"subprocess": {"allowed_tools": [...], "permission_mode": "...",
 #                   "max_turns": N}}
 DEFAULT_ALLOWED_TOOLS = (
-    "Read", "Edit", "Write", "Glob", "Grep",
-    "Bash(git *)", "Bash(python *)", "Bash(poetry *)", "Bash(pytest *)",
+    "Read",
+    "Edit",
+    "Write",
+    "Glob",
+    "Grep",
+    "Bash(git *)",
+    "Bash(python *)",
+    "Bash(poetry *)",
+    "Bash(pytest *)",
 )
 DEFAULT_PERMISSION_MODE = "acceptEdits"
 # Hard ceiling on agentic turns per stage call so a looping subprocess
@@ -221,7 +290,9 @@ def run_claude(
     if permission_mode is _FROM_CONFIG:
         permission_mode = cfg("subprocess", "permission_mode", DEFAULT_PERMISSION_MODE)
 
-    cmd = ["claude", "-p", "-", "--output-format", "json"]
+    env = _build_subprocess_env()
+
+    cmd = [resolve_claude_bin(env), "-p", "-", "--output-format", "json"]
     if model:
         cmd.extend(["--model", model])
     if permission_mode:
@@ -236,8 +307,6 @@ def run_claude(
     rules = [r for r in (disallowed_tools or ()) if r]
     if rules:
         cmd.extend(["--disallowedTools", *rules])
-
-    env = _build_subprocess_env()
 
     try:
         result = subprocess.run(
@@ -261,11 +330,16 @@ def run_claude(
         # stage log says "stderr: " and the reason is lost.
         stderr = describe_failure(stdout, result.returncode)
 
-    if result.returncode == 0:
-        try:
-            emit_usage_xml(stdout)
-        except Exception:
-            # Cost emission failure must never discard a successful result.
-            pass
+    # Emitted regardless of exit code. `<usage>` used to be emitted only on
+    # success, so a call that hit --max-turns, was stopped by the API, or
+    # failed after real spend reported zero tokens: the budgeter never saw
+    # them and the runner's cumulative cap was never decremented by them
+    # (review runner Bug 8). emit_usage_xml is a no-op when stdout carries no
+    # envelope, which is the timeout / could-not-launch case.
+    try:
+        emit_usage_xml(stdout)
+    except Exception:
+        # Cost emission failure must never discard a result, good or bad.
+        pass
 
     return result.returncode, stdout, stderr

@@ -7,6 +7,8 @@ framework_version: "1.0"
 last_verified: 2026-08-26
 ---
 
+> **Snapshot of 2026-08-26; superseded by the remediation — see CHANGELOG. Deleted at close-out (T-2026-271).**
+
 # claude-apiary — infrastructure, docs, and skills review
 
 Read-only review at `master` @ `1bee5e5` (2026-08-26). Every claim below was verified by reading the cited file or running the cited command; nothing was mutated.

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for harden/round_counter.py."""
+
 import json
 import subprocess
 import sys
@@ -11,13 +12,16 @@ SCRIPT = str(Path(__file__).parent / "round_counter.py")
 PYTHON = sys.executable
 
 
-def run(subcommand: str, session_id: str, extra_args: list = None, tmp_dir: str = None) -> subprocess.CompletedProcess:
+def run(
+    subcommand: str, session_id: str, extra_args: list = None, tmp_dir: str = None
+) -> subprocess.CompletedProcess:
     cmd = [PYTHON, SCRIPT, subcommand, "--session-id", session_id]
     if extra_args:
         cmd.extend(extra_args)
     env = None
     if tmp_dir:
         import os
+
         env = {**os.environ, "HARDEN_TMP_DIR": tmp_dir}
     return subprocess.run(cmd, text=True, capture_output=True, env=env)
 

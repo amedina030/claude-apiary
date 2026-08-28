@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
 
 from gui import pty_capture
 
@@ -31,8 +30,9 @@ def main(argv=None) -> int:
     sub.add_parser("list", help="list existing captures")
     p_show = sub.add_parser("show", help="print a capture's tail, ansi-stripped")
     p_show.add_argument("path", help="path to a .bin capture file")
-    p_show.add_argument("--tail", type=int, default=4000,
-                        help="number of trailing chars to print (default 4000)")
+    p_show.add_argument(
+        "--tail", type=int, default=4000, help="number of trailing chars to print (default 4000)"
+    )
 
     args = parser.parse_args(argv)
 
@@ -54,7 +54,7 @@ def main(argv=None) -> int:
         stripped = pty_capture.strip_ansi(text)
         print(f"bytes: {len(data)}")
         print(f"--- tail ({args.tail} chars, ansi-stripped) ---")
-        print(stripped[-args.tail:])
+        print(stripped[-args.tail :])
         return 0
 
     # Capture mode is opt-in via env var so the normal `python -m gui.app`

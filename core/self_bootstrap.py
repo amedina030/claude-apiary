@@ -1,6 +1,6 @@
 """``apiary self-bootstrap`` — first-machine setup of main-apiary.
 
-Per MIGRATION-PLAN.md §7.9, fresh-machine setup needs to:
+Fresh-machine setup needs to:
 
 1. Verify cwd is a real apiary checkout (sentinel files present).
 2. Initialize ``<main-apiary>/.repos/registry.json`` if absent.
@@ -11,6 +11,7 @@ Per MIGRATION-PLAN.md §7.9, fresh-machine setup needs to:
 The function is idempotent: re-running on an already-bootstrapped main-apiary
 just refreshes the install (same as ``apiary install --target <main-apiary>``).
 """
+
 from __future__ import annotations
 
 import sys

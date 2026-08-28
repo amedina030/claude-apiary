@@ -7,6 +7,8 @@ framework_version: "1.0"
 last_verified: 2026-08-26
 ---
 
+> **Snapshot of 2026-08-26; superseded by the remediation — see CHANGELOG. Deleted at close-out (T-2026-271).**
+
 # Code review: `gui/` (claude-apiary)
 
 Scope: every non-test `.py` in `gui/` (25 files), `gui/web/{app,prompt_detector,bubble_monitor,file_drop}.js`, `index.html`, `gui/packaging/*`, `gui/README.md`, the GUI section of `README.md`, `docs/standards/code-style.md`, all 17 Python test files (skimmed) and both Node test files. Read-only; tests executed via `poetry run pytest gui -q` (9 runs) and `node gui/web/test_*.js`. Third-party internals consulted where a claim depended on them: `.venv/Lib/site-packages/winpty/ptyprocess.py` (pywinpty 2.0.15) and `.venv/Lib/site-packages/webview/util.py` (pywebview 5.4).

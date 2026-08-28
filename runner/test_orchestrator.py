@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for runner/run.py orchestrator."""
+
 import io
 import json
 import os
@@ -9,15 +10,16 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from runner import run as orchestrator
-from runner.run import run_stage, main, STAGES, SCRIPT_DIR, REPO_ROOT
-
+from runner import run_lock
+from runner.run import REPO_ROOT
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_completed_process(returncode=0, stdout="ok", stderr=""):
     proc = MagicMock(spec=subprocess.CompletedProcess)
@@ -36,11 +38,13 @@ def make_popen(returncode=0, stdout="ok", stderr="", timeout_after_calls=0):
     proc = MagicMock()
     proc.returncode = returncode
     state = {"calls": 0}
+
     def _comm(timeout=None):
         state["calls"] += 1
         if timeout_after_calls and state["calls"] <= timeout_after_calls:
             raise subprocess.TimeoutExpired(cmd="test", timeout=timeout or 0)
         return (stdout, stderr)
+
     proc.communicate.side_effect = _comm
     proc.poll.return_value = returncode
     return proc
@@ -51,16 +55,28 @@ class _RunnerTestCase(unittest.TestCase):
 
     def setUp(self):
         import os
+
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.tmp_path = Path(self._tmp.name)
+        self.tmp_path = Path(self._tmp.name).resolve()
         # run.main()'s target_repo resolution sets APIARY_TARGET_REPO; don't let
         # it leak across test methods or between test classes.
         self._prior_active_target = os.environ.pop("APIARY_TARGET_REPO", None)
         self.addCleanup(self._restore_active_target)
+        # `run_lock.LOCKS_DIR` is frozen at import from `locks_dir()`, and
+        # `main()` calls `run_lock.scan_stale()` + `run_lock.write()` against
+        # it. Unpatched, these tests wrote lockfiles into the developer's real
+        # `.apiary/runner/locks/` and a single stale lock left on that machine
+        # failed every `main()` test (review subsystems/runner.md §"Interactive
+        # main()"). Same patch the other three lock-touching suites use.
+        self.locks_dir = self.tmp_path / "locks"
+        locks_patcher = patch.object(run_lock, "LOCKS_DIR", self.locks_dir)
+        locks_patcher.start()
+        self.addCleanup(locks_patcher.stop)
 
     def _restore_active_target(self):
         import os
+
         if self._prior_active_target is None:
             os.environ.pop("APIARY_TARGET_REPO", None)
         else:
@@ -93,9 +109,11 @@ class _RunnerTestCase(unittest.TestCase):
         out_buf = io.StringIO()
         err_buf = io.StringIO()
         exit_code = None
-        with patch.object(sys, "argv", argv), \
-             patch.object(sys, "stdout", out_buf), \
-             patch.object(sys, "stderr", err_buf):
+        with (
+            patch.object(sys, "argv", argv),
+            patch.object(sys, "stdout", out_buf),
+            patch.object(sys, "stderr", err_buf),
+        ):
             try:
                 orchestrator.main()
             except SystemExit as exc:
@@ -109,7 +127,6 @@ class _RunnerTestCase(unittest.TestCase):
 
 
 class TestRunStage(_RunnerTestCase):
-
     def test_module_not_found(self):
         input_f = self.tmp_path / "input.json"
         input_f.write_text("{}", encoding="utf-8")
@@ -204,7 +221,6 @@ class TestRunStage(_RunnerTestCase):
 
 
 class TestMainCLIValidation(_RunnerTestCase):
-
     def _write_intake_with(self, name, payload):
         f = self.tmp_path / name
         f.write_text(json.dumps(payload), encoding="utf-8")
@@ -318,7 +334,6 @@ class TestMainCLIValidation(_RunnerTestCase):
 
 
 class TestMainHappyPath(_RunnerTestCase):
-
     @patch("runner.run.run_stage")
     def test_all_stages_succeed(self, mock_run_stage):
         intake_file, _ = self.make_intake_file()
@@ -328,6 +343,21 @@ class TestMainHappyPath(_RunnerTestCase):
         self.assertIn("COMPLETE", out)
         self.assertIn("Stages completed: 6/6", out)
         self.assertEqual(mock_run_stage.call_count, 6)
+
+    @patch("runner.run.run_stage")
+    def test_lockfile_lands_in_the_patched_locks_dir(self, mock_run_stage):
+        """Hermeticity guard: main() must not touch the real .apiary locks dir."""
+        real_locks = run_lock.locks_dir()
+        before = set(real_locks.glob("*.lock")) if real_locks.exists() else set()
+        intake_file, intake_data = self.make_intake_file()
+        mock_run_stage.return_value = (True, "ok", "", 0.5)
+        code, _, _ = self._run_main_capture(["run.py", str(intake_file)])
+        self.assertIn(code, (None, 0))
+        # The lock is released on a clean exit, so assert on the directory the
+        # run created rather than on a surviving file.
+        self.assertTrue(self.locks_dir.exists())
+        after = set(real_locks.glob("*.lock")) if real_locks.exists() else set()
+        self.assertEqual(before, after)
 
     @patch("runner.run.run_stage")
     def test_stage_call_order(self, mock_run_stage):
@@ -369,9 +399,11 @@ class TestMainHappyPath(_RunnerTestCase):
             plans_dir,
             specs_dir,
         )
+
         default_intake = intake_dir() / f"{uid}.json"
         self.assertNotEqual(
-            intake_file.resolve(), default_intake.resolve(),
+            intake_file.resolve(),
+            default_intake.resolve(),
             "Test setup error: intake_file must not be in the default intake dir or the override path is never taken",
         )
         code, _, _ = self._run_main_capture(["run.py", str(intake_file)])
@@ -403,6 +435,7 @@ class TestMainHappyPath(_RunnerTestCase):
         """Phase 3: --target-repo on interactive runs must become the cwd
         argument for every stage subprocess."""
         import subprocess as _sp  # avoid shadowing
+
         intake_file, _ = self.make_intake_file()
         mock_run_stage.return_value = (True, "ok", "", 0.5)
         scratch = self.tmp_path / "scratch"
@@ -414,7 +447,8 @@ class TestMainHappyPath(_RunnerTestCase):
         self.assertIn(code, (None, 0))
         for call in mock_run_stage.call_args_list:
             self.assertEqual(
-                Path(call.kwargs["cwd"]).resolve(), scratch.resolve(),
+                Path(call.kwargs["cwd"]).resolve(),
+                scratch.resolve(),
                 f"stage call {call} did not receive target_repo as cwd",
             )
 
@@ -429,7 +463,8 @@ class TestMainHappyPath(_RunnerTestCase):
         # Every stage gets cwd=<apiary REPO_ROOT>
         for call in mock_run_stage.call_args_list:
             self.assertEqual(
-                Path(call.kwargs["cwd"]).resolve(), REPO_ROOT.resolve(),
+                Path(call.kwargs["cwd"]).resolve(),
+                REPO_ROOT.resolve(),
             )
 
     @patch("runner.run.run_stage")
@@ -439,7 +474,7 @@ class TestMainHappyPath(_RunnerTestCase):
         'unknown' fallback."""
         intake_file, _ = self.make_intake_file()
 
-        def side_effect(name, script, input_path, cwd=None):
+        def side_effect(name, script, input_path, cwd=None, extra_env=None):
             if name == "approval":
                 return (True, "", "", 1.0)
             return (True, "ok", "", 0.5)
@@ -456,12 +491,11 @@ class TestMainHappyPath(_RunnerTestCase):
 
 
 class TestMainFailurePropagation(_RunnerTestCase):
-
     @patch("runner.run.run_stage")
     def test_stage3_failure_stops_runner(self, mock_run_stage):
         intake_file, _ = self.make_intake_file()
 
-        def side_effect(name, script, input_path, cwd=None):
+        def side_effect(name, script, input_path, cwd=None, extra_env=None):
             if name == "auto_plan":
                 return (False, "", "plan error", 2.0)
             return (True, "ok", "", 0.5)
@@ -500,12 +534,11 @@ class TestMainFailurePropagation(_RunnerTestCase):
 
 
 class TestMainKeyboardInterrupt(_RunnerTestCase):
-
     @patch("runner.run.run_stage")
     def test_interrupt_during_stage4(self, mock_run_stage):
         intake_file, _ = self.make_intake_file()
 
-        def side_effect(name, script, input_path, cwd=None):
+        def side_effect(name, script, input_path, cwd=None, extra_env=None):
             if name == "executor":  # stage 4
                 raise KeyboardInterrupt()
             return (True, "ok", "", 0.5)
@@ -523,7 +556,6 @@ class TestMainKeyboardInterrupt(_RunnerTestCase):
 
 
 class TestIntakePathOverride(_RunnerTestCase):
-
     @patch("runner.run.run_stage")
     def test_intake_outside_runner_dir(self, mock_run_stage):
         intake_data = self.make_intake_data()

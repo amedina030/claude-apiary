@@ -4,7 +4,7 @@ title: Code Style
 scope: project
 description: Naming, structure, imports, error handling, and testing conventions for Python code
 framework_version: "1.0"
-last_verified: 2026-04-07
+last_verified: 2026-08-27
 ---
 
 # Code Style
@@ -13,9 +13,36 @@ Conventions derived from the existing codebase. Follow these when writing or mod
 
 ## General
 
-- **Python 3.11+** — use modern syntax (type hints, `pathlib`, f-strings, union `X | Y`, match statements) but stay within 3.11 compatibility.
-- **Stdlib only** — no external dependencies. This is a hard rule.
+- **Python 3.11+** — use modern syntax (type hints, `pathlib`, f-strings, union `X | Y`, match statements) but stay within 3.11 compatibility. CI runs 3.11 and 3.12 on ubuntu, windows and macos.
+- **Stdlib only at runtime** — no third-party import in any module a hook, a git hook or a slash command can reach. Those run under `py -3` / `python3`, not the Poetry virtualenv, so a third-party import there is a crash, not a dependency. The exceptions are declared and quarantined in `pyproject.toml`: `pytest`/`pytest-cov` in the `dev` group (tests only), and `pywebview`/`pywinpty`/`pythonnet`/`watchdog` in the optional `gui` group, which nothing outside `gui/` imports.
 - **UTF-8 everywhere** — always pass `encoding="utf-8"` to `open()`, `read_text()`, `write_text()`.
+
+## Lint and format
+
+`ruff` is the mechanical half of this document; everything below it is the
+half a reviewer has to read for. Config lives in `[tool.ruff]` in
+`pyproject.toml` and both commands are CI steps:
+
+```bash
+poetry run ruff check .          # E, F, I, PLW1514, S602, S605
+poetry run ruff format .         # line-length 100
+```
+
+The rule set is deliberately small. `F` and `E` catch dead code and
+syntax-adjacent mistakes, `I` fixes import order, and `PLW1514` / `S602` /
+`S605` are the three PORTABILITY.md rules a linter can actually enforce —
+`open()` without `encoding=`, `shell=True`, `os.system`. Two codes are ignored
+repo-wide with the reasoning inline in `pyproject.toml`: `E402`, because the
+`sys.path.insert` bootstrap below requires it, and `E501`, because
+`ruff format --check` is the real width gate and E501's residue is
+unsplittable string literals.
+
+The repo-local pre-commit hook (`docs/hooks/pre-commit`) runs `ruff check` on
+the staged `.py` files only, and skips with a note if ruff is not installed.
+Formatting is not checked at commit time — run `ruff format` before you push,
+or CI will.
+
+`docs/` is currently excluded from both commands.
 
 ## File structure
 
@@ -38,8 +65,8 @@ Each Python file follows this order:
 | Functions | `snake_case` | `load_config()`, `is_enabled()` |
 | Constants | `UPPER_SNAKE` | `CLAUDE_DIR`, `VALID_TYPES` |
 | Classes | `PascalCase` | `SessionId`, `FileLock` |
-| Private functions | `_leading_underscore` | `_strip_cont()`, `_parse_usage()` |
-| CLI subcommands | `kebab-case` (argparse) | `handoff-sessions` |
+| Private functions | `_leading_underscore` | `_file_lock()`, `_flag_path()` |
+| CLI subcommands | `kebab-case` (argparse) | `archive-learning`, `backfill-brief` |
 
 ## Imports
 
@@ -69,10 +96,12 @@ Each Python file follows this order:
 ## Testing
 
 - Tests live alongside the code they test: `budgeter/test_hooks.py`, `scribe/test_notes.py`.
-- Use `unittest` (stdlib). No pytest.
+- **Write unittest-style test classes; run them with pytest.** `unittest.TestCase` subclasses and `self.assert*` are the house style and every one of the ~100 test files follows it. The canonical runner is nonetheless pytest (`poetry run pytest -q`, configured in `pyproject.toml`), which discovers and runs unittest classes natively. Do not use pytest-only APIs — bare `assert` in a module-level function, `@pytest.fixture`, `@pytest.mark.parametrize`, `pytest.raises` — so every file also stays runnable as `python -m unittest <path>`.
 - Test file naming: `test_<module>.py`.
 - Each test method tests one behavior. Name it `test_<what_it_tests>`.
 - Use `tempfile.TemporaryDirectory()` for tests that write files — never touch real user data.
+- **Use `core/testing.py` for a git repo or a fake main-apiary.** `init_git_repo(path)` and `make_fake_apiary(root, …)` are the shared fixtures; rolling your own `git init` + `copytree` in a `setUp` is what made the install suite take a minute. `hermetic_env(**overrides)` is the env to hand a subprocess under test — never `os.environ.copy()`, which carries a live session's `CLAUDE_PROJECT_DIR` and `APIARY_*` into the thing being tested.
+- Coverage is report-only and off by default: `poetry run pytest --cov` when you want the numbers. Do not add `--cov` to `addopts` and do not gate on a percentage.
 - Integration tests that depend on real data should be isolated (see `test_hooks.py` for pattern).
 - **Runner-package import convention.** `runner/` is a proper Python package. All runner modules use relative imports for siblings (e.g. `from .config_loader import get as cfg`). Tests use absolute package imports (e.g. `from runner import detached_lib` or `from runner.executor import execute_step`). Entry points are invoked as `python -m runner.X` from the repo root, never as `python runner/X.py`. Mock patches must use the full module path (e.g. `mock.patch('runner.run.log_stage_cost')`, not `mock.patch('run.log_stage_cost')`).
 
@@ -90,8 +119,20 @@ Before writing utility code, check if `core/` already has it:
 | Need | Use |
 |------|-----|
 | Feature toggles | `core/flags.py` — `is_enabled()`, `enable()`, `disable()`, `toggle()` |
-| JSON config loading | `core/config.py` — `load_config()`, `write_config()` |
 | Hook context formatting | `core/hook_context.py` — `context_block()`, `join_contexts()`, `read_payload()` |
 | Hook registration | `core/hooks_lib.py` — `register_hooks()`, `remove_hooks()` |
 | Session identity | `core/session.py` — `SessionId` class |
 | File locking | `core/utils/filelock.py` — `FileLock` context manager |
+| Repo root from a path | `core/utils/gitutil.py` — `git_root()`, `main_worktree_root()` |
+| Reading a JSON object tolerantly | `core/utils/jsonio.py` — `read_json_object()` |
+| Writing a file without a torn read | `core/utils/atomic.py` — `write_text_atomic()`, `write_json_atomic()` |
+| A UTC timestamp | `core/utils/timeutil.py` — `now_iso()` |
+| State dirs, the registry, version pins | `core/utils/state.py` — `resolve_state_dir()`, `read_apiary_version()`, … |
+| JSONC (comments, trailing commas) | `core/utils/jsonc.py` — `load()`, `loads()` |
+| Test fixtures (git repo, fake apiary, env) | `core/testing.py` — `init_git_repo()`, `make_fake_apiary()`, `hermetic_env()` |
+
+This rule failed on its own for two years — the review found the same
+`git rev-parse` block in eight files. `scripts/check_duplicates.py` is the
+backstop: it reports identical and high-overlap function bodies across the
+tree, and CI runs it on every push. When it names a pair you wrote, either
+reuse the original or say in the code why the copy has to exist.

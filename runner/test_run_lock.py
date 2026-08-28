@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for runner/run_lock.py (T-2026-128)."""
+
 import json
 import os
 import tempfile
@@ -38,6 +39,25 @@ class WriteLockTests(unittest.TestCase):
         self.assertEqual(data["stage"], "executor")
         self.assertEqual(data["step_number"], 4)
         self.assertEqual(data["pid"], os.getpid())
+
+    def test_update_refreshes_started_at(self):
+        """review runner Bug 6: started_at is the heartbeat is_stale reads.
+        Never refreshing it meant any run longer than one stage_timeout looked
+        crashed, and --abort would delete a live run's worktree and branches
+        mid-write."""
+        path = run_lock.write("test-uuid-heartbeat", stage="init")
+        stale_ts = time.time() - 7200
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["started_at"] = stale_ts
+        path.write_text(json.dumps(data), encoding="utf-8")
+        self.assertTrue(run_lock.is_stale(run_lock.read("test-uuid-heartbeat")))
+
+        run_lock.update("test-uuid-heartbeat", stage="auto_harden", step_number=5)
+        refreshed = run_lock.read("test-uuid-heartbeat")
+        self.assertGreater(refreshed["started_at"], stale_ts)
+        self.assertFalse(run_lock.is_stale(refreshed))
+        # pid / hostname / worktree_path are still untouched.
+        self.assertEqual(refreshed["pid"], os.getpid())
 
     def test_update_nonexistent_is_noop(self):
         run_lock.update("no-such-uuid", stage="x")

@@ -15,8 +15,18 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from gui import composer_state, file_refs, picker, pty_capture, sidebar_state, tabs_state, usage_fetcher
-from gui import permission_mcp
+from gui import (
+    build_info,
+    composer_state,
+    file_refs,
+    permission_mcp,
+    picker,
+    pty_capture,
+    sidebar_state,
+    tabs_state,
+    usage_fetcher,
+)
+from gui.paths import main_apiary, state_dir
 from gui.permission_bridge import PermissionBridge
 from gui.permission_mcp import BRIDGE_URL_ENV as _PERMISSION_MCP_BRIDGE_URL_ENV
 from gui.scribe_aggregator import NoteEntry, read_body
@@ -25,12 +35,13 @@ from gui.single_instance import SingleInstance
 from gui.tabs_state import TabEntry
 from gui.theme import (
     ThemeWatcher,
-    ensure_defaults as ensure_theme_defaults,
     load_launch,
     load_theme,
 )
+from gui.theme import (
+    ensure_defaults as ensure_theme_defaults,
+)
 from gui.transcript import Message, parse_jsonl_lines
-from gui.paths import main_apiary
 from scribe import api as scribe_api
 
 # Note types the quick-capture box may write. Deliberately narrow: the box is
@@ -41,6 +52,7 @@ from scribe import api as scribe_api
 QUICK_NOTE_TYPES = ("wishlist", "todo")
 from gui.win_notify import flash_taskbar
 from gui.win_titlebar import apply_dark_titlebar, find_window_by_title
+
 
 def _web_dir() -> Path:
     # PyInstaller-frozen builds put the entry script at the bundle root, so
@@ -60,7 +72,9 @@ INDEX_HTML = WEB_DIR / "index.html"
 # posts a classified snapshot here for later analysis — the bug is intermittent
 # and unreproducible on demand, so we capture occurrences as they happen rather
 # than guess at the cause. Same home-dir location convention as permission_mcp.
-BUBBLE_ANOMALY_LOG = Path.home() / ".claude" / "apiary_gui" / "bubble_anomalies.jsonl"
+# Under the per-profile GUI state dir like every other GUI file — this was
+# the last apiary writer under ~/.claude (review gui #5 / S1).
+BUBBLE_ANOMALY_LOG = state_dir() / "bubble_anomalies.jsonl"
 
 
 class GuiBridge:
@@ -72,9 +86,6 @@ class GuiBridge:
 
     def __init__(self, app: "App") -> None:
         self._app = app
-
-    def ping(self) -> str:
-        return "ok"
 
     def send_input(self, text: str) -> bool:
         sess = self._app.active
@@ -101,10 +112,6 @@ class GuiBridge:
         """
         sess = self._app.active
         return sess.send_bytes(values) if sess is not None else False
-
-    def restart_pty(self) -> bool:
-        sess = self._app.active
-        return sess.restart_pty() if sess is not None else False
 
     def pty_resize(self, rows, cols) -> bool:
         sess = self._app.active
@@ -289,9 +296,6 @@ class GuiBridge:
 
     # --- session / tab surface ---------------------------------------------------
 
-    def list_sessions(self) -> list[dict]:
-        return self._app._sessions_descriptor()
-
     def picker_context(self) -> dict:
         """Initial context for the themed folder picker (recents, home, initial path)."""
         return picker.picker_context()
@@ -315,16 +319,6 @@ class GuiBridge:
         if not isinstance(session_id, str):
             return False
         return self._app.close_session(session_id)
-
-    def set_session_setting(self, session_id: str, key: str, value) -> bool:
-        """Per-tab permission toggles (T-2026-176).
-
-        key='accept_edits'  -> restarts the pty so --permission-mode acceptEdits
-                               takes effect on the next claude invocation.
-        """
-        if not isinstance(session_id, str) or not isinstance(key, str):
-            return False
-        return self._app.set_session_setting(session_id, key, bool(value))
 
     def resolve_permission(
         self,
@@ -353,7 +347,22 @@ class App:
         self.window = None
         self._hwnd: Optional[int] = None
         self._sessions: list[Session] = []
-        self._active_idx: int = -1
+        # The active tab is identified by session_id, never by list index: a
+        # concurrent close shifts every index after it, so an index held across
+        # two statements can point at a different (or stopped) session by the
+        # time it is dereferenced (review gui #5).
+        self._active_id: str = ""
+        # One lock for every mutation/read of _sessions, _active_id and the two
+        # pending-permission dicts (review gui #5/#6). pywebview runs each
+        # `pywebview.api.*` call on its own thread, the permission bridge's HTTP
+        # handler runs on another, and the pty/tail threads push from a third.
+        #
+        # LOCK ORDER RULE: never hold _state_lock while calling _eval / any
+        # _push_* helper. evaluate_js is a synchronous round-trip into the
+        # webview, and blocking every other bridge thread behind it would make
+        # a slow frontend stall the pty. Take the lock, snapshot what you need,
+        # release, then push.
+        self._state_lock = threading.RLock()
         self._theme_watcher: Optional[ThemeWatcher] = None
         self._usage_poller: Optional[usage_fetcher.UsagePoller] = None
         self._last_usage: Optional[dict] = None
@@ -388,8 +397,17 @@ class App:
 
     @property
     def active(self) -> Optional[Session]:
-        if 0 <= self._active_idx < len(self._sessions):
-            return self._sessions[self._active_idx]
+        """The Session for the selected tab, resolved by id (never by index)."""
+        with self._state_lock:
+            return self._find(self._active_id)
+
+    def _find(self, session_id: str) -> Optional[Session]:
+        """Session with this id, or None. Caller holds ``_state_lock``."""
+        if not session_id:
+            return None
+        for s in self._sessions:
+            if s.session_id == session_id:
+                return s
         return None
 
     # --- frontend bridge helpers --------------------------------------------------
@@ -431,28 +449,22 @@ class App:
         )
 
     def _push_pty_chunk(self, chunk: str, session_id: str = "") -> None:
-        self._eval(
-            f"window.apiary.onPtyChunk({json.dumps(chunk)}, {json.dumps(session_id)});"
-        )
+        self._eval(f"window.apiary.onPtyChunk({json.dumps(chunk)}, {json.dumps(session_id)});")
 
     def _push_pty_exit(self, code: int, session_id: str = "") -> None:
-        self._eval(
-            f"window.apiary.onPtyExit({json.dumps(code)}, {json.dumps(session_id)});"
-        )
+        self._eval(f"window.apiary.onPtyExit({json.dumps(code)}, {json.dumps(session_id)});")
 
-    def _push_notes(self, notes: list[NoteEntry], warnings: list[str], session_id: str = "") -> None:
+    def _push_notes(
+        self, notes: list[NoteEntry], warnings: list[str], session_id: str = ""
+    ) -> None:
         payload = json.dumps([n.to_dict() for n in notes])
-        self._eval(
-            f"window.apiary.onNotes({payload}, {json.dumps(session_id)});"
-        )
+        self._eval(f"window.apiary.onNotes({payload}, {json.dumps(session_id)});")
         for w in warnings:
             print(f"[scribe] {w}", file=sys.stderr)
 
     def _push_agents(self, agents: list, session_id: str = "") -> None:
         payload = json.dumps([a.to_dict() for a in agents])
-        self._eval(
-            f"window.apiary.onAgents({payload}, {json.dumps(session_id)});"
-        )
+        self._eval(f"window.apiary.onAgents({payload}, {json.dumps(session_id)});")
 
     def _push_theme(self, vars_: dict, err: Optional[str]) -> None:
         if err:
@@ -472,15 +484,14 @@ class App:
         """
         session_id = payload.get("session_id") or ""
         if session_id:
-            self._pending_permission_by_session[session_id] = (pending_id, payload)
-            self._session_by_pending_id[pending_id] = session_id
+            with self._state_lock:
+                self._pending_permission_by_session[session_id] = (pending_id, payload)
+                self._session_by_pending_id[pending_id] = session_id
             # Refresh the tabs descriptor so the non-active tab gets its
             # pending-permission badge. (No-op on the banner itself.)
             self._push_sessions()
         self._eval(
-            "window.apiary.onPermissionPrompt("
-            f"{json.dumps(pending_id)}, {json.dumps(payload)}"
-            ");"
+            f"window.apiary.onPermissionPrompt({json.dumps(pending_id)}, {json.dumps(payload)});"
         )
 
     def _push_ask_prompt(self, payload: dict, session_id: str = "") -> None:
@@ -491,11 +502,7 @@ class App:
         the pty viewport height. The JS side routes by session_id and ignores
         prompts for non-active tabs.
         """
-        self._eval(
-            "window.apiary.onAskPrompt("
-            f"{json.dumps(payload)}, {json.dumps(session_id)}"
-            ");"
-        )
+        self._eval(f"window.apiary.onAskPrompt({json.dumps(payload)}, {json.dumps(session_id)});")
 
     def _push_ask_prompt_resolved(self, tool_use_id: str, session_id: str = "") -> None:
         """Tell the frontend a pending AskUserQuestion was answered/cancelled so
@@ -557,12 +564,15 @@ class App:
         # Clear per-tab pending regardless of resolve outcome — a stale
         # pending that can't be delivered (bridge closed, timed out) should
         # not keep the tab chip badged forever.
-        session_id = self._session_by_pending_id.pop(pending_id, "")
-        if session_id and session_id in self._pending_permission_by_session:
-            stored_pending_id, _ = self._pending_permission_by_session[session_id]
-            if stored_pending_id == pending_id:
+        with self._state_lock:
+            session_id = self._session_by_pending_id.pop(pending_id, "")
+            cleared = False
+            stored = self._pending_permission_by_session.get(session_id)
+            if stored is not None and stored[0] == pending_id:
                 self._pending_permission_by_session.pop(session_id, None)
-                self._push_sessions()
+                cleared = True
+        if cleared:
+            self._push_sessions()
         return ok
 
     def _push_usage(self, payload: Optional[dict]) -> None:
@@ -595,9 +605,7 @@ class App:
             # prevent_default stops the webview from navigating to the dropped
             # file. pywebview stamps each file with pywebviewFullPath before our
             # handler runs (webview/util.py), giving us the real path for free.
-            win.dom.document.on(
-                "drop", DOMEventHandler(self._on_file_drop, prevent_default=True)
-            )
+            win.dom.document.on("drop", DOMEventHandler(self._on_file_drop, prevent_default=True))
         except Exception as e:
             print(f"[gui] file-drop registration failed: {e}", file=sys.stderr)
 
@@ -663,17 +671,17 @@ class App:
         )
 
     def _sessions_descriptor(self) -> list[dict]:
-        """Frontend-facing view of open tabs."""
+        """Frontend-facing view of open tabs. Caller holds ``_state_lock``."""
         return [
             {
                 "session_id": s.session_id,
                 "cwd": str(s.cwd),
                 "label": s.cwd.name or str(s.cwd),
-                "active": (i == self._active_idx),
+                "active": (s.session_id == self._active_id),
                 "accept_edits": bool(s.accept_edits),
                 "pending_permission": s.session_id in self._pending_permission_by_session,
             }
-            for i, s in enumerate(self._sessions)
+            for s in self._sessions
         ]
 
     def _sweep_stale_pending_permissions(self) -> None:
@@ -684,6 +692,8 @@ class App:
         Called reactively from ``_push_sessions`` so badges clear the next
         time any tab state is refreshed. Cheap: the bridge's pending set is
         bounded by the number of concurrent permission requests in flight.
+
+        Caller holds ``_state_lock``.
         """
         if self._permission_bridge is None:
             return
@@ -695,8 +705,9 @@ class App:
                 self._session_by_pending_id.pop(pending_id, None)
 
     def _push_sessions(self) -> None:
-        self._sweep_stale_pending_permissions()
-        payload = json.dumps(self._sessions_descriptor())
+        with self._state_lock:
+            self._sweep_stale_pending_permissions()
+            payload = json.dumps(self._sessions_descriptor())
         self._eval(f"window.apiary.onSessions({payload});")
 
     def _push_active_session(self) -> None:
@@ -709,40 +720,17 @@ class App:
         self._push_file_refs()
 
     def _persist_tabs(self) -> None:
-        tabs_state.save(
-            [
-                TabEntry(
-                    cwd=s.cwd,
-                    accept_edits=s.accept_edits,
-                )
-                for s in self._sessions
-            ],
-            self._active_idx,
-        )
-
-    def set_session_setting(self, session_id: str, key: str, value: bool) -> bool:
-        """Update a per-tab permission toggle.
-
-        Mid-session behavior:
-        - ``accept_edits``: stored only. Applied to the pty lazily — the
-          frontend sends Shift+Tab chord(s) to cycle claude's live permission
-          mode (no pty restart, session history preserved). The stored value
-          is ALSO consumed on the NEXT spawn of this tab (new-tab creation or
-          explicit restart) via --permission-mode acceptEdits.
-        """
-        for s in self._sessions:
-            if s.session_id != session_id:
-                continue
-            if key == "accept_edits":
-                if s.accept_edits == value:
-                    return True
-                s.accept_edits = value
-            else:
-                return False
-            self._push_sessions()
-            self._persist_tabs()
-            return True
-        return False
+        with self._state_lock:
+            entries = [TabEntry(cwd=s.cwd, accept_edits=s.accept_edits) for s in self._sessions]
+            # tabs.json is index-based (it predates ids and survives a restart,
+            # where ids do not); derive the index from the active id at write
+            # time so the id stays the single in-memory source of truth.
+            active_idx = -1
+            for i, s in enumerate(self._sessions):
+                if s.session_id == self._active_id:
+                    active_idx = i
+                    break
+        tabs_state.save(entries, active_idx)
 
     def open_session(self, cwd: str) -> Optional[str]:
         """Create a new Session at ``cwd`` and make it active. Returns the new
@@ -760,8 +748,9 @@ class App:
         sess = self._create_session(path)
         if not sess.start():
             return None
-        self._sessions.append(sess)
-        self._active_idx = len(self._sessions) - 1
+        with self._state_lock:
+            self._sessions.append(sess)
+            self._active_id = sess.session_id
         self._push_active_session()
         self._push_sessions()
         sess.flush_notes()
@@ -770,95 +759,128 @@ class App:
 
     def switch_to(self, session_id: str) -> bool:
         """Make ``session_id`` the active tab. Frontend pushes then apply to it."""
-        for i, s in enumerate(self._sessions):
-            if s.session_id == session_id:
-                if i == self._active_idx:
-                    return True
-                self._active_idx = i
-                self._push_active_session()
-                self._push_sessions()
-                # Re-push active session's transcript + clear so the UI rebuilds.
-                self._push_clear(s.session_id)
-                if s.current_path is not None:
-                    try:
-                        text = s.current_path.read_text(encoding="utf-8", errors="replace")
-                        self._push_messages(parse_jsonl_lines(text), s.session_id)
-                    except OSError as e:
-                        self._push_status(f"Cannot re-read transcript: {e}", s.session_id)
-                # Push this tab's scribe notes immediately so sidebar doesn't
-                # flash empty while waiting on the next aggregator tick.
-                s.flush_notes()
-                # If this tab has a pending permission prompt, surface it now
-                # that the tab is active (onSessionsSwitch on the JS side
-                # drops any banner from the previous tab).
-                pending = self._pending_permission_by_session.get(s.session_id)
-                if pending is not None:
-                    pending_id, payload = pending
-                    self._eval(
-                        "window.apiary.onPermissionPrompt("
-                        f"{json.dumps(pending_id)}, {json.dumps(payload)}"
-                        ");"
-                    )
-                self._persist_tabs()
+        with self._state_lock:
+            if self._find(session_id) is None:
+                return False
+            if session_id == self._active_id:
                 return True
-        return False
+            self._active_id = session_id
+        self._push_active_session()
+        self._push_sessions()
+        self._replay_active()
+        self._persist_tabs()
+        return True
 
     def close_session(self, session_id: str) -> bool:
-        """Stop and remove a session. If it was active, promote the next tab."""
-        for i, s in enumerate(self._sessions):
-            if s.session_id == session_id:
-                # Deny any pending permission prompt for this tab before
-                # tearing down — unblocks the MCP subprocess so it can exit
-                # cleanly instead of waiting on the 5-min bridge timeout.
-                pending = self._pending_permission_by_session.pop(session_id, None)
-                if pending is not None and self._permission_bridge is not None:
-                    pending_id, _ = pending
-                    self._session_by_pending_id.pop(pending_id, None)
-                    try:
-                        self._permission_bridge.resolve(
-                            pending_id,
-                            {"behavior": "deny", "message": "tab closed"},
-                        )
-                    except Exception:
-                        pass
-                try:
-                    s.stop()
-                except Exception:
-                    pass
-                # Tear down this tab's file registry: delete its owned (pasted)
-                # temp files, store, and pasted subdir so a closed tab leaves
-                # nothing behind. Dropped references' targets are untouched.
-                try:
-                    s.file_refs.destroy()
-                except Exception:
-                    pass
-                self._sessions.pop(i)
-                if not self._sessions:
-                    self._active_idx = -1
-                elif self._active_idx >= len(self._sessions):
-                    self._active_idx = len(self._sessions) - 1
-                elif self._active_idx > i:
-                    self._active_idx -= 1
-                self._push_active_session()
-                self._push_sessions()
-                # If a new tab is now active, re-render its transcript.
-                new_active = self.active
-                if new_active is not None:
-                    self._push_clear(new_active.session_id)
-                    if new_active.current_path is not None:
-                        try:
-                            text = new_active.current_path.read_text(
-                                encoding="utf-8", errors="replace"
-                            )
-                            self._push_messages(
-                                parse_jsonl_lines(text), new_active.session_id
-                            )
-                        except OSError:
-                            pass
-                    new_active.flush_notes()
-                self._persist_tabs()
-                return True
-        return False
+        """Stop and remove a session. If it was active, promote the next tab.
+
+        Returns False when the id is unknown — including the second of two
+        racing closes of the same tab, which is what makes a double-click on
+        the ``×`` safe (review gui #5).
+        """
+        with self._state_lock:
+            sess = self._find(session_id)
+            if sess is None:
+                return False
+            idx = self._sessions.index(sess)
+            self._sessions.pop(idx)
+            pending = self._pending_permission_by_session.pop(session_id, None)
+            if pending is not None:
+                self._session_by_pending_id.pop(pending[0], None)
+            if session_id == self._active_id:
+                # Promote the tab that slid into the closed one's slot, or the
+                # new last tab when the closed one was rightmost.
+                if self._sessions:
+                    self._active_id = self._sessions[min(idx, len(self._sessions) - 1)].session_id
+                else:
+                    self._active_id = ""
+            # Closing a NON-active tab leaves _active_id alone — that is the
+            # whole point of keying on id: no index to decrement, nothing to
+            # get wrong when two closes interleave.
+
+        # Everything below is slow or re-entrant (pty teardown, disk, JS) and
+        # runs outside the lock — see the LOCK ORDER RULE in __init__.
+        if pending is not None and self._permission_bridge is not None:
+            # Deny the pending prompt so the MCP subprocess unblocks now
+            # instead of waiting out the 5-min bridge timeout.
+            try:
+                self._permission_bridge.resolve(
+                    pending[0], {"behavior": "deny", "message": "tab closed"}
+                )
+            except Exception:
+                pass
+        try:
+            sess.stop()
+        except Exception:
+            pass
+        # Tear down this tab's file registry: delete its owned (pasted)
+        # temp files, store, and pasted subdir so a closed tab leaves
+        # nothing behind. Dropped references' targets are untouched.
+        try:
+            sess.file_refs.destroy()
+        except Exception:
+            pass
+        self._push_active_session()
+        self._push_sessions()
+        self._replay_active()
+        self._persist_tabs()
+        return True
+
+    def _replay_active(self) -> None:
+        """Re-render whatever tab is active now, from the backend's own state.
+
+        The one replay path for every caller that changes what the chat pane
+        is showing — tab switch, tab close, and page reload each used to
+        hand-roll their own copy and had drifted apart, so a reload lost the
+        agents strip on a switch and a pending permission banner on either
+        (review gui: "Transcript replay block appears three times").
+
+        Pushes, in order: clear → transcript history → scribe notes → agent
+        snapshot → any pending permission prompt. Every step is independently
+        guarded: a tab whose transcript has been deleted still gets its notes.
+
+        NOTE (review gui #10): this re-reads the whole JSONL and ships it as
+        one evaluate_js string. Cheap for normal transcripts, multi-MB for
+        long ones. Chunking/virtualising the render is a separate change.
+        """
+        sess = self.active
+        if sess is None:
+            return
+        sid = sess.session_id
+        self._push_clear(sid)
+        path = sess.current_path
+        if path is not None:
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError as e:
+                self._push_status(f"Cannot re-read transcript: {e}", sid)
+            else:
+                self._push_messages(parse_jsonl_lines(text), sid)
+        # Notes immediately so the sidebar doesn't flash empty while waiting
+        # on the next 5s aggregator tick.
+        try:
+            sess.flush_notes()
+        except Exception as e:
+            print(f"[gui] notes resync failed: {e}", file=sys.stderr)
+        # The tracker dedups by payload key and won't re-emit on its own, so
+        # without this the agents strip stays empty until an agent changes.
+        if sess.subagent_tracker is not None:
+            try:
+                self._push_agents(sess.subagent_tracker.snapshot(), sid)
+            except Exception as e:
+                print(f"[gui] agents resync failed: {e}", file=sys.stderr)
+        # A prompt raised while this tab was in the background (or before a
+        # reload) is still blocking an MCP call — surface it now that the tab
+        # is on screen. The JS side dropped any banner from the previous tab.
+        with self._state_lock:
+            pending = self._pending_permission_by_session.get(sid)
+        if pending is not None:
+            pending_id, payload = pending
+            self._eval(
+                "window.apiary.onPermissionPrompt("
+                f"{json.dumps(pending_id)}, {json.dumps(payload)}"
+                ");"
+            )
 
     def start_services(self) -> None:
         # Webview 'loaded' fires again on every page reload (Ctrl+F5). Without
@@ -893,15 +915,21 @@ class App:
                 entries = [TabEntry(cwd=Path(launch_cwd))]
                 active_idx = 0
 
+        started: list[Session] = []
         for entry in entries:
             sess = self._create_session(
                 entry.cwd,
                 accept_edits=entry.accept_edits,
             )
             if sess.start():
-                self._sessions.append(sess)
-        if self._sessions:
-            self._active_idx = max(0, min(active_idx, len(self._sessions) - 1))
+                started.append(sess)
+        if started:
+            with self._state_lock:
+                self._sessions.extend(started)
+                # tabs.json stores an index; translate it to an id once, here.
+                self._active_id = self._sessions[
+                    max(0, min(active_idx, len(self._sessions) - 1))
+                ].session_id
             self._push_active_session()
             self._push_sessions()
             # Flush notes once for the active tab (backend aggregators only
@@ -920,58 +948,35 @@ class App:
         # enough (GH issue #31021 / L-2026-114) that we don't want to hammer
         # it. One-shot fetch first so the sidebar populates before the first
         # timer tick.
-        self._usage_poller = usage_fetcher.UsagePoller(
-            on_update=self._push_usage, interval=60.0
-        )
-        threading.Thread(
-            target=self._usage_poller.fetch_now, daemon=True
-        ).start()
+        self._usage_poller = usage_fetcher.UsagePoller(on_update=self._push_usage, interval=60.0)
+        threading.Thread(target=self._usage_poller.fetch_now, daemon=True).start()
         self._usage_poller.start()
 
     def _resync_frontend_state(self) -> None:
         """Re-push current state to the webview after a page reload."""
         vars_, theme_err = load_theme()
         self._push_theme(vars_, theme_err)
-        # Replay the active session's transcript so the chat shows history again.
-        sess = self.active
-        if sess is not None:
+        if self.active is not None:
             self._push_active_session()
             self._push_sessions()
-            if sess.current_path is not None:
-                try:
-                    text = sess.current_path.read_text(encoding="utf-8", errors="replace")
-                    history = parse_jsonl_lines(text)
-                    self._push_messages(history, sess.session_id)
-                except OSError as e:
-                    self._push_status(f"Cannot re-read transcript: {e}", sess.session_id)
-            # One-shot notes refresh so the sidebar populates before the next
-            # 5s aggregator tick.
-            try:
-                sess.flush_notes()
-            except Exception as e:
-                print(f"[gui] notes resync failed: {e}", file=sys.stderr)
-            # Re-push current agent snapshot. The tracker dedups by payload
-            # key and won't re-emit on its own after a reload.
-            if sess.subagent_tracker is not None:
-                try:
-                    self._push_agents(
-                        sess.subagent_tracker.snapshot(), sess.session_id
-                    )
-                except Exception as e:
-                    print(f"[gui] agents resync failed: {e}", file=sys.stderr)
+            self._replay_active()
         # Re-push the cached usage payload immediately so meters don't flash
         # empty while waiting for the next poll tick.
         if self._last_usage is not None:
             self._push_usage(self._last_usage)
 
     def shutdown(self) -> None:
-        for sess in self._sessions:
+        with self._state_lock:
+            sessions = self._sessions
+            self._sessions = []
+            self._active_id = ""
+            self._pending_permission_by_session.clear()
+            self._session_by_pending_id.clear()
+        for sess in sessions:
             try:
                 sess.stop()
             except Exception:
                 pass
-        self._sessions = []
-        self._active_idx = -1
         if self._theme_watcher is not None:
             self._theme_watcher.stop()
         if self._usage_poller is not None:
@@ -1006,7 +1011,10 @@ def _webview2_installed() -> bool:
         return True
     client = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
     locations = [
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\\" + client),
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\\" + client,
+        ),
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\EdgeUpdate\Clients\\" + client),
         (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\EdgeUpdate\Clients\\" + client),
     ]
@@ -1033,6 +1041,7 @@ def _environment_warnings() -> list[str]:
         )
     try:
         from gui.pty_wrapper import _resolve_claude_command
+
         if _resolve_claude_command("claude") is None:
             warnings.append(
                 "the `claude` CLI was not found on PATH — sessions can't start "
@@ -1084,6 +1093,11 @@ def main() -> int:
         if not INDEX_HTML.is_file():
             print(f"missing frontend bundle at {INDEX_HTML}", file=sys.stderr)
             return 1
+
+        # Which build is this? Frozen bundles read the commit stamped in at
+        # build time; from source it's resolved live from git. Printed before
+        # anything can go wrong, so a bug report can name a tree state.
+        print(f"apiary GUI {build_info.version_string()}", file=sys.stderr)
 
         for _w in _environment_warnings():
             print(f"warning: {_w}", file=sys.stderr)

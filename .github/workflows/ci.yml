@@ -1,0 +1,158 @@
+name: CI
+
+# The repo's first automated check (516 commits, 30 PRs merged without one —
+# review §5 Phase 4 / §5a-F). The matrix is the point: the dev machine is
+# Windows, so ubuntu/macos legs are the only thing that ever exercises the
+# POSIX paths (`scripts/install.sh`, the repo-local git hooks, `Path.home()`
+# on a non-Windows layout).
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Tests that would otherwise skip a missing optional dependency must fail
+  # here instead — a skip in CI is a check that silently stopped running.
+  # Honoured by gui/test_js_suites.py (node).
+  APIARY_CI: "1"
+  PYTHONIOENCODING: utf-8
+  POETRY_VERSION: 2.2.1
+
+jobs:
+  test:
+    name: test · ${{ matrix.os }} · py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # docs/check.py compares each doc's `last_verified` against that
+          # file's last commit date. The default depth-1 checkout has one
+          # commit, so every file's "last change" would be the tip and every
+          # doc would read as stale. (check.py also skips the rule outright on
+          # a shallow clone, so this is belt and braces — but the belt is what
+          # makes the check actually run in CI.)
+          fetch-depth: 0
+
+      # Poetry first: setup-python's `cache: poetry` shells out to it to find
+      # the lockfile and the venv path.
+      - name: Install Poetry
+        run: pipx install poetry==${{ env.POETRY_VERSION }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: poetry
+
+      # gui/web/*.js carry node:test suites that pytest shells out to
+      # (gui/test_js_suites.py). Without this step they would skip everywhere.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Identify git
+        # core/test_{install,drift,cascade,uninstall}.py build real git repos
+        # and commit in them; a runner has no global identity by default.
+        run: |
+          git config --global user.email "ci@apiary.invalid"
+          git config --global user.name "apiary CI"
+          # The runner/approval code and several tests assume `master`.
+          git config --global init.defaultBranch master
+
+      - name: Check lockfile is in sync
+        run: poetry check --lock
+
+      - name: Install dependencies
+        # The gui group resolves on every platform: pywinpty/pythonnet are
+        # marked win32, pyobjc darwin, and pywebview's GTK/Qt bindings are
+        # extras we never ask for. `env use` pins the venv to the matrix
+        # interpreter rather than whatever python Poetry finds first.
+        run: |
+          poetry env use python
+          poetry install --with gui
+
+      # Lint before the suite: it takes ~1 s and a syntax-adjacent mistake is
+      # cheaper to read here than as a stack trace 3 minutes in. Both commands
+      # read their excludes (`docs`, `.claude`, `.repos`, `.apiary`, `_tmp_*`)
+      # from `[tool.ruff]` in pyproject.toml, so there is nothing to keep in
+      # sync between here and the pre-commit hook.
+      - name: Lint (ruff)
+        run: poetry run ruff check .
+
+      - name: Format check (ruff)
+        # This, not E501, is the line-width gate — see the `ignore` note in
+        # pyproject.toml. `ruff format` locally is the fix.
+        run: poetry run ruff format --check .
+
+      - name: Test suite
+        run: poetry run pytest -q
+
+      - name: Docs framework check
+        run: poetry run python docs/check.py
+
+      - name: CLI claim reconciliation
+        run: poetry run python docs/check_cli_claims.py
+
+      # The generated reference tables (review §5a-D.1). `--check` rebuilds each
+      # block from code and fails when the committed doc differs; the fix is the
+      # same command with --write. Both share the `--help` cache the step above
+      # just warmed, so they cost a second each.
+      - name: Generated CLI tables are in sync
+        run: poetry run python docs/generate_cli_docs.py --check --diff
+
+      - name: Generated reference tables are in sync
+        run: poetry run python docs/generate_reference.py --check --diff
+
+      - name: Secret scan
+        run: poetry run python scripts/secret_scan.py --path .
+
+      - name: Near-duplicate report
+        # Report-only by design (review §5a-C(3)): duplication is a backlog to
+        # work off, not a merge gate. `--fail-on-identical` is the gate mode
+        # to switch to once the reported groups are down to deliberate ones.
+        run: poetry run python scripts/check_duplicates.py --path .
+
+  posix-scripts:
+    # The Windows dev box never runs these. A syntax pass is the cheap half of
+    # "CI is the only thing that exercises install.sh"; a full run would need
+    # `pip install --user poetry`, which is the known PEP-668 failure the
+    # review flags (subsystems/infra-docs-skills.md §5 finding 2).
+    name: shell scripts · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse every POSIX script
+        run: |
+          set -eu
+          for f in scripts/*.sh docs/hooks/pre-commit docs/hooks/pre-commit-secret-scan runner/hooks/post-merge; do
+            [ -f "$f" ] || continue
+            echo "bash -n $f"
+            bash -n "$f"
+          done
+      - name: Reject CRLF in POSIX scripts
+        # .gitattributes forces LF on these; a CRLF shebang is a
+        # `bad interpreter` failure that only ever shows up on POSIX.
+        run: |
+          set -eu
+          for f in scripts/*.sh docs/hooks/pre-commit docs/hooks/pre-commit-secret-scan runner/hooks/post-merge; do
+            [ -f "$f" ] || continue
+            awk '/\r/ { print FILENAME " has CRLF line endings"; exit 1 }' "$f"
+          done

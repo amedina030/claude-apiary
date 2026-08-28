@@ -1,0 +1,18 @@
+{
+  "_comment": [
+    "Compass runtime config. Ships with the code (like runner/config.json).",
+    "",
+    "ab_enabled: false is the shipped default and means NOTHING CHANGES -",
+    "every session is in arm 'on' and personality.md is injected at startup",
+    "exactly as before. Set it to true to start the live A/B: sessions are",
+    "then split deterministically by session id and the 'off' arm gets no",
+    "profile injection. See docs/compass-measurement.md.",
+    "",
+    "ab_seed: change this ONLY to start a fresh measurement window. Changing",
+    "it re-rolls every future session's arm; already-recorded arms in",
+    "<state-dir>/sessions/identity-*.json are never rewritten."
+  ],
+  "ab_enabled": false,
+  "ab_seed": "compass-ab-2026-08",
+  "ab_on_fraction": 0.5
+}

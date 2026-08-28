@@ -8,7 +8,9 @@ The registry stores scheduled entries in a backend-agnostic shape
 (``RegistryEntry`` in cron_health) and each backend is responsible for
 translating to and from its native representation.
 """
+
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Optional, Protocol
 
@@ -30,6 +32,7 @@ class ObservedEntry:
       (``{"type": "daily", "time": "02:00"}`` etc.) matching the
       registry's schedule shape.
     """
+
     entry_id: str
     command: list[str]
     cwd: str
@@ -51,8 +54,12 @@ class SchedulerBackend(Protocol):
         ...
 
     def create_entry(
-        self, prefix: str, entry_id: str, command: list[str],
-        cwd: str, schedule: dict,
+        self,
+        prefix: str,
+        entry_id: str,
+        command: list[str],
+        cwd: str,
+        schedule: dict,
     ) -> None:
         """Register a new entry under ``<prefix><entry_id>``.
 
