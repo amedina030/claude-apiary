@@ -6,7 +6,7 @@ promote it to intake, create an intake directly, bridge a `/refine` handoff
 note into either, validate the result. Between them they carried three
 `slugify` implementations, three `read_todo`/`read_note` implementations, and
 three places that shelled out to `python -m runner.validate_intake` instead of
-importing its `validate()` (review X-3, `docs/review/subsystems/runner.md`
+importing its `validate()` (review X-3, `git show 5b95eaa:docs/review/subsystems/runner.md`
 §2/§8). There is one of each here.
 
 Usage:

@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Deep review 2026-08 — close-out (2026-08-28)
+
+- The review's dated snapshots under `docs/review/` (LLM and plain-language
+  editions plus six subsystem appendices) are deleted; they described the tree
+  as it stood on 2026-08-26 and every decision they recorded has now landed.
+  They remain in git history — `git show 5b95eaa:docs/review/review-for-llm.md`
+  (§5a amendments and the §6 decision record are the authoritative plan) — and
+  the six code docstrings that cite them now say so.
+- Commit range of the programme: `a150975` (PR #32, the review) → `c89cf84`
+  (PR #33, Phase 0 safety) → `5b95eaa` (PR #35, Phases 1–5 + the compass
+  measurement programme, merged with a merge commit; PR #34 superseded).
+  Tagged `v0.1.0` at `11b6d33`, the commit `VERSION` last changed in.
+- Morning checklist executed: `apiary self-bootstrap`, all 15 registered repos
+  re-bootstrapped, repo hooks reinstalled, `doctor pins` / `doctor versions`
+  clean, `apiary update` 16/16 current, frontmatter migration applied (138
+  state files, 0 for review), four merged remote branches deleted.
+  Still open: the targeted post-merge review of #35 (T-2026-293), the runner
+  ten-night acceptance (T-2026-269), the compass Gate A decision (T-2026-270).
+- Two first-morning findings fixed: `docs/generate_reference.py` globbed
+  `.claude/commands/` (the copies `apiary self-bootstrap` installs) as if they
+  were command sources, so the slash-command table drifted the moment the
+  main checkout was bootstrapped; and `docs/test_change_map.py` compared a
+  real doc's `last_verified` against the real clock, failing every day after
+  the doc was verified.
+
 ### Phase 5 — docs generated from code or tested against it (2026-08-27)
 
 - **Reference tables are generated** — the CLI index and every flag/subcommand

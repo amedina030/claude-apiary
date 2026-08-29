@@ -3,7 +3,7 @@
 Apiary is stdlib-only (see ``docs/standards/code-style.md``), so PyYAML is
 off-limits and every subsystem that wanted "markdown with YAML frontmatter"
 grew its own parser. The 2026-08 deep review counted five
-(``docs/review/subsystems/knowledge.md`` §3, "How many frontmatter/YAML
+(``git show 5b95eaa:docs/review/subsystems/knowledge.md`` §3, "How many frontmatter/YAML
 parsers?") and verified that two of them emit shapes the others cannot read:
 ``loads('tags: [a, b]')`` returned the *string* ``'[a, b]'`` in one, and a
 block list came back as ``''`` in the other. This module is the single

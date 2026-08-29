@@ -1,7 +1,7 @@
 """Parity tests for every frontmatter reader in the repo (Phase 3.3).
 
 Five subsystems once carried five hand-rolled ``---`` parsers
-(``docs/review/subsystems/knowledge.md`` §3). Nothing failed when they drifted:
+(``git show 5b95eaa:docs/review/subsystems/knowledge.md`` §3). Nothing failed when they drifted:
 a learning's ``tags: [a, b]`` came back from researcher's reader as the *string*
 ``'[a, b]'``, and a research entry's block list came back from scribe's as
 ``''``. Two files that were both "markdown with YAML frontmatter" could not be
