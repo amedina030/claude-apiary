@@ -29,6 +29,11 @@
   The git hooks in `docs/hooks/` also resolved Python via the `py` launcher
   before the repo's `.venv`, so the pre-commit lint step never found `ruff`
   and skipped on every commit; the venv is probed first now.
+- `core/testing.init_git_repo` copied the shared golden `.git` while git's
+  background auto-maintenance could still be writing `objects/maintenance.lock`
+  in it (macOS CI, first two pushes to master after the merge): the seed now
+  sets `gc.auto=0` / `maintenance.auto=false`, which every copy inherits, and
+  the copy ignores `*.lock`.
 
 ### Phase 5 — docs generated from code or tested against it (2026-08-27)
 

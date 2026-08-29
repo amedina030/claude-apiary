@@ -127,6 +127,12 @@ def _golden_git_dir() -> Path:
     seed = _session_root() / "golden-git"
     seed.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=seed, check=True)
+    # No background maintenance in the seed or in any copy of it: git may
+    # detach `gc --auto` / `maintenance run` after the commit below and drop
+    # a transient .git/objects/maintenance.lock while copytree is walking
+    # the tree (seen on macOS CI: "[Errno 2] ... maintenance.lock").
+    subprocess.run(["git", "config", "gc.auto", "0"], cwd=seed, check=True)
+    subprocess.run(["git", "config", "maintenance.auto", "false"], cwd=seed, check=True)
     subprocess.run(
         [
             "git",
@@ -157,7 +163,12 @@ def init_git_repo(path: Path) -> Path:
     """
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(_golden_git_dir(), path / ".git", dirs_exist_ok=True)
+    shutil.copytree(
+        _golden_git_dir(),
+        path / ".git",
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("*.lock"),  # never part of a repo's state
+    )
     return path
 
 
