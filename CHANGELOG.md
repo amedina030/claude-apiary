@@ -20,12 +20,15 @@
   state files, 0 for review), four merged remote branches deleted.
   Still open: the targeted post-merge review of #35 (T-2026-293), the runner
   ten-night acceptance (T-2026-269), the compass Gate A decision (T-2026-270).
-- Two first-morning findings fixed: `docs/generate_reference.py` globbed
+- Three first-morning findings fixed: `docs/generate_reference.py` globbed
   `.claude/commands/` (the copies `apiary self-bootstrap` installs) as if they
   were command sources, so the slash-command table drifted the moment the
   main checkout was bootstrapped; and `docs/test_change_map.py` compared a
   real doc's `last_verified` against the real clock, failing every day after
   the doc was verified.
+  The git hooks in `docs/hooks/` also resolved Python via the `py` launcher
+  before the repo's `.venv`, so the pre-commit lint step never found `ruff`
+  and skipped on every commit; the venv is probed first now.
 
 ### Phase 5 — docs generated from code or tested against it (2026-08-27)
 
