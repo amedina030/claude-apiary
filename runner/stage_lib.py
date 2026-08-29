@@ -2,7 +2,7 @@
 """Shared plumbing for the runner's LLM stages.
 
 Before this module the same four jobs were reimplemented once per stage
-(review X-3, `docs/review/subsystems/runner.md` §2):
+(review X-3, `git show 5b95eaa:docs/review/subsystems/runner.md` §2):
 
 * ``run_claude`` — 5 copies (auto_refine, auto_plan, executor, auto_harden,
   approval), each with its own timeout/model lookup.

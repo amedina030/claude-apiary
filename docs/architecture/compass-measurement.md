@@ -4,13 +4,13 @@ title: "Compass measurement programme"
 scope: project
 description: How compass is measured — offline predictive validity, the live A/B, the doctor health check, and a proposed keep/delete rule
 framework_version: "1.0"
-last_verified: 2026-08-26
+last_verified: 2026-08-28
 ---
 
 # Compass measurement programme
 
 The 2026-08 deep review kept compass on one condition: **measure it**
-(`docs/review/review-for-llm.md` §5a-H; decision record §6 row 3). The
+(`git show 5b95eaa:docs/review/review-for-llm.md` §5a-H; decision record §6 row 3). The
 profile has been injected into every session start for months and there was
 no evidence either way that it changes how Claude responds. This document
 describes the three instruments that now exist, the numbers to look at, and

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 DOCS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = DOCS_DIR.parent
@@ -146,8 +147,15 @@ class CliTests(unittest.TestCase):
         self.assertEqual(cm.main(["--paths", "core/hooks/dispatch.py"]), 1)
 
     def test_paths_mode_with_the_doc_exits_zero(self):
-        self.assertEqual(
-            cm.main(["--paths", "core/hooks/dispatch.py", "docs/reference/hooks.md"]), 0)
+        # The gate compares the doc's last_verified with the real clock, so pin
+        # "today" to the date hooks.md was actually verified; otherwise this test
+        # starts failing the morning after anyone re-verifies that doc.
+        doc = (REPO_ROOT / "docs/reference/hooks.md").read_text(encoding="utf-8")
+        verified = cm.FRONTMATTER_DATE_RE.search(doc).group(1)
+        fake_date = mock.Mock(**{"today.return_value.isoformat.return_value": verified})
+        with mock.patch.object(cm, "date", fake_date):
+            self.assertEqual(
+                cm.main(["--paths", "core/hooks/dispatch.py", "docs/reference/hooks.md"]), 0)
 
     def test_the_env_escape_lets_it_through(self):
         os.environ[cm.ENV_ESCAPE] = "1"

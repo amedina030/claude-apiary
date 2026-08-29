@@ -141,6 +141,8 @@ def command_records() -> list[docgen.Record]:
     """Every ``<tool>/commands/*.md``, named by its frontmatter ``name``."""
     records: list[docgen.Record] = []
     for path in sorted(REPO_ROOT.glob("*/commands/*.md")):
+        if path.relative_to(REPO_ROOT).parts[0].startswith("."):
+            continue    # .claude/commands/ holds the installed copies, not sources
         fm, _ = frontmatter.parse(path.read_text(encoding="utf-8"))
         name = (fm or {}).get("name") or path.stem
         rel = path.relative_to(REPO_ROOT).as_posix()

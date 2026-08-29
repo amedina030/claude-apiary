@@ -2,7 +2,7 @@
 """Hermetic end-to-end test for the six-stage runner pipeline.
 
 This is the acceptance harness the deep review asked for (review §5a-G item 1,
-`docs/review/subsystems/runner.md` §6: "There is no end-to-end test that runs
+`git show 5b95eaa:docs/review/subsystems/runner.md` §6: "There is no end-to-end test that runs
 two real stage subprocesses back-to-back with a fake `claude` binary").
 
 What is real here:
