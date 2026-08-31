@@ -645,6 +645,12 @@ def build_step_prompt(step: dict, spec: dict, retry_hint: str = "") -> str:
             "",
             "Write the actual code — not pseudocode, not explanations. Just implement it.",
             "Use the existing codebase patterns and conventions.",
+            "Do NOT run `poetry install`, `poetry run`, `pip install`, or "
+            "create any virtualenv: this worktree deliberately has no venv, "
+            "the codebase is stdlib-only, and a mid-run venv install races "
+            "the commit hooks (retry 2026-08-31: it produced a phantom "
+            "generated-doc drift that aborted the run). Run any test with "
+            "plain `python -m unittest ...`.",
         ]
     )
 
