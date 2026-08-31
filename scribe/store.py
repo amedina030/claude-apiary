@@ -391,10 +391,6 @@ class ScribeStore:
 
     # --- Per-(type,year) sequence counter ---
 
-    def _year_dir(self, type_dir: Path, year: int) -> Path:
-        """Return type_dir/<year>. Does NOT create it."""
-        return type_dir / str(year)
-
     def _ensure_year_dir(self, type_dir: Path, year: int) -> Path:
         """Ensure type_dir/<year> exists with index, next_seq, and archive. Returns it."""
         year_dir = type_dir / str(year)
