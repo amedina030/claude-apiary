@@ -4,7 +4,9 @@
 Stdlib unittest only (no pytest), per docs/standards/code-style.md.
 """
 
+import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -890,6 +892,154 @@ class TestTargetRepoRoot(unittest.TestCase):
         rebound one — otherwise every target looks like apiary."""
         self.assertEqual(_resolve_banned_tokens(str(self.target)), {})
         self.assertNotEqual(_resolve_banned_tokens(None), {})
+
+
+class TestRemovalCoverageDefinitionFilter(unittest.TestCase):
+    """Overnight 2026-08-30/31: prose-level symbol extraction flagged
+    identifiers the steps merely mentioned (HookResult, sort_keys, to_dict)
+    and demanded every repo file that greps for them, so dead-code plans
+    could never validate. The check now only fires when the symbol's
+    definition lives inside the plan's own files."""
+
+    def _run(self, steps, references, definitions):
+        """Run _check_removal_coverage with git grep stubbed out.
+
+        references/definitions: repo-relative paths returned for the
+        reference grep (-w) and the definition grep (-lE) respectively.
+        """
+
+        def fake_run(cmd, **kwargs):
+            out = definitions if "-lE" in cmd else references
+            return subprocess.CompletedProcess(
+                cmd,
+                0 if out else 1,
+                stdout="\n".join(out) + ("\n" if out else ""),
+                stderr="",
+            )
+
+        with mock.patch.object(validate_plan.subprocess, "run", side_effect=fake_run):
+            return validate_plan._check_removal_coverage(steps)
+
+    def _removal_step(self, files):
+        return _step(
+            1,
+            "modify",
+            "Apply the edit.",
+            description="Remove the unused function stale_helper from the module.",
+            files=files,
+        )
+
+    def test_symbol_defined_in_plan_file_and_referenced_outside_is_flagged(self):
+        errors = self._run(
+            [self._removal_step(["pkg/mod.py"])],
+            references=["pkg/mod.py", "pkg/other.py"],
+            definitions=["pkg/mod.py"],
+        )
+        self.assertTrue(any("stale_helper" in e for e in errors), errors)
+
+    def test_symbol_with_no_definition_anywhere_is_skipped(self):
+        # sort_keys / cache_read case: a kwarg or dict key, not a symbol.
+        errors = self._run(
+            [self._removal_step(["pkg/mod.py"])],
+            references=["pkg/mod.py", "pkg/other.py"],
+            definitions=[],
+        )
+        self.assertEqual(errors, [])
+
+    def test_symbol_defined_outside_the_plan_is_skipped(self):
+        # HookResult case: the step mentions a class defined elsewhere.
+        errors = self._run(
+            [self._removal_step(["pkg/mod.py"])],
+            references=["pkg/mod.py", "pkg/other.py"],
+            definitions=["core/hook_context.py"],
+        )
+        self.assertEqual(errors, [])
+
+    def test_symbol_defined_both_in_and_out_of_the_plan_is_skipped(self):
+        # to_dict case: many classes define the same method name; outside
+        # references bind to their own definitions.
+        errors = self._run(
+            [self._removal_step(["pkg/mod.py"])],
+            references=["pkg/mod.py", "pkg/other.py"],
+            definitions=["pkg/mod.py", "gui/transcript.py"],
+        )
+        self.assertEqual(errors, [])
+
+    def test_fully_covered_removal_stays_clean(self):
+        errors = self._run(
+            [self._removal_step(["pkg/mod.py", "pkg/other.py"])],
+            references=["pkg/mod.py", "pkg/other.py"],
+            definitions=["pkg/mod.py"],
+        )
+        self.assertEqual(errors, [])
+
+
+class TestChangeMapCoverage(unittest.TestCase):
+    """Overnight 2026-08-29: the executor's commit tripped the repo's
+    change-map doc gate at stage 4, after the tokens were already spent.
+    The validator now applies the same map at plan time."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.target = Path(self._tmp.name).resolve() / "target"
+        (self.target / "docs").mkdir(parents=True)
+        (self.target / "src").mkdir()
+        (self.target / "src" / "mapped.py").write_text("x = 1\n", encoding="utf-8")
+        (self.target / "docs" / "thing.md").write_text("doc\n", encoding="utf-8")
+        (self.target / "docs" / "change_map.json").write_text(
+            json.dumps(
+                {
+                    "entries": [
+                        {
+                            "id": "thing",
+                            "code": ["src/mapped.py"],
+                            "docs": ["docs/thing.md"],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def _check(self, steps):
+        with validate_plan.repo_root_scope(self.target):
+            return validate_plan._check_change_map_coverage(steps)
+
+    def test_mapped_code_without_doc_is_rejected(self):
+        errors = self._check([_step(1, "modify", "spec", files=["src/mapped.py"])])
+        self.assertTrue(any("change-map gate" in e and "'thing'" in e for e in errors), errors)
+
+    def test_plan_updating_the_doc_passes(self):
+        errors = self._check(
+            [
+                _step(1, "modify", "spec", files=["src/mapped.py"]),
+                _step(2, "modify", "spec", files=["docs/thing.md"], depends_on=[1]),
+            ]
+        )
+        self.assertEqual(errors, [])
+
+    def test_docs_unchanged_attestation_passes(self):
+        step = _step(1, "modify", "spec", files=["src/mapped.py"])
+        step["docs_unchanged"] = True
+        self.assertEqual(self._check([step]), [])
+
+    def test_unmapped_files_pass(self):
+        errors = self._check([_step(1, "modify", "spec", files=["src/free.py"])])
+        self.assertEqual(errors, [])
+
+    def test_repo_without_a_map_passes(self):
+        with validate_plan.repo_root_scope(Path(self._tmp.name)):
+            errors = validate_plan._check_change_map_coverage(
+                [_step(1, "modify", "spec", files=["src/mapped.py"])]
+            )
+        self.assertEqual(errors, [])
+
+    def test_docs_unchanged_must_be_boolean(self):
+        step = _step(1, "create", "make a file", files=["src/new_file.py"])
+        step["docs_unchanged"] = "yes"
+        errors = validate(_base_plan([step]), repo_root=self.target)
+        self.assertTrue(any("docs_unchanged" in e and "boolean" in e for e in errors), errors)
 
 
 if __name__ == "__main__":

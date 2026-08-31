@@ -36,6 +36,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # checkout and every check (including the secret scan) would run against the
 # wrong tree.
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+# Main checkout root. In a linked worktree (the runner works in
+# .runner-worktrees/*) the toplevel has no .venv, but the main checkout's
+# does -- git-common-dir points at the main .git, whose parent is the main
+# checkout. Equal to REPO_ROOT outside a worktree; on gits too old for
+# --path-format the dirname of the relative path is just '.', and the venv
+# probes below fail closed to the PATH fallbacks.
+MAIN_ROOT="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")"
 
 # Resolve a Python 3 interpreter portably. No single name works everywhere:
 # Windows ships the `py` launcher, Unix ships `python3`, some boxes only have
@@ -49,6 +56,8 @@ if [ -n "$APIARY_PYTHON" ]; then
 # below would quietly skip on every commit.
 elif [ -x "$REPO_ROOT/.venv/Scripts/python.exe" ]; then PY=("$REPO_ROOT/.venv/Scripts/python.exe")
 elif [ -x "$REPO_ROOT/.venv/bin/python" ];         then PY=("$REPO_ROOT/.venv/bin/python")
+elif [ -x "$MAIN_ROOT/.venv/Scripts/python.exe" ]; then PY=("$MAIN_ROOT/.venv/Scripts/python.exe")
+elif [ -x "$MAIN_ROOT/.venv/bin/python" ];         then PY=("$MAIN_ROOT/.venv/bin/python")
 elif command -v py      >/dev/null 2>&1 && _is_py3 py -3;   then PY=(py -3)
 elif command -v python3 >/dev/null 2>&1 && _is_py3 python3; then PY=(python3)
 elif command -v python  >/dev/null 2>&1 && _is_py3 python;  then PY=(python)
@@ -65,6 +74,17 @@ elif command -v ruff >/dev/null 2>&1; then
     RUFF=(ruff)
 elif "${PY[@]}" -c 'import ruff' >/dev/null 2>&1; then
     RUFF=("${PY[@]}" -m ruff)
+# The runner's worktree venv (created without the dev group) satisfies the
+# PY probe but has no ruff -- fall through to the venv ruff executables,
+# worktree first, then the main checkout's.
+elif [ -x "$REPO_ROOT/.venv/Scripts/ruff.exe" ]; then
+    RUFF=("$REPO_ROOT/.venv/Scripts/ruff.exe")
+elif [ -x "$REPO_ROOT/.venv/bin/ruff" ]; then
+    RUFF=("$REPO_ROOT/.venv/bin/ruff")
+elif [ -x "$MAIN_ROOT/.venv/Scripts/ruff.exe" ]; then
+    RUFF=("$MAIN_ROOT/.venv/Scripts/ruff.exe")
+elif [ -x "$MAIN_ROOT/.venv/bin/ruff" ]; then
+    RUFF=("$MAIN_ROOT/.venv/bin/ruff")
 else
     RUFF=()
 fi

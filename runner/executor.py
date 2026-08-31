@@ -16,6 +16,7 @@ Usage:
 
 import argparse
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -237,7 +238,7 @@ def _assert_action_matches_staged(action: str, files: list):
         )
 
 
-def commit_files(files: list, message: str, action: str = ""):
+def commit_files(files: list, message: str, action: str = "", docs_unchanged: bool = False):
     """Stage specific files and commit them on the current branch.
 
     This is the runner's single commit path — every file mutation that the
@@ -281,7 +282,25 @@ def commit_files(files: list, message: str, action: str = ""):
         )
     if action:
         _assert_action_matches_staged(action, files)
-    result = git("commit", "-m", message)
+    if docs_unchanged:
+        # The planner attested (and _check_change_map_coverage validated)
+        # that this change does not affect the docs mapped to these files.
+        # Waive the change-map gate the way its own docs prescribe: the
+        # trailer satisfies the commit-msg hook and records the attestation
+        # in history; the env var satisfies the pre-commit half, which runs
+        # before git has written the message and cannot see the trailer.
+        message = message.rstrip() + "\n\ndocs: unchanged"
+        prev = os.environ.get("APIARY_DOCS_UNCHANGED")
+        os.environ["APIARY_DOCS_UNCHANGED"] = "1"
+        try:
+            result = git("commit", "-m", message)
+        finally:
+            if prev is None:
+                os.environ.pop("APIARY_DOCS_UNCHANGED", None)
+            else:
+                os.environ["APIARY_DOCS_UNCHANGED"] = prev
+    else:
+        result = git("commit", "-m", message)
     if result.returncode != 0:
         raise RuntimeError(
             _format_git_error(
@@ -979,6 +998,7 @@ def run_step_with_commit(
                 files,
                 f"runner/{uuid} step {step_num}: {step.get('description', '')}",
                 action=step.get("action", ""),
+                docs_unchanged=step.get("docs_unchanged") is True,
             )
             return step_result, None
         except NoChangesError as e:

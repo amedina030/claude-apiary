@@ -19,6 +19,7 @@ Usage:
 
 import argparse
 import contextlib
+import fnmatch
 import json
 import os
 import re
@@ -831,6 +832,44 @@ def _check_removal_coverage(steps: list[dict]) -> list[str]:
             _SELF = "runner/validate_plan.py"
             py_files = {f for f in referencing_files if f.endswith(".py") and f != _SELF}
 
+            # Definition-site filter (overnight 2026-08-30/31): the symbol
+            # extraction above is prose-level -- it picks up identifiers the
+            # step merely *mentions* (a kwarg like sort_keys, a class the
+            # code_spec references like HookResult) and then demands every
+            # repo file that greps for them. Only treat the symbol as being
+            # removed when its *definition* (def/class/module assignment)
+            # lives in files this plan touches. No definition anywhere -> a
+            # kwarg/attribute/prose mention, skip. A definition outside the
+            # plan -> this plan is not removing it (or references bind to
+            # their own definition elsewhere), skip.
+            try:
+                def_result = subprocess.run(
+                    [
+                        "git",
+                        "grep",
+                        "-lE",
+                        rf"^\s*(def|class)\s+{symbol}\b|^{symbol}\s*=",
+                        "--",
+                        "*.py",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=10,
+                    cwd=str(_REPO_ROOT),
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            def_files = {
+                f.strip().replace("\\", "/")
+                for f in (def_result.stdout or "").splitlines()
+                if f.strip()
+            } - {_SELF}
+            if def_result.returncode != 0 or not def_files:
+                continue
+            if not def_files <= plan_files:
+                continue
+
             uncovered = py_files - plan_files
             if uncovered:
                 errors.append(
@@ -840,6 +879,92 @@ def _check_removal_coverage(steps: list[dict]) -> list[str]:
                     + (f" (and {len(uncovered) - 5} more)" if len(uncovered) > 5 else "")
                 )
 
+    return errors
+
+
+def _load_change_map() -> list[dict]:
+    """Load the target repo's docs/change_map.json entries ([] when absent)."""
+    path = _REPO_ROOT / "docs" / "change_map.json"
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    entries = data.get("entries") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        return []
+    return [e for e in entries if isinstance(e, dict)]
+
+
+def _change_map_matches(path: str, patterns) -> bool:
+    """fnmatch against repo-relative paths, with `**` crossing directories.
+
+    Mirrors docs/change_map.py:matches() -- replicated rather than imported
+    because docs/ is not a package and the map being applied belongs to the
+    *target* repo, not necessarily to apiary.
+    """
+    for pattern in patterns:
+        if not isinstance(pattern, str):
+            continue
+        if fnmatch.fnmatch(path, pattern):
+            return True
+        if "**" in pattern and fnmatch.fnmatch(path, pattern.replace("**/", "*")):
+            return True
+    return False
+
+
+def _check_change_map_coverage(steps: list[dict]) -> list[str]:
+    """Apply the target repo's commit-time doc gate at plan time.
+
+    Overnight 2026-08-29: the executor's commit of scribe/store.py was
+    blocked by the pre-commit change-map gate (docs/change_map.py) -- the
+    plan touched mapped code without touching its doc, and the run aborted
+    at stage 4 with the tokens already spent. Reject the plan up front
+    instead: either a step updates one of the mapped docs, or the step
+    touching the mapped code carries `"docs_unchanged": true`, which the
+    executor turns into the gate's documented waiver at commit time.
+    """
+    entries = _load_change_map()
+    if not entries:
+        return []
+
+    plan_files: set[str] = set()
+    attested: set[str] = set()
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        files = [
+            f.replace("\\", "/").strip() for f in s.get("files", []) if isinstance(f, str) and f
+        ]
+        plan_files.update(files)
+        if s.get("docs_unchanged") is True:
+            attested.update(files)
+
+    errors = []
+    for entry in entries:
+        code_globs = entry.get("code", [])
+        doc_globs = entry.get("docs", [])
+        if not isinstance(code_globs, list) or not isinstance(doc_globs, list):
+            continue
+        touched = sorted(p for p in plan_files if _change_map_matches(p, code_globs))
+        if not touched:
+            continue
+        if any(_change_map_matches(p, doc_globs) for p in plan_files):
+            continue
+        if all(p in attested for p in touched):
+            continue
+        shown = ", ".join(touched[:3]) + (f" (+{len(touched) - 3})" if len(touched) > 3 else "")
+        errors.append(
+            f"change-map gate: {shown} changed but the plan touches none of "
+            f"{', '.join(str(d) for d in doc_globs)} (docs/change_map.json "
+            f"entry '{entry.get('id', '?')}') -- the repo's commit hook will "
+            f"block the executor at commit time. Either add a step that "
+            f"updates one of those docs (and bumps its `last_verified:` "
+            f'date), or set "docs_unchanged": true on the step(s) touching '
+            f"the mapped code after verifying the doc's claims are "
+            f"unaffected."
+        )
     return errors
 
 
@@ -987,6 +1112,10 @@ def _validate(data: dict, banned_tokens: dict) -> list[str]:
                     f"(expected: {', '.join(sorted(VALID_MODELS))})"
                 )
 
+        # Optional per-step docs_unchanged attestation (change-map gate).
+        if "docs_unchanged" in step and not isinstance(step.get("docs_unchanged"), bool):
+            errors.append(f"{label}: field 'docs_unchanged' must be a boolean")
+
         # Track files that create steps will produce, so modify/delete
         # steps can reference them without a "file not found" error.
         if action == "create":
@@ -1045,6 +1174,10 @@ def _validate(data: dict, banned_tokens: dict) -> list[str]:
     # Symbol removal coverage: reject plans that remove a symbol without
     # covering all files that reference it.
     errors.extend(_check_removal_coverage(steps))
+
+    # Change-map doc gate (overnight 2026-08-29): reject plans whose mapped
+    # code changes the repo's commit-time doc gate would block anyway.
+    errors.extend(_check_change_map_coverage(steps))
 
     # Post-conditions schema (#T-2026-122 phase 2) — optional per-step
     # verification declarations used by the executor to decide success
