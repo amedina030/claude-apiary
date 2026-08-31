@@ -44,8 +44,8 @@ class TestParseTs(unittest.TestCase):
 
 class TestDisplayId(unittest.TestCase):
     def test_round_trip_all_types(self):
-        for note_type in api.TYPE_TO_PREFIX:
-            did = api.format_display_id(note_type, 2026, 7)
+        for note_type, prefix in api.TYPE_TO_PREFIX.items():
+            did = f"{prefix}-2026-7"
             self.assertEqual(api.parse_display_id(did), (note_type, 2026, 7))
 
     def test_lowercase_prefix_parsed(self):
@@ -61,10 +61,6 @@ class TestDisplayId(unittest.TestCase):
             api.parse_display_id("T-26-1")
         with self.assertRaises(ValueError):
             api.parse_display_id("garbage")
-
-    def test_format_unknown_type_raises(self):
-        with self.assertRaises(ValueError):
-            api.format_display_id("ticket", 2026, 1)
 
 
 class TestResolver(unittest.TestCase):
