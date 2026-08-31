@@ -35,6 +35,7 @@ __all__ = [
     "open_store",
     "normalize_entry",
     "parse_display_id",
+    "format_display_id",
     "parse_ts",
     "PREFIX_TO_TYPE",
     "TYPE_TO_PREFIX",
@@ -94,6 +95,16 @@ def parse_display_id(display_id: str) -> "tuple[str, int, int]":
             f"unknown prefix {prefix!r} in {display_id!r}; expected one of {''.join(PREFIX_TO_TYPE)}"
         )
     return note_type, int(m.group(2)), int(m.group(3))
+
+
+def format_display_id(note_type: str, year: int, seq: int) -> str:
+    """Format ``(type_name, year, seq)`` → ``PREFIX-YEAR-SEQ``."""
+    prefix = TYPE_TO_PREFIX.get(note_type)
+    if prefix is None:
+        raise ValueError(
+            f"unknown note type {note_type!r}; expected one of {sorted(TYPE_TO_PREFIX)}"
+        )
+    return f"{prefix}-{year}-{seq}"
 
 
 def _registry(apiary_repo: Path) -> dict:

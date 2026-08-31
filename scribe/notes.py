@@ -16,8 +16,8 @@ and the printing. Everything a handler does beyond that lives next door —
 ===================  =======================================================
 
 Notes are operational state — deferred work, handoffs, decisions — stored one
-folder per type (``todos/``, ``handoffs/``, ``decisions/``, ...) as
-``<state-dir>/scribe/<folder>/<year>/<seq>.md`` with an ``index.jsonl`` beside
+folder per type (the folder names, not all pluralized, are ``scribe.store.TYPE_FOLDERS``)
+as ``<state-dir>/scribe/<folder>/<year>/<seq>.md`` with an ``index.jsonl`` beside
 them. Learnings are the same shape under ``learnings/`` and never auto-archive.
 
 Requires PYTHONUTF8=1 on Windows. Run ``notes.py --help`` for the verbs — the

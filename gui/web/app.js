@@ -435,7 +435,7 @@
     modelBadgeEl.focus();
   }, true);
 
-  // --- markdown render (hand-rolled subset: emphasis, code, links, lists, tables) ---
+  // --- markdown render (hand-rolled subset: inline code spans, fenced code blocks, GFM tables) ---
   function escapeHtml(s) {
     return s
       .replace(/&/g, "&amp;")
