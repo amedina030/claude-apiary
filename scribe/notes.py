@@ -15,8 +15,9 @@ and the printing. Everything a handler does beyond that lives next door —
 ``scribe.cli_args``  the argparse declaration — the CLI contract, in one place
 ===================  =======================================================
 
-Notes are operational state — deferred work, handoffs, decisions — stored as
-``<state-dir>/scribe/<type>/<year>/<seq>.md`` with an ``index.jsonl`` beside
+Notes are operational state — deferred work, handoffs, decisions — stored one
+folder per type (``todos/``, ``handoffs/``, ``decisions/``, ...) as
+``<state-dir>/scribe/<folder>/<year>/<seq>.md`` with an ``index.jsonl`` beside
 them. Learnings are the same shape under ``learnings/`` and never auto-archive.
 
 Requires PYTHONUTF8=1 on Windows. Run ``notes.py --help`` for the verbs — the
