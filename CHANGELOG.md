@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The startup prompt hook now strips the skill header with
+  `core.frontmatter.split` instead of its own fence scan — the last hand-rolled
+  parser is gone, so `core/test_frontmatter_parity.py` no longer exempts it in
+  `ALLOWED` and asserts its delegation in `DELEGATORS`. The injected `apiary
+  toolkit rules` block is byte-identical.
+
 ### Deep review 2026-08 — close-out (2026-08-28)
 
 - The review's dated snapshots under `docs/review/` (LLM and plain-language
