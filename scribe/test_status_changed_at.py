@@ -86,9 +86,7 @@ class TestExplicitStatusChangedAt(unittest.TestCase):
 
     def test_empty_status_changed_at_gets_fresh_stamp(self):
         a = self._add()
-        u = self.store.update_note(
-            "todo", a["year"], a["seq"], status="done", status_changed_at=""
-        )
+        u = self.store.update_note("todo", a["year"], a["seq"], status="done", status_changed_at="")
         self._assert_near_now(u["status_changed_at"])
 
     def test_status_without_explicit_timestamp_gets_fresh_stamp(self):
@@ -119,9 +117,7 @@ class TestExplicitStatusChangedAt(unittest.TestCase):
         a = self._add()
         self.store.update_note("todo", a["year"], a["seq"], status="done")
         stale = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
-        u = self.store.update_note(
-            "todo", a["year"], a["seq"], status_changed_at=stale
-        )
+        u = self.store.update_note("todo", a["year"], a["seq"], status_changed_at=stale)
         self.assertEqual(u["status_changed_at"], stale)
         self.assertEqual(policy.run_auto_archive(self.store), 1)
 
