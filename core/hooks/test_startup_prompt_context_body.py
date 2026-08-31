@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -102,11 +103,22 @@ class TestContextBody(unittest.TestCase):
 
 
 class TestHookInjectsStrippedRules(unittest.TestCase):
+    def _purge_session_flags(self, sid: str) -> None:
+        for f in (REPO / ".claude" / "apiary" / "session-tmp").glob(f"{sid}_*"):
+            f.unlink(missing_ok=True)
+
     def test_injected_rules_block_has_no_skill_header(self):
+        # A unique id per run: the hook's run-once flag lives in the REAL
+        # repo's .claude/apiary/session-tmp keyed by session id (env-blind),
+        # so a fixed id collides with a flag left by any earlier run and the
+        # hook emits {} forever after. Exactly that happened on the runner's
+        # first execution (2026-08-31): a flag from 08-26 predated this test.
+        sid = str(uuid.uuid4())
+        self.addCleanup(self._purge_session_flags, sid)
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp).resolve()
             payload = {
-                "session_id": "abcd1234-1111-2222-3333-444444444444",
+                "session_id": sid,
                 "message": "hi",
                 "cwd": str(home),
             }

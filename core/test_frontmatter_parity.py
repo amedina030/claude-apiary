@@ -204,7 +204,7 @@ class TestNoSecondDialect(unittest.TestCase):
         "scripts/test_migrate_frontmatter.py",
     }
 
-    SKIP_PREFIXES = (".repos/", ".venv/", "build/", "dist/", ".claude/")
+    SKIP_PREFIXES = (".repos/", ".venv/", "build/", "dist/", ".claude/", ".runner-worktrees/")
 
     #: Every module that reads frontmatter must get it from ``core``.
     DELEGATORS = (
