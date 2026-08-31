@@ -672,6 +672,11 @@ class ScribeStore:
         content so the sidebar stays in sync. Returns the updated entry dict,
         or None if not found.
 
+        On a status change, ``status_changed_at`` is stamped with the current
+        UTC time unless the caller passes a non-empty ``status_changed_at`` of
+        its own, which is stored verbatim and never validated; ``None`` or
+        ``""`` count as not supplied and still get the fresh stamp.
+
         Archive-aware: the active index is searched first, then the year's
         ``archive/`` index. An archived note is updated in place (the body
         stays in ``archive/<seq>.md``) and the returned dict carries
@@ -726,8 +731,13 @@ class ScribeStore:
             entry = {**txn.entries[i], **kwargs}
             # Stamp status_changed_at on any status transition (done/drop/
             # defer/resume), but never on a content-only edit. Mirrors the
-            # source scribe oracle (spec §5.6).
-            if "status" in kwargs:
+            # source scribe oracle (spec §5.6). An explicit status_changed_at
+            # wins — the same "explicit kwarg beats the derived value" rule
+            # brief_summary follows below — so an API caller that knows the
+            # real close time records it in one write. A missing, None or
+            # empty value counts as not supplied and still gets the stamp
+            # policy.done_at depends on.
+            if "status" in kwargs and not kwargs.get("status_changed_at"):
                 entry["status_changed_at"] = datetime.now(timezone.utc).isoformat()
             # Tag mutation: remove-all-occurrences then add-if-absent, so
             # the result is a dedup'd, order-preserving list (spec §5.14).

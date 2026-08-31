@@ -38,6 +38,8 @@ The rules live in `scribe/policy.py` and run from `notes.py add`, `notes.py tidy
 
 Archiving is not deletion: `notes.py list --archive` searches it and `notes.py unarchive <ID>` brings a note back.
 
+`update_note` stamps `status_changed_at` itself on every status change, but an explicitly passed `status_changed_at` wins — an API caller (`scribe/api.py`'s `open_store`) closing a note with its real completion time records it in one write, while `None` or an empty string count as not supplied and still get the fresh stamp.
+
 ---
 
 ## Note ID format
