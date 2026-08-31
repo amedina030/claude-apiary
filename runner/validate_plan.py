@@ -915,56 +915,59 @@ def _change_map_matches(path: str, patterns) -> bool:
 
 
 def _check_change_map_coverage(steps: list[dict]) -> list[str]:
-    """Apply the target repo's commit-time doc gate at plan time.
+    """Apply the target repo's commit-time doc gate at plan time, PER STEP.
 
-    Overnight 2026-08-29: the executor's commit of scribe/store.py was
-    blocked by the pre-commit change-map gate (docs/change_map.py) -- the
-    plan touched mapped code without touching its doc, and the run aborted
-    at stage 4 with the tokens already spent. Reject the plan up front
-    instead: either a step updates one of the mapped docs, or the step
-    touching the mapped code carries `"docs_unchanged": true`, which the
-    executor turns into the gate's documented waiver at commit time.
+    The executor commits one step at a time and the repo's commit hook
+    checks every commit, so coverage must hold per step, not per plan.
+    Overnight 2026-08-29 aborted because a plan committed scribe/store.py
+    alone in step 1 with its doc updates in later steps -- a plan-wide
+    union check would call that covered (it did, until 2026-08-31), yet
+    the gate still blocks the step-1 commit. A step touching mapped code
+    must either carry one of the mapped docs in its OWN files list or
+    declare `"docs_unchanged": true`, which the executor turns into the
+    gate's documented waiver for that commit.
     """
     entries = _load_change_map()
     if not entries:
         return []
 
-    plan_files: set[str] = set()
-    attested: set[str] = set()
-    for s in steps:
+    errors = []
+    for i, s in enumerate(steps):
         if not isinstance(s, dict):
+            continue
+        # test/verify steps never commit, so the gate never sees them.
+        if s.get("action") in ("test", "verify"):
+            continue
+        if s.get("docs_unchanged") is True:
             continue
         files = [
             f.replace("\\", "/").strip() for f in s.get("files", []) if isinstance(f, str) and f
         ]
-        plan_files.update(files)
-        if s.get("docs_unchanged") is True:
-            attested.update(files)
-
-    errors = []
-    for entry in entries:
-        code_globs = entry.get("code", [])
-        doc_globs = entry.get("docs", [])
-        if not isinstance(code_globs, list) or not isinstance(doc_globs, list):
+        if not files:
             continue
-        touched = sorted(p for p in plan_files if _change_map_matches(p, code_globs))
-        if not touched:
-            continue
-        if any(_change_map_matches(p, doc_globs) for p in plan_files):
-            continue
-        if all(p in attested for p in touched):
-            continue
-        shown = ", ".join(touched[:3]) + (f" (+{len(touched) - 3})" if len(touched) > 3 else "")
-        errors.append(
-            f"change-map gate: {shown} changed but the plan touches none of "
-            f"{', '.join(str(d) for d in doc_globs)} (docs/change_map.json "
-            f"entry '{entry.get('id', '?')}') -- the repo's commit hook will "
-            f"block the executor at commit time. Either add a step that "
-            f"updates one of those docs (and bumps its `last_verified:` "
-            f'date), or set "docs_unchanged": true on the step(s) touching '
-            f"the mapped code after verifying the doc's claims are "
-            f"unaffected."
-        )
+        for entry in entries:
+            code_globs = entry.get("code", [])
+            doc_globs = entry.get("docs", [])
+            if not isinstance(code_globs, list) or not isinstance(doc_globs, list):
+                continue
+            touched = sorted(f for f in files if _change_map_matches(f, code_globs))
+            if not touched:
+                continue
+            if any(_change_map_matches(f, doc_globs) for f in files):
+                continue
+            shown = ", ".join(touched[:3]) + (f" (+{len(touched) - 3})" if len(touched) > 3 else "")
+            errors.append(
+                f"step[{i}] change-map gate: commits {shown} without any of "
+                f"{', '.join(str(d) for d in doc_globs)} in the same step "
+                f"(docs/change_map.json entry '{entry.get('id', '?')}'). The "
+                f"executor commits one step at a time and the repo's commit "
+                f"hook checks each commit, so a doc updated in a different "
+                f"step does not unblock this one. Either add one of those "
+                f"doc files to THIS step's files (update it in the same "
+                f"commit and bump its `last_verified:` date), or set "
+                f'"docs_unchanged": true on this step after verifying the '
+                f"doc's claims are unaffected."
+            )
     return errors
 
 
