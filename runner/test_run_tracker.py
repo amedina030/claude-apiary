@@ -117,12 +117,19 @@ class TestGetResumeStage(unittest.TestCase):
 
     def test_plan_exists_resumes_from_executor(self):
         (self.fake_runner_root / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
-        (self.fake_runner_root / "plans" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_runner_root / "plans" / "uuid1.json").write_text(
+            '{"valid": true}', encoding="utf-8"
+        )
         self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "executor")
 
     def test_execution_exists_resumes_from_auto_harden(self):
-        for d in ("specs", "plans", "executions"):
-            (self.fake_runner_root / d / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_runner_root / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_runner_root / "plans" / "uuid1.json").write_text(
+            '{"valid": true}', encoding="utf-8"
+        )
+        (self.fake_runner_root / "executions" / "uuid1.json").write_text(
+            '{"status": "completed"}', encoding="utf-8"
+        )
         self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "auto_harden")
 
     def test_harden_exists_resumes_from_approval(self):
@@ -132,7 +139,43 @@ class TestGetResumeStage(unittest.TestCase):
 
     def test_picks_latest_artifact(self):
         """When only a plan exists (no execution), should resume from executor."""
-        (self.fake_runner_root / "plans" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_runner_root / "plans" / "uuid1.json").write_text(
+            '{"valid": true}', encoding="utf-8"
+        )
+        self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "executor")
+
+    def test_invalid_plan_falls_back_to_auto_plan(self):
+        """Retry of 2026-08-31: auto_plan failed validation but saved its best
+        attempt (valid=false); the resume must re-plan, not hand the invalid
+        plan to the executor."""
+        (self.fake_runner_root / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_runner_root / "plans" / "uuid1.json").write_text(
+            '{"valid": false}', encoding="utf-8"
+        )
+        self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "auto_plan")
+
+    def test_invalid_plan_without_spec_returns_none(self):
+        (self.fake_runner_root / "plans" / "uuid1.json").write_text(
+            '{"valid": false}', encoding="utf-8"
+        )
+        self.assertIsNone(run_tracker.get_resume_stage("uuid1", self.wt))
+
+    def test_malformed_plan_json_falls_back_to_auto_plan(self):
+        (self.fake_runner_root / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_runner_root / "plans" / "uuid1.json").write_text("not json", encoding="utf-8")
+        self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "auto_plan")
+
+    def test_aborted_execution_falls_back_to_executor(self):
+        """An executor abort leaves an execution log with status=aborted; the
+        retry must re-run the executor (with the valid plan), not jump to
+        auto_harden."""
+        (self.fake_runner_root / "specs" / "uuid1.json").write_text("{}", encoding="utf-8")
+        (self.fake_runner_root / "plans" / "uuid1.json").write_text(
+            '{"valid": true}', encoding="utf-8"
+        )
+        (self.fake_runner_root / "executions" / "uuid1.json").write_text(
+            '{"status": "aborted"}', encoding="utf-8"
+        )
         self.assertEqual(run_tracker.get_resume_stage("uuid1", self.wt), "executor")
 
     def test_worktree_path_arg_is_ignored(self):

@@ -75,13 +75,45 @@ def record_attempt(
     return tracker
 
 
-# Maps each artifact key to the dir-returning helper and the stage to
-# resume from. Latest-to-earliest order so we resume as late as possible.
+# Maps each artifact key to the dir-returning helper, the stage to resume
+# from, and a predicate deciding whether the artifact represents COMPLETED
+# work. Latest-to-earliest order so we resume as late as possible.
+#
+# The predicates exist because failed stages also write artifacts:
+# auto_plan saves its best attempt with valid=false for diagnosis, and the
+# executor persists an aborted execution log. Resuming *past* those (retry
+# of 2026-08-31: plan valid=false -> "resuming from executor" -> executor
+# refused with "Plan is not valid") turns every failed stage into a wall
+# on the next attempt.
+
+
+def _read_artifact(path: Path) -> dict | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _plan_is_valid(path: Path) -> bool:
+    data = _read_artifact(path)
+    return data is not None and data.get("valid") is True
+
+
+def _execution_completed(path: Path) -> bool:
+    data = _read_artifact(path)
+    return data is not None and data.get("status") == "completed"
+
+
+def _always(_path: Path) -> bool:
+    return True
+
+
 _ARTIFACT_RESUME_MAP = [
-    (hardens_dir, "approval"),
-    (executions_dir, "auto_harden"),
-    (plans_dir, "executor"),
-    (specs_dir, "auto_plan"),
+    (hardens_dir, "approval", _always),
+    (executions_dir, "auto_harden", _execution_completed),
+    (plans_dir, "executor", _plan_is_valid),
+    (specs_dir, "auto_plan", _always),
 ]
 
 
@@ -91,10 +123,15 @@ def get_resume_stage(uuid: str, worktree_path: Path | None = None) -> str | None
     Review artifacts (specs/plans/executions/hardens/reports) live under
     ``<apiary>/.apiary/runner/`` today. ``worktree_path`` is retained for
     backward compatibility but ignored.
+
+    An artifact only counts as a resume point when its predicate says the
+    stage actually completed -- an invalid plan or an aborted execution is
+    a failure record, and the lookup falls through to the stage that must
+    be re-run.
     """
-    for dir_fn, resume_stage in _ARTIFACT_RESUME_MAP:
+    for dir_fn, resume_stage, is_complete in _ARTIFACT_RESUME_MAP:
         artifact = dir_fn() / f"{uuid}.json"
-        if artifact.exists():
+        if artifact.exists() and is_complete(artifact):
             return resume_stage
     return None
 
