@@ -155,7 +155,7 @@
   }
 
   function buildResult(lines, i, parsed) {
-    const { options, lastIdx } = parsed;
+    const { options } = parsed;
     let question = "";
     let questionIdx = -1;
     for (let k = i - 1; k >= 0 && k >= i - PROMPT_SCAN_BACK_LINES; k--) {
@@ -186,7 +186,6 @@
         if (body) context = body;
       }
     }
-    void lastIdx;
     const signature = (context ? context.slice(0, 80) + "|" : "") +
                       options.map(o => `${o.number}.${o.text}`).join("|");
     return { question, context, options, signature };

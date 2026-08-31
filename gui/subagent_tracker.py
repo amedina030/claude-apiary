@@ -68,9 +68,11 @@ class AgentState:
     status: str = "running"  # "running" | "done"
 
     def to_dict(self) -> dict:
-        d = asdict(self)
-        # tokens is already a dict via asdict — rename keys the frontend uses.
-        return d
+        # asdict recurses into TokenTotals, so tokens arrives as
+        # {"input", "output", "cache_read", "cache_write"} — already the keys
+        # app.js reads. No renaming happens, and none may: the change-detection
+        # hash and the onAgents payload both depend on this dict as-is.
+        return asdict(self)
 
 
 def _parse_ts(ts: Optional[str]) -> Optional[float]:
