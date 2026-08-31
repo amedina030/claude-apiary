@@ -97,7 +97,6 @@
     addBtn.addEventListener("click", openNewTab);
     tabsEl.appendChild(addBtn);
   }
-  window.renderTabs = renderTabs;
 
   async function switchTab(sid) {
     if (!bridgeReady()) return;
@@ -436,7 +435,7 @@
     modelBadgeEl.focus();
   }, true);
 
-  // --- markdown render (Phase 1 minimal — markdown-it lands later) ---------
+  // --- markdown render (hand-rolled subset: emphasis, code, links, lists, tables) ---
   function escapeHtml(s) {
     return s
       .replace(/&/g, "&amp;")
@@ -1795,7 +1794,6 @@
     // Always write — the buffer is valid pre-open, so the prompt detector can
     // read it even when the terminal is visually collapsed.
     term.write(chunk);
-    scheduleDetect();
     ensureThinkingBubble();
     // Buffer is moving again → next time it goes stationary with an unparsed
     // prompt, the fallback should fire anew (not dedup against the stale
@@ -2462,7 +2460,6 @@
   // churn; detectPrompt is cheap (regex over ~200 buffer rows).
   const PROMPT_DETECT_INTERVAL_MS = 500;
   setInterval(runDetect, PROMPT_DETECT_INTERVAL_MS);
-  function scheduleDetect() { /* retained as hook point; poll now drives detection */ }
 
   // --- agents strip (ephemeral) --------------------------------------------
   // Thin row between tabs and header. Only renders when there's ≥1 running
@@ -2902,14 +2899,13 @@
       try {
         const arr = typeof arrJson === "string" ? JSON.parse(arrJson) : arrJson;
         if (Array.isArray(arr)) {
-          window.apiary.__sessions = arr;
           // Drop tab state for sessions that no longer exist (closed tabs).
           // The Map otherwise leaks indefinitely as tabs come and go.
           const live = new Set(arr.map(s => s.session_id));
           for (const sid of Array.from(tabs.keys())) {
             if (!live.has(sid)) tabs.delete(sid);
           }
-          if (typeof window.renderTabs === "function") window.renderTabs(arr);
+          renderTabs(arr);
         }
       } catch (e) {
         console.error("onSessions parse error", e);
