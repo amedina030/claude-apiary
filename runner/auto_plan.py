@@ -119,6 +119,7 @@ _GENERIC_INSTRUCTION_1 = (
 def build_prompt(
     spec: dict,
     previous_errors: list[str] | None = None,
+    previous_attempt: dict | None = None,
     *,
     target_repo: str | Path | None = None,
 ) -> str:
@@ -350,6 +351,21 @@ def build_prompt(
             parts.append(f"- `{path}`{sha_note}: {summary}")
         parts.append("")
 
+    if previous_attempt and previous_errors:
+        # Retry 2026-08-31: attempt 3 fixed the one named error but
+        # regenerated the plan from scratch and dropped attempt 2's
+        # change-map attestations. Show the model its own previous plan and
+        # demand a minimal edit so already-passing fixes survive the retry.
+        parts.extend(
+            [
+                "",
+                "## Your previous plan attempt",
+                "",
+                "```json",
+                json.dumps({"steps": previous_attempt.get("steps", [])}, indent=2),
+                "```",
+            ]
+        )
     if previous_errors:
         parts.extend(
             [
@@ -361,7 +377,16 @@ def build_prompt(
         for err in previous_errors:
             parts.append(f"- {err}")
         parts.append("")
-        parts.append("Fix ALL of the above issues in your new output.")
+        if previous_attempt:
+            parts.append(
+                "Start from your previous plan above and apply the SMALLEST "
+                "edit that fixes ALL of the listed errors. Keep every other "
+                "step, field, depends_on link, and docs_unchanged "
+                "attestation exactly as it was -- regenerating from scratch "
+                "loses fixes that already passed validation."
+            )
+        else:
+            parts.append("Fix ALL of the above issues in your new output.")
 
     return "\n".join(parts)
 
@@ -557,7 +582,9 @@ def main():
 
     try:
         ok, best_plan, best_errors = retry_until_valid(
-            build_prompt=lambda errors: build_prompt(spec, errors, target_repo=spec_target_repo),
+            build_prompt=lambda errors, prev: build_prompt(
+                spec, errors, previous_attempt=prev, target_repo=spec_target_repo
+            ),
             call_model=run_claude,
             parse=extract_plan,
             assemble=lambda data: _assemble_plan(data, spec, spec_id),

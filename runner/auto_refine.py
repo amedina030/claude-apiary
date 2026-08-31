@@ -238,7 +238,9 @@ def main():
 
     try:
         ok, best_spec, best_errors = retry_until_valid(
-            build_prompt=lambda errors: build_prompt(intake, errors),
+            # _prev (the prior spec artifact) is accepted but unused: refine
+            # keeps error-only feedback until it shows the same regression.
+            build_prompt=lambda errors, _prev: build_prompt(intake, errors),
             call_model=run_claude,
             parse=extract_spec,
             assemble=lambda spec: _assemble_spec(spec, intake, intake_id),

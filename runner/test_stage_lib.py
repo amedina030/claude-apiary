@@ -141,7 +141,7 @@ class TestRetryUntilValid(unittest.TestCase):
         validation_iter = iter(validations)
 
         ok, artifact, errors = stage_lib.retry_until_valid(
-            build_prompt=lambda prev: prompts.append(prev) or "prompt",
+            build_prompt=lambda prev, _prev_art: prompts.append(prev) or "prompt",
             call_model=lambda prompt: next(call_iter),
             parse=json.loads,
             assemble=lambda parsed: dict(parsed, stamped=True),
@@ -200,7 +200,7 @@ class TestRetryUntilValid(unittest.TestCase):
             return (0, '{"a": 1}', "")
 
         ok, artifact, errors = stage_lib.retry_until_valid(
-            build_prompt=lambda prev: prompts.append(prev) or "p",
+            build_prompt=lambda prev, _prev_art: prompts.append(prev) or "p",
             call_model=_call,
             parse=json.loads,
             assemble=lambda p: p,
@@ -221,13 +221,32 @@ class TestRetryUntilValid(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("not valid JSON", prompts[1][0])
 
+    def test_previous_artifact_is_fed_back_on_retry(self):
+        """Attempt N sees attempt N-1's assembled artifact, so the model can
+        minimally edit it instead of regenerating (retry 2026-08-31: attempt 3
+        fixed one error but dropped attempt 2's already-passing fixes)."""
+        seen = []
+        calls = iter([(0, '{"a": 1}', ""), (0, '{"a": 2}', "")])
+        validations = iter([["bad"], []])
+        ok, _artifact, _errors = stage_lib.retry_until_valid(
+            build_prompt=lambda prev, prev_art: seen.append((prev, prev_art)) or "p",
+            call_model=lambda prompt: next(calls),
+            parse=json.loads,
+            assemble=lambda parsed: dict(parsed, stamped=True),
+            persist=lambda a: None,
+            validate=lambda: next(validations),
+        )
+        self.assertTrue(ok)
+        self.assertEqual(seen[0], (None, None))
+        self.assertEqual(seen[1], (["bad"], {"a": 1, "stamped": True}))
+
     def test_missing_cli_raises_instead_of_burning_attempts(self):
         def _call(prompt):
             raise FileNotFoundError("claude")
 
         with self.assertRaises(stage_lib.ClaudeMissingError):
             stage_lib.retry_until_valid(
-                build_prompt=lambda prev: "p",
+                build_prompt=lambda prev, _prev_art: "p",
                 call_model=_call,
                 parse=json.loads,
                 assemble=lambda p: p,

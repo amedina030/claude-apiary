@@ -231,5 +231,24 @@ class TestValidatePlanRespectsTargetRepo(unittest.TestCase):
             )
 
 
+class TestPreviousAttemptFeedback(unittest.TestCase):
+    """Retries must anchor on the previous plan, not regenerate blind."""
+
+    def test_previous_attempt_is_embedded_with_minimal_edit_instruction(self):
+        prev = {"steps": [{"step_number": 1, "action": "modify", "docs_unchanged": True}]}
+        prompt = auto_plan.build_prompt(
+            _base_spec(), ["change-map gate: doc missing"], previous_attempt=prev
+        )
+        self.assertIn("Your previous plan attempt", prompt)
+        self.assertIn('"docs_unchanged": true', prompt)
+        self.assertIn("SMALLEST", prompt)
+        self.assertNotIn("Fix ALL of the above issues in your new output.", prompt)
+
+    def test_no_previous_attempt_keeps_the_old_instruction(self):
+        prompt = auto_plan.build_prompt(_base_spec(), ["some error"])
+        self.assertIn("Fix ALL of the above issues in your new output.", prompt)
+        self.assertNotIn("Your previous plan attempt", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

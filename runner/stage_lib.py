@@ -222,7 +222,7 @@ def extract_json_str(raw_output: str, *, allow_list: bool = True) -> str:
 
 def retry_until_valid(
     *,
-    build_prompt: Callable[[Optional[list]], str],
+    build_prompt: Callable[[Optional[list], Optional[dict]], str],
     call_model: Callable[[str], tuple],
     parse: Callable[[str], Any],
     assemble: Callable[[Any], dict],
@@ -234,7 +234,10 @@ def retry_until_valid(
     """Drive one LLM stage until its deterministic validator is happy.
 
     The loop auto_refine and auto_plan each had their own copy of: build the
-    prompt (carrying the previous attempt's validator errors), spawn the
+    prompt (carrying the previous attempt's validator errors and, when one
+    exists, the previous attempt's artifact -- so the model minimally edits
+    its own output instead of regenerating and losing fixes that already
+    passed), spawn the
     model, salvage JSON, assemble the artifact, write it, validate it — and on
     exhaustion keep the attempt with the fewest errors so an operator has
     something to read.
@@ -247,10 +250,11 @@ def retry_until_valid(
     best_artifact: Optional[dict] = None
     best_errors: Optional[list] = None
     previous_errors: Optional[list] = None
+    previous_artifact: Optional[dict] = None
 
     for attempt in range(1, max_attempts + 1):
         report(f"Attempt {attempt}/{max_attempts}...")
-        prompt = build_prompt(previous_errors)
+        prompt = build_prompt(previous_errors, previous_artifact)
 
         try:
             returncode, stdout, stderr = call_model(prompt)
@@ -286,6 +290,7 @@ def retry_until_valid(
             best_errors = errors
 
         previous_errors = errors
+        previous_artifact = artifact
         report(f"Validation failed (attempt {attempt}): {len(errors)} error(s)")
         for err in errors:
             report(f"  {err}")
