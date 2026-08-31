@@ -1404,5 +1404,48 @@ class TestEnsureOnBranch(unittest.TestCase):
             self.assertEqual(run_branch_from_env("abc"), "runner/slug-abc")
 
 
+class TestCommitFilesDocsUnchanged(unittest.TestCase):
+    """The docs_unchanged step flag (change-map gate): the commit must carry
+    the `docs: unchanged` trailer for the commit-msg hook and export
+    APIARY_DOCS_UNCHANGED=1 for the pre-commit half, which cannot read the
+    message. Overnight 2026-08-29 aborted on exactly this gate."""
+
+    def _fake_git(self, record):
+        def fake(*args, cwd=None):
+            if args[0] == "commit":
+                record["message"] = args[2]
+                record["env"] = os.environ.get("APIARY_DOCS_UNCHANGED")
+                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            if args[0] == "diff":
+                # Non-zero: a staged diff exists, so commit_files proceeds.
+                return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        return fake
+
+    def test_trailer_and_env_var_are_applied(self):
+        record = {}
+        with mock.patch.object(executor, "git", side_effect=self._fake_git(record)):
+            executor.commit_files(["a.py"], "runner/x step 1: change", docs_unchanged=True)
+        self.assertTrue(record["message"].endswith("\n\ndocs: unchanged"), record)
+        self.assertEqual(record["env"], "1")
+        self.assertNotIn("APIARY_DOCS_UNCHANGED", os.environ)
+
+    def test_default_commit_is_untouched(self):
+        record = {}
+        with mock.patch.object(executor, "git", side_effect=self._fake_git(record)):
+            executor.commit_files(["a.py"], "runner/x step 1: change")
+        self.assertNotIn("docs: unchanged", record["message"])
+        self.assertIsNone(record["env"])
+
+    def test_preexisting_env_value_is_restored(self):
+        record = {}
+        os.environ["APIARY_DOCS_UNCHANGED"] = "keep"
+        self.addCleanup(os.environ.pop, "APIARY_DOCS_UNCHANGED", None)
+        with mock.patch.object(executor, "git", side_effect=self._fake_git(record)):
+            executor.commit_files(["a.py"], "m", docs_unchanged=True)
+        self.assertEqual(os.environ.get("APIARY_DOCS_UNCHANGED"), "keep")
+
+
 if __name__ == "__main__":
     unittest.main()
