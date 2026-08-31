@@ -202,12 +202,9 @@ class TestNoSecondDialect(unittest.TestCase):
         "core/test_frontmatter_parity.py",
         "scripts/migrate_frontmatter.py",
         "scripts/test_migrate_frontmatter.py",
-        # Skips a block without parsing it; owned by the hook dispatcher work
-        # (Phase 3.1), which is where it should be folded in.
-        "core/hooks/startup_prompt_hook.py",
     }
 
-    SKIP_PREFIXES = (".repos/", ".venv/", "build/", "dist/", ".claude/")
+    SKIP_PREFIXES = (".repos/", ".venv/", "build/", "dist/", ".claude/", ".runner-worktrees/")
 
     #: Every module that reads frontmatter must get it from ``core``.
     DELEGATORS = (
@@ -219,6 +216,7 @@ class TestNoSecondDialect(unittest.TestCase):
         "captures/cli.py",
         "core/context_rules.py",
         "docs/check.py",
+        "core/hooks/startup_prompt_hook.py",
     )
 
     def test_no_module_scans_fences_by_hand(self) -> None:

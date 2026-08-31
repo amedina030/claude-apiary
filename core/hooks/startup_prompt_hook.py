@@ -25,6 +25,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from core import frontmatter
 from core.hook_context import HookResult, context_block, run_standalone
 from core.sanitizer import sanitize_and_report
 from core.session import SessionId
@@ -33,22 +34,12 @@ from core.utils.gitutil import git_root
 from core.utils.state import find_state_dir, state_dir_from_env
 
 
-def _strip_frontmatter(md: str) -> str:
-    """Drop a leading YAML frontmatter block (``--- ... ---``) from markdown.
-
-    Returns the body (leading blank lines trimmed) when frontmatter is
-    present, or the input unchanged when it is not. Used to inject the
-    apiary-context skill's *content* without its skill header.
-    """
-    if not md.startswith("---"):
+def _context_body(md: str) -> str:
+    """Return the markdown body with the leading dialect header removed."""
+    parts = frontmatter.split(md)
+    if parts is None:
         return md
-    close = md.find("\n---", 3)
-    if close == -1:
-        return md
-    body_start = md.find("\n", close + 1)
-    if body_start == -1:
-        return ""
-    return md[body_start + 1 :].lstrip("\n")
+    return parts[1].lstrip("\n")
 
 
 # Sanitizer hit log lives in the umbrella state directory. With the
@@ -244,7 +235,7 @@ def run(payload: dict):
         ctx_md = (PROJECT_ROOT / "core" / "commands" / "apiary-context.md").read_text(
             encoding="utf-8"
         )
-        ctx_body = _strip_frontmatter(ctx_md.strip())
+        ctx_body = _context_body(ctx_md.strip())
         if ctx_body:
             scrubbed, hits = sanitize_and_report(ctx_body)
             _log_sanitizer_hits("apiary_context", hits, sid.full)
