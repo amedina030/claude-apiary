@@ -51,13 +51,16 @@ MAIN_ROOT="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>
 _is_py3() { "$@" -c 'import sys; sys.exit(0 if sys.version_info[0]==3 else 1)' >/dev/null 2>&1; }
 if [ -n "$APIARY_PYTHON" ]; then
     PY=("$APIARY_PYTHON")
-# The repo's own venv first: it is the interpreter with the dev group (ruff)
-# installed; the launcher and the system Python are not, so the lint step
-# below would quietly skip on every commit.
-elif [ -x "$REPO_ROOT/.venv/Scripts/python.exe" ]; then PY=("$REPO_ROOT/.venv/Scripts/python.exe")
-elif [ -x "$REPO_ROOT/.venv/bin/python" ];         then PY=("$REPO_ROOT/.venv/bin/python")
+# The main checkout's venv first: it is the interpreter with the dev group
+# (ruff) installed, and unlike a worktree-local venv it is never mid-install.
+# (Retry 2026-08-31: a step agent ran `poetry install` inside the runner's
+# worktree; the hook picked that venv up seconds after its creation and the
+# generated-doc check reported phantom drift.) Outside a worktree MAIN_ROOT
+# equals REPO_ROOT, so this is the historical "repo venv first" order there.
 elif [ -x "$MAIN_ROOT/.venv/Scripts/python.exe" ]; then PY=("$MAIN_ROOT/.venv/Scripts/python.exe")
 elif [ -x "$MAIN_ROOT/.venv/bin/python" ];         then PY=("$MAIN_ROOT/.venv/bin/python")
+elif [ -x "$REPO_ROOT/.venv/Scripts/python.exe" ]; then PY=("$REPO_ROOT/.venv/Scripts/python.exe")
+elif [ -x "$REPO_ROOT/.venv/bin/python" ];         then PY=("$REPO_ROOT/.venv/bin/python")
 elif command -v py      >/dev/null 2>&1 && _is_py3 py -3;   then PY=(py -3)
 elif command -v python3 >/dev/null 2>&1 && _is_py3 python3; then PY=(python3)
 elif command -v python  >/dev/null 2>&1 && _is_py3 python;  then PY=(python)
@@ -74,17 +77,17 @@ elif command -v ruff >/dev/null 2>&1; then
     RUFF=(ruff)
 elif "${PY[@]}" -c 'import ruff' >/dev/null 2>&1; then
     RUFF=("${PY[@]}" -m ruff)
-# The runner's worktree venv (created without the dev group) satisfies the
-# PY probe but has no ruff -- fall through to the venv ruff executables,
-# worktree first, then the main checkout's.
-elif [ -x "$REPO_ROOT/.venv/Scripts/ruff.exe" ]; then
-    RUFF=("$REPO_ROOT/.venv/Scripts/ruff.exe")
-elif [ -x "$REPO_ROOT/.venv/bin/ruff" ]; then
-    RUFF=("$REPO_ROOT/.venv/bin/ruff")
+# A stray worktree venv may satisfy the PY probe yet lack ruff -- fall
+# through to the venv ruff executables, main checkout first (stable,
+# complete install), then the worktree's.
 elif [ -x "$MAIN_ROOT/.venv/Scripts/ruff.exe" ]; then
     RUFF=("$MAIN_ROOT/.venv/Scripts/ruff.exe")
 elif [ -x "$MAIN_ROOT/.venv/bin/ruff" ]; then
     RUFF=("$MAIN_ROOT/.venv/bin/ruff")
+elif [ -x "$REPO_ROOT/.venv/Scripts/ruff.exe" ]; then
+    RUFF=("$REPO_ROOT/.venv/Scripts/ruff.exe")
+elif [ -x "$REPO_ROOT/.venv/bin/ruff" ]; then
+    RUFF=("$REPO_ROOT/.venv/bin/ruff")
 else
     RUFF=()
 fi

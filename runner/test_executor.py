@@ -298,7 +298,13 @@ class TestBuildPrompts(unittest.TestCase):
             "\n"
             "Write the actual code — not pseudocode, not explanations. "
             "Just implement it.\n"
-            "Use the existing codebase patterns and conventions."
+            "Use the existing codebase patterns and conventions.\n"
+            "Do NOT run `poetry install`, `poetry run`, `pip install`, or "
+            "create any virtualenv: this worktree deliberately has no venv, "
+            "the codebase is stdlib-only, and a mid-run venv install races "
+            "the commit hooks (retry 2026-08-31: it produced a phantom "
+            "generated-doc drift that aborted the run). Run any test with "
+            "plain `python -m unittest ...`."
         )
         self.assertEqual(prompt, expected)
 
@@ -1445,6 +1451,25 @@ class TestCommitFilesDocsUnchanged(unittest.TestCase):
         with mock.patch.object(executor, "git", side_effect=self._fake_git(record)):
             executor.commit_files(["a.py"], "m", docs_unchanged=True)
         self.assertEqual(os.environ.get("APIARY_DOCS_UNCHANGED"), "keep")
+
+
+class TestStepPromptForbidsVenvCreation(unittest.TestCase):
+    """Retry 2026-08-31: a step agent ran `poetry install` in the worktree;
+    the hook picked up the seconds-old venv and the generated-doc check
+    reported phantom drift, aborting the run at commit time."""
+
+    def test_no_poetry_install_instruction_present(self):
+        step = {
+            "step_number": 1,
+            "description": "d",
+            "type": "modify",
+            "action": "modify",
+            "files": ["a.py"],
+            "code_spec": "spec",
+        }
+        prompt = build_step_prompt(step, {})
+        self.assertIn("poetry install", prompt)
+        self.assertIn("python -m unittest", prompt)
 
 
 if __name__ == "__main__":
