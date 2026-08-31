@@ -226,14 +226,17 @@ def build_prompt(
         "all files that reference it.",
         "5b. DOC GATE: the target repo may map code files to architecture "
         "docs (docs/change_map.json -- read it if it exists; reading it does "
-        "not count against the search budget). If a step modifies mapped "
-        "code, the plan MUST either (a) include a step that updates one of "
-        "the mapped doc files AND bumps its `last_verified:` frontmatter "
-        'date to today, or (b) set "docs_unchanged": true on the step '
-        "touching the mapped code -- only after confirming the doc's claims "
-        "are genuinely unaffected by the change. Plans that do neither are "
-        "rejected by the validator, and the repo's commit hook would block "
-        "the executor's commit anyway.",
+        "not count against the search budget). The executor commits ONE "
+        "STEP AT A TIME and the repo's commit hook checks EVERY commit, so "
+        "each create/modify/delete step whose files touch mapped code MUST "
+        "itself satisfy the gate: either (a) include one of the mapped doc "
+        "files in that SAME step's files list, updating it in the same "
+        "commit and bumping its `last_verified:` frontmatter date to today, "
+        'or (b) set "docs_unchanged": true on that step -- only after '
+        "confirming the doc's claims are genuinely unaffected. A doc "
+        "updated in a different step does NOT unblock the commit. The "
+        "validator rejects per-step violations, and the commit hook would "
+        "block the executor anyway.",
         "6. Always include at least one 'verify' step at the end that describes "
         "how to confirm the implementation works.",
         "7. Ensure every acceptance criterion from the spec is covered by at "

@@ -1010,11 +1010,27 @@ class TestChangeMapCoverage(unittest.TestCase):
         errors = self._check([_step(1, "modify", "spec", files=["src/mapped.py"])])
         self.assertTrue(any("change-map gate" in e and "'thing'" in e for e in errors), errors)
 
-    def test_plan_updating_the_doc_passes(self):
+    def test_doc_in_the_same_step_passes(self):
+        errors = self._check([_step(1, "modify", "spec", files=["src/mapped.py", "docs/thing.md"])])
+        self.assertEqual(errors, [])
+
+    def test_doc_in_a_different_step_is_rejected(self):
+        """2026-08-31 (d2ac4652): the executor commits per step, so a doc
+        updated in a later step does not unblock the mapped-code commit --
+        exactly how the plan-wide union check let the 08-29 plan through."""
         errors = self._check(
             [
                 _step(1, "modify", "spec", files=["src/mapped.py"]),
                 _step(2, "modify", "spec", files=["docs/thing.md"], depends_on=[1]),
+            ]
+        )
+        self.assertTrue(any("step[0]" in e and "'thing'" in e for e in errors), errors)
+
+    def test_test_and_verify_steps_are_exempt(self):
+        errors = self._check(
+            [
+                _step(1, "test", "python -m unittest x", files=["src/mapped.py"]),
+                _step(2, "verify", "check it", files=["src/mapped.py"]),
             ]
         )
         self.assertEqual(errors, [])
