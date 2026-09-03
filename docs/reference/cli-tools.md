@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-08-27"
+last_verified: "2026-09-02"
 ---
 
 # CLI Tools
@@ -1040,10 +1040,11 @@ Verdicts written to the artifact:
 - `all_resolved` — every finding fixed/refactored (or no findings).
 - `has_unresolved` — some findings deferred or unresolved; human review needed.
 - `defender_failed` — attacker produced findings but defender returned no responses; run is structurally broken. Reviewer sees this in `queue.py`'s HARDEN column.
+- `attacker_failed` — the attacker never produced findings (timeouts or validation failures on both attempts). The executor's work is intact and tested, but unaudited — human review needed. A timed-out attacker attempt is retried once with double the configured timeout, not identical parameters.
 
 ## runner/approval.py
 
-Approval — Stage 6. Reads the harden verdict and either squash-merges to master **locally** (all resolved — it never pushes; a todo asks the operator to review and push), flags for review (unresolved findings), or halts on `defender_failed` without merging or writing a note. Includes a deferral review sub-step that uses Claude to evaluate deferred findings on the `has_unresolved` path.
+Approval — Stage 6. Reads the harden verdict and either squash-merges to master **locally** (all resolved — it never pushes; a todo asks the operator to review and push), flags for review (unresolved findings or `attacker_failed`, each with a scribe todo), or halts on `defender_failed` without merging or writing a note. Includes a deferral review sub-step that uses Claude to evaluate deferred findings on the `has_unresolved` path.
 
 ```bash
 python -m runner.approval <state-dir>/runner/hardens/<uuid>.json
@@ -1055,7 +1056,7 @@ python -m runner.approval <state-dir>/runner/hardens/<uuid>.json
 | `harden_result` | yes | Path to harden result JSON |
 <!-- generated:end: cli:runner/approval.py:arg -->
 
-Output: `<state-dir>/runner/reports/<uuid>.json`. Path taken: `merged-locally`, `pending-review`, `defender-failed`, or a merge error. Exits non-zero on `defender_failed` so `run_history.jsonl` records the failure.
+Output: `<state-dir>/runner/reports/<uuid>.json`. Path taken: `merged-locally`, `pending-review`, `harden-incomplete`, `defender-failed`, or a merge error. Exits non-zero on `defender_failed` so `run_history.jsonl` records the failure; `attacker_failed` exits 0 — the run completed, pending human review.
 
 ## runner/draft_ticket.py
 
@@ -1120,6 +1121,7 @@ Shared helper used by every stage's `run_claude` wrapper. Library module — not
 
 ```python
 from cost_emit import emit_usage_xml
+
 emit_usage_xml(claude_subprocess_stdout)  # writes <usage>...</usage> to stderr
 ```
 
@@ -1162,6 +1164,7 @@ Shared config loader. Library module — not a CLI tool. Used by runner stages t
 
 ```python
 from config_loader import get as cfg
+
 timeout = cfg("orchestrator", "stage_timeout", 3600)
 ```
 

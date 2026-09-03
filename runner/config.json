@@ -23,7 +23,7 @@
     "max_rounds": 1,
     "attacker_model": "opus",
     "defender_model": "sonnet",
-    "timeout": 300
+    "timeout": 900
   },
   "orchestrator": {
     "stage_timeout": 3600

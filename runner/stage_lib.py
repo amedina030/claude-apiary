@@ -156,13 +156,17 @@ def extract_json(
     fences (including one the model opened and never closed), JSON embedded in
     prose, and unescaped newlines inside string values.
 
-    ``require_keys`` names the keys that identify the *wanted* object: any
-    candidate carrying all of them wins outright, and only if none does is the
-    first parseable value returned instead. ``allow_list`` controls whether a
-    top-level array counts as a candidate (the harden validators want arrays;
-    the spec/plan parsers only ever want an object).
+    ``require_keys`` names the keys that identify the *wanted* object: only a
+    candidate carrying all of them is returned, and finding none raises —
+    falling back to an arbitrary first object used to hand the planner an
+    inner post_condition dict, which assembled as ``{"steps": []}`` and told
+    the retry "'steps' is empty" instead of the truth (2026-09-01, one
+    unescaped quote inside a ``code_spec``). ``allow_list`` controls whether
+    a top-level array counts as a candidate (the harden validators want
+    arrays; the spec/plan parsers only ever want an object).
 
-    Raises ``json.JSONDecodeError`` when nothing parses.
+    Raises ``json.JSONDecodeError`` when nothing parses, or when
+    ``require_keys`` is given and no parseable value carries them.
     """
 
     def _wanted(value: Any) -> bool:
@@ -193,6 +197,14 @@ def extract_json(
             for value in _scan(candidate, openers, decoder):
                 if _wanted(value):
                     return value
+        raise json.JSONDecodeError(
+            "no JSON object carrying required key(s) "
+            f"[{', '.join(require_keys)}] found in output — the artifact "
+            "JSON is likely malformed (e.g. an unescaped quote or backslash "
+            "inside a string value). Re-emit the FULL artifact as valid JSON",
+            text,
+            0,
+        )
     for candidate in candidates:
         for value in _scan(candidate, openers, decoder):
             if allow_list or isinstance(value, dict):

@@ -249,6 +249,30 @@ class TestPreviousAttemptFeedback(unittest.TestCase):
         self.assertIn("Fix ALL of the above issues in your new output.", prompt)
         self.assertNotIn("Your previous plan attempt", prompt)
 
+    def test_empty_steps_attempt_is_not_an_anchor(self):
+        # A misparse salvaged as {"steps": []} must not be shown back to the
+        # model with a "minimally edit this" instruction (2026-09-01).
+        prompt = auto_plan.build_prompt(
+            _base_spec(),
+            ["'steps' is empty — plan must have at least one step"],
+            previous_attempt={"steps": []},
+        )
+        self.assertNotIn("Your previous plan attempt", prompt)
+        self.assertIn("Fix ALL of the above issues in your new output.", prompt)
+
+
+class TestPromptRules(unittest.TestCase):
+    """Rules the validator enforces must be stated in the prompt."""
+
+    def test_metacharacter_ban_is_stated(self):
+        prompt = auto_plan.build_prompt(_base_spec())
+        self.assertIn("shell metacharacter", prompt)
+        self.assertIn("&&", prompt)
+
+    def test_poetry_ban_is_stated(self):
+        prompt = auto_plan.build_prompt(_base_spec())
+        self.assertIn("NEVER 'poetry run'", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

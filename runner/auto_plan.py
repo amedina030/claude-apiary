@@ -136,6 +136,13 @@ def build_prompt(
     """
     spec_text = json.dumps(spec, indent=2)
 
+    # An attempt whose salvaged JSON carried no steps is not an anchor:
+    # telling the model to "minimally edit" an empty plan regenerates from
+    # scratch anyway, with misleading instructions (seen 2026-09-01, where a
+    # misparse produced {"steps": []} and attempt 2 anchored on it).
+    if previous_attempt is not None and not previous_attempt.get("steps"):
+        previous_attempt = None
+
     # Resolve target (default = apiary) and whether we're in the apiary case.
     target_path = Path(target_repo) if target_repo else REPO_ROOT
     try:
@@ -210,7 +217,16 @@ def build_prompt(
         "Do NOT write 'Run the tests with python -m unittest...' or any other "
         "prose. The executor passes code_spec directly to "
         "subprocess.run(shell=True), so any prose becomes a shell command and "
-        "fails (e.g. 'Run' is tried as a Windows binary).",
+        "fails (e.g. 'Run' is tried as a Windows binary). "
+        "ONE command only — the validator auto-rejects any test code_spec "
+        "containing a shell metacharacter (; & | > < ` $( ${): no chaining "
+        "with '&&', no redirection, no substitution. To run two test "
+        "modules, write two test steps. "
+        "Invoke tools as plain 'python ...' — NEVER 'poetry run', 'pip', or "
+        "anything that creates or installs into a virtualenv: the executor "
+        "runs in a fresh worktree where poetry builds a NEW venv whose tool "
+        "versions differ from the repo's pinned ones (a branch that passed "
+        "'format --check' in-worktree broke master CI this way).",
         "   - action='verify': the verification check description (what to "
         "confirm and how). The executor passes it to a Claude verify call.",
         "5. For 'modify' and 'delete' actions, the files listed MUST exist in the "
