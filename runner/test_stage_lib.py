@@ -88,12 +88,27 @@ class TestExtractJson(unittest.TestCase):
         raw = '{"note": "ignore me"} then {"steps": [3]}'
         self.assertEqual(stage_lib.extract_json(raw, require_keys=("steps",)), {"steps": [3]})
 
-    def test_falls_back_to_first_object_when_none_match(self):
+    def test_raises_when_no_object_carries_required_keys(self):
+        # The old fallback returned {"note": ...} here, which auto_plan
+        # assembled into {"steps": []} and reported as "'steps' is empty" —
+        # hiding the real misparse from the retry (2026-09-01).
         raw = 'nope {"note": "only this"}'
-        self.assertEqual(
-            stage_lib.extract_json(raw, require_keys=("steps",)),
-            {"note": "only this"},
+        with self.assertRaises(json.JSONDecodeError):
+            stage_lib.extract_json(raw, require_keys=("steps",))
+
+    def test_no_require_keys_still_falls_back_to_first_object(self):
+        raw = 'nope {"note": "only this"}'
+        self.assertEqual(stage_lib.extract_json(raw), {"note": "only this"})
+
+    def test_unescaped_quote_in_code_spec_raises(self):
+        # One unescaped quote makes the outer plan unparseable; the inner
+        # post_condition object parses but lacks "steps" — must raise.
+        raw = (
+            '{"steps": [{"code_spec": "print("hi")", '
+            '"post_conditions": [{"type": "file_exists", "file": "a.py"}]}]}'
         )
+        with self.assertRaises(json.JSONDecodeError):
+            stage_lib.extract_json(raw, require_keys=("steps",), allow_list=False)
 
     def test_unescaped_newlines_inside_strings(self):
         raw = '{"steps": [{"code_spec": "line one\nline two"}]}'
