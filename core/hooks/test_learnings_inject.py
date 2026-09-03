@@ -9,7 +9,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.hooks.learnings_inject_hook import (
     _area_is_specific,
     _tokenize_command,
+    load_seen_ids,
+    record_seen_ids,
     score_learnings,
+    seen_ids_path,
 )
 
 
@@ -103,15 +106,43 @@ class TestScoreLearnings(unittest.TestCase):
         entries = [_entry("L-2026-1", areas=["gui/**"])]
         self.assertEqual(score_learnings(entries, target_path="gui/x.js", top_n=0), [])
 
-    def test_ties_broken_by_display_id_ascending(self):
+    def test_ties_broken_by_timestamp_newest_first(self):
         entries = [
-            _entry("L-2026-7", areas=["gui/**"]),
+            _entry("L-2026-3", areas=["gui/**"], timestamp="2026-01-03T00:00:00Z"),
+            _entry("L-2026-7", areas=["gui/**"], timestamp="2026-01-07T00:00:00Z"),
+            _entry("L-2026-5", areas=["gui/**"], timestamp="2026-01-05T00:00:00Z"),
+        ]
+        top = score_learnings(entries, target_path="gui/x.js")
+        # All same score (all inside the recency window) → newest first.
+        self.assertEqual([e["display_id"] for e in top], ["L-2026-7", "L-2026-5", "L-2026-3"])
+
+    def test_equal_timestamps_fall_back_to_id_descending(self):
+        entries = [
             _entry("L-2026-3", areas=["gui/**"]),
+            _entry("L-2026-7", areas=["gui/**"]),
             _entry("L-2026-5", areas=["gui/**"]),
         ]
         top = score_learnings(entries, target_path="gui/x.js")
-        # All same score → ID-ascending fallback puts 3 first.
-        self.assertEqual([e["display_id"] for e in top], ["L-2026-3", "L-2026-5", "L-2026-7"])
+        # No timestamps at all → higher seq (newer) wins, deterministically.
+        self.assertEqual([e["display_id"] for e in top], ["L-2026-7", "L-2026-5", "L-2026-3"])
+
+    def test_all_wildcard_segment_globs_are_broad(self):
+        # `**/*.py` matches most of any repo — it must not outrank a
+        # subsystem glob like `runner/**` on every .py edit.
+        for glob in ("**/*.py", "*/*", "*.py", "**/*"):
+            with self.subTest(glob=glob):
+                self.assertFalse(_area_is_specific(glob))
+        for glob in ("gui/**", "scribe/notes.py", "docs/*/ref.md"):
+            with self.subTest(glob=glob):
+                self.assertTrue(_area_is_specific(glob))
+
+    def test_broad_catchall_loses_to_subsystem_glob(self):
+        entries = [
+            _entry("L-2026-1", areas=["**/*.py"]),
+            _entry("L-2026-2", areas=["runner/**"]),
+        ]
+        top = score_learnings(entries, target_path="runner/auto_plan.py", top_n=1)
+        self.assertEqual(top[0]["display_id"], "L-2026-2")
 
     def test_area_and_tag_accumulate(self):
         entry = _entry("L-2026-1", areas=["gui/**"], tags=["pyinstaller"])
@@ -151,6 +182,46 @@ class TestScoreLearnings(unittest.TestCase):
         """Legacy entries with no tags/areas fields must not crash the scorer."""
         entries = [{"display_id": "L-2026-1", "year": 2026, "seq": 1, "summary": "legacy"}]
         self.assertEqual(score_learnings(entries, target_path="x"), [])
+
+
+class SessionDedupTests(unittest.TestCase):
+    """The per-session seen-file that stops repeat injections."""
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_path_follows_session_tmp_convention(self):
+        p = seen_ids_path(self.repo, "abc12345")
+        self.assertEqual(
+            p,
+            self.repo / ".claude" / "apiary" / "session-tmp" / "abc12345_learnings_injected",
+        )
+
+    def test_load_missing_file_is_empty(self):
+        self.assertEqual(load_seen_ids(seen_ids_path(self.repo, "abc12345")), set())
+
+    def test_record_then_load_round_trips(self):
+        p = seen_ids_path(self.repo, "abc12345")
+        record_seen_ids(p, ["L-2026-1", "L-2026-2"])
+        self.assertEqual(load_seen_ids(p), {"L-2026-1", "L-2026-2"})
+
+    def test_record_appends_across_calls(self):
+        p = seen_ids_path(self.repo, "abc12345")
+        record_seen_ids(p, ["L-2026-1"])
+        record_seen_ids(p, ["L-2026-2"])
+        self.assertEqual(load_seen_ids(p), {"L-2026-1", "L-2026-2"})
+
+    def test_record_failure_is_silent(self):
+        # A file where the parent dir should be → mkdir fails; must not raise.
+        blocker = self.repo / "blocked"
+        blocker.write_text("x", encoding="utf-8")
+        record_seen_ids(blocker / "sub" / "seen", ["L-2026-1"])
 
 
 if __name__ == "__main__":

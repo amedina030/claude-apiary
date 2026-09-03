@@ -201,6 +201,12 @@ def run(payload: dict):
                 parts.append(
                     "--- learnings index (run `python scribe/notes.py get L-X` for full body) ---"
                 )
+                parts.append(
+                    "The tag groups below are this repo's known traps. Before "
+                    "changing files or running commands in an area a tag "
+                    "covers, `get` the matching bodies first — the titles "
+                    "here are truncated; do not act on them alone."
+                )
                 parts.append(scrubbed)
         except Exception:
             pass

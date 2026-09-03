@@ -40,13 +40,59 @@ _BROAD_AREA_SCORE = 0.5
 
 
 def _area_is_specific(glob: str) -> bool:
-    """An area glob is 'specific' when it pins down a path segment. Bare
-    ``*`` / ``**`` globs or empty strings are treated as broad."""
+    """An area glob is 'specific' when it pins down a path segment.
+
+    At least one ``/``-separated segment must be wildcard-free: ``gui/**``
+    and ``scribe/notes.py`` are specific; ``**/*.py`` — every segment a
+    wildcard — matches most of any repo and would otherwise outrank
+    subsystem globs on every ``.py`` edit. Bare ``*`` / ``**`` and empty
+    strings are broad.
+    """
     if not glob:
         return False
-    if glob in ("*", "**"):
+    segments = [seg for seg in glob.split("/") if seg]
+    if not segments:
         return False
-    return "/" in glob or not glob.startswith("*")
+    return any(not any(ch in seg for ch in "*?[") for seg in segments)
+
+
+def seen_ids_path(repo_root, session_id: str):
+    """Session-scoped dedup file: one injected display_id per line.
+
+    Lives with the other per-session flags under
+    ``<repo>/.claude/apiary/session-tmp/`` (the ``inject_session``
+    convention), so the age-based sweep that cleans those files covers
+    this one too.
+    """
+    from pathlib import Path
+
+    return (
+        Path(repo_root) / ".claude" / "apiary" / "session-tmp" / f"{session_id}_learnings_injected"
+    )
+
+
+def load_seen_ids(path) -> set:
+    """IDs already injected this session. Missing/unreadable file → empty."""
+    try:
+        return {ln.strip() for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()}
+    except OSError:
+        return set()
+
+
+def record_seen_ids(path, ids) -> None:
+    """Append newly injected IDs. Best-effort: failure must not block injection."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            for injected_id in ids:
+                fh.write(f"{injected_id}\n")
+    except OSError:
+        pass
+
+
+# Session ids come from the hook payload (external input) and end up in a
+# filename — accept only the uuid-ish shape Claude Code actually sends.
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9-]{8,64}\Z")
 
 
 def _tokenize_command(command: str) -> list[str]:
@@ -118,8 +164,8 @@ def score_learnings(
     1. Score descending (highest first).
     2. Recency bump — entries in the most-recent ``_RECENCY_WINDOW`` get a
        small bonus already baked into the raw score.
-    3. Display-ID ascending — deterministic final tiebreak so two entries
-       with identical score render in a stable order across runs.
+    3. Timestamp descending, then display-ID descending — newest first,
+       deterministic across runs.
     """
     if not entries or top_n <= 0:
         return []
@@ -157,9 +203,14 @@ def score_learnings(
             }
         )
 
+    # Newest-first tiebreak: a fresh learning usually carries the current
+    # workaround; display-id-ascending handed every tie to the repo's oldest
+    # notes. Two stable sorts: recency first, then score.
     scored.sort(
-        key=lambda e: (-e["_match_score"], e.get("display_id", "")),
+        key=lambda e: (e.get("timestamp", ""), e.get("display_id", "")),
+        reverse=True,
     )
+    scored.sort(key=lambda e: -e["_match_score"])
     return scored[:top_n]
 
 
@@ -184,7 +235,9 @@ def run(payload: dict):  # pragma: no cover — covered by integration; the
     from scribe.paths import scribe_state_dir
     from scribe.store import ScribeStore
 
-    if not is_enabled("learnings-inject"):
+    # Default-on (2026-09): the per-repo kill switch is
+    # `core/flags.py enable learnings-inject-off`.
+    if is_enabled("learnings-inject-off"):
         return None
 
     if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
@@ -225,7 +278,20 @@ def run(payload: dict):  # pragma: no cover — covered by integration; the
     if not top:
         return None
 
+    # Per-session dedup: without it the same top-3 ride along on every
+    # matching call (every `git ...` command re-injects the same git notes).
+    session_id = str(payload.get("session_id") or "").strip()
+    seen_path = None
+    if _SESSION_ID_RE.match(session_id):
+        repo_root = os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or cwd
+        seen_path = seen_ids_path(repo_root, session_id)
+        seen = load_seen_ids(seen_path)
+        top = [e for e in top if e.get("display_id", "") not in seen]
+        if not top:
+            return None
+
     blocks: list[str] = []
+    injected_ids: list[str] = []
     for entry in top:
         full = store.get_learning(entry["year"], entry["seq"])
         if not full:
@@ -240,9 +306,14 @@ def run(payload: dict):  # pragma: no cover — covered by integration; the
             header_bits.append(f"matched tag: {entry['_matched_tag']}")
         scrubbed, _hits = sanitize_and_report(body)
         blocks.append(f"--- relevant learning ({' · '.join(header_bits)}) ---\n{scrubbed}")
+        if entry.get("display_id"):
+            injected_ids.append(entry["display_id"])
 
     if not blocks:
         return None
+
+    if seen_path is not None and injected_ids:
+        record_seen_ids(seen_path, injected_ids)
 
     return HookResult(context=context_block("learnings", *blocks))
 

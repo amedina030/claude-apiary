@@ -4,7 +4,7 @@ title: System Overview
 scope: project
 description: What the toolkit is made of, how a session flows through it, and what everything shares
 framework_version: "1.0"
-last_verified: "2026-08-27"
+last_verified: "2026-09-02"
 ---
 
 # System Overview
@@ -65,7 +65,7 @@ Tool call N starts
   → PreToolUse: launch.py → dispatch.py pre  (ONE process)
       drift_check          registry catch-up if the repo moved (once/session)
       inject_session       session context (first call only)
-      learnings_inject     top-3 relevant learnings (Edit|Write|Bash, flag-gated)
+      learnings_inject     top-3 relevant learnings (Edit|Write|Bash, once per session each)
       research_reminder    capture nudge (WebSearch|WebFetch|Agent|Task)
       pre_push_*           doc-drift and secret gates, on `git push` only
       budgeter_pre         logs the cost of call N-1, saves baseline N
