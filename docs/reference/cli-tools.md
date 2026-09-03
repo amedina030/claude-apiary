@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-08-27"
+last_verified: "2026-09-02"
 ---
 
 # CLI Tools

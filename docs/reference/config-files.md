@@ -4,7 +4,7 @@ title: Config Files
 scope: project
 description: Every config file, with the key tables generated from the shipped JSON
 framework_version: "1.0"
-last_verified: "2026-08-27"
+last_verified: "2026-09-02"
 ---
 
 # Config Files
