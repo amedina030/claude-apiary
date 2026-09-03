@@ -468,6 +468,14 @@ def cmd_learn(args):
     areas = [a for a in (getattr(args, "area", None) or []) if a]
     tags, areas = infer.resolve(args, content, store, tags, areas)
 
+    if not tags and not areas:
+        print(
+            "warning: no --tags/--area — this learning will be invisible to "
+            "the PreToolUse injector and ungrouped in the startup index. "
+            "Backfill later with `notes.py retrotag`.",
+            file=sys.stderr,
+        )
+
     entry = store.add_learning(
         content=content,
         session_id=args.session_id or "",

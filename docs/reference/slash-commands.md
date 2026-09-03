@@ -4,7 +4,7 @@ title: Slash Commands
 scope: project
 description: Every slash command apiary installs, generated from the command files' frontmatter
 framework_version: "1.0"
-last_verified: 2026-08-27
+last_verified: 2026-09-02
 ---
 
 # Slash Commands
@@ -54,9 +54,11 @@ Toggles are per-repo and persist across sessions. The skill shells out to
 `core/flags.py` (see [CLI Tools](cli-tools.md#coreflagspy)), which is the same
 code path the hooks read — so what the toggle writes is what they check.
 
-One more flag exists with no slash command: `learnings-inject` gates the
-PreToolUse learnings injector (`core/hooks/learnings_inject_hook.py`), and is
-off unless you run `core/flags.py enable learnings-inject`.
+One more flag exists with no slash command: `learnings-inject-off` disables
+the PreToolUse learnings injector (`core/hooks/learnings_inject_hook.py`),
+which is **on by default**. Opt a repo out with
+`core/flags.py enable learnings-inject-off`. (Until 2026-09 the polarity was
+reversed — a `learnings-inject` flag that no repo ever enabled.)
 
 ## Always-active features
 
