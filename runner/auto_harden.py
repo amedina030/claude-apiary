@@ -8,6 +8,8 @@ the executor's changed files on the runner branch.
 Produces a verdict:
   - all_resolved: safe to auto-merge
   - has_unresolved: needs human review
+  - attacker_failed: adversarial check never ran — needs human review
+  - defender_failed: findings with no responses — structurally broken
 
 Output: runner/hardens/<uuid>.json
 
@@ -100,8 +102,10 @@ def commit_all(message: str, paths=(), new_since=None):
 # -- Claude Code helpers --
 
 
-def run_claude(prompt: str, model: str | None = None) -> tuple[int, str, str]:
-    return _spawn(prompt, timeout=cfg("harden", "timeout", 300), model=model)
+def run_claude(
+    prompt: str, model: str | None = None, timeout: int | None = None
+) -> tuple[int, str, str]:
+    return _spawn(prompt, timeout=timeout or cfg("harden", "timeout", 900), model=model)
 
 
 # -- Harden script wrappers --
@@ -231,21 +235,24 @@ def run_attacker(files: list[str], spec: dict) -> list[dict] | None:
     """Run attacker. Returns findings list or None on failure."""
     prompt = build_attacker_prompt(files, spec)
 
+    # rc == -1 is claude_subprocess's timeout sentinel (TimeoutExpired never
+    # escapes it). Retrying a timeout with identical parameters just times
+    # out again — 2026-08-31 and 2026-09-01 both burned 2x300s proving it —
+    # so the retry after a timeout gets double the budget.
+    base_timeout = cfg("harden", "timeout", 900)
+    timeout = base_timeout
     for attempt in range(2):
-        try:
-            rc, stdout, stderr = run_claude(prompt, model=cfg("harden", "attacker_model", "opus"))
-        except subprocess.TimeoutExpired:
-            print(f"  Attacker timed out (attempt {attempt + 1})", file=sys.stderr)
-            continue
-        except FileNotFoundError:
-            print("Claude Code error: 'claude' command not found", file=sys.stderr)
-            return None
+        rc, stdout, stderr = run_claude(
+            prompt, model=cfg("harden", "attacker_model", "opus"), timeout=timeout
+        )
 
         if rc != 0:
             print(
                 f"  Attacker failed (attempt {attempt + 1}): {stderr.strip()[:200]}",
                 file=sys.stderr,
             )
+            if rc == -1:
+                timeout = base_timeout * 2
             continue
 
         text = extract_text(stdout)
@@ -273,20 +280,20 @@ def run_defender(findings: list[dict], files: list[str]) -> list[dict] | None:
     prompt = build_defender_prompt(findings, files)
     expected_ids = [f.get("id", "") for f in findings if f.get("id")]
 
+    base_timeout = cfg("harden", "timeout", 900)
+    timeout = base_timeout
     for attempt in range(2):
-        try:
-            rc, stdout, stderr = run_claude(prompt, model=cfg("harden", "defender_model", "sonnet"))
-        except subprocess.TimeoutExpired:
-            print(f"  Defender timed out (attempt {attempt + 1})", file=sys.stderr)
-            continue
-        except FileNotFoundError:
-            return None
+        rc, stdout, stderr = run_claude(
+            prompt, model=cfg("harden", "defender_model", "sonnet"), timeout=timeout
+        )
 
         if rc != 0:
             print(
                 f"  Defender failed (attempt {attempt + 1}): {stderr.strip()[:200]}",
                 file=sys.stderr,
             )
+            if rc == -1:
+                timeout = base_timeout * 2
             continue
 
         text = extract_text(stdout)
@@ -306,7 +313,7 @@ def run_defender(findings: list[dict], files: list[str]) -> list[dict] | None:
     return None
 
 
-def compute_verdict(rounds: list[dict]) -> tuple[str, list[str]]:
+def compute_verdict(rounds: list[dict], attacker_failed: bool = False) -> tuple[str, list[str]]:
     """Compute verdict and unresolved list from per-round data.
 
     Verdicts:
@@ -314,6 +321,11 @@ def compute_verdict(rounds: list[dict]) -> tuple[str, list[str]]:
         responses (either None or empty list). Means the run is structurally
         broken — do NOT auto-merge; a human must inspect.
       - has_unresolved: at least one finding is not fixed/refactored.
+      - attacker_failed: the attacker never produced findings (timeouts,
+        validation failures). The executor's work is intact and its tests
+        passed, but the adversarial check did not run — do NOT auto-merge;
+        a human reviews the branch instead. Ranked below defender_failed
+        and has_unresolved because those carry concrete findings to act on.
       - all_resolved: every finding was fixed or refactored, or no findings.
     """
     defender_failed = any(
@@ -330,6 +342,8 @@ def compute_verdict(rounds: list[dict]) -> tuple[str, list[str]]:
         return "defender_failed", unresolved
     if unresolved:
         return "has_unresolved", unresolved
+    if attacker_failed:
+        return "attacker_failed", unresolved
     return "all_resolved", unresolved
 
 
@@ -418,6 +432,7 @@ def main():
     all_findings_by_id = {}
     total_findings = 0
     total_resolved = 0
+    attacker_failed = False
 
     try:
         for round_num in range(1, MAX_ROUNDS + 1):
@@ -426,9 +441,17 @@ def main():
             # Attack
             findings = run_attacker(changed_files, spec)
             if findings is None:
-                print(f"  Attacker failed in round {round_num}, aborting harden", file=sys.stderr)
-                checkout(original_branch)
-                sys.exit(1)
+                # Do not abort the run: the executor's work is committed and
+                # its tests passed. Record that the adversarial check never
+                # ran and let approval route the branch to human review
+                # (aborting here ended the whole night on 2026-08-31 and
+                # 2026-09-01 over attacker timeouts).
+                print(
+                    f"  Attacker failed in round {round_num}; verdict will be attacker_failed",
+                    file=sys.stderr,
+                )
+                attacker_failed = True
+                break
 
             if len(findings) == 0:
                 # Clean — no issues found
@@ -520,7 +543,7 @@ def main():
         # Always return to original branch
         checkout(original_branch)
 
-    verdict, unresolved = compute_verdict(rounds)
+    verdict, unresolved = compute_verdict(rounds, attacker_failed=attacker_failed)
 
     harden_result = {
         "schema_version": HARDEN_SCHEMA_VERSION,

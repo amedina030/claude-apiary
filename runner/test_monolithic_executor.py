@@ -405,7 +405,7 @@ class TestMonolithicArtifactFeedsAutoHarden(ChainedExecutorTestBase):
     def _run_auto_harden(self, log_path):
         """Run stage 5 with a fake attacker that finds nothing."""
 
-        def fake_claude(prompt, model=None):
+        def fake_claude(prompt, model=None, timeout=None):
             return 0, json.dumps({"result": "[]"}), ""
 
         argv = ["auto_harden.py", str(log_path)]

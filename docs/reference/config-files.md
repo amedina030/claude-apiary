@@ -39,7 +39,7 @@ Description column is hand-written. Change a value in the file and
 | `harden` | `max_rounds` | int | `1` | Attack-defend rounds per run |
 | `harden` | `attacker_model` | string | `"opus"` | Claude model alias for the attacker |
 | `harden` | `defender_model` | string | `"sonnet"` | Claude model alias for the defender |
-| `harden` | `timeout` | int | `300` | Per-round timeout in seconds |
+| `harden` | `timeout` | int | `900` | Per-round timeout in seconds |
 | `orchestrator` | `stage_timeout` | int | `3600` | Wall-clock ceiling for any one stage before the orchestrator kills it |
 | `detached` | `token_cap` | int | `10000000` | Per-run token cap in detached (cron) mode; `--token-cap` overrides it |
 | `detached` | `max_unreviewed` | int | `5` | Detached runs refuse to start a new ticket once this many branches are waiting for review |

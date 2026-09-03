@@ -433,6 +433,19 @@ def main():
         # (there are none), do not write a scribe note. The reviewer sees this
         # in the runner queue via the HARDEN column and run_history.jsonl.
         path_taken, exit_code = "defender-failed", 1
+    elif verdict == "attacker_failed":
+        # The adversarial check never ran (attacker timeouts / validation
+        # failures), but the executor's work is committed and its tests
+        # passed. Keep the branch, ask a human to review it, and exit 0 so
+        # the run records as complete-pending-review rather than failed.
+        write_scribe_note(
+            "todo",
+            f"RUNNER HARDEN INCOMPLETE: {stats['title']}. Branch {branch} "
+            "passed executor tests but the harden attacker never produced "
+            "findings (timeouts or validation failures). Review the branch "
+            "manually before merging.",
+        )
+        path_taken, exit_code = "harden-incomplete", 0
     elif verdict == "has_unresolved":
         verdict, unresolved, path_taken, exit_code = triage_unresolved(harden, branch, uuid, stats)
     else:
