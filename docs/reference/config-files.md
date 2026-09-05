@@ -162,20 +162,33 @@ Global budgeter configuration. Located in the repo at `budgeter/config.json`.
 budgeter hooks' matcher, so changing it changes which tool calls are logged
 *and* which ones pay for the hook.
 
-The last four rows are read by `budgeter/report.py --weighted` and are
+`usage_sample_interval_seconds`, `model_weights` and the two cache factors
+feed the usage-limit sampler and the transcript-based `budgeter/bill.py` /
+`budgeter/usage_calibrate.py`; the weights are API list-price ratios used only
+to compare models (the account has no API key, so nothing here is a price).
+
+The four `price_weight_*` rows are read by `budgeter/report.py --weighted` and are
 deliberately **absent from the shipped file** — their defaults live in
 `budgeter/report.py` and are generated from there.
 
 <!-- generated:start: config:budgeter/config.json -->
-| Field | Type | Default | Description |
-|-----|----|-------|-----------|
-| `monitored_tools` | array | `["Agent", "Bash", "Read", "Write"]` | Tool names the budgeter hooks fire for; also the dispatcher matcher for both budgeter hooks |
-| `session_warn_soft_tokens` | int | `600000` | Prompt size at which the session-length nudge suggests wrapping up |
-| `session_warn_hard_tokens` | int | `800000` | Prompt size at which it suggests starting a new session now |
-| `price_weight_input` | float | `1.0` (code default; not in the file) | Weight applied to input tokens by `report.py --weighted` |
-| `price_weight_cache` | float | `0.1` (code default; not in the file) | Weight applied to cache-read tokens |
-| `price_weight_cache_creation` | float | `1.25` (code default; not in the file) | Weight applied to cache-creation tokens |
-| `price_weight_output` | float | `5.0` (code default; not in the file) | Weight applied to output tokens |
+| Section | Field | Type | Default | Description |
+|-------|-----|----|-------|-----------|
+|  | `monitored_tools` | array | `["Agent", "Bash", "Read", "Write"]` | Tool names the budgeter hooks fire for; also the dispatcher matcher for both budgeter hooks |
+|  | `session_warn_soft_tokens` | int | `600000` | Prompt size at which the session-length nudge suggests wrapping up |
+|  | `session_warn_hard_tokens` | int | `800000` | Prompt size at which it suggests starting a new session now |
+|  | `usage_sample_interval_seconds` | int | `300` | Minimum seconds between two usage-limit samples in `budgeter/data/usage_samples.jsonl`; the Stop hook and the GUI each check the last sample's age before recording |
+| `model_weights` | `claude-fable-5-1` | object | `{"input": 10.0, "output": 50.0, "cache_read": 0.25}` | Relative weight per million tokens used by `bill.py` and `usage_calibrate.py` to compare models (API list-price ratios, not a price); `cache_read` is an absolute rate here because Fable 5.1 prices cache reads flat |
+| `model_weights` | `claude-fable-5` | object | `{"input": 10.0, "output": 50.0}` | Same table, Fable 5; cache reads fall back to `cache_read_factor` x `input` |
+| `model_weights` | `claude-opus-5` | object | `{"input": 5.0, "output": 25.0}` | Same table, Opus 5 |
+| `model_weights` | `claude-sonnet-5` | object | `{"input": 2.0, "output": 10.0}` | Same table, Sonnet 5 |
+| `model_weights` | `claude-haiku-4-5` | object | `{"input": 1.0, "output": 5.0}` | Same table, Haiku 4.5; keys match by longest prefix, so dated ids such as `claude-haiku-4-5-20251001` resolve here. A model with no entry counts as zero load and is named in the report footer |
+|  | `cache_read_factor` | float | `0.1` | Cache-read tokens weigh this fraction of a model's `input` weight unless the model sets an absolute `cache_read` |
+|  | `cache_write_factor` | float | `1.25` | Cache-write tokens weigh this multiple of a model's `input` weight |
+|  | `price_weight_input` | float | `1.0` (code default; not in the file) | Weight applied to input tokens by `report.py --weighted` |
+|  | `price_weight_cache` | float | `0.1` (code default; not in the file) | Weight applied to cache-read tokens |
+|  | `price_weight_cache_creation` | float | `1.25` (code default; not in the file) | Weight applied to cache-creation tokens |
+|  | `price_weight_output` | float | `5.0` (code default; not in the file) | Weight applied to output tokens |
 <!-- generated:end: config:budgeter/config.json -->
 
 ## .claude/budgeter.json (per-project)

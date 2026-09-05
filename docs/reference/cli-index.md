@@ -4,7 +4,7 @@ title: CLI Tools Index
 scope: project
 description: Generated one-line index of every CLI entry point — use cli_lookup.py for full details
 framework_version: "1.0"
-last_verified: "2026-08-27"
+last_verified: "2026-09-05"
 ---
 
 # CLI Tools Index
@@ -30,6 +30,8 @@ flag — `--check` runs in `docs/hooks/pre-commit` and in CI.
 | `python core/doctor.py` | Read-only consistency checks for the per-repo install model. | compass, duplicates, orphans, pins, pointers, registry, stale, unreachable, versions |
 | `python core/flags.py` | Per-repo feature flag toggles | disable, enable, status, toggle |
 | `python budgeter/report.py` | Usage reporting | --all, --by-agent, --by-request, --by-turn, --date, --flat, --grouped, --since, --weighted |
+| `python budgeter/bill.py` | Attribute Claude Code usage from the machine-wide transcripts | --by, --json, --project, --projects-dir, --since, --top, --until |
+| `python budgeter/usage_calibrate.py` | Calibrate transcript load against the sampled usage limits | --json, --projects-dir, --samples, --since, --top, --window |
 | `python budgeter/query_request.py` | Sum tokens for a given request_id | --cwd, --request-id |
 | `python budgeter/log_agent_cost.py` | Log background agent token costs | --agent, --cwd, --request-id, --session-id |
 | `python compass/observations.py` | Inspect/maintain personality observation files | archive, count, list, validate |

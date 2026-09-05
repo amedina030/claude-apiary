@@ -15,6 +15,8 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+from budgeter.lib import usage_samples
+from core import usage_fetcher
 from gui import (
     build_info,
     composer_state,
@@ -24,7 +26,6 @@ from gui import (
     pty_capture,
     sidebar_state,
     tabs_state,
-    usage_fetcher,
 )
 from gui.paths import main_apiary, state_dir
 from gui.permission_bridge import PermissionBridge
@@ -584,6 +585,10 @@ class App:
         """
         if payload is not None:
             self._last_usage = payload
+            try:
+                usage_samples.record_if_due(payload, "gui")
+            except Exception as e:  # noqa: BLE001 — sampling must never break the UI
+                print(f"[gui] usage sample failed: {e}", file=sys.stderr)
         self._eval(f"window.apiary.onUsage({json.dumps(payload)});")
 
     # --- drag-dropped file references ---------------------------------------------

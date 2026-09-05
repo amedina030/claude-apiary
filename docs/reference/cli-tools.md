@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-09-02"
+last_verified: "2026-09-05"
 ---
 
 # CLI Tools
@@ -260,6 +260,66 @@ python budgeter/report.py [options]
 | `--by-request` | Group by `request_id` (sums multi-call chains like one runner run; entries without a `request_id` bucket into `(no request)`) |
 | `--weighted` | Weight tokens by type: cache 0.1x, output 5x |
 <!-- generated:end: cli:budgeter/report.py:flag -->
+
+## budgeter/bill.py
+
+Where the usage went. Reads every Claude Code transcript under
+`~/.claude/projects` (interactive sessions, subagents, and every headless
+`claude -p` call the runner and the scheduled pipelines make) and attributes
+the billed tokens of each call by project, session, model, day, or kind
+(interactive vs headless). Works for any repo on the machine, hooks installed
+or not, because it reads what Claude Code itself wrote. This is a different
+quantity from the budgeter log: `net_tokens_delta` there is the marginal
+growth of the prompt between tool calls, while the limits are drawn down by
+the full billed input of every call, cache reads included.
+
+`load` is tokens weighted per model by `model_weights` in
+`budgeter/config.json`: API list-price ratios, used only so a Sonnet call and a
+Fable call are comparable. The account has no API key and this is not a bill.
+Cache reads weigh `cache_read_factor` of input, cache writes
+`cache_write_factor`. `budgeter/usage_calibrate.py` turns load into measured
+percent-of-limit.
+
+```bash
+python budgeter/bill.py                          # last 7 days by project
+python budgeter/bill.py --since 24h --by session
+python budgeter/bill.py --project job_search --by session --top 40
+python budgeter/bill.py --by model --json
+```
+
+<!-- generated:start: cli:budgeter/bill.py:flag -->
+| Flag | Description |
+|------|-------------|
+| `--projects-dir` | Transcript root to read (default ~/.claude/projects); mainly for tests |
+<!-- generated:end: cli:budgeter/bill.py:flag -->
+
+Exit codes: `0` on success; `1` when `--since` or `--until` cannot be parsed (reason on stderr).
+
+## budgeter/usage_calibrate.py
+
+Calibrates `bill.py` load against the real limits. Pairs consecutive usage
+samples (`budgeter/data/usage_samples.jsonl`, written by the budgeter Stop hook
+and the GUI every `usage_sample_interval_seconds`) that fall inside one limit
+window, sums the transcript load that happened between them, and fits percent
+of the window per unit of load. Reports the movement no local session explains
+(claude.ai, another device, the Chrome extension) and lists the sessions that
+drew on the window currently open, each with its estimated share.
+
+```bash
+python budgeter/usage_calibrate.py                    # 5-hour window, last 7 days of samples
+python budgeter/usage_calibrate.py --window seven_day
+python budgeter/usage_calibrate.py --json
+```
+
+<!-- generated:start: cli:budgeter/usage_calibrate.py:flag -->
+| Flag | Description |
+|------|-------------|
+| `--projects-dir` | Transcript root to read (default ~/.claude/projects); mainly for tests |
+| `--samples` | Samples file (default budgeter/data/usage_samples.jsonl) |
+| `--top` | Sessions to list for the open window |
+<!-- generated:end: cli:budgeter/usage_calibrate.py:flag -->
+
+Exit codes: `0` on success, including "no samples yet"; `1` when `--since` cannot be parsed.
 
 ## budgeter/query_request.py
 

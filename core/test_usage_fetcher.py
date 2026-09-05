@@ -1,4 +1,4 @@
-"""Unit tests for gui.usage_fetcher."""
+"""Unit tests for core.usage_fetcher."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import urllib.error
 from pathlib import Path
 from unittest import mock
 
-from gui import usage_fetcher
+from core import usage_fetcher
 
 
 class ReadAccessTokenTests(unittest.TestCase):
@@ -72,7 +72,7 @@ class FetchUsageTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             creds = self._write_creds(tmp)
-            with mock.patch("gui.usage_fetcher.urllib.request.urlopen", return_value=FakeResp()):
+            with mock.patch("core.usage_fetcher.urllib.request.urlopen", return_value=FakeResp()):
                 got = usage_fetcher.fetch_usage(creds)
         self.assertEqual(got, payload)
 
@@ -82,14 +82,14 @@ class FetchUsageTests(unittest.TestCase):
             err = urllib.error.HTTPError(
                 usage_fetcher.USAGE_URL, 429, "Too Many Requests", {}, None
             )
-            with mock.patch("gui.usage_fetcher.urllib.request.urlopen", side_effect=err):
+            with mock.patch("core.usage_fetcher.urllib.request.urlopen", side_effect=err):
                 self.assertIsNone(usage_fetcher.fetch_usage(creds))
 
     def test_timeout_returns_none(self):
         with tempfile.TemporaryDirectory() as tmp:
             creds = self._write_creds(tmp)
             with mock.patch(
-                "gui.usage_fetcher.urllib.request.urlopen", side_effect=TimeoutError("slow")
+                "core.usage_fetcher.urllib.request.urlopen", side_effect=TimeoutError("slow")
             ):
                 self.assertIsNone(usage_fetcher.fetch_usage(creds))
 
@@ -106,7 +106,7 @@ class FetchUsageTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             creds = self._write_creds(tmp)
-            with mock.patch("gui.usage_fetcher.urllib.request.urlopen", return_value=FakeResp()):
+            with mock.patch("core.usage_fetcher.urllib.request.urlopen", return_value=FakeResp()):
                 self.assertIsNone(usage_fetcher.fetch_usage(creds))
 
 
