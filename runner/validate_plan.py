@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 from .config_loader import get as cfg
+from .validate_post_conditions import check_literals
 
 # Where apiary itself lives. Fixed, and used only to decide whether a plan
 # targets apiary (which has its own banned-token list).
@@ -1186,6 +1187,7 @@ def _validate(data: dict, banned_tokens: dict) -> list[str]:
     # verification declarations used by the executor to decide success
     # independent of whether the subprocess made git changes.
     errors.extend(_check_post_conditions(steps))
+    errors.extend(check_literals(steps, _REPO_ROOT))
 
     # Acceptance criteria coverage
     if isinstance(spec, dict):
