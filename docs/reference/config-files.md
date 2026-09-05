@@ -4,7 +4,7 @@ title: Config Files
 scope: project
 description: Every config file, with the key tables generated from the shipped JSON
 framework_version: "1.0"
-last_verified: "2026-09-02"
+last_verified: "2026-09-05"
 ---
 
 # Config Files
@@ -33,6 +33,7 @@ Description column is hand-written. Change a value in the file and
 | `executor` | `model` | string | `"sonnet"` | Claude model alias for the executor stage |
 | `executor` | `max_retries_per_step` | int | `2` | Retries per execution step |
 | `executor` | `max_no_change_retries` | int | `2` | Retries allowed when a step returns without touching a file — the "the model did nothing" guard |
+| `executor` | `max_feedback_retries` | int | `2` | Retries a step gets when its result fails a check the model can act on — an unmet post-condition or a commit the repo's hooks rejected — with the failure text fed back; one shared budget per step |
 | `executor` | `timeout` | int | `900` | Per-step timeout in seconds |
 | `executor` | `mode` | string | `"per_step"` | `per_step` runs one Claude call per plan step; `monolithic` runs the whole plan in one call (and uses `monolithic_executor.timeout_seconds`) |
 | `monolithic_executor` | `timeout_seconds` | int | `1800` | Timeout for the single call the monolithic executor makes |
