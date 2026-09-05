@@ -4,7 +4,7 @@ title: Hooks
 scope: project
 description: Every hook the dispatcher runs, in order, with its event and matcher
 framework_version: "1.0"
-last_verified: 2026-09-02
+last_verified: 2026-09-05
 ---
 
 # Hooks
@@ -46,7 +46,7 @@ Adding a `Hook(...)` row to the registry and running
 | PreToolUse (`pre`) | 8 | `remind_standards` | `docs/hooks/remind_standards.py` | `Write\|Edit` | On the session's first Write/Edit of a `.py` file or a `docs/*.md` file, injects a one-line pointer to the relevant standards doc. Once per file category per session. Classification is relative to **the repo the write is in** (`CLAUDE_PROJECT_DIR`, then `APIARY_TARGET_REPO`, then the payload cwd), so it works in every bootstrapped repo; "new tool" means the top-level directory holds no other Python (T-2026-282). |
 | PostToolUse (`post`) | 1 | `context_rule_error_reminder` | `core/hooks/context_rule_error_reminder.py` | `Bash` | On a failed Bash call (non-zero exit, traceback, interrupted, `is_error`), injects the `recover_from_trivial_errors` rule and the `Errors Signal Doc Gaps` principle, and files a scribe todo when the failure is doc-shaped (an unrecognised argument on a documented command, or a documented path that does not exist). Skips successes and hook denials. |
 | PostToolUse (`post`) | 2 | `budgeter_post` | `budgeter/hooks/post_tool_use.py` | `Agent\|Bash\|Read\|Write` | Logs exact subagent token cost from `tool_response.totalTokens` (Agent calls only). |
-| Stop (`stop`) | 1 | `budgeter_stop` | `budgeter/hooks/stop_session.py` | _(every tool)_ | Logs the final tool call's cost and cleans up the temp baseline file. |
+| Stop (`stop`) | 1 | `budgeter_stop` | `budgeter/hooks/stop_session.py` | _(every tool)_ | Logs the final tool call's cost, records one usage-limit sample (`budgeter/lib/usage_samples.py`) if the last one is older than `usage_sample_interval_seconds` (silenced per repo by the `budgeter-usage-sample-off` flag), and cleans up the temp baseline file. |
 | Stop (`stop`) | 2 | `save_transcript` | `core/hooks/save_transcript.py` | _(every tool)_ | Records the session in `<state-dir>/sessions/{history.json,last-session.json}` for handoff generation, and sweeps stale session files. |
 | UserPromptSubmit (`prompt`) | 1 | `startup_prompt` | `core/hooks/startup_prompt_hook.py` | _(every tool)_ | On the first user message, injects identity, the notes summary, the learnings index, the CLI index, the apiary toolkit rules and the compass profile. With `APIARY_GUI_SESSION=1` it also injects a `surface:` note saying the session runs inside the GUI. |
 <!-- generated:end: hooks:registry -->

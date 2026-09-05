@@ -4,7 +4,7 @@ title: Hook Lifecycle
 scope: budgeter
 description: PRE-to-PRE delta pattern, the Agent special case, task attribution, baselines and the session-length nudge
 framework_version: "1.0"
-last_verified: "2026-08-27"
+last_verified: "2026-09-05"
 ---
 
 # Hook Lifecycle
@@ -82,6 +82,25 @@ Each session has a baseline file at `budgeter/tmp/<session_id>_baseline.json`
 Written atomically (temp file + `os.replace`), and deleted by
 `budgeter/hooks/stop_session.py` at the end of every assistant turn — the Stop
 hook fires per response, not per session.
+
+## Usage-limit samples
+
+The same Stop hook records one usage-limit sample after it has logged the
+final call: it fetches the Claude Code OAuth usage endpoint through
+`core/usage_fetcher.py` and appends the 5-hour and 7-day utilization (with
+their reset times and a `hook` source tag) to
+`budgeter/data/usage_samples.jsonl`, but only when the last sample there is
+older than `usage_sample_interval_seconds` (`budgeter/config.json`, default
+300). The GUI's poller appends the payload it already holds under the same
+gate with a `gui` tag. The file is always the main apiary copy: usage is per
+account, so the per-project redirect the token log honours does not apply.
+
+The sample is what the token log is not, the quantity the subscription's
+limits are actually drawn down by. `budgeter/usage_calibrate.py` joins it to
+the transcript load `budgeter/bill.py` computes. On by default in every repo,
+silenced per repo by the `budgeter-usage-sample-off` flag; fail-open, bounded
+by the fetcher's 5-second timeout, and refused outright under
+`APIARY_BUDGETER_TEST_ISOLATION=1` before any network call.
 
 ## Warnings
 

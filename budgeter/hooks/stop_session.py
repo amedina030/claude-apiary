@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Stop hook — logs the final tool call's cost and cleans up temp files.
+Stop hook — logs the final tool call's cost, samples the usage limits, and cleans up temp files.
 
 The last tool in a session has no subsequent PRE hook to capture its cost.
 This hook reads the final transcript, computes the delta against the last
@@ -30,6 +30,10 @@ def run(payload: dict):
         _log_final_call(payload, session_id)
     except Exception as exc:  # noqa: BLE001 — hooks must not crash
         print(f"[budgeter] stop_session failed: {exc!r}", file=sys.stderr)
+    try:
+        _sample_usage()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[budgeter] usage sample failed: {exc!r}", file=sys.stderr)
     finally:
         if session_id:
             try:
@@ -37,6 +41,22 @@ def run(payload: dict):
             except Exception as exc:  # noqa: BLE001
                 print(f"[budgeter] stop_session cleanup failed: {exc!r}", file=sys.stderr)
     return None
+
+
+def _sample_usage():
+    """Record one usage-limit sample if the interval has elapsed.
+
+    On by default everywhere: usage is per account, and this hook fires at
+    the end of every assistant turn in every apiary repo, interactive or
+    headless, which is when the limits move. ``budgeter-usage-sample-off`` in
+    a repo silences it there. The fetcher's 5 s timeout bounds the cost.
+    """
+    if flags.is_enabled("budgeter-usage-sample-off"):
+        return
+    from budgeter.lib import usage_samples
+    from core.usage_fetcher import fetch_usage
+
+    usage_samples.sample_if_due("hook", fetch_usage)
 
 
 def _log_final_call(payload, session_id):
