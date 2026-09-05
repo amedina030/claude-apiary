@@ -13,6 +13,7 @@
     "model": "sonnet",
     "max_retries_per_step": 2,
     "max_no_change_retries": 2,
+    "max_feedback_retries": 2,
     "timeout": 900,
     "mode": "per_step"
   },

@@ -19,6 +19,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -52,6 +53,17 @@ EXECUTIONS_DIR = executions_dir()
 
 MAX_STEP_RETRIES = cfg("executor", "max_retries_per_step", 2)
 MAX_NO_CHANGE_RETRIES = cfg("executor", "max_no_change_retries", 2)
+# Retries a step gets when its output fails a check the model can act on: an
+# unmet post-condition (T-2026-312) or a commit the repo's hooks rejected
+# (T-2026-314). One shared budget per step, so the worst case stays bounded
+# whichever check keeps failing. Before this budget existed both failures
+# aborted the whole run on the first miss: three consecutive detached nights
+# (2026-09-03/04/05) each spent 15-36 min in refine+plan and then died after a
+# single executor call.
+MAX_FEEDBACK_RETRIES = cfg("executor", "max_feedback_retries", 2)
+# Hook output fed back to the model is capped so one noisy hook cannot
+# balloon the retry prompt.
+_FEEDBACK_OUTPUT_CAP = 4000
 
 
 class NoChangesError(RuntimeError):
@@ -605,12 +617,55 @@ def topo_sort(steps: list[dict]) -> list[dict]:
 # -- Step execution --
 
 
+_POST_CONDITION_PHRASES = {
+    "file_contains": "must contain the exact text",
+    "file_lacks": "must NOT contain the text",
+    "file_exists": "must exist",
+    "file_absent": "must not exist",
+}
+
+
+def describe_post_conditions(step: dict) -> list:
+    """Render a step's declared ``post_conditions`` as prompt bullet lines.
+
+    Mirrors ``verify_post_conditions`` — one line per well-formed condition,
+    malformed entries skipped the same way — so the model is told exactly
+    what will be checked. The text checks are literal substring matches,
+    which the prompt says out loud: the 2026-09-03 night (T-2026-312) failed
+    on a plan that demanded ``HOOKS = (`` and a model that wrote the same
+    table under another name.
+    """
+    conds = step.get("post_conditions")
+    if not conds or not isinstance(conds, list):
+        return []
+    lines = []
+    for cond in conds:
+        if not isinstance(cond, dict):
+            continue
+        phrase = _POST_CONDITION_PHRASES.get(cond.get("type"))
+        fpath = cond.get("file", "")
+        if phrase is None or not isinstance(fpath, str) or not fpath:
+            continue
+        if cond.get("type") in ("file_contains", "file_lacks"):
+            lines.append(f"- `{fpath}` {phrase} {cond.get('text', '')!r}")
+        else:
+            lines.append(f"- `{fpath}` {phrase}")
+    return lines
+
+
 def build_step_prompt(step: dict, spec: dict, retry_hint: str = "") -> str:
     """Build the prompt for a create/modify/delete step.
 
+    A step that declares ``post_conditions`` gets them spelled out between
+    the code specification and the instructions (T-2026-312), so the model
+    satisfies the check on the first attempt instead of learning about it
+    from a retry hint.
+
     ``retry_hint``, when non-empty, is appended after the standard
     instructions. The executor uses this to nudge a retry attempt after
-    a previous attempt produced no file changes (T-2026-119).
+    a previous attempt produced no file changes (T-2026-119), failed a
+    post-condition (T-2026-312) or had its commit rejected by the repo's
+    hooks (T-2026-314).
     """
     parts = [
         f"You are implementing step {step['step_number']} of a plan.",
@@ -624,9 +679,24 @@ def build_step_prompt(step: dict, spec: dict, retry_hint: str = "") -> str:
         "",
         step.get("code_spec", ""),
         "",
-        "## Instructions",
-        "",
     ]
+
+    pc_lines = describe_post_conditions(step)
+    if pc_lines:
+        parts.extend(
+            [
+                "## Post-conditions (checked automatically after this step)",
+                "",
+                *pc_lines,
+                "",
+                "The step fails if any of these is unmet. The text checks are "
+                "literal substring matches, so reproduce the quoted text "
+                "verbatim — spacing and punctuation included.",
+                "",
+            ]
+        )
+
+    parts.extend(["## Instructions", ""])
 
     action = step.get("action", "")
     if action == "create":
@@ -937,29 +1007,161 @@ def _mark_remaining_skipped(
         )
 
 
+_RUFF_CONFIG_FILES = ("ruff.toml", ".ruff.toml")
+
+
+def _repo_has_ruff_config(root: Path) -> bool:
+    """True when the target repo configures ruff itself, so running it applies
+    the repo's own style rather than a default the runner would be imposing."""
+    if any((root / name).is_file() for name in _RUFF_CONFIG_FILES):
+        return True
+    try:
+        return "[tool.ruff" in (root / "pyproject.toml").read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+def _find_ruff():
+    """Resolve a ruff command, or None.
+
+    Same order of preference as ``docs/hooks/pre-commit``: an explicit
+    ``$APIARY_RUFF``, then the bin dir of the interpreter the runner is
+    running in, then PATH, then the main checkout's venv — the runner works
+    in a linked worktree that deliberately has no venv of its own.
+    """
+    explicit = os.environ.get("APIARY_RUFF", "").strip()
+    if explicit:
+        return [explicit]
+    exe_dir = Path(sys.executable).resolve().parent
+    for name in ("ruff.exe", "ruff"):
+        cand = exe_dir / name
+        if cand.is_file():
+            return [str(cand)]
+    on_path = shutil.which("ruff")
+    if on_path:
+        return [on_path]
+    common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common.returncode == 0 and common.stdout.strip():
+        venv = Path(common.stdout.strip()).parent / ".venv"
+        for rel in ("Scripts/ruff.exe", "bin/ruff"):
+            cand = venv / rel
+            if cand.is_file():
+                return [str(cand)]
+    return None
+
+
+def autofix_python_files(files: list, repo_root=None) -> None:
+    """Run ruff's safe autofixes and formatter over a step's Python files
+    before they are committed (T-2026-314).
+
+    The pre-commit hook lints staged ``.py`` files and CI additionally checks
+    formatting. A model-authored edit that trips either used to cost a whole
+    detached night over something ``ruff --fix`` repairs in milliseconds
+    (2026-09-05: one unsorted import block), and runner-authored files that
+    were never formatted have needed hand fixes to unbreak CI (PR #46). Only
+    runs when the target repo configures ruff, so the runner never imposes a
+    style; never raises — anything ruff cannot fix is still the hook's call,
+    and the hook's verdict is what the retry feeds back.
+    """
+    root = Path(repo_root or Path.cwd()).resolve()
+    py_files = [f for f in files if f.endswith(".py") and (root / f).is_file()]
+    if not py_files or not _repo_has_ruff_config(root):
+        return
+    ruff = _find_ruff()
+    if ruff is None:
+        print("autofix: ruff not found, skipping (set APIARY_RUFF)", file=sys.stderr)
+        return
+    for args in (
+        ["check", "--fix", "--force-exclude", "--quiet"],
+        ["format", "--force-exclude", "--quiet"],
+    ):
+        try:
+            subprocess.run(
+                ruff + args + py_files,
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=120,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            print(f"autofix: ruff {args[0]} failed: {e}", file=sys.stderr)
+            return
+
+
+def _post_condition_retry_hint(failures: list) -> str:
+    lines = "\n".join(f"- {f}" for f in failures)
+    return (
+        "IMPORTANT: A previous attempt implemented this step, but the "
+        "automatic post-condition check failed:\n"
+        f"{lines}\n"
+        "The files already carry that attempt's edits — read them, keep what "
+        "is right, and make the smallest change that satisfies every "
+        "post-condition above. The text checks are literal substring "
+        "matches, so reproduce the quoted text verbatim."
+    )
+
+
+def _hook_rejection_retry_hint(hook_output: str) -> str:
+    output = hook_output.strip()
+    if len(output) > _FEEDBACK_OUTPUT_CAP:
+        output = output[:_FEEDBACK_OUTPUT_CAP] + "\n[... hook output truncated ...]"
+    return (
+        "IMPORTANT: A previous attempt implemented this step, but the "
+        "repository's commit hooks rejected the commit. Fix every problem "
+        "the hook output below reports, in the files listed above, without "
+        "disabling or bypassing any hook. Hook output:\n"
+        f"{output}"
+    )
+
+
 def run_step_with_commit(
     step: dict, spec: dict, model: str, uuid: str, execution_log: dict, log_path: Path
 ) -> tuple:
     """Execute one step, verify it, and commit it. Returns ``(result, error)``.
 
     ``error`` is non-None when the commit itself failed and the run must
-    abort. The loop exists for T-2026-119: when commit_files finds no diff
-    (the subprocess succeeded but made no edits) the step is retried with an
-    augmented prompt up to MAX_NO_CHANGE_RETRIES times, because the
-    subprocess is the only thing that can actually write the files.
+    abort. Three retry paths share the loop, each with its own reason to
+    hand the step back to the model rather than give up:
 
-    The log entry is rewritten and persisted after every state change (#243)
-    so a crash leaves the log honest about what the step produced.
+    * no changes (T-2026-119): commit_files found no diff, so the subprocess
+      is nudged to actually use its edit tools — up to MAX_NO_CHANGE_RETRIES;
+    * unmet post-condition (T-2026-312) and hook-rejected commit
+      (T-2026-314): the failure text goes back as the retry hint, the two
+      sharing one budget of MAX_FEEDBACK_RETRIES. Both used to abort the run
+      on the first miss.
+
+    ``feedback_retries`` on the recorded step result is the audit trail for
+    the second kind. The log entry is rewritten and persisted after every
+    state change (#243) so a crash leaves the log honest about what the step
+    produced.
     """
     step_num = step["step_number"]
     retry_hint = ""
     no_change_attempts = 0
+    feedback_attempts = 0
+
+    def arm_feedback_retry(reason: str, hint: str) -> bool:
+        """Spend one feedback retry. False once the shared budget is gone."""
+        nonlocal feedback_attempts, retry_hint
+        feedback_attempts += 1
+        if feedback_attempts > MAX_FEEDBACK_RETRIES:
+            return False
+        print(
+            f"Step {step_num}: {reason} — retrying "
+            f"({feedback_attempts}/{MAX_FEEDBACK_RETRIES}) with the failure fed back",
+            file=sys.stderr,
+        )
+        retry_hint = hint
+        return True
 
     while True:
         # #236: snapshot worktree state before the step so we can detect
         # writes to paths the step didn't declare in step.files.
         pre_state = snapshot_worktree_state()
         step_result = execute_step(step, spec, model, retry_hint=retry_hint)
+        if feedback_attempts:
+            step_result["feedback_retries"] = min(feedback_attempts, MAX_FEEDBACK_RETRIES)
         # Unexpected-write check on any non-test/verify step that succeeded —
         # test/verify steps shell out and shouldn't write files at all, and
         # they aren't subject to the step.files contract.
@@ -984,9 +1186,14 @@ def run_step_with_commit(
         # Post-conditions (#T-2026-122 phase 2) run BEFORE the commit, so a
         # step whose declared post-state is wrong is never committed. They
         # read the live filesystem, so a condition a prior step already
-        # satisfied counts as met.
+        # satisfied counts as met. An unmet one goes back to the model with
+        # the failure spelled out (T-2026-312) until the budget runs out.
         pc_failures = verify_post_conditions(step, Path.cwd())
         if pc_failures:
+            if arm_feedback_retry(
+                "post-condition(s) not satisfied", _post_condition_retry_hint(pc_failures)
+            ):
+                continue
             step_result["status"] = "failed"
             step_result["error"] = "Post-condition(s) not satisfied after step: " + "; ".join(
                 pc_failures
@@ -998,6 +1205,9 @@ def run_step_with_commit(
         files = step.get("files", [])
         if not files or step.get("action") in ("test", "verify"):
             return step_result, None
+
+        if step.get("action") != "delete":
+            autofix_python_files(files)
 
         try:
             commit_files(
@@ -1058,6 +1268,13 @@ def run_step_with_commit(
                 "just describe or plan the change — execute the tool call."
             )
         except RuntimeError as e:
+            # The commit itself failed — in practice the repo's hooks
+            # rejecting it (T-2026-314: 2026-09-05, one unsorted import
+            # block) or an action/status mismatch. Either message names the
+            # problem precisely, so the model gets it back instead of the
+            # run dying here.
+            if arm_feedback_retry("commit rejected", _hook_rejection_retry_hint(str(e))):
+                continue
             return step_result, str(e)
 
 

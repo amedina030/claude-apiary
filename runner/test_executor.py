@@ -363,6 +363,41 @@ class TestBuildPrompts(unittest.TestCase):
         )
         self.assertEqual(prompt, expected)
 
+    def test_step_prompt_lists_post_conditions(self):
+        # T-2026-312: the model is told what will be checked, between the
+        # spec and the instructions, with the text checks flagged as literal
+        # substring matches. Malformed entries are skipped exactly as
+        # verify_post_conditions skips them.
+        step = self._base_step("modify")
+        step["post_conditions"] = [
+            {"type": "file_contains", "file": "runner/hello.py", "text": "HOOKS = ("},
+            {"type": "file_lacks", "file": "runner/hello.py", "text": "TODO"},
+            {"type": "file_exists", "file": "runner/__init__.py"},
+            {"type": "file_absent", "file": "runner/old.py"},
+            {"type": "bogus", "file": "runner/x.py"},
+            {"type": "file_exists", "file": ""},
+            "not-a-dict",
+        ]
+        prompt = build_step_prompt(step, spec={})
+        section = prompt.split("## Post-conditions")[1].split("## Instructions")[0]
+        self.assertIn("- `runner/hello.py` must contain the exact text 'HOOKS = ('", section)
+        self.assertIn("- `runner/hello.py` must NOT contain the text 'TODO'", section)
+        self.assertIn("- `runner/__init__.py` must exist", section)
+        self.assertIn("- `runner/old.py` must not exist", section)
+        self.assertNotIn("bogus", section)
+        self.assertNotIn("runner/x.py", section)
+        self.assertIn("literal substring matches", section)
+        self.assertLess(prompt.index("## Code specification"), prompt.index("## Post-conditions"))
+        self.assertLess(prompt.index("## Post-conditions"), prompt.index("## Instructions"))
+        # The retry hint still lands after everything else.
+        hinted = build_step_prompt(step, spec={}, retry_hint="RETRY-HINT")
+        self.assertTrue(hinted.endswith("RETRY-HINT"))
+
+    def test_describe_post_conditions_empty_for_missing_or_malformed(self):
+        self.assertEqual(executor.describe_post_conditions({}), [])
+        self.assertEqual(executor.describe_post_conditions({"post_conditions": "x"}), [])
+        self.assertEqual(executor.describe_post_conditions({"post_conditions": [1, "a"]}), [])
+
 
 class TestExecutorEndToEnd(unittest.TestCase):
     """#250: real git repo + real validate_plan + real executor.main(),
@@ -969,6 +1004,322 @@ class TestPostConditionsInExecutorLoop(TestExecutorEndToEnd):
         self.assertEqual(data["steps"][0]["status"], "failed")
         self.assertIn("Post-condition", data["steps"][0]["error"])
         self.assertIn("WIRED_MARKER", data["steps"][0]["error"])
+
+
+class TestRetryOnPostConditionFailure(TestExecutorEndToEnd):
+    """T-2026-312: an unmet post-condition goes back to the model as the
+    retry hint and the step is re-run, up to MAX_FEEDBACK_RETRIES, instead
+    of aborting the whole run on the first miss (nights 2026-09-03/04)."""
+
+    def _write_plan_with_pc(self, uuid):
+        plan = {
+            "schema_version": 1,
+            "uuid": uuid,
+            "valid": True,
+            "executor_model": "sonnet",
+            "spec": {"acceptance_criteria": ["create the hello module"]},
+            "steps": [
+                {
+                    "step_number": 1,
+                    "type": "create",
+                    "description": "create the hello module",
+                    "action": "create",
+                    "files": ["hello.py"],
+                    "depends_on": [],
+                    "code_spec": "write the module and wire the marker",
+                    "post_conditions": [
+                        {"type": "file_contains", "file": "hello.py", "text": "WIRED_MARKER"},
+                    ],
+                },
+            ],
+        }
+        plan_path = self.repo / "plan.json"
+        plan_path.write_text(json.dumps(plan), encoding="utf-8")
+        return plan_path, plan
+
+    def _run_main(self, plan_path, fake_execute):
+        argv = ["executor.py", str(plan_path)]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(executor, "execute_step", side_effect=fake_execute),
+        ):
+            try:
+                executor.main()
+            except SystemExit as e:
+                return e.code
+        return 0
+
+    def test_retry_recovers_when_fed_back_attempt_meets_post_condition(self):
+        plan_path, plan = self._write_plan_with_pc("pc-retry-recovers")
+        self.assertEqual(self._validate_plan.validate(plan), [])
+        calls = {"n": 0, "hints": []}
+
+        def fake_execute(step, spec, model, retry_hint=""):
+            calls["n"] += 1
+            calls["hints"].append(retry_hint)
+            body = "print('x')\n" if calls["n"] == 1 else "# WIRED_MARKER\nprint('x')\n"
+            (self.repo / "hello.py").write_text(body, encoding="utf-8")
+            return {
+                "step_number": step["step_number"],
+                "status": "passed",
+                "files_changed": step.get("files", []),
+                "error": None,
+            }
+
+        self.assertEqual(self._run_main(plan_path, fake_execute), 0)
+
+        self.assertEqual(calls["n"], 2, "expected exactly one feedback retry")
+        self.assertEqual(calls["hints"][0], "")
+        self.assertIn("post-condition check failed", calls["hints"][1])
+        self.assertIn("WIRED_MARKER", calls["hints"][1])
+        self.assertIn("literal substring", calls["hints"][1])
+
+        log = self._git("log", "--format=%s", "-n", "1").stdout
+        self.assertIn("runner/pc-retry-recovers step 1", log)
+        data = json.loads((self._executions / "pc-retry-recovers.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["status"], "completed")
+        self.assertEqual(data["steps"][0]["status"], "passed")
+        self.assertEqual(data["steps"][0]["feedback_retries"], 1)
+
+    def test_aborts_once_feedback_budget_is_spent(self):
+        plan_path, plan = self._write_plan_with_pc("pc-retry-exhausted")
+        self.assertEqual(self._validate_plan.validate(plan), [])
+        calls = {"n": 0}
+
+        def fake_execute(step, spec, model, retry_hint=""):
+            calls["n"] += 1
+            (self.repo / "hello.py").write_text("print('never')\n", encoding="utf-8")
+            return {
+                "step_number": step["step_number"],
+                "status": "passed",
+                "files_changed": step.get("files", []),
+                "error": None,
+            }
+
+        self.assertEqual(self._run_main(plan_path, fake_execute), 1)
+
+        self.assertEqual(calls["n"], 1 + executor.MAX_FEEDBACK_RETRIES)
+        log = self._git("log", "--format=%s", "-n", "1").stdout
+        self.assertNotIn("step 1", log, "nothing may be committed on a failed post-condition")
+        data = json.loads(
+            (self._executions / "pc-retry-exhausted.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(data["status"], "aborted")
+        self.assertEqual(data["steps"][0]["status"], "failed")
+        self.assertIn("Post-condition", data["steps"][0]["error"])
+        self.assertEqual(data["steps"][0]["feedback_retries"], executor.MAX_FEEDBACK_RETRIES)
+
+
+class TestRetryOnCommitHookRejection(TestExecutorEndToEnd):
+    """T-2026-314: a commit the repo's hooks reject is fed back to the model
+    (hook output included) and the step re-run, sharing the
+    MAX_FEEDBACK_RETRIES budget, instead of aborting the run (2026-09-05:
+    one ruff-fixable unsorted import block)."""
+
+    HOOK_MESSAGE = "hook: BAD_TOKEN is not allowed in hello.py"
+
+    def _install_rejecting_hook(self):
+        hooks_dir = Path(self._git("rev-parse", "--git-path", "hooks").stdout.strip())
+        if not hooks_dir.is_absolute():
+            hooks_dir = self.repo / hooks_dir
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook = hooks_dir / "pre-commit"
+        hook.write_text(
+            "#!/bin/sh\n"
+            "if grep -q BAD_TOKEN hello.py; then\n"
+            f"  echo '{self.HOOK_MESSAGE}' >&2\n"
+            "  exit 1\n"
+            "fi\n"
+            "exit 0\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        hook.chmod(0o755)
+
+    def _run_main(self, plan_path, fake_execute):
+        argv = ["executor.py", str(plan_path)]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(executor, "execute_step", side_effect=fake_execute),
+        ):
+            try:
+                executor.main()
+            except SystemExit as e:
+                return e.code
+        return 0
+
+    def test_retry_recovers_after_hook_rejection(self):
+        self._install_rejecting_hook()
+        plan_path, plan = self._write_plan("hook-recovers")
+        self.assertEqual(self._validate_plan.validate(plan), [])
+        calls = {"n": 0, "hints": []}
+
+        def fake_execute(step, spec, model, retry_hint=""):
+            calls["n"] += 1
+            calls["hints"].append(retry_hint)
+            body = "BAD_TOKEN = 1\n" if calls["n"] == 1 else "GOOD = 1\n"
+            (self.repo / "hello.py").write_text(body, encoding="utf-8")
+            return {
+                "step_number": step["step_number"],
+                "status": "passed",
+                "files_changed": step.get("files", []),
+                "error": None,
+            }
+
+        self.assertEqual(self._run_main(plan_path, fake_execute), 0)
+
+        self.assertEqual(calls["n"], 2, "expected exactly one feedback retry")
+        self.assertEqual(calls["hints"][0], "")
+        self.assertIn("commit hooks rejected", calls["hints"][1])
+        self.assertIn(self.HOOK_MESSAGE, calls["hints"][1])
+        self.assertIn("without disabling or bypassing", calls["hints"][1])
+
+        log = self._git("log", "--format=%s", "-n", "1").stdout
+        self.assertIn("runner/hook-recovers step 1", log)
+        self.assertEqual((self.repo / "hello.py").read_text(encoding="utf-8"), "GOOD = 1\n")
+        data = json.loads((self._executions / "hook-recovers.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["status"], "completed")
+        self.assertEqual(data["steps"][0]["status"], "passed")
+        self.assertEqual(data["steps"][0]["feedback_retries"], 1)
+
+    def test_aborts_once_hook_rejections_spend_the_budget(self):
+        self._install_rejecting_hook()
+        plan_path, plan = self._write_plan("hook-exhausted")
+        self.assertEqual(self._validate_plan.validate(plan), [])
+        calls = {"n": 0}
+
+        def fake_execute(step, spec, model, retry_hint=""):
+            calls["n"] += 1
+            (self.repo / "hello.py").write_text(f"BAD_TOKEN = {calls['n']}\n", encoding="utf-8")
+            return {
+                "step_number": step["step_number"],
+                "status": "passed",
+                "files_changed": step.get("files", []),
+                "error": None,
+            }
+
+        self.assertEqual(self._run_main(plan_path, fake_execute), 1)
+
+        self.assertEqual(calls["n"], 1 + executor.MAX_FEEDBACK_RETRIES)
+        log = self._git("log", "--format=%s", "-n", "1").stdout
+        self.assertNotIn("step 1", log)
+        data = json.loads((self._executions / "hook-exhausted.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["status"], "aborted")
+        self.assertEqual(data["steps"][0]["status"], "failed")
+        self.assertIn(self.HOOK_MESSAGE, data["steps"][0]["error"])
+
+
+class TestAutofixBeforeCommit(TestExecutorEndToEnd):
+    """T-2026-314: the step's files go through ruff's autofix after the
+    post-condition check and before the commit, so the hook sees the fixed
+    files and CI's format check sees formatted ones."""
+
+    def test_autofix_sees_step_files_before_the_commit_exists(self):
+        plan_path, plan = self._write_plan("autofix-e2e")
+        self.assertEqual(self._validate_plan.validate(plan), [])
+        seen = []
+
+        def fake_autofix(files, repo_root=None):
+            seen.append(list(files))
+            log = self._git("log", "--format=%s", "-n", "1").stdout
+            self.assertNotIn("step 1", log, "autofix must run before the commit")
+
+        def fake_execute(step, spec, model, retry_hint=""):
+            (self.repo / "hello.py").write_text("print('hello')\n", encoding="utf-8")
+            return {
+                "step_number": step["step_number"],
+                "status": "passed",
+                "files_changed": step.get("files", []),
+                "error": None,
+            }
+
+        argv = ["executor.py", str(plan_path)]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(executor, "execute_step", side_effect=fake_execute),
+            mock.patch.object(executor, "autofix_python_files", side_effect=fake_autofix),
+        ):
+            try:
+                executor.main()
+            except SystemExit as e:
+                self.assertEqual(e.code, 0)
+
+        self.assertEqual(seen, [["hello.py"]])
+        log = self._git("log", "--format=%s", "-n", "1").stdout
+        self.assertIn("runner/autofix-e2e step 1", log)
+
+
+class TestAutofixPythonFiles(unittest.TestCase):
+    """autofix_python_files: runs `ruff check --fix` then `ruff format` on the
+    step's existing .py files, only in a repo that configures ruff, and never
+    raises."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name).resolve()
+        (self.root / "a.py").write_text("import os\n", encoding="utf-8")
+        (self.root / "b.txt").write_text("x\n", encoding="utf-8")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _configure_ruff(self, via="pyproject"):
+        if via == "pyproject":
+            (self.root / "pyproject.toml").write_text(
+                "[tool.ruff]\nline-length = 100\n", encoding="utf-8"
+            )
+        else:
+            (self.root / via).write_text("line-length = 100\n", encoding="utf-8")
+
+    def _run(self, files, ruff=("ruff-stub",)):
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append((list(argv), kwargs))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        ruff_cmd = list(ruff) if ruff is not None else None
+        with (
+            mock.patch.object(executor, "_find_ruff", return_value=ruff_cmd),
+            mock.patch.object(executor.subprocess, "run", side_effect=fake_run),
+        ):
+            executor.autofix_python_files(files, repo_root=self.root)
+        return calls
+
+    def test_skips_repo_without_ruff_config(self):
+        self.assertEqual(self._run(["a.py"]), [])
+
+    def test_runs_fix_then_format_on_existing_py_files_only(self):
+        self._configure_ruff()
+        calls = self._run(["a.py", "b.txt", "missing.py"])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(
+            calls[0][0], ["ruff-stub", "check", "--fix", "--force-exclude", "--quiet", "a.py"]
+        )
+        self.assertEqual(calls[1][0], ["ruff-stub", "format", "--force-exclude", "--quiet", "a.py"])
+        for _, kwargs in calls:
+            self.assertEqual(kwargs["cwd"], str(self.root))
+            self.assertEqual(kwargs["encoding"], "utf-8")
+
+    def test_ruff_toml_counts_as_config(self):
+        self._configure_ruff(via="ruff.toml")
+        self.assertEqual(len(self._run(["a.py"])), 2)
+
+    def test_no_python_files_means_no_ruff_call(self):
+        self._configure_ruff()
+        self.assertEqual(self._run(["b.txt"]), [])
+
+    def test_skips_when_ruff_is_not_found(self):
+        self._configure_ruff()
+        self.assertEqual(self._run(["a.py"], ruff=None), [])
+
+    def test_ruff_failure_does_not_raise(self):
+        self._configure_ruff()
+        with (
+            mock.patch.object(executor, "_find_ruff", return_value=["ruff-stub"]),
+            mock.patch.object(executor.subprocess, "run", side_effect=OSError("boom")),
+        ):
+            executor.autofix_python_files(["a.py"], repo_root=self.root)  # must not raise
 
 
 class TestAssertFilesClean(unittest.TestCase):
