@@ -31,6 +31,7 @@ from .detached_lib import (
     git_commit_all_in,
     git_worktree_create,
     git_worktree_remove,
+    git_worktree_reuse,
     hygiene_precheck,
     pick_backlog_item,
     prune_stale_worktrees,
@@ -581,10 +582,56 @@ def _detached_pick_intake(cli_args, default_target: Path) -> tuple:
         return Path(cli_args.intake), False
 
     picked_path = pick_backlog_item(default_target)
-    if picked_path is None:
-        reason = "all in progress" if all_backlog_items_claimed(default_target) else "backlog empty"
-        raise _DetachedStop(0, f"skipped: {reason}")
-    return picked_path, True
+    if picked_path is not None:
+        return picked_path, True
+
+    resumable = _pick_resumable_intake()
+    if resumable is not None:
+        return resumable, False
+
+    reason = "all in progress" if all_backlog_items_claimed(default_target) else "backlog empty"
+    raise _DetachedStop(0, f"skipped: {reason}")
+
+
+def _pick_resumable_intake() -> Path | None:
+    """Oldest intake ticket a previous detached run left resumable (T-2026-302).
+
+    Backlog items come first, so new work is never starved by retries; a
+    failed ticket is retried only on a night with nothing new to do. A
+    ticket qualifies when it has been attempted at least once and failed,
+    still has restarts left under ``detached.max_restarts``, and left
+    artifacts to resume from. ``"parked": true`` on the ticket opts it out
+    (a ticket held for manual salvage), and ``detached.resume_failed``
+    false turns the whole path off.
+    """
+    if not cfg("detached", "resume_failed", True):
+        return None
+    max_restarts = cfg("detached", "max_restarts", 3)
+    root = intake_dir()
+    if not root.exists():
+        return None
+    candidates = sorted(root.glob("*.json"), key=lambda p: p.stat().st_mtime)
+    for path in candidates:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict) or data.get("parked") is True:
+            continue
+        uid = data.get("id")
+        if not isinstance(uid, str) or not uid.strip() or not is_uuid_safe(uid):
+            continue
+        uid = uid.strip()
+        tracker = run_tracker.load(uid)
+        attempts = tracker.get("attempt_count", 0)
+        if attempts < 1 or attempts >= max_restarts:
+            continue
+        if tracker.get("last_exit_status") == "ok":
+            continue
+        if run_tracker.get_resume_stage(uid) is None:
+            continue
+        return path
+    return None
 
 
 def _detached_load_intake(picked_path: Path) -> tuple:
@@ -684,9 +731,18 @@ def _detached_create_worktree(branch: str, target_repo_path: Path, uuid: str, sl
     artifact files bleeding across runs, no collision with an interactive
     session on the same repo.
     """
-    ok, wt_path, err = git_worktree_create(branch, target_repo=target_repo_path)
-    if ok:
+    # T-2026-302: a previous night's preserved worktree/branch is the resume
+    # point, not an obstacle. Reuse it when it is there; only a state that
+    # cannot be reused (another branch on the path, an undeletable orphan)
+    # fails the run.
+    found, wt_path, err = git_worktree_reuse(branch, target_repo=target_repo_path)
+    if found:
+        print(f"Reusing preserved worktree for {uuid[:8]}: {wt_path}", file=sys.stderr)
         return wt_path
+    if not err:
+        ok, wt_path, err = git_worktree_create(branch, target_repo=target_repo_path)
+        if ok:
+            return wt_path
 
     print(f"ERROR: git worktree setup failed: {err}", file=sys.stderr)
     # Record the attempt BEFORE raising. This early return skipped run_tracker
@@ -970,6 +1026,8 @@ def _run_detached_impl(cli_args) -> int:
         "total_tokens": cumulative_tokens(stage_costs),
         "exit_status": exit_status,
         "log_file": str(run_log_path),
+        # T-2026-302: which stage this invocation resumed at (None = fresh).
+        "resumed_from": resume_from,
         # T-124-followup: propagate the source scribe note id (set by
         # draft_ticket --from-todo) so the post-merge hook can close it
         # after a human reviews + merges the runner branch.

@@ -45,6 +45,7 @@ Description column is hand-written. Change a value in the file and
 | `detached` | `token_cap` | int | `10000000` | Per-run token cap in detached (cron) mode; `--token-cap` overrides it |
 | `detached` | `max_unreviewed` | int | `5` | Detached runs refuse to start a new ticket once this many branches are waiting for review |
 | `detached` | `max_restarts` | int | `3` | How many times a detached run may be restarted after a recoverable failure |
+| `detached` | `resume_failed` | bool | `true` | When the backlog is empty, retry the oldest failed intake ticket that still has restarts and artifacts to resume from (`"parked": true` on a ticket opts it out) |
 | `runner` | `target_repo` | null | `null` | Default target repo path for runs that name none. `null` means "the repo apiary resolved" |
 | `runner` | `banned_tokens` | object | `{"pytest": "use unittest (stdlib) \u2014 see docs/standards/code-style.md", "shell=true": "shell=True is banned \u2014 use list-form subprocess args", "import requests": "external dependencies are banned \u2014 stdlib only", "from requests": "external dependencies are banned \u2014 stdlib only"}` | Lowercase substring → the message the executor prints when a generated diff contains it |
 | `runner` | `target_overrides` | object | `{}` | Target-repo path → a partial config that shadows the top-level one for runs against that repo |

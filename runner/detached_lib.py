@@ -331,3 +331,71 @@ def prune_stale_worktrees(target_repo: Path) -> list:
                 results.append((resolved, "rmtree"))
     _git(["worktree", "prune"], cwd=repo)
     return results
+
+
+def git_worktree_reuse(branch: str, *, target_repo: Path) -> tuple:
+    """Reuse what a failed run preserved for *branch* (T-2026-302).
+
+    Returns ``(found, wt_path, err)``. ``found`` False with an empty ``err``
+    means there is nothing to reuse and a fresh ``git_worktree_create`` is
+    the right move; ``found`` False with ``err`` set means something is in
+    the way and the run must fail as ``git_setup_failed``.
+
+    Three shapes a previous night can leave behind:
+
+    * the worktree is registered on the branch: reset it (``reset --hard``
+      plus ``clean -fdx``, because the failed step's uncommitted edits would
+      trip the executor's ``assert_files_clean`` and a stray venv is what
+      makes teardown fail on Windows) and reuse it;
+    * the branch exists but the directory is gone (the stale-worktree sweep,
+      or a hand cleanup): ``git worktree add <path> <branch>``;
+    * the directory exists but is not the branch's worktree (an orphan from
+      a long-path failure): delete it through the long-path helper, prune,
+      then fall into one of the cases above.
+
+    Before this the second night of any failed ticket died in
+    ``git worktree add -b`` with 'branch already exists', and the only way
+    past it was ``--cleanup``, which threw the committed steps away.
+    """
+    repo = Path(target_repo)
+    safe = branch.replace("/", "_").replace("\\", "_")
+    wt_path = worktrees_dir_for(repo) / safe
+    registered = {p: b for p, b in _list_detached_worktrees(repo)}
+    try:
+        resolved = wt_path.resolve()
+    except OSError:
+        resolved = wt_path
+    on_branch = registered.get(resolved)
+    branch_exists = (
+        _git(["rev-parse", "--verify", f"refs/heads/{branch}"], cwd=repo).returncode == 0
+    )
+
+    if on_branch == branch and wt_path.exists():
+        for args in (["reset", "--hard"], ["clean", "-fdx"]):
+            r = _git(args, cwd=wt_path)
+            if r.returncode != 0:
+                return False, None, f"could not reset preserved worktree: {r.stderr.strip()}"
+        return True, wt_path, ""
+
+    if wt_path.exists():
+        if on_branch and on_branch != branch:
+            return False, None, f"worktree path is checked out on another branch: {on_branch}"
+        try:
+            rmtree_long(wt_path)
+        except OSError as exc:
+            return False, None, f"could not remove orphaned worktree directory: {exc}"
+        _git(["worktree", "prune"], cwd=repo)
+    elif on_branch is not None:
+        # Registered, directory gone: prune so `worktree add` may reuse the path.
+        _git(["worktree", "prune"], cwd=repo)
+
+    if not branch_exists:
+        return False, None, ""
+    try:
+        wt_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return False, None, f"could not create worktrees dir: {exc}"
+    r = _git(["worktree", "add", str(wt_path), branch], cwd=repo)
+    if r.returncode != 0:
+        return False, None, r.stderr
+    return True, wt_path, ""

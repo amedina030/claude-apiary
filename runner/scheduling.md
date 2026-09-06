@@ -27,6 +27,19 @@ draft_ticket.py  -->  <state-dir>/runner/backlog/<slug>.json   (has UUID from dr
   Use this for the interactive path (you supply the intake path to `run.py`).
 - `--detached` mode picks the oldest unclaimed backlog item directly
   (oldest by mtime, skips items whose UUID already has a `runner/*` branch).
+- When the backlog is empty, `--detached` retries the oldest intake ticket a
+  previous night left resumable: attempted at least once and not `ok`, still
+  under `detached.max_restarts`, with artifacts to resume from (a spec resumes
+  at `auto_plan`, a valid plan at `executor`, a completed execution at
+  `auto_harden`). Backlog first, so retries never starve new work. Set
+  `"parked": true` on an intake ticket to hold it for manual salvage, or
+  `detached.resume_failed` false to turn retries off (T-2026-302).
+- A retry reuses what the failed night preserved: a worktree still on the
+  run's branch is reset (`reset --hard`, `clean -fdx`) and reused, so the
+  executor skips the steps already committed there; a branch whose directory
+  is gone gets a fresh worktree on that branch; an orphaned directory is
+  removed through the long-path helper first. The run_history row records
+  `resumed_from`.
 
 ## The command
 
