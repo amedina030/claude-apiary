@@ -8,6 +8,17 @@ resolves the scribe state dir from the session's cwd, loads
 ``learnings/<year>/index.jsonl``, and emits up to 3 matched learnings
 as a single context_block.
 
+Matching (2026-09-05 tightening): Edit/Write match the file path against each
+learning's ``areas`` globs; Bash matches the command's *whole tokens* against
+each learning's ``tags`` after stripping the launcher idiom
+(``$(git rev-parse --show-toplevel)/.claude/apiary/launch.py``). Substring
+matching used to let ``api`` fire on "apiary", ``js`` on "json" and ``git`` on
+every launcher call, so top-3 was recency among ~30 candidates, not relevance.
+
+Runner subprocesses (``APIARY_RUNNER_SUBPROCESS=1``) are deliberately *not*
+skipped here, unlike the startup dump: a headless executor editing a tagged
+area is exactly where a known-trap note pays for its ~1KB.
+
 Fail-open: any error path (missing payload field, corrupt index, state dir
 not resolvable) degrades to an empty allow — the tool call still proceeds.
 """
@@ -27,10 +38,20 @@ TOP_N_INJECTED = 3
 _RECENCY_WINDOW = 10
 _RECENCY_BONUS = 0.05
 
-# Score awarded when a tag substring matches a token from a Bash command.
-# Lower than any real area match so path-based matches always win when both
-# are available.
+# Score awarded when a tag matches a Bash command token whole (every token
+# of a hyphenated tag must be present). Lower than any real area match so
+# path-based matches always win when both are available.
 _TAG_MATCH_SCORE = 0.2
+
+# Boilerplate every launcher invocation carries. Stripped before tokenizing
+# so `git`, `claude`, `apiary` and `launch` are not tokens of every command.
+_LAUNCHER_BOILERPLATE_RE = re.compile(
+    r"\$\(\s*git\s+rev-parse\s+--show-toplevel\s*\)"
+    r"|\$CLAUDE_PROJECT_DIR"
+    r"|[^\s\"']*[\\/]\.claude[\\/]apiary[\\/]launch\.py",
+    re.IGNORECASE,
+)
+_TOKEN_SPLIT_RE = re.compile(r"[^A-Za-z0-9_]+")
 
 # Scores for area-glob matches. A "specific" glob (contains ``/``) — for
 # example ``gui/web/**`` — scores higher than a bare wildcard glob like
@@ -56,19 +77,21 @@ def _area_is_specific(glob: str) -> bool:
     return any(not any(ch in seg for ch in "*?[") for seg in segments)
 
 
-def seen_ids_path(repo_root, session_id: str):
+def seen_ids_path(repo_root, session_id: str, agent_id: str | None = None):
     """Session-scoped dedup file: one injected display_id per line.
 
     Lives with the other per-session flags under
     ``<repo>/.claude/apiary/session-tmp/`` (the ``inject_session``
     convention), so the age-based sweep that cleans those files covers
-    this one too.
+    this one too. A subagent shares the parent's ``session_id`` but not its
+    context, so when the payload names an ``agent_id`` the file is keyed by
+    both — otherwise a learning the parent already saw would be withheld
+    from a worker that never did.
     """
     from pathlib import Path
 
-    return (
-        Path(repo_root) / ".claude" / "apiary" / "session-tmp" / f"{session_id}_learnings_injected"
-    )
+    stem = f"{session_id}_{agent_id}" if agent_id else session_id
+    return Path(repo_root) / ".claude" / "apiary" / "session-tmp" / f"{stem}_learnings_injected"
 
 
 def load_seen_ids(path) -> set:
@@ -96,14 +119,23 @@ _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9-]{8,64}\Z")
 
 
 def _tokenize_command(command: str) -> list[str]:
-    """Lowercase alphabetic tokens from a shell command — good enough for
-    substring matching against tags. Strips flags, punctuation, and paths."""
+    """Lowercase word tokens from a shell command, launcher boilerplate removed.
+
+    Strips flags, punctuation and path separators; a path contributes its
+    segments as separate tokens (``scribe/notes.py`` → ``scribe``, ``notes``,
+    ``py``), which is what lets a ``scribe`` tag fire on a scribe command.
+    """
     if not command:
         return []
-    # Replace non-word runs with spaces, then split — keeps the implementation
-    # dependency-free while discarding ``--flags``, quotes, and path separators.
-    cleaned = re.sub(r"[^A-Za-z0-9_]+", " ", command).lower()
+    cleaned = _LAUNCHER_BOILERPLATE_RE.sub(" ", command)
+    cleaned = _TOKEN_SPLIT_RE.sub(" ", cleaned).lower()
     return [tok for tok in cleaned.split() if tok]
+
+
+def _tag_tokens(tag: str) -> list[str]:
+    """A tag's word tokens, so ``claude-code`` matches the tokens ``claude``
+    and ``code`` rather than the literal hyphenated string no command has."""
+    return [tok for tok in _TOKEN_SPLIT_RE.sub(" ", tag).lower().split() if tok]
 
 
 def _score_entry(
@@ -112,13 +144,14 @@ def _score_entry(
     """Return ``(score, matched_area, matched_tag)`` for one learning.
 
     - ``matched_area`` is the glob that fired against ``target_path`` (or None).
-    - ``matched_tag`` is the tag substring that fired against a command token.
+    - ``matched_tag`` is the tag whose every token appeared in the command.
     Used by the hook shell so the injected header can label *why* each
     learning surfaced.
     """
     score = 0.0
     matched_area: str | None = None
     matched_tag: str | None = None
+    token_set = set(command_tokens)
 
     areas = entry.get("areas") or []
     if target_path and areas:
@@ -132,17 +165,18 @@ def _score_entry(
                     matched_area = glob
 
     tags = entry.get("tags") or []
-    if command_tokens and tags:
+    if token_set and tags:
         for tag in tags:
             if not isinstance(tag, str) or not tag:
                 continue
-            tag_lower = tag.lower()
-            for token in command_tokens:
-                if tag_lower in token:
-                    score += _TAG_MATCH_SCORE
-                    if matched_tag is None:
-                        matched_tag = tag
-                    break
+            parts = _tag_tokens(tag)
+            # Whole-token, all parts: ``api`` must not fire on "apiary" nor
+            # ``js`` on "json" — that substring leak made every launcher call
+            # match ~30 learnings and reduced top-3 to a recency sort.
+            if parts and all(part in token_set for part in parts):
+                score += _TAG_MATCH_SCORE
+                if matched_tag is None:
+                    matched_tag = tag
 
     return score, matched_area, matched_tag
 
@@ -240,8 +274,9 @@ def run(payload: dict):  # pragma: no cover — covered by integration; the
     if is_enabled("learnings-inject-off"):
         return None
 
-    if os.environ.get("APIARY_RUNNER_SUBPROCESS") == "1":
-        return None
+    # No APIARY_RUNNER_SUBPROCESS short-circuit here, on purpose: the runner
+    # skip exists for the tens-of-KB startup dump, and a headless executor
+    # editing a tagged area is where a ~1KB known-trap note earns its keep.
 
     tool_name = payload.get("tool_name") or ""
     if tool_name not in ("Edit", "Write", "Bash"):
@@ -283,8 +318,14 @@ def run(payload: dict):  # pragma: no cover — covered by integration; the
     session_id = str(payload.get("session_id") or "").strip()
     seen_path = None
     if _SESSION_ID_RE.match(session_id):
+        # Subagent tool calls carry the parent's session_id; key their
+        # seen-file by agent_id too when the payload names one, so the
+        # parent's history does not starve a worker with fresh context.
+        agent_id = str(payload.get("agent_id") or "").strip()
+        if not _SESSION_ID_RE.match(agent_id):
+            agent_id = ""
         repo_root = os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or cwd
-        seen_path = seen_ids_path(repo_root, session_id)
+        seen_path = seen_ids_path(repo_root, session_id, agent_id or None)
         seen = load_seen_ids(seen_path)
         top = [e for e in top if e.get("display_id", "") not in seen]
         if not top:

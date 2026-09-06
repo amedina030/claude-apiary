@@ -3,10 +3,15 @@
 Centralizes the spawn so every runner subprocess:
   1. Sets ``APIARY_RUNNER_SUBPROCESS=1`` in its env, telling startup hooks
      in the spawned Claude Code session to skip context injection (identity,
-     active notes summary, full learnings dump, CLI tools index). These
+     active notes summary, learnings index, CLI tools index). These
      payloads are useful to interactive sessions but pure overhead for a
      one-shot runner worker — typically tens of KB of input tokens that
-     the worker doesn't read.
+     the worker doesn't read. The per-call learnings injector
+     (core/hooks/learnings_inject_hook.py) deliberately ignores the flag:
+     a ~1KB known-trap note before an Edit in a tagged area is the one
+     piece of session context a headless executor does benefit from.
+     Note the flag only matters where hooks fire at all — a worktree with
+     no ``.claude/settings.json`` runs no hook chain (T-2026-318).
   2. Emits a ``<usage>`` XML block via cost_emit so run.py can attribute
      per-stage tokens.
   3. Forwards only an allowlisted subset of the parent environment, so
