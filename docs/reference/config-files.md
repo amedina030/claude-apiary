@@ -4,7 +4,7 @@ title: Config Files
 scope: project
 description: Every config file, with the key tables generated from the shipped JSON
 framework_version: "1.0"
-last_verified: "2026-09-05"
+last_verified: "2026-09-06"
 ---
 
 # Config Files
@@ -74,10 +74,10 @@ Canonical list of scheduled OS-scheduler entries that apiary owns on a given mac
       "cwd": "<apiary_repo>"
     },
     {
-      "id": "compass-weekly-synthesis",
-      "description": "Weekly compass synthesis (self-throttled to 7-day cadence via --cron)",
-      "schedule": {"type": "daily", "time": "03:00"},
-      "command": ["<python>", "-m", "compass.synthesize", "--cron"],
+      "id": "compass-nightly-classify",
+      "description": "Classify finished compass turn sessions that ended without /wrapup (D-2026-62)",
+      "schedule": {"type": "daily", "time": "03:30"},
+      "command": ["<python>", "-m", "compass.classify", "--catch-up"],
       "cwd": "<apiary_repo>"
     }
   ]
@@ -109,56 +109,9 @@ Claude Code spawn configuration for the GUI. Auto-created on first run from `DEF
 
 Unknown top-level keys are dropped on load (whitelist, see `gui/theme.py::load_launch`). To add a field, update `DEFAULT_LAUNCH` first.
 
-## compass/dimensions.json
-
-List of personality dimensions the compass synthesizer extracts and emits. Located at `compass/dimensions.json` (in the repo, not under `.apiary/` — it's source, not state).
-
-```json
-{
-  "dimensions": [
-    {
-      "name": "communication_style",
-      "volatile": false,
-      "description": "Verbosity, directness, formality of user messages..."
-    },
-    {
-      "name": "mood_tone",
-      "volatile": true,
-      "description": "Current emotional state, energy..."
-    }
-  ]
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `dimensions[].name` | string | yes | Snake_case dimension name. Must be unique within the file |
-| `dimensions[].volatile` | bool | yes | `true` for current-state signals (mood, energy); `false` for stable traits |
-| `dimensions[].description` | string | yes | One-paragraph description used by the capture and synthesis prompts |
-
-Adding a dimension: edit the JSON, then re-run any backfill or wait for the next `/wrapup` and weekly synthesis to start populating it. Removing a dimension: existing observations with that dimension will fail validation; archive or delete them first.
-
-## compass/config.json
-
-Compass runtime config, controlling the live A/B on profile injection. Located at `compass/config.json` (in the repo — source, not state). `$APIARY_COMPASS_CONFIG` points at an alternate file; tests use it.
-
-<!-- generated:start: config:compass/config.json -->
-| Field | Type | Default | Description |
-|-----|----|-------|-----------|
-| `ab_enabled` | bool | `false` | When false (shipped default) **nothing changes**: every session is in arm `on` and `personality.md` is injected as always. Set true to start splitting sessions |
-| `ab_seed` | string | `"compass-ab-2026-08"` | Salt for the per-session coin flip. Change it only to start a fresh measurement window — changing it mid-window makes the two halves incomparable |
-| `ab_on_fraction` | float | `0.5` | Share of sessions in the injected arm. `0` sends everyone to `off`, `1` to `on` |
-<!-- generated:end: config:compass/config.json -->
-
-A malformed or missing file reads as the defaults (A/B off) — this is loaded from a startup hook and must never break session start. See [Compass Measurement Programme](../architecture/compass-measurement.md).
-
-## compass/label_vocabulary.json
-
-Target definition for `compass/evaluate.py offline`: `{"labels": {<dimension>: {<label>: [cue, ...]}}}`. The labels are the poles named in that dimension's `description` in `dimensions.json`; the cues are case-insensitive substrings counted over an observation's `observation` text. Editing this file changes the metric — do it before a measurement window, never inside one. `compass/evaluate.py labels` prints the current vocabulary.
-
 ## compass/seed_rules.json
 
-The seed of the compass rule table (D-2026-62). Located at `compass/seed_rules.json` in the repo — source, not state. `compass/rules.py build` merges it with `<state-dir>/compass/rules_manual.json` and the classified events into `<state-dir>/compass/rules.md`, which future sessions read.
+The seed of the compass rule table (D-2026-62). Located at `compass/seed_rules.json` in the repo — source, not state. `compass/rules.py build` merges it with `<state-dir>/compass/rules_manual.json` and the classified events into `<state-dir>/compass/rules.md`, which every session reads at startup (and every runner stage as a prompt preamble). See [Compass rule table](../architecture/compass-rules.md).
 
 | Key | Shape | Description |
 |-----|-------|-------------|
@@ -166,7 +119,7 @@ The seed of the compass rule table (D-2026-62). Located at `compass/seed_rules.j
 | `rules` | list of rows | `id` (`J1`, `O3`, …), `section`, `kind` (`principle` \| `specific`), `parent` (the principle a specific row instantiates, else `null`), `rule` (imperative, second person, to Claude), `why` (one clause — the rationale that also says where the rule stops applying), `source` (`seed`), optional `expiry` (`YYYY-MM-DD`) |
 | `self_check` | `{title, items[]}` | The checklist rendered at the end of `rules.md`, applied before finalizing a recommendation or report |
 
-Every row is delivered to Claude in every session once T-2026-320 lands, so edit deliberately. The row ids are the classifier's `rule` vocabulary: renaming one orphans the events already attributed to it.
+Every row is delivered to Claude in every session, so edit deliberately (`compass/test_rules.py` pins the rendered size at about 1,100 tokens). The row ids are the classifier's `rule` vocabulary: renaming one orphans the events already attributed to it.
 
 ## budgeter/config.json
 

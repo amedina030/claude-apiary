@@ -41,6 +41,7 @@ import json
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 from .config_loader import get as cfg
 from .cost_emit import emit_usage_xml
@@ -71,6 +72,57 @@ def resolve_claude_bin(env: dict[str, str] | None = None) -> str:
         return override
     found = shutil.which("claude", path=lookup.get("PATH"))
     return found or "claude"
+
+
+# ---------------------------------------------------------------------------
+# Compass rule table as a stage preamble (D-2026-62 step 2)
+# ---------------------------------------------------------------------------
+#
+# Interactive sessions get <state-dir>/compass/rules.md from the startup hook
+# and a per-turn pin. Runner stages cannot rely on hooks — a runner worktree
+# carries no .claude/settings.json, so no hook chain fires there (T-2026-318)
+# — so the same table is prepended to every stage prompt here instead. The
+# classifier that scores the table opts out (`rules=False`).
+
+RULES_PREAMBLE_HEADER = (
+    "<compass-rules>\n"
+    "The rules below describe the user this work is for. Apply them to your "
+    "judgment and to any prose you write. Where the task after them fixes an "
+    "output format (JSON, a schema, a verdict), that format wins.\n\n"
+)
+RULES_PREAMBLE_FOOTER = "\n</compass-rules>\n\n"
+
+
+def rules_path(target: "os.PathLike[str] | str | None" = None) -> Path | None:
+    """``<state-dir>/compass/rules.md`` for the run's target repo, or ``None``.
+
+    The launcher's ``APIARY_TARGET_STATE_DIR`` wins when set; otherwise the
+    target repo's pins (``core.utils.state.resolve_state_dir``), so a stage
+    whose cwd is a worktree still finds the main checkout's state.
+    """
+    from core.utils.state import resolve_state_dir
+
+    from .target_repo import _default_target
+
+    compass = resolve_state_dir(repo=_default_target(target), subdir="compass", require_exists=True)
+    if compass is None:
+        return None
+    return compass / "rules.md"
+
+
+def rules_preamble(target: "os.PathLike[str] | str | None" = None) -> str:
+    """The rule table wrapped for a stage prompt; empty when there is none."""
+    try:
+        path = rules_path(target)
+        if path is None or not path.is_file():
+            return ""
+        text = path.read_text(encoding="utf-8").strip()
+    except Exception:
+        # A missing or unreadable table must never fail a stage.
+        return ""
+    if not text:
+        return ""
+    return RULES_PREAMBLE_HEADER + text + RULES_PREAMBLE_FOOTER
 
 
 # System-essential vars, named explicitly per platform. Missing any of
@@ -243,13 +295,17 @@ def run_claude(
     disallowed_tools=DEFAULT_DISALLOWED_TOOLS,
     allowed_tools=_FROM_CONFIG,
     permission_mode=_FROM_CONFIG,
+    rules: bool = True,
 ) -> tuple[int, str, str]:
     """Run a `claude -p` subprocess and return (returncode, stdout, stderr).
 
     Parameters
     ----------
     prompt:
-        Text sent to the claude CLI via stdin.
+        Text sent to the claude CLI via stdin. With ``rules`` (the default)
+        the target's compass rule table (:func:`rules_preamble`) is prepended
+        when it exists; pass ``rules=False`` for a call that must not see it
+        (the classifier that scores the table).
     timeout:
         Seconds before the subprocess is killed and a ``TimeoutExpired``
         exception is converted into a ``(-1, "", <message>)`` return value.
@@ -309,9 +365,12 @@ def run_claude(
     grants = [r for r in (allowed_tools or ()) if r]
     if grants:
         cmd.extend(["--allowedTools", *grants])
-    rules = [r for r in (disallowed_tools or ()) if r]
+    denials = [r for r in (disallowed_tools or ()) if r]
+    if denials:
+        cmd.extend(["--disallowedTools", *denials])
+
     if rules:
-        cmd.extend(["--disallowedTools", *rules])
+        prompt = rules_preamble() + prompt
 
     try:
         result = subprocess.run(

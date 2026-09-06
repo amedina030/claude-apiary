@@ -19,9 +19,9 @@ What it does, per fenced ```bash block in the documentation set:
    answer. The real arguments are dropped: a doc example is full of
    placeholders, and several of these commands spawn Claude, write state or
    touch a scheduler. ``--help`` exercises the part that can rot — the parser —
-   without any of that. (``--dry-run`` was the alternative; it still calls out
-   to `claude` for `compass/synthesize.py`, so it is not a safe universal
-   substitute.)
+   without any of that. (``--dry-run`` was the alternative; several tools give
+   it a different meaning — `compass/classify.py` prints the prompt — so it
+   is not a safe universal substitute.)
 4. Assert every ``--flag`` the example passes is a flag that parser really has.
 
 Escape hatch: put ``<!-- no-run -->`` on the line before a fence to skip the

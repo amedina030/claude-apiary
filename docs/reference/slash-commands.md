@@ -4,7 +4,7 @@ title: Slash Commands
 scope: project
 description: Every slash command apiary installs, generated from the command files' frontmatter
 framework_version: "1.0"
-last_verified: 2026-09-02
+last_verified: 2026-09-06
 ---
 
 # Slash Commands
@@ -27,7 +27,6 @@ longer note has been written here.
 | `/apiary-context` | `core/commands/apiary-context.md` | Load apiary toolkit context (scribe, budgeter, runner, portability rules) |
 | `/budgeter` | `budgeter/commands/budgeter.md` | Toggle a budgeter feature for this repo — log or session-warn |
 | `/budgeter-setup` | `budgeter/commands/budgeter-setup.md` | Bootstrap apiary into the current repo so budgeter and the rest of the toolkit work here |
-| `/compass-sync` | `compass/commands/compass-sync.md` | Manually trigger compass synthesis — regenerate personality.md from active observations |
 | `/harden` | `harden/commands/harden.md` | Adversarial attack-defend loop that stress-tests code or plans |
 | `/incubator` | `incubator/commands/incubator.md` | Spawn a new side-project repo wired up with the apiary toolkit — refines the idea, creates a git repo, drops a Python+poetry skeleton, migrates the spec into the new repo's scribe |
 | `/note` | `scribe/commands/note.md` | Add a note via the scribe tool |

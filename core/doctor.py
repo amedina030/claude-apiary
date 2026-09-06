@@ -19,9 +19,9 @@ Subcommands:
 - ``orphans``       — folders under ``.repos/<slug>/`` with no registry entry
 - ``duplicates``    — registry entries sharing a ``real_path``
 - ``unreachable``   — registry entries whose ``real_path`` does not exist
-- ``compass``       — compass measurement health: observation count, last
-                      synthesis age, profile size, A/B arm counts and the
-                      last ``compass/evaluate.py offline`` headline
+- ``compass``       — compass rule-table health: captured turn sessions,
+                      classified events, heuristic turns, ``rules.md`` rows
+                      and the D-2026-62 go/no-go verdict
                       (report-only — always notes, never issues)
 - (no arg)          — run all checks, print a summary
 
@@ -407,12 +407,12 @@ def check_unreachable(apiary: Path) -> CheckResult:
 
 
 def check_compass(apiary: Path) -> CheckResult:
-    """Report compass's measurement health for main-apiary's own state dir.
+    """Report the compass rule-table health for main-apiary's own state dir.
 
-    Report-only on purpose: every finding is a note, never an issue. A stale
-    profile or an A/B that has not been turned on is information the owner
-    asked for (review §5a-H.3), not a broken install, and this check shares
-    the doctor's exit code with checks that gate CI.
+    Report-only on purpose: every finding is a note, never an issue. A
+    pending go/no-go or an unclassified session is information the owner
+    asked for (D-2026-62), not a broken install, and this check shares the
+    doctor's exit code with checks that gate CI.
     """
     notes: list[str] = []
     try:

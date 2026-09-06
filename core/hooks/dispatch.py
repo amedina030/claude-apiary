@@ -126,6 +126,7 @@ def _registry() -> dict[str, tuple[Hook, ...]]:
                 "core.hooks.research_capture_reminder",
                 "WebSearch|WebFetch|Agent|Task",
             ),
+            Hook("compass_rules", "core.hooks.compass_rules", "Agent|Task|AskUserQuestion"),
             Hook("pre_push_doc_conformer", "core.hooks.pre_push_doc_conformer", "Bash"),
             Hook("pre_push_secret_scan", "core.hooks.pre_push_secret_scan", "Bash"),
             Hook("budgeter_pre", "budgeter.hooks.pre_tool_use", budgeter),
@@ -146,7 +147,10 @@ def _registry() -> dict[str, tuple[Hook, ...]]:
             Hook("save_transcript", "core.hooks.save_transcript"),
             Hook("compass_pair_log", "core.hooks.compass_pair_log"),
         ),
-        "UserPromptSubmit": (Hook("startup_prompt", "core.hooks.startup_prompt_hook"),),
+        "UserPromptSubmit": (
+            Hook("startup_prompt", "core.hooks.startup_prompt_hook"),
+            Hook("compass_rules", "core.hooks.compass_rules"),
+        ),
         # No SessionStart hooks yet; the verb exists so one can be registered
         # without another settings.json migration.
         "SessionStart": (),

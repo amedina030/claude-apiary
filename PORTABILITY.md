@@ -64,7 +64,7 @@ Per-target state lives under the apiary checkout, not inside each target repo. T
 - `<state-dir>/scribe/<type>/<year>/archive/` — auto-archived notes. Retention is per note type, not a flat clock: a handoff is superseded by the next one for the same `(role, mission)`, `context` and `decision` notes age out on their own schedules, a note marked `done` ages from when it was closed, and everything else is kept until it is closed. The constants live in `scribe/policy.py`; the generated table is in [docs/reference/file-storage.md](docs/reference/file-storage.md#scribe-data).
 - `<state-dir>/scribe/learnings/<year>/` — accumulated project learnings (same typed-year layout)
 - `<state-dir>/scribe/memory/` — long-lived memory facts loaded at session start
-- `<state-dir>/compass/` — personality observations + synthesized profile
+- `<state-dir>/compass/` — captured turn pairs, classified events and the generated rule table (`rules.md`)
 - `<state-dir>/research/` — researcher entries + tag vocabulary
 - `<state-dir>/captures/` — image + sidecar pairs
 - `<state-dir>/runner/` — runner artifacts (intake, specs, plans, executions, etc.)

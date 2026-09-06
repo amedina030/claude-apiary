@@ -55,7 +55,7 @@ STORAGE_DOC = DOCS_DIR / "reference" / "file-storage.md"
 SCRIBE_DOC = REPO_ROOT / "scribe" / "CLAUDE.md"
 
 #: Config files with a generated key table, in the order they appear in the doc.
-CONFIG_FILES = ("runner/config.json", "budgeter/config.json", "compass/config.json")
+CONFIG_FILES = ("runner/config.json", "budgeter/config.json")
 
 STATE = "&lt;state-dir&gt;"
 REPO = "&lt;repo&gt;"

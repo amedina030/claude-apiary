@@ -4,7 +4,7 @@ title: CLI Tools Index
 scope: project
 description: Generated one-line index of every CLI entry point — use cli_lookup.py for full details
 framework_version: "1.0"
-last_verified: "2026-09-05"
+last_verified: "2026-09-06"
 ---
 
 # CLI Tools Index
@@ -34,13 +34,8 @@ flag — `--check` runs in `docs/hooks/pre-commit` and in CI.
 | `python budgeter/usage_calibrate.py` | Calibrate transcript load against the sampled usage limits | --json, --projects-dir, --samples, --since, --top, --window |
 | `python budgeter/query_request.py` | Sum tokens for a given request_id | --cwd, --request-id |
 | `python budgeter/log_agent_cost.py` | Log background agent token costs | --agent, --cwd, --request-id, --session-id |
-| `python compass/observations.py` | Inspect/maintain personality observation files | archive, count, list, validate |
-| `python compass/capture.py` | Validate + store a /wrapup compass observation payload | dimensions, store, template, validate |
 | `python compass/classify.py` | Classify a session's turn pairs into compass rule events (one Sonnet call) | session_id |
 | `python compass/rules.py` | Regenerate the compass rule table from seed rows, manual rows and events | build |
-| `python compass/synthesize.py` | Synthesize personality.md from active observations | --cron, --dry-run, --max-sessions, --model |
-| `python compass/backfill.py` | Extract observations from historical transcripts | --force, --last, --model, --session-ids, --since |
-| `python compass/evaluate.py` | Measure whether the personality profile carries signal | ab, labels, offline |
 | `python incubator/cli.py` | Spawn a new side-project repo wired up with apiary | spawn, verify |
 | `python researcher/cli.py` | Manage structured research findings (apiary researcher subsystem). | add, find, list, register-tag, show, verify |
 | `python captures/cli.py` | Manage visual captures (apiary captures subsystem). | add, find, list, path, register-tag, show |

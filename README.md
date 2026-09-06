@@ -122,18 +122,18 @@ An automated attack-defend loop where Attacker agents find weaknesses (edge case
 
 ### Compass
 
-Captures personality and behavior signals across sessions and synthesizes them into a profile that future sessions read at startup, so Claude can anticipate this user's preferences — verbosity, when to ask vs decide, pushback style — and act in alignment in headless/runner sessions where it can't pause to ask.
+Keeps one artifact per target, `<state-dir>/compass/rules.md`: a table of rules written in the second person to Claude ("Prefer the thorough option over the quick one", "Lead with the outcome, then one recommendation"), each with a why clause and evidence counts, scored by this user's own corrections and acceptances rather than by a model's inference about them. The whole table is injected at every session start, its principle rows are pinned to every later message, and every runner stage gets it as a prompt preamble — so Claude acts the way this user would want at the moments it cannot ask.
 
-Two-tier storage: per-session JSON observations under `<state-dir>/compass/observations/` (written inline by `/wrapup`'s Step 4 capture, or by `compass/backfill.py` for historical transcripts), and a synthesized `personality.md` rewritten weekly from those observations + `corrections.md` (manual high-weight evidence). The startup `/apiary-context` skill reads `personality.md` and uses it as soft guidance — explicit auto-memory feedback still overrides it.
+Pipeline: a Stop hook logs `(assistant, user)` turn pairs while the session is alive; `/wrapup` (or the nightly `compass-nightly-classify` cron entry) classifies them into correction / acceptance / anticipation-miss events with one batched Sonnet call; `compass/rules.py build` counts the events (60-day half-life) into the table. Nothing is hand-edited: extra rows go in `rules_manual.json`.
 
 ```
-/compass-sync                                                                            # manually re-run synthesis
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/observations.py count      # how many active observations
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/backfill.py --last 5       # backfill 5 recent transcripts
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/observations.py archive    # dry-run archive sweep
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/classify.py <session_id>   # classify one session (what /wrapup does)
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/classify.py --catch-up     # sweep finished, unclassified sessions
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/rules.py build --write     # regenerate rules.md
+poetry run apiary doctor compass                                                                      # counts and the go/no-go verdict
 ```
 
-Bloat handling: rolling archive at 50+ active observations and 90+ days old; never archives below 50. Synthesizer self-throttles to 7-day cadence (cron runs daily, no-ops 6 of 7 days). Dimensions are configured at `compass/dimensions.json`. See [`compass/CLAUDE.md`](compass/CLAUDE.md) for lane discipline (compass vs auto-memory) and observation quality bar.
+See [`compass/CLAUDE.md`](compass/CLAUDE.md) for the pipeline and lane discipline (compass vs auto-memory) and [`docs/architecture/compass-rules.md`](docs/architecture/compass-rules.md) for the design, cost and the go/no-go rule.
 
 ---
 

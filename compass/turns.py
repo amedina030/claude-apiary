@@ -10,7 +10,9 @@ It is called from the Stop hook ``core/hooks/compass_pair_log.py`` at the end
 of every assistant turn, so it must be cheap: a cursor file beside the turns
 file records the byte offset already consumed and the assistant text of the
 turn that just finished (the "carry"), and each call reads only what the
-transcript grew by. No model call happens here.
+transcript grew by. No model call happens here. The same walk hands the
+turn's final assistant message to ``compass/heuristics.py`` (the output
+heuristics, a secondary signal for the output rules only).
 
 Record filter (L-2026-87, L-2026-172 and the 2026-09-06 field census):
 
@@ -29,7 +31,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from compass import store
+from compass import heuristics, store
 from core.utils.atomic import write_json_atomic
 from core.utils.filelock import FileLock
 
@@ -128,6 +130,12 @@ class PairState:
     carry: str | None = None  # assistant text of the last finished turn
     carry_ts: str | None = None
     seen_prompt_ids: set[str] = field(default_factory=set)
+    #: The last assistant text block the walk saw — the final message of the
+    #: turn that just ended, which the output heuristics score. Unlike the
+    #: carry it is one block, not the whole turn joined, and it is not
+    #: persisted between calls.
+    last_reply: str | None = None
+    last_reply_ts: str | None = None
 
 
 def extract_pairs(records: list[dict], state: PairState) -> list[dict]:
@@ -165,6 +173,8 @@ def extract_pairs(records: list[dict], state: PairState) -> list[dict]:
         if reply is not None:
             acc.append(reply)
             acc_ts = record.get("timestamp") or acc_ts
+            state.last_reply = reply
+            state.last_reply_ts = record.get("timestamp")
     joined = "\n\n".join(acc).strip()
     state.carry = _tail(joined, CARRY_MAX_CHARS) if joined else None
     state.carry_ts = acc_ts if joined else None
@@ -265,6 +275,12 @@ def update_from_transcript(
             with turns_file.open("a", encoding="utf-8") as f:
                 for pair in pairs:
                     f.write(json.dumps(pair, ensure_ascii=False) + "\n")
+        # Output heuristics for the turn that just ended (D-2026-62 step 2):
+        # one row per Stop that saw assistant text. The cursor guarantees each
+        # record is walked once, so the only repeat is a reset re-walk — that
+        # one is skipped rather than scoring the same final message twice.
+        if state.last_reply and not reset:
+            heuristics.record_turn(session_id, state.last_reply, state.last_reply_ts, start=start)
         write_json_atomic(
             cursor_file,
             {

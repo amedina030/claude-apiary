@@ -308,6 +308,8 @@ def classify_session(
 
         run_claude = _run
     started = time.time()
+    # rules=False: the classifier is judging the table, so the runner's
+    # rules.md preamble would be noise in front of a JSON-only task.
     rc, stdout, stderr = run_claude(
         prompt,
         model=model,
@@ -316,6 +318,7 @@ def classify_session(
         allowed_tools=(),
         disallowed_tools=(),
         permission_mode=None,
+        rules=False,
     )
     if rc != 0:
         print(

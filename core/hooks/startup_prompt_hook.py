@@ -5,14 +5,17 @@ UserPromptSubmit hook — injects startup context on the first user message.
 Always injects: identity, notes summary, learnings, CLI reference, the
 apiary toolkit rules (the same content the /apiary-context skill serves,
 read from core/commands/apiary-context.md), and — when the session cwd is a
-registered git repo — the compass personality profile. The latter two used
-to depend on the model invoking /apiary-context; injecting them here makes
-them deterministic. The skill remains for on-demand reload (e.g. /clear).
+registered git repo — the compass rule table (``<state-dir>/compass/rules.md``,
+D-2026-62). The latter two used to depend on the model invoking
+/apiary-context; injecting them here makes them deterministic. The skill
+remains for on-demand reload (e.g. /clear). ``core/hooks/compass_rules.py``
+pins the table's principle rows to every later user message.
 
 Runner subprocesses (auto_refine, auto_plan, auto_harden, executor,
 approval) set ``APIARY_RUNNER_SUBPROCESS=1`` to skip injection — they
 are one-shot workers that don't use any of this context, and the
-injection is tens of KB of input tokens per spawn.
+injection is tens of KB of input tokens per spawn. They receive the rule
+table as a prompt preamble from ``runner/claude_subprocess.py`` instead.
 """
 
 import datetime
@@ -49,22 +52,6 @@ def _context_body(md: str) -> str:
 # the legacy in-repo layout still works during the migration window.
 def _hook_state_dir() -> Path:
     return state_dir_from_env() or (PROJECT_ROOT / ".apiary")
-
-
-def _compass_arm_on(sid: SessionId) -> bool:
-    """Whether this session is in the compass A/B's injection arm.
-
-    True for every session while the experiment is disabled, which is the
-    shipped default — so this is a no-op until the owner turns the A/B on
-    (compass/config.json, docs/compass-measurement.md). Any failure means
-    "inject", so a broken config can never silently strip the profile.
-    """
-    try:
-        from compass.ab import ARM_OFF, arm_for_session
-
-        return arm_for_session(sid.short) != ARM_OFF
-    except Exception:
-        return True
 
 
 def _log_sanitizer_hits(site: str, hits: dict[str, int], session_id: str) -> None:
@@ -253,25 +240,28 @@ def run(payload: dict):
     except Exception:
         pass
 
-    # --- 6. Compass personality profile (dynamic, per-target) ---
-    # The only runtime-resolved piece of apiary-context. Read directly here so
-    # the profile that shapes tone/verbosity/autonomy is guaranteed loaded,
-    # rather than relying on the skill's cat-if-exists snippet. find_state_dir
-    # is read-only (no auto-registration), so it is safe to call from a hook.
-    if not skip_notes_injection and _compass_arm_on(sid):
+    # --- 6. Compass rule table (dynamic, per-target) ---
+    # The only runtime-resolved piece of apiary-context: the second-person
+    # rule table `compass/rules.py build` writes (D-2026-62). Read directly
+    # here so it is guaranteed loaded rather than relying on the skill's
+    # cat-if-exists snippet. The launcher's pre-resolved state dir comes
+    # first; find_state_dir is read-only (no auto-registration), so it is
+    # safe to call from a hook.
+    if not skip_notes_injection:
         try:
-            state_dir = find_state_dir(session_repo_root)
+            state_dir = state_dir_from_env() or find_state_dir(session_repo_root)
             if state_dir is not None:
-                compass_path = state_dir / "compass" / "personality.md"
-                if compass_path.is_file():
+                rules_path = state_dir / "compass" / "rules.md"
+                if rules_path.is_file():
                     scrubbed, hits = sanitize_and_report(
-                        compass_path.read_text(encoding="utf-8").strip()
+                        rules_path.read_text(encoding="utf-8").strip()
                     )
                     _log_sanitizer_hits("compass", hits, sid.full)
                     parts.append("")
                     parts.append(
-                        "--- compass personality profile (soft guidance; "
-                        "explicit user statements and feedback memory override) ---"
+                        "--- compass rules for Claude (mined from this user's corrections "
+                        "and acceptances; explicit user statements and feedback memory "
+                        "override; pinned to every later message) ---"
                     )
                     parts.append(scrubbed)
         except Exception:

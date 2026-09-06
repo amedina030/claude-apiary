@@ -20,7 +20,7 @@ What lives where after bootstrap:
 - **Per-repo install state** — `<repo>/.claude/apiary/` (launcher, pointers, version, flags). Gitignored; regenerable.
 - **Per-repo hooks** — `<repo>/.claude/settings.json` references `$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py`.
 - **Per-repo slash commands** — `<repo>/.claude/commands/*.md`, copied at install time.
-- **Per-target data** — centralized at `<main-apiary>/.repos/<name>-<uid>/` (scribe notes, sessions, runner state, compass observations, captures, researcher findings).
+- **Per-target data** — centralized at `<main-apiary>/.repos/<name>-<uid>/` (scribe notes, sessions, runner state, the compass rule table, captures, researcher findings).
 - **Apiary code** — your `claude-apiary` clone (referred to as **main-apiary**).
 
 ---

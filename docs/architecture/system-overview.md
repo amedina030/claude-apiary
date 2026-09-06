@@ -4,7 +4,7 @@ title: System Overview
 scope: project
 description: What the toolkit is made of, how a session flows through it, and what everything shares
 framework_version: "1.0"
-last_verified: "2026-09-02"
+last_verified: "2026-09-06"
 ---
 
 # System Overview
@@ -33,7 +33,7 @@ behind them.
 
    Slash commands, copied into <repo>/.claude/commands/ at install:
    /apiary-context /note /notes /review-learnings /wrapup /refine
-   /harden /review /research /compass-sync /runner-prep /incubator
+   /harden /review /research /runner-prep /incubator
    /budgeter /budgeter-setup
 ```
 
@@ -44,7 +44,7 @@ behind them.
 | **core** | Install, registry, drift, the hook dispatcher, session identity, shared utilities | Library everything imports; `apiary` console script |
 | **scribe** | Cross-session notes, learnings, handoffs, memory | `/note`, `/notes`, `/review-learnings`; injected at session start |
 | **budgeter** | Logs what every monitored tool call cost, nudges on session length | PreToolUse / PostToolUse / Stop hooks |
-| **compass** | Personality observations → a synthesized profile, plus the A/B that measures whether it helps | `/compass-sync`, `/wrapup` capture, startup injection |
+| **compass** | A second-person rule table mined from the user's corrections and acceptances, scored by counting | Stop-hook capture, `/wrapup` classification, startup injection + per-turn pin, runner prompt preamble |
 | **researcher** | Durable research findings under `<state-dir>/research/` | `/research` |
 | **captures** | Screenshots and images with sidecar metadata | `captures/cli.py` |
 | **refiner** | Turns a fuzzy idea into a structured handoff spec by adversarial questioning | `/refine` (prompt only — no Python) |
@@ -87,12 +87,15 @@ failure log are in [Hooks](../reference/hooks.md).
 First user message
   → UserPromptSubmit: dispatch.py prompt → startup_prompt_hook
       identity, notes summary, learnings index, the CLI index,
-      the apiary toolkit rules, the compass profile
+      the apiary toolkit rules, the compass rule table
+  → every later user message: compass_rules pins the principle rows
   → ... normal work ...
 End of EVERY assistant turn (not session end — Stop fires per response)
   → dispatch.py stop
       budgeter_stop     logs the final call's cost, deletes the baseline
       save_transcript   records the session in <state-dir>/sessions/
+      compass_pair_log  appends the turn's (assistant, user) pair and scores
+                        the final message for the compass rule table
 ```
 
 There is no `/startup` command; startup is the hook above. Handoffs are written
