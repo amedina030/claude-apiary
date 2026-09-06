@@ -648,14 +648,14 @@ class CheckCompassTests(unittest.TestCase):
             },
         )
         state_dir = state.repos_dir(self.apiary) / "apiary-1"
-        (state_dir / "compass" / "observations").mkdir(parents=True)
-        (state_dir / "compass" / "observations" / "aaaa0001.json").write_text(
+        (state_dir / "compass" / "turns").mkdir(parents=True)
+        (state_dir / "compass" / "turns" / "aaaa0001.jsonl").write_text(
             "{}", encoding="utf-8"
         )
         notes, issues = doctor.check_compass(self.apiary)
         self.assertEqual(issues, [])
         joined = " ".join(notes)
-        self.assertIn("observations: 1 active", joined)
+        self.assertIn("turns: 1 session(s), 1 pair(s)", joined)
         self.assertIn("A/B:", joined)
 
     def test_compass_is_in_the_all_checks_run(self):
