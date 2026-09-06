@@ -46,6 +46,17 @@ class TestTokenizeCommand(unittest.TestCase):
     def test_lowercases(self):
         self.assertEqual(_tokenize_command("PyInstaller --build"), ["pyinstaller", "build"])
 
+    def test_launcher_boilerplate_is_stripped(self):
+        posix = 'python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py list'
+        self.assertEqual(_tokenize_command(posix), ["python", "scribe", "notes", "py", "list"])
+        hook_env = 'python "$CLAUDE_PROJECT_DIR/.claude/apiary/launch.py" core/flags.py status'
+        self.assertEqual(_tokenize_command(hook_env), ["python", "core", "flags", "py", "status"])
+        windows = r"python C:\work\repo\.claude\apiary\launch.py budgeter/report.py"
+        self.assertEqual(_tokenize_command(windows), ["python", "budgeter", "report", "py"])
+
+    def test_plain_git_command_keeps_git_token(self):
+        self.assertIn("git", _tokenize_command("git status --short"))
+
 
 class TestAreaIsSpecific(unittest.TestCase):
     def test_empty_is_not_specific(self):
@@ -96,6 +107,35 @@ class TestScoreLearnings(unittest.TestCase):
         top = score_learnings(entries, command="python -m pyinstaller gui/app.py")
         self.assertEqual(top[0]["display_id"], "L-2026-1")
         self.assertEqual(top[0]["_matched_tag"], "pyinstaller")
+
+    def test_tag_matches_whole_token_not_substring(self):
+        entries = [_entry("L-2026-1", tags=["api"]), _entry("L-2026-2", tags=["js"])]
+        # "apiary" and "json" contain the tags but are not the tags.
+        self.assertEqual(score_learnings(entries, command="ls .apiary/runner/*.json"), [])
+        top = score_learnings(entries, command="curl api/v1 && node app.js")
+        self.assertEqual(sorted(e["display_id"] for e in top), ["L-2026-1", "L-2026-2"])
+
+    def test_hyphenated_tag_needs_every_part(self):
+        entries = [_entry("L-2026-1", tags=["claude-code"])]
+        self.assertEqual(score_learnings(entries, command="claude -p hi"), [])
+        top = score_learnings(entries, command="grep -rn 'claude code' docs/")
+        self.assertEqual(top[0]["_matched_tag"], "claude-code")
+
+    def test_launcher_idiom_matches_only_the_invoked_tool(self):
+        entries = [
+            _entry("L-2026-1", tags=["git"]),
+            _entry("L-2026-2", tags=["claude"]),
+            _entry("L-2026-3", tags=["apiary"]),
+            _entry("L-2026-4", tags=["scribe"]),
+        ]
+        cmd = 'python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" scribe/notes.py list'
+        self.assertEqual(
+            [e["display_id"] for e in score_learnings(entries, command=cmd)], ["L-2026-4"]
+        )
+        # A real git command still reaches the git learning.
+        self.assertEqual(
+            score_learnings(entries, command="git status")[0]["display_id"], "L-2026-1"
+        )
 
     def test_top_n_caps_results(self):
         entries = [_entry(f"L-2026-{i}", areas=["gui/**"]) for i in range(1, 10)]
@@ -202,6 +242,15 @@ class SessionDedupTests(unittest.TestCase):
             p,
             self.repo / ".claude" / "apiary" / "session-tmp" / "abc12345_learnings_injected",
         )
+
+    def test_agent_id_keys_a_separate_seen_file(self):
+        parent = seen_ids_path(self.repo, "abc12345")
+        worker = seen_ids_path(self.repo, "abc12345", "a0116afbeb1ca60ea")
+        self.assertNotEqual(parent, worker)
+        self.assertEqual(worker.name, "abc12345_a0116afbeb1ca60ea_learnings_injected")
+        self.assertEqual(worker.parent, parent.parent)
+        # None falls back to the session-only file.
+        self.assertEqual(seen_ids_path(self.repo, "abc12345", None), parent)
 
     def test_load_missing_file_is_empty(self):
         self.assertEqual(load_seen_ids(seen_ids_path(self.repo, "abc12345")), set())
