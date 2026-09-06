@@ -79,17 +79,34 @@ class CompassRulesHookTests(unittest.TestCase):
 
     # --- the pin ---------------------------------------------------------
 
-    def test_first_message_is_skipped_then_every_message_is_pinned(self):
+    def counter(self) -> Path:
+        return self.flags / f"{SID}_{compass_rules.PIN_COUNTER}"
+
+    def messages(self, n: int) -> list:
+        """Run the pin hook for *n* consecutive user messages; return its answers."""
+        return [compass_rules.run(self.prompt()) for _ in range(n)]
+
+    def test_pins_every_tenth_message_and_the_hook_does_the_counting(self):
+        every = compass_rules.PIN_EVERY
+        first = self.messages(every - 1)
+        self.assertEqual(first, [None] * (every - 1))  # message 1 has the startup block
+        self.assertEqual(self.counter().read_text(encoding="utf-8"), str(every - 1))
+        tenth = compass_rules.run(self.prompt())
+        self.assertIsNotNone(tenth)
+        self.assertTrue(tenth.context.startswith("[compass] compass rules pin"))
+        self.assertIn("J1 Prefer the thorough option over the quick one.", tenth.context)
+        self.assertIn("Self-check before finalizing:", tenth.context)
+        self.assertNotIn("J4 ", tenth.context)  # specific rows are not pinned
+        self.assertEqual(self.messages(every - 1), [None] * (every - 1))
+        twentieth = compass_rules.run(self.prompt())
+        self.assertEqual(twentieth.context, tenth.context)
+        self.assertEqual(self.counter().read_text(encoding="utf-8"), str(2 * every))
+
+    def test_counter_recovers_from_a_garbage_file(self):
+        self.counter().write_text("not a number", encoding="utf-8")
         self.assertIsNone(compass_rules.run(self.prompt()))
-        self.assertTrue((self.flags / f"{SID}_{compass_rules.PIN_FLAG}").is_file())
-        second = compass_rules.run(self.prompt())
-        self.assertIsNotNone(second)
-        self.assertTrue(second.context.startswith("[compass] compass rules pin"))
-        self.assertIn("J1 Prefer the thorough option over the quick one.", second.context)
-        self.assertIn("Self-check before finalizing:", second.context)
-        self.assertNotIn("J4 ", second.context)  # specific rows are not pinned
-        third = compass_rules.run(self.prompt())
-        self.assertEqual(third.context, second.context)
+        self.assertEqual(self.counter().read_text(encoding="utf-8"), "1")
+        self.assertEqual(compass_rules.bump_counter(self.root / "missing" / "count"), 1)
 
     def test_pin_reads_the_rendered_table_not_the_seed(self):
         self.write_rules(
@@ -104,13 +121,12 @@ class CompassRulesHookTests(unittest.TestCase):
                 }
             ]
         )
-        compass_rules.run(self.prompt())
+        self.messages(compass_rules.PIN_EVERY - 1)
         self.assertIn("J1 Prefer thorough (edited).", compass_rules.run(self.prompt()).context)
 
     def test_no_rules_md_means_no_pin(self):
         store.rules_path().unlink()
-        compass_rules.run(self.prompt())
-        self.assertIsNone(compass_rules.run(self.prompt()))
+        self.assertEqual(self.messages(2 * compass_rules.PIN_EVERY), [None] * 20)
 
     def test_bad_or_missing_session_id_is_a_no_op(self):
         self.assertIsNone(compass_rules.run(self.prompt(session_id="")))
@@ -166,7 +182,10 @@ class CompassRulesHookTests(unittest.TestCase):
     def test_dispatch_prompt_chain_carries_the_pin(self):
         chain = dispatch._registry()["UserPromptSubmit"]
         only_pin = tuple(h for h in chain if h.name == "compass_rules")
-        dispatch.dispatch("UserPromptSubmit", self.prompt(), only_pin)  # first message: flag only
+        for _ in range(compass_rules.PIN_EVERY - 1):
+            self.assertIsNone(
+                dispatch.dispatch("UserPromptSubmit", self.prompt(), only_pin).context
+            )
         result = dispatch.dispatch("UserPromptSubmit", self.prompt(), only_pin)
         self.assertIn("compass rules pin", result.context)
 
