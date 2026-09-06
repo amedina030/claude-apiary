@@ -180,3 +180,22 @@ class TestTodoIdFilter(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTodoIdFromSource(unittest.TestCase):
+    """Every source spelling the tools write resolves to the bare todo id;
+    anything else resolves to '' so nothing is closed by accident."""
+
+    def test_accepted_spellings(self):
+        for source in (
+            "T-2026-294",
+            "scribe-todo:T-2026-294",
+            "scribe-note:T-2026-294",
+            "  SCRIBE-TODO: T-2026-294  ",
+            "todo:T-2026-294",
+        ):
+            self.assertEqual(close_source_todo.todo_id_from_source(source), "T-2026-294", source)
+
+    def test_rejected_spellings(self):
+        for source in ("", None, "H-2026-277", "scribe-todo:H-2026-277", "T-2026", "ticket 294"):
+            self.assertEqual(close_source_todo.todo_id_from_source(source), "", source)

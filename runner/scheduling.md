@@ -138,3 +138,12 @@ python -m runner.run --cleanup <UUID>
 # Prune old failed/aborted runs (default: older than 7 days)
 python -m runner.run --prune-failed [--older-than DAYS] [--dry-run]
 ```
+
+Worktree teardown (the end of every detached run, `--cleanup`, and the
+stale-worktree sweep at the start of a run) goes through
+`detached_lib.git_worktree_remove`. When `git worktree remove` fails, which on
+Windows it does with 'Filename too long' whenever a step agent left a venv in
+the worktree, the directory is deleted through the extended-length path prefix
+(`core/utils/longpath.rmtree_long`) and the registration pruned, so the run
+no longer ends `worktree_remove_failed` on an otherwise clean night
+(T-2026-303).
