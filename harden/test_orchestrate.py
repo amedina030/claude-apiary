@@ -1357,9 +1357,10 @@ class TestSkillProse(unittest.TestCase):
                 f"{path.name} still mandates the picker",
             )
 
-    def test_wrapup_step_four_delegates_to_capture(self):
+    def test_wrapup_step_four_delegates_to_classify(self):
         text = WRAPUP_MD.read_text(encoding="utf-8")
-        self.assertIn("compass/capture.py store", text)
+        self.assertIn("compass/classify.py <session_id_8char>", text)
+        self.assertNotIn("compass/capture.py", text)
         self.assertNotIn("compass/observations.py validate", text)
         self.assertNotIn("compass/dimensions.json", text)
 

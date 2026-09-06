@@ -144,6 +144,7 @@ def _registry() -> dict[str, tuple[Hook, ...]]:
         "Stop": (
             Hook("budgeter_stop", "budgeter.hooks.stop_session"),
             Hook("save_transcript", "core.hooks.save_transcript"),
+            Hook("compass_pair_log", "core.hooks.compass_pair_log"),
         ),
         "UserPromptSubmit": (Hook("startup_prompt", "core.hooks.startup_prompt_hook"),),
         # No SessionStart hooks yet; the verb exists so one can be registered

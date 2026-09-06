@@ -156,6 +156,18 @@ A malformed or missing file reads as the defaults (A/B off) — this is loaded f
 
 Target definition for `compass/evaluate.py offline`: `{"labels": {<dimension>: {<label>: [cue, ...]}}}`. The labels are the poles named in that dimension's `description` in `dimensions.json`; the cues are case-insensitive substrings counted over an observation's `observation` text. Editing this file changes the metric — do it before a measurement window, never inside one. `compass/evaluate.py labels` prints the current vocabulary.
 
+## compass/seed_rules.json
+
+The seed of the compass rule table (D-2026-62). Located at `compass/seed_rules.json` in the repo — source, not state. `compass/rules.py build` merges it with `<state-dir>/compass/rules_manual.json` and the classified events into `<state-dir>/compass/rules.md`, which future sessions read.
+
+| Key | Shape | Description |
+|-----|-------|-------------|
+| `sections` | list of `{id, title, subtitle}` | The three sections in render order: `judgment`, `output`, `anticipation`. The ids are also the classifier's `section` vocabulary |
+| `rules` | list of rows | `id` (`J1`, `O3`, …), `section`, `kind` (`principle` \| `specific`), `parent` (the principle a specific row instantiates, else `null`), `rule` (imperative, second person, to Claude), `why` (one clause — the rationale that also says where the rule stops applying), `source` (`seed`), optional `expiry` (`YYYY-MM-DD`) |
+| `self_check` | `{title, items[]}` | The checklist rendered at the end of `rules.md`, applied before finalizing a recommendation or report |
+
+Every row is delivered to Claude in every session once T-2026-320 lands, so edit deliberately. The row ids are the classifier's `rule` vocabulary: renaming one orphans the events already attributed to it.
+
 ## budgeter/config.json
 
 Global budgeter configuration. Located in the repo at `budgeter/config.json`.

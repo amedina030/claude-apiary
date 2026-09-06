@@ -36,6 +36,8 @@ flag — `--check` runs in `docs/hooks/pre-commit` and in CI.
 | `python budgeter/log_agent_cost.py` | Log background agent token costs | --agent, --cwd, --request-id, --session-id |
 | `python compass/observations.py` | Inspect/maintain personality observation files | archive, count, list, validate |
 | `python compass/capture.py` | Validate + store a /wrapup compass observation payload | dimensions, store, template, validate |
+| `python compass/classify.py` | Classify a session's turn pairs into compass rule events (one Sonnet call) | session_id |
+| `python compass/rules.py` | Regenerate the compass rule table from seed rows, manual rows and events | build |
 | `python compass/synthesize.py` | Synthesize personality.md from active observations | --cron, --dry-run, --max-sessions, --model |
 | `python compass/backfill.py` | Extract observations from historical transcripts | --force, --last, --model, --session-ids, --since |
 | `python compass/evaluate.py` | Measure whether the personality profile carries signal | ab, labels, offline |

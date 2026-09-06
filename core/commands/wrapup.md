@@ -54,28 +54,14 @@ The handoff must follow this structure:
 
 Be concise but specific — file names, function names, concrete details.
 
-## Step 4: Compass capture (non-blocking)
+## Step 4: Compass classification (non-blocking)
 
-Extract personality/behaviour observations from this session. `compass/capture.py` owns the schema, the target path and the validation — you only supply the observations.
+The Stop hook has been logging this session's `(assistant, user)` turn pairs all along. One command classifies them into rule events (a single Sonnet call, no in-context work for you) and regenerates the rule table:
 
-Compass is about **how** the user engages — personality, behaviour, quirks — *not* what they know or rules they've stated. Facts and explicit preferences belong in auto-memory, not here.
+```bash
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/classify.py <session_id_8char>
+```
 
-**Skip silently** when the session was startup-only or trivial (< ~5 user messages of real interaction): write nothing, say nothing.
+You supply nothing but the session id: the classifier reads the pairs, applies the fixed vocabulary, validates the reply and writes `<state-dir>/compass/events/<sid>.json` plus a fresh `rules.md`. A session with fewer than 5 pairs is recorded as skipped without a model call, so there is no "trivial session" judgement to make here — always run it.
 
-Otherwise:
-
-1. Read the dimensions and which of them are volatile:
-
-   ```bash
-   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/capture.py dimensions
-   ```
-
-2. Write the observation JSON to a scratch file (`compass/capture.py template --session-id <sid>` prints the exact shape). Quality bar: 3–7 observations across the dimensions where you saw **clear signal**; skip the rest rather than padding. Every observation needs an evidence quote or paraphrase from this session. Tag mood/tone as `"volatility": "volatile"`, everything else `"stable"`. Honest emptiness is fine — `"observations": []` beats anything fabricated.
-
-3. Store it:
-
-   ```bash
-   python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/capture.py store --content-file <scratch.json> --session-id <session_id_8char>
-   ```
-
-`store` validates before it writes, so a rejected payload leaves nothing behind. Exit 0 means stored (or honestly empty and skipped). On a non-zero exit, fix the payload and run it once more; if it still fails, log a one-line warning to the user and move on. Capture is non-blocking and must never prevent `/wrapup` from completing.
+Exit 0 means classified or honestly skipped. On a non-zero exit, run it once more; if it still fails, log a one-line warning to the user and move on. Classification is non-blocking and must never prevent `/wrapup` from completing. Do not write observation files or rules by hand.

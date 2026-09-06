@@ -6,6 +6,27 @@ Project-level rules live in the repo-root `CLAUDE.md`. This file is only about c
 
 ---
 
+## Transition: the rule table (D-2026-62)
+
+Compass is being replaced by a **second-person rule table**, `<state-dir>/compass/rules.md`, scored by the user's own corrections and acceptances instead of by a model's inference about the user. Step 1 (T-2026-319) shipped the capture side; step 2 (T-2026-320) replaces delivery and retires the observation pipeline below. Until step 2 lands, `personality.md` is still what the startup hook injects, so both halves of this file are live.
+
+The new pipeline, all under `<state-dir>/compass/`:
+
+1. **Stop hook** `core/hooks/compass_pair_log.py` appends `(assistant_text, user_turn, ts)` pairs to `turns/<sid>.jsonl` every turn (no model call; cursor file keeps it cheap). Claude Code prunes transcripts, so capture happens while the session is alive.
+2. **`compass/classify.py <sid>`** (called by `/wrapup` Step 4; `--catch-up` nightly) sends the pairs in one batched Sonnet call with a fixed vocabulary — `type` correction | acceptance | anticipation_miss, `section` judgment | output | anticipation, `rule` id or null, `polarity` confirm | contradict, `action`, `quote` — validates the reply, writes `events/<sid>.json`. Empty is the expected output for most pairs.
+3. **`compass/rules.py build --write`** counts: seed rows (`compass/seed_rules.json`) + manual rows (`rules_manual.json`) + events -> `rules.md`, with 60-day half-life decay, a confidence per row, a flag for specific rows contradicted twice in a row, and proposed rows for repeated unattached events. Pure function; zero events reproduces the seed table.
+
+Rules for working in this lane now:
+
+- **Never hand-edit `rules.md`.** Add or override rows in `rules_manual.json`; accept a proposed row by giving it an id there.
+- **Do not add observation files** (`/wrapup` no longer does). `compass/observations/` is read-only history.
+- **Row ids are the classifier's vocabulary.** Renaming a seed id orphans its events.
+- **Go/no-go**: after 30 captured sessions, fewer than ~50 classified events means the pipeline is not earning its keep; `rules.md` then stays a hand-maintained seed table and the capture code goes. `apiary doctor compass` reports the counts.
+
+Everything below this line describes the observation pipeline that step 2 retires.
+
+---
+
 ## Lane discipline — compass vs auto-memory
 
 Compass and auto-memory are deliberately separate stores:

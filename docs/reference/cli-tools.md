@@ -406,6 +406,71 @@ python compass/capture.py store --content-file obs.json --session-id abc12345 [-
 
 Exit codes: `0` stored (or honestly empty and skipped), `1` invalid payload or write failure (capture is non-blocking: `/wrapup` warns and moves on), `2` usage error.
 
+## compass/classify.py
+
+The model step of the compass rule table (D-2026-62). Reads the `(assistant, user)` pairs the Stop hook `compass_pair_log` logged to `<state-dir>/compass/turns/<sid>.jsonl`, sends them in **one** batched `claude -p` call (Sonnet by default, prompt via stdin) with a fixed vocabulary — `type` correction | acceptance | anticipation_miss, `section` judgment | output | anticipation, `rule` id or null, `polarity` confirm | contradict, `action`, `quote` — validates the reply against that vocabulary (anything outside it is dropped and counted, never guessed), writes `<state-dir>/compass/events/<sid>.json` and regenerates `rules.md`. An empty event list is a valid result. `/wrapup` Step 4 calls it for the current session; `--catch-up` is the nightly sweep over finished sessions with no current events file.
+
+```bash
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/classify.py <sid>
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/classify.py <sid> --dry-run   # print the prompt, call nothing
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/classify.py --catch-up [--min-age-hours 2] [--limit N]
+```
+
+### Arguments
+
+<!-- generated:start: cli:compass/classify.py:arg -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `session_id` | no | Session id (8-char prefix or full UUID); omit with `--catch-up` |
+<!-- generated:end: cli:compass/classify.py:arg -->
+
+### Flags
+
+<!-- generated:start: cli:compass/classify.py:flag -->
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--catch-up` | no | Classify every finished session (turns file older than `--min-age-hours`) whose events file is missing or behind the pair count |
+| `--model MODEL` | no | claude model alias (default `sonnet`) |
+| `--min-pairs N` | no | Below this many pairs the session is recorded as skipped with no model call (default 5, matching the `/wrapup` "trivial session" rule) |
+| `--min-age-hours H` | no | `--catch-up` only: leave turns files younger than this alone — they may be a live session (default 2) |
+| `--limit N` | no | `--catch-up` only: classify at most N sessions |
+| `--dry-run` | no | Print the prompt; call nothing, write nothing |
+| `--force` | no | Re-classify even if an events file is current |
+| `--no-build` | no | Do not regenerate `rules.md` afterwards |
+<!-- generated:end: cli:compass/classify.py:flag -->
+
+Exit codes: `0` classified or honestly skipped (too few pairs, nothing pending), `1` model or validation failure — nothing written, `2` usage error.
+
+## compass/rules.py
+
+Aggregation step of the compass rule table — counts, no model. Merges the shipped seed table (`compass/seed_rules.json`), the optional manual rows (`<state-dir>/compass/rules_manual.json`; a manual row with a seed id replaces it, `expiry` drops temporary rows) and every event under `<state-dir>/compass/events/`, then renders `<state-dir>/compass/rules.md`: per rule, confirmed and contradicted counts with a 60-day half-life, last seen, one quote, `confidence = (confirmed + 0.5) / (confirmed + contradicted + 1)` and `source` (seed | mined | manual). Events on a specific row also count on its parent principle. A specific row contradicted twice in a row is **flagged**, not demoted; three or more unattached events sharing `(section, action)` are listed as a **proposed** row. With zero events the build reproduces the seed table byte for byte, which is what `--check` verifies.
+
+```bash
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/rules.py build            # render to stdout
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/rules.py build --write    # write rules.md
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/rules.py build --check    # exit 1 if rules.md is stale
+```
+
+### Subcommands
+
+<!-- generated:start: cli:compass/rules.py:sub -->
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `build` | `rules.py build [--write] [--check] [--now ISO]` | Render rules.md (stdout unless `--write`) |
+<!-- generated:end: cli:compass/rules.py:sub -->
+
+### Flags
+
+<!-- generated:start: cli:compass/rules.py:flag -->
+| Flag | Applies to | Description |
+|------|-----------|-------------|
+| `--write` | build | Write `<state-dir>/compass/rules.md` atomically |
+| `--check` | build | Exit 1 if the on-disk `rules.md` differs from a fresh build (or is missing) |
+| `--now ISO` | build | ISO-8601 instant for the decay math (default: now); tests use it |
+<!-- generated:end: cli:compass/rules.py:flag -->
+
+Exit codes: `0` rendered / written / up to date, `1` `--check` found drift, `2` usage error (bad `--now`).
+
 ## compass/synthesize.py
 
 Read active observations, previous `personality.md`, and `corrections.md`; call headless `claude -p` to produce a new `personality.md`. Used by `/compass-sync` and the weekly cron entry.
