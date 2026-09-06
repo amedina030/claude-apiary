@@ -280,7 +280,13 @@ def build_prompt(
         "'file_absent' (file must be gone — for delete actions). "
         "Pick anchor texts that are specific enough to avoid false positives "
         "(e.g. the full 'def symbol_name(' rather than just 'symbol_name'). "
-        "Post_conditions are optional for test/verify steps.",
+        "Post_conditions are optional for test/verify steps. Every text is a "
+        "LITERAL substring the finished file will contain: copy the exact code "
+        "the step writes. Never use a placeholder (the validator rejects texts "
+        "containing placeholder, never_used, lorem ipsum, or the words TODO, "
+        "FIXME, TBD, XXX), and an import statement used as an anchor must name "
+        "a module and symbol that already exist in the repo or that an earlier "
+        "step creates - the validator resolves it against the checkout.",
         "",
     ]
 
