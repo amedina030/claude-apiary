@@ -29,6 +29,17 @@ both contradict it is *flagged*, not demoted. Three or more events sharing
 ``build`` is a pure function of its inputs and ``now``; with zero events it
 reproduces the seed table byte for byte (``--check`` verifies that on disk).
 
+Delivery (D-2026-62 step 2) reads the rendered ``rules.md`` back rather than
+rebuilding: :func:`parse_rules_md` recovers the rows and the self-check from
+the generated text, :func:`pin_text` renders the per-turn pin (principle rows
+plus self-check) and :func:`rule_line` one row for the hook-point injections.
+The row format is therefore part of the contract — change ``_render_row`` and
+``parse_rules_md`` together.
+
+Output heuristics (``compass/heuristics.py``, written by the Stop hook) are a
+secondary signal for the output rules only: they are summarised under the
+Output section and never counted in a row's confidence.
+
 Usage::
 
     rules.py build [--write] [--check] [--now ISO]
@@ -44,7 +55,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from compass import store  # noqa: E402
+from compass import heuristics, store  # noqa: E402
 from core.utils.atomic import write_text_atomic  # noqa: E402
 from core.utils.timeutil import parse_iso  # noqa: E402
 
@@ -277,30 +288,60 @@ def _fmt_day(ts: datetime | None) -> str:
     return ts.strftime("%Y-%m-%d") if ts else "never"
 
 
-def _render_row(row: dict, stat: dict, flagged: bool) -> list[str]:
-    rid = row["id"]
+FLAG_MARK = "FLAGGED"
+HEURISTICS_SECTION = "output"  # the section the Stop-hook heuristics report under
+
+
+def _row_label(row: dict, stat: dict, flagged: bool) -> str:
+    """``principle; mined 0.83`` / ``specific, J1; seed 0.50; expires ...; FLAGGED``."""
     kind = row.get("kind", "specific")
     label = "principle" if kind == "principle" else f"specific, {row.get('parent') or '-'}"
-    lines = [f"- **{rid}** ({label}) {row['rule'].strip()}"]
-    if row.get("why"):
-        lines.append(f"  - why: {row['why'].strip()}")
     source = row.get("source") or "seed"
     if source == "seed" and (stat["n_confirm"] or stat["n_contradict"]):
         source = "mined"
-    evidence = (
-        f"  - evidence: confirmed {stat['n_confirm']}, contradicted {stat['n_contradict']}, "
-        f"last seen {_fmt_day(stat['last_seen'])}; confidence {stat['confidence']:.2f}; "
-        f"source {source}"
-    )
+    parts = [label, f"{source} {stat['confidence']:.2f}"]
     if row.get("expiry"):
-        evidence += f"; expires {str(row['expiry'])[:10]}"
+        parts.append(f"expires {str(row['expiry'])[:10]}")
     if flagged:
-        evidence += "; FLAGGED"
-    lines.append(evidence)
-    if stat.get("quote"):
-        quote = " ".join(str(stat["quote"]).split())
-        lines.append(f'  - quote: "{quote}"')
+        parts.append(FLAG_MARK)
+    return "; ".join(parts)
+
+
+def _render_row(row: dict, stat: dict, flagged: bool) -> list[str]:
+    """One row: header, ``why``, and an evidence line only once events exist.
+
+    Every row is delivered to Claude at every session start, so the format is
+    the budget: the header carries source and confidence, seed rows with no
+    events carry no evidence line, and the quote rides on the evidence line.
+    """
+    rid = row["id"]
+    lines = [f"- **{rid}** ({_row_label(row, stat, flagged)}) {row['rule'].strip()}"]
+    if row.get("why"):
+        lines.append(f"  - why: {row['why'].strip()}")
+    if stat["n_confirm"] or stat["n_contradict"]:
+        evidence = (
+            f"  - evidence: {stat['n_confirm']} confirmed, {stat['n_contradict']} "
+            f"contradicted, last {_fmt_day(stat['last_seen'])}"
+        )
+        if stat.get("quote"):
+            evidence += f'; "{" ".join(str(stat["quote"]).split())}"'
+        lines.append(evidence)
     return lines
+
+
+def _render_heuristics(summary: dict) -> str:
+    """The secondary-signal line under the Output section."""
+
+    def pct(key: str) -> str:
+        return f"{100.0 * summary[key] / summary['turns']:.0f}%"
+
+    return (
+        f"- heuristics (Stop hook, secondary signal, not counted in confidence; "
+        f"{summary['turns']} turn(s) in {summary['sessions']} session(s)): "
+        f"outcome in the first sentence {pct('outcome_first')}, at most one "
+        f"recommendation {pct('one_recommendation')}, length band "
+        f"{heuristics.LENGTH_BAND[0]}-{heuristics.LENGTH_BAND[1]} chars {pct('length_band')}"
+    )
 
 
 def render(
@@ -310,6 +351,7 @@ def render(
     events: list[dict],
     proposed: list[dict],
     flagged: list[str],
+    heuristic_summary: dict | None = None,
 ) -> str:
     sessions = {e.get("session_id") for e in events if e.get("session_id")}
     latest = max((t for t in (_as_ts(e.get("ts")) for e in events) if t), default=None)
@@ -319,11 +361,9 @@ def render(
         "Second-person rules mined from this user's corrections and acceptances "
         "(D-2026-62). They shape how you reason about recommendations and how you "
         "write, throughout a session, not only at tool boundaries. Explicit feedback "
-        "in memory overrides any row here.",
-        "",
-        f"Built by `compass/rules.py build` from {len(events)} event(s) across "
-        f"{len(sessions)} session(s); last event {_fmt_day(latest)}. Generated file: "
-        "add or override rows in `rules_manual.json`, not here.",
+        "in memory overrides any row here. Generated by `compass/rules.py build` from "
+        f"{len(events)} event(s) across {len(sessions)} session(s), last event "
+        f"{_fmt_day(latest)}; add or override rows in `rules_manual.json`, never here.",
         "",
     ]
     for section in seed.get("sections", []):
@@ -334,6 +374,8 @@ def render(
             if row.get("section") != sid:
                 continue
             out.extend(_render_row(row, stats[str(row["id"])], row["id"] in flagged))
+        if sid == HEURISTICS_SECTION and heuristic_summary and heuristic_summary.get("turns"):
+            out.append(_render_heuristics(heuristic_summary))
         out.append("")
     if flagged:
         out.append("## Flags")
@@ -378,18 +420,28 @@ def build(
     seed: dict | None = None,
     manual_rows: list[dict] | None = None,
     events: list[dict] | None = None,
+    heuristic_turns: list[dict] | None = None,
     now: datetime | None = None,
 ) -> dict:
-    """Pure build. Returns ``{"text", "rows", "stats", "flagged", "proposed", "events"}``."""
+    """Pure build. Returns ``{"text", "rows", "stats", "flagged", "proposed", "events"}``.
+
+    *heuristic_turns* defaults to the Stop-hook heuristics of every session
+    that has an events file, so the summary line only moves when a session is
+    classified (which rebuilds this file anyway) and ``--check`` stays honest
+    while a session is live.
+    """
     now = now or datetime.now(timezone.utc)
     seed = store.load_seed_rules() if seed is None else seed
     manual_rows = load_manual_rows() if manual_rows is None else manual_rows
     events = load_events() if events is None else events
+    if heuristic_turns is None:
+        heuristic_turns = heuristics.load_classified()
     rows = merge_rows(list(seed.get("rules", [])), manual_rows, now)
     stats = aggregate(rows, events, now)
     flagged = flagged_rules(rows, stats)
     proposed = proposals(events, rows)
-    text = render(seed, rows, stats, events, proposed, flagged)
+    summary = heuristics.summarize(heuristic_turns)
+    text = render(seed, rows, stats, events, proposed, flagged, summary)
     return {
         "text": text,
         "rows": rows,
@@ -397,7 +449,95 @@ def build(
         "flagged": flagged,
         "proposed": proposed,
         "events": len(events),
+        "heuristics": summary,
     }
+
+
+# ---------------------------------------------------------------------------
+# Delivery: read the rendered table back
+# ---------------------------------------------------------------------------
+
+_ROW_RE = re.compile(r"^- \*\*(?P<id>[A-Z]{1,2}\d{1,3})\*\* \((?P<label>[^)]*)\) (?P<rule>.+)$")
+_WHY_PREFIX = "  - why: "
+_SELF_CHECK_HEADING = "## Self-check"
+_CHECK_ITEM_RE = re.compile(r"^\d+\. (?P<item>.+)$")
+
+
+def parse_rules_md(text: str) -> dict:
+    """Rows and self-check items from a rendered ``rules.md``.
+
+    The inverse of :func:`render` for the parts delivery needs: each row's
+    ``id``, ``kind`` (``principle`` | ``specific``), ``parent``, ``rule``,
+    ``why`` and whether it is flagged; and the self-check items in order.
+    Tolerant of hand edits — an unparseable line is skipped, never fatal.
+    """
+    rows: list[dict] = []
+    items: list[str] = []
+    in_check = False
+    for line in text.splitlines():
+        stripped = line.rstrip()
+        if stripped.startswith("## "):
+            in_check = stripped.startswith(_SELF_CHECK_HEADING)
+            continue
+        if in_check:
+            m = _CHECK_ITEM_RE.match(stripped)
+            if m:
+                items.append(m.group("item").strip())
+            continue
+        m = _ROW_RE.match(stripped)
+        if m:
+            parts = [p.strip() for p in m.group("label").split(";")]
+            head = parts[0] if parts else ""
+            kind = "principle" if head == "principle" else "specific"
+            parent = None
+            if kind == "specific" and "," in head:
+                parent = head.split(",", 1)[1].strip() or None
+                if parent == "-":
+                    parent = None
+            rows.append(
+                {
+                    "id": m.group("id"),
+                    "kind": kind,
+                    "parent": parent,
+                    "rule": m.group("rule").strip(),
+                    "why": "",
+                    "flagged": FLAG_MARK in parts,
+                }
+            )
+            continue
+        if rows and stripped.startswith(_WHY_PREFIX) and not rows[-1]["why"]:
+            rows[-1]["why"] = stripped[len(_WHY_PREFIX) :].strip()
+    return {"rows": rows, "self_check": items}
+
+
+def pin_text(parsed: dict) -> str:
+    """The per-turn pin: principle rows plus the self-check, one line each.
+
+    Injected by ``core/hooks/compass_rules.py`` on every user message after the
+    first (the startup block carries the whole table), so the rules sit near
+    the active turn and survive compaction. Roughly 200 tokens.
+    """
+    principles = [r for r in parsed.get("rows", []) if r.get("kind") == "principle"]
+    lines = [
+        "compass rules pin (full table in the startup block; explicit user statements "
+        "and feedback memory override):"
+    ]
+    lines.extend(f"{r['id']} {r['rule']}" for r in principles)
+    items = parsed.get("self_check") or []
+    if items:
+        lines.append("Self-check before finalizing: " + " ".join(items))
+    return "\n".join(lines)
+
+
+def rule_line(parsed: dict, rule_id: str) -> str | None:
+    """``J5 rule text (why: ...)`` for one row, or ``None`` if the id is absent."""
+    for row in parsed.get("rows", []):
+        if row.get("id") == rule_id:
+            line = f"{row['id']} {row['rule']}"
+            if row.get("why"):
+                line += f" (why: {row['why']})"
+            return line
+    return None
 
 
 def rule_ids(seed: dict | None = None, manual_rows: list[dict] | None = None) -> list[str]:
@@ -431,7 +571,8 @@ def cmd_build(args: argparse.Namespace) -> int:
         write_text_atomic(target, result["text"])
         print(
             f"wrote {target} ({len(result['rows'])} rows, {result['events']} events, "
-            f"{len(result['flagged'])} flagged, {len(result['proposed'])} proposed)"
+            f"{len(result['flagged'])} flagged, {len(result['proposed'])} proposed, "
+            f"{result['heuristics']['turns']} heuristic turns)"
         )
         return 0
     sys.stdout.write(result["text"])

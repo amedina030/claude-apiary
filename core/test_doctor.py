@@ -654,7 +654,8 @@ class CheckCompassTests(unittest.TestCase):
         self.assertEqual(issues, [])
         joined = " ".join(notes)
         self.assertIn("turns: 1 session(s), 1 pair(s)", joined)
-        self.assertIn("A/B:", joined)
+        self.assertIn("go/no-go (D-2026-62)", joined)
+        self.assertNotIn("A/B:", joined)
 
     def test_compass_is_in_the_all_checks_run(self):
         self.assertIn("compass", doctor.CHECKS)

@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-09-05"
+last_verified: "2026-09-06"
 ---
 
 # CLI Tools
@@ -178,7 +178,7 @@ python core/doctor.py [subcommand] [--fix] [--apiary-repo PATH]
 | `orphans` | Folders under `.repos/<slug>/` whose UID has no registry entry |
 | `duplicates` | Registry entries sharing a `real_path` |
 | `unreachable` | Registry entries whose `real_path` does not exist on disk |
-| `compass` | Compass measurement health for main-apiary's own state dir: observation counts, `personality.md` size and synthesis age (warns above 14 days), A/B arm counts, and the last `compass/evaluate.py offline` headline. Report-only — always notes, never issues, so it cannot fail a doctor run. See [Compass Measurement Programme](../architecture/compass-measurement.md) |
+| `compass` | Compass rule-table health for main-apiary's own state dir: captured turn sessions and pairs, classified / skipped / pending sessions, events, heuristic turns, `rules.md` rows (flagged, proposed, age) and the D-2026-62 go/no-go verdict once 30 sessions are captured. Report-only — always notes, never issues, so it cannot fail a doctor run. See [Compass rule table](../architecture/compass-rules.md) |
 <!-- generated:end: cli:core/doctor.py:sub -->
 
 ### Flags
@@ -355,57 +355,6 @@ echo '<usage>...</usage>' | python budgeter/log_agent_cost.py --session-id ID [-
 | `--request-id ID` | no | Optional grouping id for multi-call chains (e.g. one runner run). Surfaces in `report.py --by-request`. |
 <!-- generated:end: cli:budgeter/log_agent_cost.py:flag -->
 
-## compass/observations.py
-
-Inspect and maintain per-session personality observation files at `<state-dir>/compass/observations/` (per-target state dir resolved via the registry; see [File Storage](file-storage.md)).
-
-### Subcommands
-
-<!-- generated:start: cli:compass/observations.py:sub -->
-| Subcommand | Usage | Description |
-|------------|-------|-------------|
-| `count` | `observations.py count` | Print active observation count |
-| `list` | `observations.py list [--full] [--archive]` | List observation files (one per line; `--full` prints JSON; `--archive` lists archived files instead) |
-| `validate` | `observations.py validate <path> [--no-filename-check]` | Validate one observation file's schema. Default checks `session_id` matches the filename stem |
-| `archive` | `observations.py archive [--apply]` | Archive sweep — moves files older than 90 days into `observations/archive/<iso-year>-<iso-week>/`. Skips entirely when active count is below 50. Dry-run by default; `--apply` performs the move |
-<!-- generated:end: cli:compass/observations.py:sub -->
-
-## compass/capture.py
-
-The write side of `/wrapup` Step 4. Takes the session's observation JSON, validates it against the dimension config and the session-id guard, and only then writes `<state-dir>/compass/observations/<sid>.json`. Nothing is written when validation fails, so a malformed payload can never reach the synthesizer. `compass/observations.py` remains the read and maintenance surface.
-
-```bash
-python compass/capture.py dimensions [--json]
-python compass/capture.py template --session-id abc12345
-python compass/capture.py validate --content-file obs.json [--session-id abc12345]
-python compass/capture.py store --content-file obs.json --session-id abc12345 [--allow-empty] [--dry-run]
-```
-
-### Subcommands
-
-<!-- generated:start: cli:compass/capture.py:sub -->
-| Subcommand | Usage | Description |
-|------------|-------|-------------|
-| `dimensions` | `capture.py dimensions [--json]` | Print the dimensions to look for and which are volatile; `--json` prints the raw config |
-| `template` | `capture.py template [--session-id ID]` | Print a skeleton payload so the skill never retypes the schema |
-| `validate` | `capture.py validate --content-file PATH` | Validate a payload without storing it |
-| `store` | `capture.py store --content-file PATH --session-id ID` | Validate, then write the observation file |
-<!-- generated:end: cli:compass/capture.py:sub -->
-
-### Flags
-
-<!-- generated:start: cli:compass/capture.py:flag -->
-| Flag | Applies to | Description |
-|------|-----------|-------------|
-| `--content-file PATH` | validate, store | The observation JSON (one wrapping markdown fence is tolerated) |
-| `--session-id ID` | template, validate, store | 8-char prefix or full UUID. The payload's `session_id` must match it |
-| `--json` | dimensions | Print the raw dimensions config |
-| `--allow-empty` | store | Write the file even when `observations` is empty (skipped by default) |
-| `--dry-run` | store | Validate and report the target path, write nothing |
-<!-- generated:end: cli:compass/capture.py:flag -->
-
-Exit codes: `0` stored (or honestly empty and skipped), `1` invalid payload or write failure (capture is non-blocking: `/wrapup` warns and moves on), `2` usage error.
-
 ## compass/classify.py
 
 The model step of the compass rule table (D-2026-62). Reads the `(assistant, user)` pairs the Stop hook `compass_pair_log` logged to `<state-dir>/compass/turns/<sid>.jsonl`, sends them in **one** batched `claude -p` call (Sonnet by default, prompt via stdin) with a fixed vocabulary — `type` correction | acceptance | anticipation_miss, `section` judgment | output | anticipation, `rule` id or null, `polarity` confirm | contradict, `action`, `quote` — validates the reply against that vocabulary (anything outside it is dropped and counted, never guessed), writes `<state-dir>/compass/events/<sid>.json` and regenerates `rules.md`. An empty event list is a valid result. `/wrapup` Step 4 calls it for the current session; `--catch-up` is the nightly sweep over finished sessions with no current events file.
@@ -443,7 +392,7 @@ Exit codes: `0` classified or honestly skipped (too few pairs, nothing pending),
 
 ## compass/rules.py
 
-Aggregation step of the compass rule table — counts, no model. Merges the shipped seed table (`compass/seed_rules.json`), the optional manual rows (`<state-dir>/compass/rules_manual.json`; a manual row with a seed id replaces it, `expiry` drops temporary rows) and every event under `<state-dir>/compass/events/`, then renders `<state-dir>/compass/rules.md`: per rule, confirmed and contradicted counts with a 60-day half-life, last seen, one quote, `confidence = (confirmed + 0.5) / (confirmed + contradicted + 1)` and `source` (seed | mined | manual). Events on a specific row also count on its parent principle. A specific row contradicted twice in a row is **flagged**, not demoted; three or more unattached events sharing `(section, action)` are listed as a **proposed** row. With zero events the build reproduces the seed table byte for byte, which is what `--check` verifies.
+Aggregation step of the compass rule table — counts, no model. Merges the shipped seed table (`compass/seed_rules.json`), the optional manual rows (`<state-dir>/compass/rules_manual.json`; a manual row with a seed id replaces it, `expiry` drops temporary rows) and every event under `<state-dir>/compass/events/`, then renders `<state-dir>/compass/rules.md`: per rule, source and `confidence = (confirmed + 0.5) / (confirmed + contradicted + 1)` on the header line, and — once events exist — an evidence line with the confirmed and contradicted counts (60-day half-life in the weights), last seen and one quote. Events on a specific row also count on its parent principle. A specific row contradicted twice in a row is **flagged**, not demoted; three or more unattached events sharing `(section, action)` are listed as a **proposed** row. The Stop-hook output heuristics of every classified session are summarised as rates under the Output section and never counted in a row's confidence. With zero events the build reproduces the seed table byte for byte, which is what `--check` verifies. The module also reads the rendered file back (`parse_rules_md`, `pin_text`, `rule_line`) for the startup pin and the hook-point rules in `core/hooks/compass_rules.py`.
 
 ```bash
 python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/rules.py build            # render to stdout
@@ -470,89 +419,6 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/rules
 <!-- generated:end: cli:compass/rules.py:flag -->
 
 Exit codes: `0` rendered / written / up to date, `1` `--check` found drift, `2` usage error (bad `--now`).
-
-## compass/synthesize.py
-
-Read active observations, previous `personality.md`, and `corrections.md`; call headless `claude -p` to produce a new `personality.md`. Used by `/compass-sync` and the weekly cron entry.
-
-```bash
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/synthesize.py
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/synthesize.py --dry-run
-python -m compass.synthesize --cron        # cron-driven; no-ops if personality.md is < 7 days old
-```
-
-<!-- generated:start: cli:compass/synthesize.py:flag -->
-| Flag | Required | Description |
-|------|----------|-------------|
-| `--dry-run` | no | Print the synthesis prompt instead of calling claude |
-| `--model MODEL` | no | Override the claude CLI's default model |
-| `--cron` | no | Self-throttle to a 7-day cadence (no-op if `personality.md` was rewritten in the last week) |
-| `--max-sessions N` | no | Synthesize from at most the N most recent sessions by `captured_at` (default 50, matching the archive threshold; `0` disables the cap) |
-<!-- generated:end: cli:compass/synthesize.py:flag -->
-
-Exit codes: `0` wrote `personality.md`; `1` no active observations; `2` claude subprocess failed (previous file untouched).
-
-## compass/backfill.py
-
-Extract observations from historical session transcripts via headless claude. Selectors are combinable and intersected.
-
-```bash
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/backfill.py --last 5
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/backfill.py --session-ids 1089da5c,8123e697
-python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" compass/backfill.py --since 2026-04-10 --last 5
-```
-
-<!-- generated:start: cli:compass/backfill.py:flag -->
-| Flag | Required | Description |
-|------|----------|-------------|
-| `--last N` | one of these | N most recent transcripts by mtime |
-| `--session-ids LIST` | one of these | Comma-separated 8-char prefixes or full UUIDs |
-| `--since YYYY-MM-DD` | one of these | Only transcripts modified on/after this date |
-| `--force` | no | Overwrite existing observation files (default: skip) |
-| `--model MODEL` | no | Override the claude CLI's default model |
-<!-- generated:end: cli:compass/backfill.py:flag -->
-
-Exit codes: `0` at least one file written; `1` no selectors / no matches / nothing written; `2` claude subprocess failed for every selected session.
-
-## compass/evaluate.py
-
-Measure whether the personality profile carries signal (review §5a-H). Design, metric definition, honesty caveats, and the proposed keep/delete rule: [Compass Measurement Programme](../architecture/compass-measurement.md).
-
-```bash
-python compass/evaluate.py offline                                   # stub synthesiser, free
-python compass/evaluate.py offline --model opus --max-folds 20       # prints a cost estimate only
-python compass/evaluate.py offline --model opus --max-folds 20 --yes # spends it
-python compass/evaluate.py ab --since 2026-09-01
-python compass/evaluate.py labels
-```
-
-### Subcommands
-
-<!-- generated:start: cli:compass/evaluate.py:sub -->
-| Subcommand | Usage | Description |
-|------------|-------|-------------|
-| `offline` | `evaluate.py offline [--dry-run] [--model M] [--max-folds N] [--yes] [--json] [--no-cache]` | Leave-one-out predictive validity over the observation files: does a profile synthesized from the other sessions predict a held-out session's per-dimension labels? Reports micro/macro accuracy, majority and random baselines, lift, coverage and per-dimension precision, and caches the headline to `<state-dir>/compass/evaluate/last.json` |
-| `ab` | `evaluate.py ab [--since YYYY-MM-DD] [--log PATH] [--json]` | Join the per-session A/B arm against budgeter outcome proxies (tool calls per task, corrections per task, net tokens per task) and print both arms with n |
-| `labels` | `evaluate.py labels [--json]` | Print the per-dimension label vocabulary — the metric's target definition |
-<!-- generated:end: cli:compass/evaluate.py:sub -->
-
-### Flags
-
-<!-- generated:start: cli:compass/evaluate.py:flag -->
-| Flag | Applies to | Description |
-|------|-----------|-------------|
-| `--state-dir PATH` | all | Evaluate another target's compass state (sets `$APIARY_TARGET_STATE_DIR`) |
-| `--dry-run` | offline | Force the deterministic stub synthesizer. This is already the default when `--model` is absent; no model is ever called |
-| `--model MODEL` | offline | Run the real `synthesize.py` prompt once per fold with this model alias. Costs one `claude -p` call per fold |
-| `--max-folds N` | offline | Stop after N folds — use with `--model` to bound spend |
-| `--yes` | offline | Confirm the printed cost estimate and actually run `--model`. Without it the estimate prints and nothing is spent (exit 2) |
-| `--no-cache` | offline | Do not write the headline to the state dir |
-| `--since YYYY-MM-DD` | ab | Only count budgeter log rows on/after this date |
-| `--log PATH` | ab | Budgeter usage log path (default: budgeter's own) |
-| `--json` | offline, ab, labels | Emit machine-readable output instead of the table |
-<!-- generated:end: cli:compass/evaluate.py:flag -->
-
-Exit codes: `0` evaluation ran; `1` not enough data (fewer than two valid observation files, or an empty budgeter log); `2` usage error, or a `--model` run declined for want of `--yes`.
 
 ## incubator/cli.py
 

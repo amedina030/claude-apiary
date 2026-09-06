@@ -84,14 +84,20 @@
       "why": "The manifest format, the extends chain and the merge semantics."
     },
     {
-      "id": "compass-measurement",
-      "code": ["compass/ab.py", "compass/evaluate.py", "compass/synthesize.py"],
-      "docs": ["docs/architecture/compass-measurement.md"],
-      "why": "The A/B design, the offline metric and the keep/remove rule depend on how these behave."
+      "id": "compass-rules",
+      "code": [
+        "compass/turns.py",
+        "compass/classify.py",
+        "compass/rules.py",
+        "compass/heuristics.py",
+        "compass/seed_rules.json"
+      ],
+      "docs": ["docs/architecture/compass-rules.md", "compass/CLAUDE.md"],
+      "why": "The event vocabulary, the aggregation math, the row format and the delivery paths are what the doc describes."
     },
     {
       "id": "config-files",
-      "code": ["*/config.json", "compass/dimensions.json", "compass/label_vocabulary.json"],
+      "code": ["*/config.json", "compass/seed_rules.json"],
       "docs": ["docs/reference/config-files.md"],
       "why": "The key tables are generated from these files — a changed default must be regenerated."
     },

@@ -78,6 +78,29 @@ class CompassPairLogTests(unittest.TestCase):
         self.assertEqual(json.loads(rows[0])["user"], "U1")
         self.assertTrue(store.cursor_path(SID).is_file())
 
+    def test_scores_the_turns_final_message_once(self):
+        compass_pair_log.run(self.payload())
+        rows = store.heuristics_path(SID).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(rows), 1)
+        row = json.loads(rows[0])
+        self.assertEqual(row["source"], "heuristic")
+        self.assertEqual(row["chars"], len("A1"))
+        # A second Stop with nothing new scores nothing more.
+        compass_pair_log.run(self.payload())
+        self.assertEqual(
+            len(store.heuristics_path(SID).read_text(encoding="utf-8").splitlines()), 1
+        )
+        # A new turn adds exactly one row, scored on its last text block.
+        with self.transcript.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(_user("p02", "U2")) + "\n")
+            f.write(json.dumps(_asst("I'll look.")) + "\n")
+            f.write(json.dumps(_asst("Done. The fix is in.")) + "\n")
+        compass_pair_log.run(self.payload())
+        rows = store.heuristics_path(SID).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(json.loads(rows[1])["chars"], len("Done. The fix is in."))
+        self.assertTrue(json.loads(rows[1])["outcome_first"])
+
     def test_runner_subprocess_is_skipped(self):
         with mock.patch.dict(os.environ, {"APIARY_RUNNER_SUBPROCESS": "1"}):
             self.assertIsNone(compass_pair_log.run(self.payload()))

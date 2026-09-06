@@ -224,11 +224,16 @@ class MergeRowsTests(unittest.TestCase):
             self.assertEqual([r["id"] for r in rules.load_manual_rows(path)], ["J9"])
 
 
+def build(**kwargs):
+    kwargs.setdefault("heuristic_turns", [])
+    return rules.build(**kwargs)
+
+
 class RenderAndBuildTests(unittest.TestCase):
     def test_seed_round_trips_with_zero_events(self):
         seed = store.load_seed_rules()
-        first = rules.build(seed=seed, manual_rows=[], events=[], now=NOW)
-        second = rules.build(seed=seed, manual_rows=[], events=[], now=NOW + timedelta(days=40))
+        first = build(seed=seed, manual_rows=[], events=[], now=NOW)
+        second = build(seed=seed, manual_rows=[], events=[], now=NOW + timedelta(days=40))
         self.assertEqual(first["text"], second["text"])
         for row in seed["rules"]:
             self.assertIn(f"- **{row['id']}** (", first["text"])
@@ -236,31 +241,94 @@ class RenderAndBuildTests(unittest.TestCase):
             self.assertIn(item, first["text"])
         self.assertNotIn("## Flags", first["text"])
         self.assertNotIn("## Proposed rules", first["text"])
-        self.assertIn("source seed", first["text"])
-        self.assertNotIn("source mined", first["text"])
+        self.assertIn("seed 0.50", first["text"])
+        self.assertNotIn("; mined ", first["text"])
+        # Seed rows with no events carry no evidence line — that is the budget.
+        self.assertNotIn("- evidence:", first["text"])
+        self.assertNotIn("heuristics", first["text"])
         self.assertTrue(first["text"].endswith("\n"))
 
+    def test_shipped_seed_table_fits_the_startup_budget(self):
+        # Every row goes out at every session start (D-2026-62: about 1,000
+        # tokens). Chars/4 is a rough token estimate; the bound is the alarm.
+        text = build(seed=store.load_seed_rules(), manual_rows=[], events=[], now=NOW)["text"]
+        self.assertLess(len(text), 5200, msg=f"seed rules.md is {len(text)} chars")
+
     def test_events_flip_source_to_mined_and_show_evidence(self):
-        result = rules.build(
+        result = build(
             seed=SEED, manual_rows=[], events=[event("J4", "confirm", quote="ship it")], now=NOW
         )
         text = result["text"]
-        self.assertIn(
-            "confirmed 1, contradicted 0, last seen 2026-09-06; confidence 0.75; source mined", text
-        )
-        self.assertIn('quote: "ship it"', text)
+        self.assertIn("- **J4** (specific, J1; mined 0.75) Lean on prior art.", text)
+        self.assertIn('  - evidence: 1 confirmed, 0 contradicted, last 2026-09-06; "ship it"', text)
+        self.assertIn("- **J1** (principle; mined 0.75) Prefer thorough.", text)  # rolled up
         self.assertIn("from 1 event(s) across 1 session(s)", text)
 
     def test_flags_and_proposals_render_as_sections(self):
         events = [event("J4", "contradict", 2), event("J4", "contradict", 1)] + [
             event(None, "confirm", action="name the ci job", sid=s) for s in "abc"
         ]
-        result = rules.build(seed=SEED, manual_rows=[], events=events, now=NOW)
+        result = build(seed=SEED, manual_rows=[], events=events, now=NOW)
         self.assertEqual(result["flagged"], ["J4"])
         self.assertIn("## Flags", result["text"])
-        self.assertIn("FLAGGED", result["text"])
+        self.assertIn("(specific, J1; mined 0.17; FLAGGED) Lean on prior art.", result["text"])
         self.assertIn("## Proposed rules", result["text"])
         self.assertIn("- [judgment] name the ci job (3 events, 3 sessions)", result["text"])
+
+    def test_expiry_shows_on_the_header(self):
+        manual = [
+            {
+                "id": "T2",
+                "section": "output",
+                "kind": "specific",
+                "parent": "O1",
+                "rule": "Usage is tight this week.",
+                "why": "w",
+                "expiry": "2026-09-30",
+            }
+        ]
+        text = build(seed=SEED, manual_rows=manual, events=[], now=NOW)["text"]
+        self.assertIn("- **T2** (specific, O1; manual 0.50; expires 2026-09-30) Usage", text)
+
+    def test_heuristics_summarise_under_output_only(self):
+        turns = [
+            {
+                "session_id": "a",
+                "outcome_first": True,
+                "one_recommendation": True,
+                "length_band": False,
+            },
+            {
+                "session_id": "a",
+                "outcome_first": False,
+                "one_recommendation": True,
+                "length_band": True,
+            },
+            {
+                "session_id": "b",
+                "outcome_first": True,
+                "one_recommendation": False,
+                "length_band": True,
+            },
+            {
+                "session_id": "b",
+                "outcome_first": True,
+                "one_recommendation": True,
+                "length_band": True,
+            },
+        ]
+        result = build(seed=SEED, manual_rows=[], events=[], heuristic_turns=turns, now=NOW)
+        text = result["text"]
+        line = next(ln for ln in text.splitlines() if ln.startswith("- heuristics"))
+        self.assertIn("4 turn(s) in 2 session(s)", line)
+        self.assertIn("outcome in the first sentence 75%", line)
+        self.assertIn("at most one recommendation 75%", line)
+        self.assertIn("length band 150-3000 chars 75%", line)
+        judgment = text.split("## Output")[0]
+        self.assertNotIn("heuristics", judgment)
+        self.assertEqual(result["heuristics"]["turns"], 4)
+        # A heuristic row never touches a rule's confidence.
+        self.assertIn("(principle; seed 0.50) Lead with the outcome.", text)
 
     def test_rule_ids_is_the_classifier_vocabulary(self):
         self.assertEqual(rules.rule_ids(seed=SEED, manual_rows=[]), ["J1", "J4", "O1"])
@@ -277,6 +345,78 @@ class RenderAndBuildTests(unittest.TestCase):
                 target.write_text(target.read_text(encoding="utf-8") + "drift\n", encoding="utf-8")
                 self.assertEqual(rules.main(["build", "--check"]), 1)
                 self.assertEqual(rules.main(["build", "--now", "garbage"]), 2)
+
+
+class DeliveryTests(unittest.TestCase):
+    """parse_rules_md / pin_text / rule_line read the rendered table back."""
+
+    def rendered(self, events=(), manual=()):
+        return build(seed=SEED, manual_rows=list(manual), events=list(events), now=NOW)["text"]
+
+    def test_parse_recovers_rows_why_flags_and_self_check(self):
+        events = [event("J4", "contradict", 2), event("J4", "contradict", 1)]
+        parsed = rules.parse_rules_md(self.rendered(events))
+        by_id = {r["id"]: r for r in parsed["rows"]}
+        self.assertEqual(sorted(by_id), ["J1", "J4", "O1"])
+        self.assertEqual(by_id["J1"]["kind"], "principle")
+        self.assertIsNone(by_id["J1"]["parent"])
+        self.assertEqual(by_id["J1"]["rule"], "Prefer thorough.")
+        self.assertEqual(by_id["J1"]["why"], "you do")
+        self.assertEqual(by_id["J4"]["kind"], "specific")
+        self.assertEqual(by_id["J4"]["parent"], "J1")
+        self.assertTrue(by_id["J4"]["flagged"])
+        self.assertFalse(by_id["J1"]["flagged"])
+        self.assertEqual(parsed["self_check"], ["Outcome first?", "One recommendation?"])
+
+    def test_parse_round_trips_the_shipped_seed(self):
+        seed = store.load_seed_rules()
+        parsed = rules.parse_rules_md(build(seed=seed, manual_rows=[], events=[], now=NOW)["text"])
+        self.assertEqual([r["id"] for r in parsed["rows"]], [r["id"] for r in seed["rules"]])
+        for got, want in zip(parsed["rows"], seed["rules"]):
+            self.assertEqual(got["rule"], want["rule"])
+            self.assertEqual(got["why"], want["why"])
+            self.assertEqual(got["kind"], want["kind"])
+            self.assertEqual(got["parent"], want["parent"])
+        self.assertEqual(parsed["self_check"], seed["self_check"]["items"])
+
+    def test_parse_tolerates_junk_and_empty_text(self):
+        self.assertEqual(rules.parse_rules_md(""), {"rows": [], "self_check": []})
+        parsed = rules.parse_rules_md("- **J1**\n- not a row\n## Self-check\n\nno numbers\n")
+        self.assertEqual(parsed, {"rows": [], "self_check": []})
+
+    def test_pin_is_principles_plus_self_check(self):
+        pin = rules.pin_text(rules.parse_rules_md(self.rendered()))
+        lines = pin.splitlines()
+        self.assertTrue(lines[0].startswith("compass rules pin"))
+        self.assertIn("J1 Prefer thorough.", lines)
+        self.assertIn("O1 Lead with the outcome.", lines)
+        self.assertNotIn("J4", pin)  # specific rows stay in the startup block
+        self.assertEqual(
+            lines[-1], "Self-check before finalizing: Outcome first? One recommendation?"
+        )
+
+    def test_shipped_pin_is_small(self):
+        seed = store.load_seed_rules()
+        pin = rules.pin_text(
+            rules.parse_rules_md(build(seed=seed, manual_rows=[], events=[], now=NOW)["text"])
+        )
+        self.assertLess(len(pin), 1400, msg=f"pin is {len(pin)} chars")
+        self.assertEqual(pin.count("\n"), 1 + 8)  # header, 8 principles, self-check
+
+    def test_rule_line_uses_the_rendered_text(self):
+        manual = [
+            {
+                "id": "J4",
+                "section": "judgment",
+                "kind": "specific",
+                "parent": "J1",
+                "rule": "Cite the prior art (edited).",
+                "why": "w2",
+            }
+        ]
+        parsed = rules.parse_rules_md(self.rendered(manual=manual))
+        self.assertEqual(rules.rule_line(parsed, "J4"), "J4 Cite the prior art (edited). (why: w2)")
+        self.assertIsNone(rules.rule_line(parsed, "J5"))
 
 
 if __name__ == "__main__":

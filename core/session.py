@@ -252,11 +252,9 @@ def load_identity(session_id=None):
     *session_id* may be a raw string or a SessionId instance.
 
     Returns dict with keys: role, mission, registered, session_id,
-    wants_role, wants_mission, compass_arm. Defaults if file not found.
-
-    ``compass_arm`` is ``None`` for sessions written before the compass A/B
-    existed — callers must treat "not recorded" as distinct from "off"
-    (``compass.ab.arm_for_session`` does).
+    wants_role, wants_mission. Defaults if file not found. (Identity files
+    written before D-2026-62 step 2 also carry a ``compass_arm`` key from the
+    retired compass A/B; it is ignored.)
     """
     defaults = {
         "role": "user",
@@ -265,7 +263,6 @@ def load_identity(session_id=None):
         "session_id": "",
         "wants_role": "user",
         "wants_mission": "general",
-        "compass_arm": None,
     }
 
     if session_id:
@@ -298,7 +295,6 @@ def load_identity(session_id=None):
             "session_id": sid,
             "wants_role": data.get("wants_role", "user"),
             "wants_mission": data.get("wants_mission", "general"),
-            "compass_arm": data.get("compass_arm"),
         }
     except (json.JSONDecodeError, OSError):
         return defaults

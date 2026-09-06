@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- Compass rule table, step 2 of D-2026-62 (T-2026-320): delivery and
+  retirement. The startup hook injects `<state-dir>/compass/rules.md` in
+  place of `personality.md`; the new `core/hooks/compass_rules.py` pins the
+  principle rows plus the self-check to every later user message and injects
+  J5 before an `Agent`/`Task` spawn and O3 before `AskUserQuestion`;
+  `runner/claude_subprocess.run_claude` prepends the table to every stage
+  prompt (`rules=False` for the classifier) so worktree stages without a hook
+  chain still see it. The Stop hook now also scores each turn's final message
+  with `compass/heuristics.py` (outcome first, one recommendation, length
+  band) into `events/<sid>.heuristics.jsonl`; `rules.py build` summarises the
+  rates of classified sessions under the Output section and never counts them
+  in a row's confidence. `rules.md` rows are rendered tighter (source and
+  confidence on the header, an evidence line only once events exist) so the
+  seed table fits about 1,100 tokens, and `rules.py` reads the file back
+  (`parse_rules_md`, `pin_text`, `rule_line`) for the deliveries. Retired:
+  `compass/synthesize.py`, `evaluate.py`, `ab.py`, `capture.py`,
+  `backfill.py`, `observations.py`, `config.json`, `dimensions.json`,
+  `label_vocabulary.json`, the `/compass-sync` skill, the `compass_arm`
+  identity stamp, and the `compass-weekly-synthesis` cron entry — replaced by
+  `compass-nightly-classify` (03:30, `classify.py --catch-up`).
+  `docs/architecture/compass-measurement.md` is now `compass-rules.md`;
+  `compass/CLAUDE.md` describes only the rule table.
 - The startup prompt hook now strips the skill header with
   `core.frontmatter.split` instead of its own fence scan — the last hand-rolled
   parser is gone, so `core/test_frontmatter_parity.py` no longer exempts it in

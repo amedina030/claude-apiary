@@ -4,7 +4,7 @@ title: Per-Repo Install Model
 scope: project
 description: How apiary is installed, where state lives, and how drift is detected after the per-repo migration (2026-05)
 framework_version: "1.0"
-last_verified: "2026-08-27"
+last_verified: "2026-09-06"
 ---
 
 # Per-Repo Install Model
@@ -58,7 +58,7 @@ where it lives, and how the parts coordinate.
     <slug>/                                      # per-target state per registered repo
       scribe/                                    # notes, learnings, memory
       runner/                                    # runner artifacts
-      compass/                                   # personality observations + profile
+      compass/                                   # turn pairs, events, the rule table
       research/                                  # researcher findings
       sessions/                                  # per-repo session state
         history.json                             # per-repo session history (v1 schema)
@@ -221,7 +221,7 @@ other code path is read-only with respect to bootstrapped repos.
 | `orphans` | `.repos/<slug>/` folders whose UID has no registry entry | Report only |
 | `duplicates` | Two registry entries sharing a `real_path` | Report only |
 | `unreachable` | Registry entries pointing at non-existent paths | Report only |
-| `compass` | Personality-profile health: age, active observation count, last synthesis, the cached `evaluate offline` headline | Report only |
+| `compass` | Rule-table health: captured sessions, classified events, heuristic turns, `rules.md` rows, the go/no-go verdict | Report only |
 | (no arg) | All of the above in read-only mode | n/a |
 
 Exit code is 0 when all checks pass and 1 when any reports an issue. Notes

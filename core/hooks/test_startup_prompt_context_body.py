@@ -142,5 +142,61 @@ class TestHookInjectsStrippedRules(unittest.TestCase):
             self.assertNotIn("name: apiary-context", result.stdout)
 
 
+class TestHookInjectsCompassRules(unittest.TestCase):
+    """The rule table (D-2026-62) replaces the personality profile block."""
+
+    def _purge_session_flags(self, sid: str) -> None:
+        for f in (REPO / ".claude" / "apiary" / "session-tmp").glob(f"{sid}_*"):
+            f.unlink(missing_ok=True)
+
+    def _run(self, home: Path, state: Path, sid: str) -> subprocess.CompletedProcess:
+        # cwd is this checkout (a git repo, so the notes/rules sections run);
+        # the state dir is the temp one the launcher would have exported.
+        payload = {"session_id": sid, "message": "hi", "cwd": str(REPO)}
+        env = hermetic_env(
+            HOME=str(home),
+            USERPROFILE=str(home),
+            APIARY_GUI_SESSION="",
+            APIARY_TARGET_STATE_DIR=str(state),
+        )
+        return subprocess.run(
+            [sys.executable, str(HOOK)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+
+    def test_rules_md_is_injected_and_the_profile_is_not(self):
+        sid = str(uuid.uuid4())
+        self.addCleanup(self._purge_session_flags, sid)
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            compass = home / "state" / "compass"
+            compass.mkdir(parents=True)
+            (compass / "rules.md").write_text(
+                "# Rules for Claude\n\n- **J1** (principle; seed 0.50) Prefer thorough.\n",
+                encoding="utf-8",
+            )
+            (compass / "personality.md").write_text("# OLD PROFILE TEXT\n", encoding="utf-8")
+            result = self._run(home, home / "state", sid)
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertIn("--- compass rules for Claude", result.stdout)
+            self.assertIn("Prefer thorough.", result.stdout)
+            self.assertNotIn("OLD PROFILE TEXT", result.stdout)
+            self.assertNotIn("personality profile", result.stdout)
+
+    def test_no_rules_md_means_no_compass_block(self):
+        sid = str(uuid.uuid4())
+        self.addCleanup(self._purge_session_flags, sid)
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            (home / "state").mkdir()
+            result = self._run(home, home / "state", sid)
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertNotIn("--- compass rules", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -269,6 +269,58 @@ class TestUsageEmission(unittest.TestCase):
         self.assertEqual(emitted, [""])
 
 
+class TestRulesPreamble(unittest.TestCase):
+    """D-2026-62 step 2: every stage prompt starts with the compass rule table."""
+
+    def _sent(self, **kwargs) -> str:
+        from runner import claude_subprocess as cs
+
+        captured = {}
+
+        def fake_run(cmd, **run_kwargs):
+            captured["input"] = run_kwargs["input"].decode("utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+
+        with mock.patch.object(cs.subprocess, "run", fake_run):
+            cs.run_claude("TASK", **kwargs)
+        return captured["input"]
+
+    def test_preamble_is_prepended_by_default_and_skippable(self):
+        from runner import claude_subprocess as cs
+
+        with mock.patch.object(
+            cs, "rules_preamble", lambda *a, **k: "<compass-rules>R</compass-rules>\n\n"
+        ):
+            self.assertEqual(self._sent(), "<compass-rules>R</compass-rules>\n\nTASK")
+            self.assertEqual(self._sent(rules=False), "TASK")
+
+    def test_empty_preamble_leaves_the_prompt_alone(self):
+        from runner import claude_subprocess as cs
+
+        with mock.patch.object(cs, "rules_preamble", lambda *a, **k: ""):
+            self.assertEqual(self._sent(), "TASK")
+
+    def test_preamble_reads_the_targets_rules_md(self):
+        import os
+        import tempfile
+
+        from runner import claude_subprocess as cs
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp).resolve() / "state"
+            (state / "compass").mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"APIARY_TARGET_STATE_DIR": str(state)}):
+                self.assertEqual(cs.rules_preamble(), "")  # no table yet
+                (state / "compass" / "rules.md").write_text(
+                    "# Rules\n\n- **J1** x\n", encoding="utf-8"
+                )
+                text = cs.rules_preamble()
+        self.assertTrue(text.startswith(cs.RULES_PREAMBLE_HEADER))
+        self.assertIn("- **J1** x", text)
+        self.assertTrue(text.endswith(cs.RULES_PREAMBLE_FOOTER))
+        self.assertIn("that format wins", text)
+
+
 class TestResolveClaudeBin(unittest.TestCase):
     """Which executable a stage actually spawns."""
 

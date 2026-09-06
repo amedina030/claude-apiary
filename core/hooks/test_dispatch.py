@@ -85,6 +85,7 @@ class DispatchTest(unittest.TestCase):
                 "inject_session",
                 "learnings_inject",
                 "research_reminder",
+                "compass_rules",
                 "pre_push_doc_conformer",
                 "pre_push_secret_scan",
                 "budgeter_pre",
