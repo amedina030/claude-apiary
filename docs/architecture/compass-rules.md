@@ -125,12 +125,15 @@ the minor path.
 | Path | Mechanism | Size | When |
 |---|---|---|---|
 | Startup | `core/hooks/startup_prompt_hook.py` injects the whole `rules.md` | about 1,100 tokens (seed) | first user message of a session |
-| Pin | `core/hooks/compass_rules.py` injects the principle rows plus the self-check | about 200 tokens | every user message after the first |
+| Pin | `core/hooks/compass_rules.py` injects the principle rows plus the self-check; the hook counts messages in a flag file, never the model | about 250 tokens | every tenth user message |
 | Hook points | the same module injects J5 before `Agent`/`Task` (once per session and agent) and O3 before `AskUserQuestion` (every time) | one row | PreToolUse |
 | Runner | `runner/claude_subprocess.run_claude` prepends `rules.md` as a `<compass-rules>` block | the whole table | every stage prompt: refine, plan, execute, verify, harden, approval |
 
-The pin exists so the rules survive context compaction and sit next to the
-turn being composed. The runner path is a prompt preamble rather than a
+The pin exists so the rules survive context compaction and stay within a
+few turns of the one being composed; every tenth message was chosen on
+2026-09-06 as the starting cadence (every message was the original spec and
+cost about 250 tokens per turn) and may be revisited. The runner path is a
+prompt preamble rather than a
 hook on purpose: a runner worktree carries no `.claude/settings.json`, so no
 hook chain fires there (T-2026-318), and the preamble works everywhere a
 stage runs. All deliveries read the rendered `rules.md`, so a manual override
@@ -168,7 +171,7 @@ issues.
 | Item | Cost |
 |---|---|
 | Startup block | about 1,100 input tokens once per session, cached prefix thereafter |
-| Pin | about 200 input tokens per user message |
+| Pin | about 250 input tokens every tenth user message |
 | Runner preamble | about 1,100 input tokens per stage call (a night with 30 stage calls is roughly 35k tokens) |
 | Classification | one Sonnet call per wrapped-up session, about 3 minutes wall clock, no in-context work |
 | Stop hook | file I/O only |

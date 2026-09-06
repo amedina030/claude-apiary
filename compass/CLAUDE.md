@@ -15,7 +15,7 @@ All state lives under `<state-dir>/compass/` (the per-target dir the registry al
 3. **Build** — `compass/rules.py build --write` counts: seed rows (`compass/seed_rules.json`) + manual rows (`rules_manual.json`) + events -> `rules.md`, with a 60-day half-life, a confidence per row, a flag for specific rows contradicted twice in a row, proposed rows for repeated unattached events, and the heuristics summarised under the Output section (never counted in a row's confidence). Pure function of its inputs; zero events reproduces the seed table; `--check` verifies the file on disk.
 4. **Deliver**
    - **Startup**: `core/hooks/startup_prompt_hook.py` injects the whole `rules.md` on the first message of a session (about 1,100 tokens for the seed table).
-   - **Pin**: `core/hooks/compass_rules.py` injects the principle rows plus the self-check (about 200 tokens) on every later user message, so the rules sit next to the turn Claude is composing and survive context compaction.
+   - **Pin**: `core/hooks/compass_rules.py` injects the principle rows plus the self-check (about 250 tokens) on every tenth user message, so the rules stay within reach of the turn Claude is composing and survive context compaction. The hook counts the messages itself in a flag file under `session-tmp/`; the model is never asked to keep the count.
    - **Hook points** (the minor path): the same module injects J5 before an `Agent`/`Task` spawn (once per session and agent) and O3 before `AskUserQuestion` (every time).
    - **Runner**: `runner/claude_subprocess.run_claude` prepends `rules.md` to every stage prompt as a `<compass-rules>` block, so a worktree stage with no hook chain still sees it. The classifier opts out (`rules=False`).
 

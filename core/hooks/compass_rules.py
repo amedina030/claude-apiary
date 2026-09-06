@@ -7,11 +7,13 @@ The whole ``<state-dir>/compass/rules.md`` goes out once, in the startup block
 (``core/hooks/startup_prompt_hook.py``). This module does the two smaller
 deliveries around it:
 
-* **The pin** (UserPromptSubmit). On every user message after the first,
-  inject the compact form — the principle rows plus the self-check, about 200
-  tokens — so the rules sit next to the turn Claude is composing and survive
-  context compaction. The first message is skipped because the full table is
-  already in that turn.
+* **The pin** (UserPromptSubmit). Every ``PIN_EVERY``-th user message,
+  inject the compact form — the principle rows plus the self-check, about 250
+  tokens — so the rules stay within reach of the turn Claude is composing and
+  survive context compaction. The first message carries the full table in the
+  startup block, so it never pins. The hook counts, not the model: the
+  per-session message count lives in a flag file under ``session-tmp/`` and
+  is incremented here on every call.
 * **Hook-point rules** (PreToolUse, the minor path). Before an ``Agent`` /
   ``Task`` spawn inject J5 (usage cost, once per session and agent); before
   ``AskUserQuestion`` inject O3 (ask in prose, every time — each call is the
@@ -53,7 +55,10 @@ ONCE_PER_SESSION_TOOLS = frozenset({"Agent", "Task"})
 #: The dispatcher matcher for the PreToolUse registration.
 MATCHER = "Agent|Task|AskUserQuestion"
 
-PIN_FLAG = "compass_pin_seen"
+#: Pin on every N-th user message. Ten to start (2026-09-06); may be revisited.
+PIN_EVERY = 10
+#: Flag file holding the session's user-message count (the hook's counter).
+PIN_COUNTER = "compass_pin_count"
 CONTEXT_NAMESPACE = "compass"
 
 
@@ -95,16 +100,34 @@ def _session(payload: dict) -> SessionId | None:
         return None
 
 
+def bump_counter(path: Path) -> int:
+    """Increment the on-disk user-message count and return the new value.
+
+    A missing or unreadable file counts from zero again; a write failure is
+    swallowed (the pin then fires on the next readable count), because a
+    hook must never fail a user message over a scratch file.
+    """
+    try:
+        count = int(path.read_text(encoding="utf-8").strip() or 0)
+    except (OSError, ValueError):
+        count = 0
+    count += 1
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(str(count), encoding="utf-8")
+    except OSError:
+        pass
+    return count
+
+
 def _pin(payload: dict) -> HookResult | None:
     sid = _session(payload)
     if sid is None:
         return None
-    flag = sid.flag_path(PIN_FLAG)
-    if not flag.exists():
-        # First message of the session: the startup block carries the whole
-        # table this turn. Mark it and pin from the second message on.
-        flag.parent.mkdir(parents=True, exist_ok=True)
-        flag.write_text("1", encoding="utf-8")
+    count = bump_counter(sid.flag_path(PIN_COUNTER))
+    if count % PIN_EVERY != 0:
+        # Message 1 carries the whole table in the startup block; the pin
+        # lands on messages 10, 20, 30, ...
         return None
     parsed = _parsed_rules(payload.get("cwd"))
     if parsed is None:

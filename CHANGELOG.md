@@ -5,7 +5,8 @@
 - Compass rule table, step 2 of D-2026-62 (T-2026-320): delivery and
   retirement. The startup hook injects `<state-dir>/compass/rules.md` in
   place of `personality.md`; the new `core/hooks/compass_rules.py` pins the
-  principle rows plus the self-check to every later user message and injects
+  principle rows plus the self-check to every tenth user message (the hook
+  keeps the count in a flag file; every message was the first cut) and injects
   J5 before an `Agent`/`Task` spawn and O3 before `AskUserQuestion`;
   `runner/claude_subprocess.run_claude` prepends the table to every stage
   prompt (`rules=False` for the classifier) so worktree stages without a hook

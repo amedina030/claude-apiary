@@ -88,7 +88,7 @@ First user message
   → UserPromptSubmit: dispatch.py prompt → startup_prompt_hook
       identity, notes summary, learnings index, the CLI index,
       the apiary toolkit rules, the compass rule table
-  → every later user message: compass_rules pins the principle rows
+  → every tenth user message: compass_rules pins the principle rows
   → ... normal work ...
 End of EVERY assistant turn (not session end — Stop fires per response)
   → dispatch.py stop

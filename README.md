@@ -122,7 +122,7 @@ An automated attack-defend loop where Attacker agents find weaknesses (edge case
 
 ### Compass
 
-Keeps one artifact per target, `<state-dir>/compass/rules.md`: a table of rules written in the second person to Claude ("Prefer the thorough option over the quick one", "Lead with the outcome, then one recommendation"), each with a why clause and evidence counts, scored by this user's own corrections and acceptances rather than by a model's inference about them. The whole table is injected at every session start, its principle rows are pinned to every later message, and every runner stage gets it as a prompt preamble — so Claude acts the way this user would want at the moments it cannot ask.
+Keeps one artifact per target, `<state-dir>/compass/rules.md`: a table of rules written in the second person to Claude ("Prefer the thorough option over the quick one", "Lead with the outcome, then one recommendation"), each with a why clause and evidence counts, scored by this user's own corrections and acceptances rather than by a model's inference about them. The whole table is injected at every session start, its principle rows are re-pinned every ten messages, and every runner stage gets it as a prompt preamble — so Claude acts the way this user would want at the moments it cannot ask.
 
 Pipeline: a Stop hook logs `(assistant, user)` turn pairs while the session is alive; `/wrapup` (or the nightly `compass-nightly-classify` cron entry) classifies them into correction / acceptance / anticipation-miss events with one batched Sonnet call; `compass/rules.py build` counts the events (60-day half-life) into the table. Nothing is hand-edited: extra rows go in `rules_manual.json`.
 

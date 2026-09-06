@@ -9,7 +9,7 @@ registered git repo — the compass rule table (``<state-dir>/compass/rules.md``
 D-2026-62). The latter two used to depend on the model invoking
 /apiary-context; injecting them here makes them deterministic. The skill
 remains for on-demand reload (e.g. /clear). ``core/hooks/compass_rules.py``
-pins the table's principle rows to every later user message.
+pins the table's principle rows to every tenth user message.
 
 Runner subprocesses (auto_refine, auto_plan, auto_harden, executor,
 approval) set ``APIARY_RUNNER_SUBPROCESS=1`` to skip injection — they
@@ -246,7 +246,8 @@ def run(payload: dict):
     # here so it is guaranteed loaded rather than relying on the skill's
     # cat-if-exists snippet. The launcher's pre-resolved state dir comes
     # first; find_state_dir is read-only (no auto-registration), so it is
-    # safe to call from a hook.
+    # safe to call from a hook. compass_rules.py re-pins the principle rows
+    # every tenth message.
     if not skip_notes_injection:
         try:
             state_dir = state_dir_from_env() or find_state_dir(session_repo_root)
@@ -261,7 +262,7 @@ def run(payload: dict):
                     parts.append(
                         "--- compass rules for Claude (mined from this user's corrections "
                         "and acceptances; explicit user statements and feedback memory "
-                        "override; pinned to every later message) ---"
+                        "override; the principle rows are re-pinned every ten messages) ---"
                     )
                     parts.append(scrubbed)
         except Exception:
