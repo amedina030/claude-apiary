@@ -35,6 +35,24 @@ NOTES_SCRIPT = SCRIPT_DIR.parent / "scribe" / "notes.py"
 # ``T-`` (todos) — closing handoffs/decisions/contexts would be weird.
 _TODO_ID_RE = re.compile(r"^T-\d{4}-\d+$")
 
+# What the ticket's ``source`` may look like. /runner-prep writes
+# ``scribe-todo:T-2026-NN``, ``runner/ticket.py --note`` writes
+# ``scribe-note:T-2026-NN``, hand-written tickets carry the bare id. Until
+# 2026-09-05 only the bare form matched, so the auto-close never fired for a
+# prepped ticket (every 2026-08-28 backlog ticket).
+_SOURCE_PREFIXES = ("scribe-todo:", "scribe-note:", "todo:", "note:")
+
+
+def todo_id_from_source(source: str) -> str:
+    """The ``T-YYYY-N`` id a source string names, or '' when it names none."""
+    text = (source or "").strip()
+    for prefix in _SOURCE_PREFIXES:
+        if text.lower().startswith(prefix):
+            text = text[len(prefix) :].strip()
+            break
+    return text if _TODO_ID_RE.match(text) else ""
+
+
 _RUNNER_SUBJECT_RE = re.compile(r"^runner/(?P<uuid>[A-Za-z0-9][\w-]*) step \d+:")
 
 
@@ -142,11 +160,11 @@ def main():
     if not uuids:
         return 0
     for uuid in uuids:
-        source = source_for_uuid(uuid)
-        if not source or not _TODO_ID_RE.match(source):
+        todo_id = todo_id_from_source(source_for_uuid(uuid))
+        if not todo_id:
             continue
-        if close_todo(source):
-            print(f"[post-merge] Closed {source} (runner {uuid[:8]} merged).", file=sys.stderr)
+        if close_todo(todo_id):
+            print(f"[post-merge] Closed {todo_id} (runner {uuid[:8]} merged).", file=sys.stderr)
     return 0
 
 

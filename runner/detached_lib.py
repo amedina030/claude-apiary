@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
+
+from core.utils.longpath import rmtree_long
 
 from .target_repo import (
     backlog_dir,
@@ -220,11 +221,28 @@ def git_commit_all_in(cwd: Path, message: str) -> tuple:
 
 
 def git_worktree_remove(path: Path, *, target_repo: Path) -> tuple:
-    """git worktree remove --force <path>. Idempotent — returns ok if path is gone."""
+    """git worktree remove --force <path>, with a long-path fallback (T-2026-303).
+
+    On Windows a worktree carrying a venv holds paths past MAX_PATH; git then
+    fails with 'Filename too long' AFTER dropping its own bookkeeping, so the
+    directory is orphaned and the run exits worktree_remove_failed on an
+    otherwise clean night. The fallback deletes the tree through the
+    extended-length prefix and prunes. Idempotent: returns ok if path is gone.
+    """
     if not path.exists():
         return True, ""
-    r = _git(["worktree", "remove", "--force", str(path)], cwd=Path(target_repo))
-    return (r.returncode == 0, r.stderr)
+    repo = Path(target_repo)
+    r = _git(["worktree", "remove", "--force", str(path)], cwd=repo)
+    if r.returncode == 0 or not path.exists():
+        return True, ""
+    try:
+        rmtree_long(path)
+    except OSError as exc:
+        return False, f"{r.stderr.strip()}\nrmtree fallback failed: {exc}"
+    _git(["worktree", "prune"], cwd=repo)
+    if path.exists():
+        return False, f"{r.stderr.strip()}\nrmtree fallback left the directory in place"
+    return True, ""
 
 
 def _list_detached_worktrees(repo: Path) -> list:
@@ -292,8 +310,8 @@ def prune_stale_worktrees(target_repo: Path) -> list:
         if _branch_has_commits_beyond(branch, repo):
             results.append((wt, "preserved"))
             continue
-        r = _git(["worktree", "remove", "--force", str(wt)], cwd=repo)
-        if r.returncode == 0:
+        ok, _err = git_worktree_remove(Path(wt), target_repo=repo)
+        if ok:
             if branch:
                 _git(["branch", "-D", branch], cwd=repo)
             results.append((wt, "removed"))
@@ -309,7 +327,7 @@ def prune_stale_worktrees(target_repo: Path) -> list:
             except OSError:
                 continue
             if entry.is_dir() and resolved not in known:
-                shutil.rmtree(entry, ignore_errors=True)
+                rmtree_long(entry, ignore_errors=True)
                 results.append((resolved, "rmtree"))
     _git(["worktree", "prune"], cwd=repo)
     return results

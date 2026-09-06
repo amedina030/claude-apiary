@@ -284,3 +284,64 @@ class TestGitWorktreeCreateTargetRepo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGitWorktreeRemoveFallback(unittest.TestCase):
+    """T-2026-303: git's 'Filename too long' on a venv-bearing worktree no
+    longer ends the night as worktree_remove_failed; the tree is deleted
+    through the long-path helper and the registration pruned."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = Path(self._tmp.name) / "repo"
+        self.repo.mkdir()
+        self.wt = Path(self._tmp.name) / "wt"
+        (self.wt / "deep" / "dir").mkdir(parents=True)
+        (self.wt / "deep" / "dir" / "f.txt").write_text("x", encoding="utf-8")
+
+    @staticmethod
+    def _proc(rc, stderr=""):
+        import subprocess
+
+        return subprocess.CompletedProcess(["git"], rc, stdout="", stderr=stderr)
+
+    def test_missing_path_is_ok_without_calling_git(self):
+        with mock.patch.object(detached_lib, "_git") as git:
+            ok, err = detached_lib.git_worktree_remove(self.wt / "absent", target_repo=self.repo)
+        self.assertEqual((ok, err), (True, ""))
+        git.assert_not_called()
+
+    def test_git_success_is_ok(self):
+        with mock.patch.object(detached_lib, "_git", return_value=self._proc(0)) as git:
+            ok, err = detached_lib.git_worktree_remove(self.wt, target_repo=self.repo)
+        self.assertEqual((ok, err), (True, ""))
+        self.assertEqual(git.call_count, 1)
+
+    def test_git_failure_falls_back_to_long_path_rmtree_and_prunes(self):
+        calls = []
+
+        def fake_git(args, cwd=None):
+            calls.append(list(args))
+            if args[:2] == ["worktree", "remove"]:
+                return self._proc(1, "error: failed to delete: Filename too long")
+            return self._proc(0)
+
+        with mock.patch.object(detached_lib, "_git", side_effect=fake_git):
+            ok, err = detached_lib.git_worktree_remove(self.wt, target_repo=self.repo)
+        self.assertEqual((ok, err), (True, ""))
+        self.assertFalse(self.wt.exists())
+        self.assertEqual(calls[-1], ["worktree", "prune"])
+
+    def test_reports_both_errors_when_the_fallback_fails_too(self):
+        with (
+            mock.patch.object(
+                detached_lib, "_git", return_value=self._proc(1, "Filename too long")
+            ),
+            mock.patch.object(detached_lib, "rmtree_long", side_effect=OSError("locked")),
+        ):
+            ok, err = detached_lib.git_worktree_remove(self.wt, target_repo=self.repo)
+        self.assertFalse(ok)
+        self.assertIn("Filename too long", err)
+        self.assertIn("rmtree fallback failed: locked", err)
+        self.assertTrue(self.wt.exists())
