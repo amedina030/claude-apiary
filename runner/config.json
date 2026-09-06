@@ -32,21 +32,31 @@
   "detached": {
     "token_cap": 10000000,
     "max_unreviewed": 5,
-    "max_restarts": 3
+    "max_restarts": 3,
+    "resume_failed": true
   },
   "runner": {
     "target_repo": null,
     "banned_tokens": {
-      "pytest": "use unittest (stdlib) — see docs/standards/code-style.md",
-      "shell=true": "shell=True is banned — use list-form subprocess args",
-      "import requests": "external dependencies are banned — stdlib only",
-      "from requests": "external dependencies are banned — stdlib only"
+      "pytest": "use unittest (stdlib) \u2014 see docs/standards/code-style.md",
+      "shell=true": "shell=True is banned \u2014 use list-form subprocess args",
+      "import requests": "external dependencies are banned \u2014 stdlib only",
+      "from requests": "external dependencies are banned \u2014 stdlib only"
     },
     "target_overrides": {}
   },
   "usher": {
-    "max_files": {"pass": 5, "warn": 8},
-    "max_subsystems": {"pass": 2, "warn": 3},
-    "max_description_chars": {"pass": 2000, "warn": 4000}
+    "max_files": {
+      "pass": 5,
+      "warn": 8
+    },
+    "max_subsystems": {
+      "pass": 2,
+      "warn": 3
+    },
+    "max_description_chars": {
+      "pass": 2000,
+      "warn": 4000
+    }
   }
 }

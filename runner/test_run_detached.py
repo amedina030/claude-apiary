@@ -917,6 +917,157 @@ class TestDetachedRun(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("unknown", buf.getvalue())
 
+    # -- T-2026-302: resume a failed ticket on the next detached night -------------
+
+    def _seed_resumable_intake(
+        self, uid="resume-uuid-0001", parked=False, attempts=1, last="stage_failed:executor"
+    ):
+        """An intake ticket a previous night left with a tracker and a valid plan."""
+        from runner import target_repo as target_repo_module
+
+        intake_dir_path = target_repo_module.intake_dir()
+        intake_dir_path.mkdir(parents=True, exist_ok=True)
+        ticket = {"id": uid, "title": "Resume me"}
+        if parked:
+            ticket["parked"] = True
+        intake_file = intake_dir_path / f"{uid}.json"
+        intake_file.write_text(json.dumps(ticket), encoding="utf-8")
+        for _ in range(attempts):
+            run_tracker_module.record_attempt(uid, 100, 2, last, last_stage_completed="auto_plan")
+        plans = target_repo_module.plans_dir()
+        plans.mkdir(parents=True, exist_ok=True)
+        (plans / f"{uid}.json").write_text(
+            json.dumps({"uuid": uid, "valid": True, "steps": []}), encoding="utf-8"
+        )
+        return intake_file
+
+    def _run_with_empty_backlog(self, wt_path, **create_kwargs):
+        with (
+            mock.patch("runner.run.hygiene_precheck", return_value=None),
+            mock.patch("runner.run.pick_backlog_item", return_value=None),
+            mock.patch("runner.run.all_backlog_items_claimed", return_value=False),
+            mock.patch("runner.run.git_worktree_create", return_value=(True, wt_path, "")),
+            mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+            mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+            mock.patch("runner.run.run_stage", return_value=(True, _make_fake_usage(100), "", 0.1)),
+        ):
+            return run.run_detached(_make_cli_args())
+
+    def test_resumable_intake_is_picked_when_backlog_is_empty(self):
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            intake_file = self._seed_resumable_intake()
+            wt_path = self._make_fake_worktree(td, intake_file)
+            rc = self._run_with_empty_backlog(wt_path)
+        self.assertEqual(rc, 0)
+        entries = self._read_log(self._history_path)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["exit_status"], "ok")
+        self.assertEqual(entries[0]["uuid"], "resume-uuid-0001")
+        self.assertEqual(entries[0]["resumed_from"], "executor")
+        # validate_intake, auto_refine, auto_plan skipped; executor, harden, approval ran.
+        self.assertEqual(entries[0]["stages_completed"], 3)
+
+    def test_parked_and_fresh_intake_tickets_are_not_retried(self):
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            parked = self._seed_resumable_intake(uid="parked-uuid-0001", parked=True)
+            self._seed_resumable_intake(uid="fresh-uuid-0001", attempts=0)
+            self._seed_resumable_intake(uid="spent-uuid-0001", attempts=3)
+            self._seed_resumable_intake(uid="done-uuid-0001", last="ok")
+            wt_path = self._make_fake_worktree(td, parked)
+            rc = self._run_with_empty_backlog(wt_path)
+        self.assertEqual(rc, 0)
+        entries = self._read_log(self._history_path)
+        self.assertEqual(entries[0]["exit_status"], "skipped: backlog empty")
+
+    def test_resume_failed_switch_turns_the_path_off(self):
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            intake_file = self._seed_resumable_intake()
+            wt_path = self._make_fake_worktree(td, intake_file)
+            with mock.patch(
+                "runner.run.cfg",
+                side_effect=lambda s, k, d=None: False if k == "resume_failed" else d,
+            ):
+                rc = self._run_with_empty_backlog(wt_path)
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            self._read_log(self._history_path)[0]["exit_status"], "skipped: backlog empty"
+        )
+
+    def test_backlog_beats_resumable_intake(self):
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            backlog = td / "backlog"
+            backlog.mkdir()
+            new_item = self._make_intake_file(backlog, uid="new-uuid-0001")
+            self._seed_resumable_intake()
+            wt_path = self._make_fake_worktree(td, new_item)
+            with (
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=new_item),
+                mock.patch("runner.run.git_worktree_create", return_value=(True, wt_path, "")),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+                mock.patch(
+                    "runner.run.run_stage", return_value=(True, _make_fake_usage(100), "", 0.1)
+                ),
+            ):
+                rc = run.run_detached(_make_cli_args())
+        self.assertEqual(rc, 0)
+        entry = self._read_log(self._history_path)[0]
+        self.assertEqual(entry["uuid"], "new-uuid-0001")
+        self.assertIsNone(entry["resumed_from"])
+
+    def test_preserved_worktree_is_reused_without_create(self):
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            backlog = td / "backlog"
+            backlog.mkdir()
+            intake_file = self._make_intake_file(backlog)
+            wt_path = self._make_fake_worktree(td, intake_file)
+            with (
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch("runner.run.git_worktree_reuse", return_value=(True, wt_path, "")),
+                mock.patch(
+                    "runner.run.git_worktree_create", side_effect=AssertionError("must not create")
+                ),
+                mock.patch("runner.run.git_commit_all_in", return_value=(True, "")),
+                mock.patch("runner.run.git_worktree_remove", return_value=(True, "")),
+                mock.patch(
+                    "runner.run.run_stage", return_value=(True, _make_fake_usage(100), "", 0.1)
+                ),
+            ):
+                rc = run.run_detached(_make_cli_args())
+        self.assertEqual(rc, 0)
+        self.assertEqual(self._read_log(self._history_path)[0]["exit_status"], "ok")
+
+    def test_unusable_preserved_worktree_is_git_setup_failed(self):
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            backlog = td / "backlog"
+            backlog.mkdir()
+            intake_file = self._make_intake_file(backlog)
+            with (
+                mock.patch("runner.run.hygiene_precheck", return_value=None),
+                mock.patch("runner.run.pick_backlog_item", return_value=intake_file),
+                mock.patch(
+                    "runner.run.git_worktree_reuse",
+                    return_value=(False, None, "worktree path is checked out on another branch: x"),
+                ),
+                mock.patch(
+                    "runner.run.git_worktree_create", side_effect=AssertionError("must not create")
+                ),
+            ):
+                rc = run.run_detached(_make_cli_args())
+        self.assertEqual(rc, 1)
+        entry = self._read_log(self._history_path)[0]
+        self.assertEqual(entry["exit_status"], "git_setup_failed")
+        self.assertIn("another branch", entry["stderr"])
+        self.assertEqual(run_tracker_module.load("test-uuid-1234")["attempt_count"], 1)
+
 
 class TestIsolationGuards(unittest.TestCase):
     """T-2026-123: self-tests for the APIARY_RUNNER_TEST_ISOLATION guard.

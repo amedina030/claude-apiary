@@ -2,6 +2,7 @@
 """Unit tests for runner/detached_lib.py."""
 
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -345,3 +346,92 @@ class TestGitWorktreeRemoveFallback(unittest.TestCase):
         self.assertIn("Filename too long", err)
         self.assertIn("rmtree fallback failed: locked", err)
         self.assertTrue(self.wt.exists())
+
+
+class TestGitWorktreeReuse(unittest.TestCase):
+    """T-2026-302: a preserved worktree/branch is reused on the next attempt
+    instead of failing `git worktree add -b` with 'branch already exists'."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = Path(self._tmp.name).resolve() / "repo"
+        self.repo.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "master"], cwd=str(self.repo), check=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(self.repo), check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=str(self.repo), check=True)
+        (self.repo / "README").write_text("x\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(self.repo), check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(self.repo), check=True)
+        self.branch = "runner/slug-abcd1234"
+
+    def _git(self, *args, cwd=None):
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd or self.repo),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+    def _create(self):
+        ok, wt, err = detached_lib.git_worktree_create(self.branch, target_repo=self.repo)
+        self.assertTrue(ok, err)
+        return wt
+
+    def test_nothing_preserved_means_fresh_create(self):
+        found, wt, err = detached_lib.git_worktree_reuse(self.branch, target_repo=self.repo)
+        self.assertEqual((found, wt, err), (False, None, ""))
+
+    def test_registered_worktree_is_reset_and_reused(self):
+        wt = self._create()
+        (wt / "README").write_text("dirty\n", encoding="utf-8")  # the failed step's edit
+        (wt / "stray.txt").write_text("x", encoding="utf-8")  # untracked leftover
+        (wt / ".venv").mkdir()  # what an agent leaves behind; ignored or not, it goes
+        found, path, err = detached_lib.git_worktree_reuse(self.branch, target_repo=self.repo)
+        self.assertEqual((found, err), (True, ""))
+        self.assertEqual(path.resolve(), wt.resolve())
+        self.assertEqual((wt / "README").read_text(encoding="utf-8"), "x\n")
+        self.assertFalse((wt / "stray.txt").exists())
+        self.assertFalse((wt / ".venv").exists())
+        head = self._git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt).stdout.strip()
+        self.assertEqual(head, self.branch)
+
+    def test_branch_without_directory_gets_a_worktree_on_that_branch(self):
+        wt = self._create()
+        (wt / "step.txt").write_text("committed work\n", encoding="utf-8")
+        self._git("add", "-A", cwd=wt)
+        self._git("commit", "-q", "-m", "runner/abcd1234 step 1: work", cwd=wt)
+        self.assertEqual(self._git("worktree", "remove", "--force", str(wt)).returncode, 0)
+        self.assertFalse(wt.exists())
+        found, path, err = detached_lib.git_worktree_reuse(self.branch, target_repo=self.repo)
+        self.assertEqual((found, err), (True, ""))
+        self.assertTrue((path / "step.txt").exists(), "the committed step must be back")
+        head = self._git("rev-parse", "--abbrev-ref", "HEAD", cwd=path).stdout.strip()
+        self.assertEqual(head, self.branch)
+
+    def test_orphaned_directory_is_replaced(self):
+        wt = self._create()
+        self._git("worktree", "remove", "--force", str(wt))
+        wt.mkdir(parents=True)  # orphan: on disk, not registered
+        (wt / "junk").write_text("x", encoding="utf-8")
+        found, path, err = detached_lib.git_worktree_reuse(self.branch, target_repo=self.repo)
+        self.assertEqual((found, err), (True, ""))
+        self.assertFalse((path / "junk").exists())
+        self.assertTrue((path / "README").exists())
+
+    def test_orphaned_directory_without_branch_is_removed_then_fresh(self):
+        wt_dir = detached_lib.worktrees_dir_for(self.repo) / self.branch.replace("/", "_")
+        wt_dir.mkdir(parents=True)
+        found, path, err = detached_lib.git_worktree_reuse(self.branch, target_repo=self.repo)
+        self.assertEqual((found, path, err), (False, None, ""))
+        self.assertFalse(wt_dir.exists())
+
+    def test_path_on_another_branch_is_an_error(self):
+        wt = self._create()
+        # Move the worktree onto a different branch: reuse must refuse.
+        self._git("checkout", "-q", "-b", "somebody/else", cwd=wt)
+        found, path, err = detached_lib.git_worktree_reuse(self.branch, target_repo=self.repo)
+        self.assertFalse(found)
+        self.assertIn("another branch", err)
+        self.assertTrue(wt.exists())
