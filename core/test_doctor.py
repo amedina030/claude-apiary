@@ -649,9 +649,7 @@ class CheckCompassTests(unittest.TestCase):
         )
         state_dir = state.repos_dir(self.apiary) / "apiary-1"
         (state_dir / "compass" / "turns").mkdir(parents=True)
-        (state_dir / "compass" / "turns" / "aaaa0001.jsonl").write_text(
-            "{}", encoding="utf-8"
-        )
+        (state_dir / "compass" / "turns" / "aaaa0001.jsonl").write_text("{}", encoding="utf-8")
         notes, issues = doctor.check_compass(self.apiary)
         self.assertEqual(issues, [])
         joined = " ".join(notes)
