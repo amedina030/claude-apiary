@@ -2,10 +2,11 @@
   "entries": [
     {
       "id": "overnight-runner",
-      "description": "Nightly detached runner pass",
+      "description": "Nightly detached runner pass (disabled 2026-09-10 pending a runner revisit; see T-2026-326 and T-2026-329)",
       "schedule": {"type": "daily", "time": "01:00"},
       "command": ["<python>", "-m", "runner.run", "--detached"],
-      "cwd": "<apiary_repo>"
+      "cwd": "<apiary_repo>",
+      "disabled": true
     },
     {
       "id": "compass-nightly-classify",
