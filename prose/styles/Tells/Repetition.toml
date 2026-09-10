@@ -1,0 +1,11 @@
+extends = "repetition"
+message = "Repeated word '%s'."
+summary = "No doubled words ('the the')."
+level = "warning"
+scope = ["paragraph", "list", "heading", "blockquote"]
+exceptions = ["that", "had", "very", "no", "so", "bye"]
+why = """A word typed twice in a row survives rereading because the eye slides over
+it. The exceptions are the doublings English allows ("that that", "had had").
+Tables are out of scope: adjacent cells ("archive | Archive notes") read as a
+doubled word once the pipes are stripped, and the corpus calibration showed
+every table hit was that."""

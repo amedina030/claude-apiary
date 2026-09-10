@@ -1,0 +1,18 @@
+extends = "existence"
+message = "Announced candour '%s': the sentence performs honesty instead of being honest. Delete the announcement and keep the claim."
+summary = "No 'I want to be clear/honest/exact' or 'to be honest,' openers."
+level = "error"
+scope = ["sentence"]
+ignorecase = true
+raw = [
+  '\b(?:I (?:want|need|ought|have|should) to be|let me be|I(?:\x27m| am) going to be|I(?:\x27ll| will) be)\s+(?:exact|precise|clear|honest|blunt|frank|candid|direct|upfront|transparent|specific|accurate|straight)\b',
+  '\bI want to (?:describe|say|state|put|flag)\b[^.]{0,40}\b(?:accurately|precisely|exactly|plainly|honestly|straight)\b',
+  '\b(?:to be|being)\s+(?:exact|precise|clear|honest|blunt|frank|candid|direct|upfront|transparent|specific|accurate|straight)\b(?=\s*[,.:;]|\s+(?:about|with|here))',
+]
+why = """A literal phrase list misses the productive form: "I want to state the
+trade-off accurately, because..." is the same construction as "I want to be
+exact, because...". The discriminator is the adjective. Allowing any word after
+"to be" flagged "I want to be on the rota next week", which is ordinary writing,
+so the adjective class is closed. The third pattern's lookahead is what keeps
+"to be honest," (a tell) apart from "to be honest work" (not one). Sentence
+scope so the bounded gap in the second pattern cannot cross a full stop."""

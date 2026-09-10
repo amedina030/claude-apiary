@@ -1,0 +1,26 @@
+extends = "existence"
+message = "Negation-correction '%s': stating what it is not to set up what it is. Keep the positive half."
+summary = "No staged reversals: 'not X, it is Y', 'not just X but Y', 'X rather than being Y'. State the positive half."
+level = "warning"
+scope = ["text"]
+ignorecase = true
+raw = [
+  '\bnot\b[^.!?;,—]{0,60}[;,—]\s*(?:it|I|that|this|they|we)\s+(?:is|was|are|were|have|has|had|do|does|did|will|would|can|could|should)\b',
+  '\bis not\b[^.!?]{0,30},\s*(?:it|that|this)\s+is\b',
+  '\brather than\s+(?:being|having|arriving|getting|becoming|an?\s|the\s)',
+  '\bnot\s+(?:just|only|merely|simply)\b[^.!?]{0,80}\b(?:but(?:\s+also)?|it(?:\x27s| is))\b',
+  '\b(?:isn\x27t|wasn\x27t|aren\x27t|weren\x27t|doesn\x27t|don\x27t|didn\x27t|can\x27t|couldn\x27t|wouldn\x27t)\b[^.!?]{0,80}[.!?]\s+(?:It|That|This|They|We)(?:\x27s|\x27re| is| was| are| were)\b',
+]
+why = """Stating what a thing is not, then correcting to what it is, stages a small
+reversal the reader never asked for. Surface forms: "not X; Y", "not X, but Y",
+"X rather than Y", "it is not A, it is B", "not just X, but Y", and the
+sentence-break form "It wasn't X. It was Y."
+
+The first pattern requires a pronoun plus a verb after the pause: that is what
+separates the rhetorical reversal from an ordinary contrast, and dropping it
+fires on every sentence containing a comma and the word "not". "Rather than"
+only counts when followed by a participle or an article, because "TOML rather
+than YAML" is a factual contrast that belongs in the draft. Warning, not
+error: the corpus measurement showed the shape appears in honest contrasts often
+enough that a reader has to decide."""
+credit = "not-just-but shape adapted from vale-ai-tells NegParallel, sentence-break shape from slopster AISlop (both MIT)"

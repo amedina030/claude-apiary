@@ -120,6 +120,10 @@ A section counts as present when it appears as a Markdown heading (`### What was
 
 To change the shape for this repo, edit `<state-dir>/scribe/templates/<type>.md` — bootstrap never overwrites an existing template.
 
+### The prose gate
+
+After the template gate, `add` and `learn` run the body through the prose linter (`prose/gate.py`, rules in `docs/standards/prose-style.md`): announced candour, negation-correction, any em-dash or semicolon outside code, summary closers, process openers, machine vocabulary. Findings print to stderr with the line, the span and the fix. The gate is advisory until the per-repo flag is on (`core/flags.py enable prose-gate`). With the flag on, an error-level finding exits 1 and the note is not written. `--force` writes anyway and tags the note `prose-forced`, so `notes.py list --search prose-forced` lists every bypass. Warnings and suggestions never block. Quote a tell in backticks when a note has to mention one.
+
 ---
 
 ## When to write a learning

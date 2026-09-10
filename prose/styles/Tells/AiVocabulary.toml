@@ -1,0 +1,37 @@
+extends = "existence"
+message = "Machine vocabulary '%s': use the plain word, or cut the sentence if it only decorates."
+summary = "No machine vocabulary (delve, tapestry, testament to, pivotal, seamless, meticulous, holistic, deep dive, game-changer, it's important to note)."
+level = "warning"
+scope = ["text"]
+ignorecase = true
+tokens = [
+  "delve", "delves", "delving",
+  "tapestry",
+  "testament to",
+  "pivotal",
+  "seamless", "seamlessly",
+  "meticulous", "meticulously",
+  "intricate", "intricacies",
+  "foster", "fosters", "fostering",
+  "vibrant",
+  "boasts",
+  "garner",
+  "deep dive",
+  "holistic",
+  "game-changer", "game changer",
+  "paradigm shift",
+  "a myriad of",
+  "plethora",
+  "ever-evolving",
+  "in the realm of",
+  "navigate the complexities",
+  "in today's fast-paced",
+  "it's important to note",
+  "it is important to note",
+]
+why = """Words whose frequency jumped in machine-generated text and that a person
+writing a technical note rarely reaches for. The list is restricted to the
+unambiguous ones: "robust", "landscape", "leverage" and "key" have honest uses
+in engineering prose and are left out (leverage lives in JargonSwaps as a
+suggestion). Literal tokens, so a reader can add a word the day they notice it."""
+credit = "word list drawn from the public Wikipedia page 'Signs of AI writing' (WikiProject AI Cleanup)"

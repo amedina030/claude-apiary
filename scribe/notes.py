@@ -46,6 +46,34 @@ from scribe.templates import (
     template_path,
 )
 
+PROSE_FORCED_TAG = "prose-forced"  # mirrors prose.gate.FORCED_TAG without importing it at load
+
+
+def _prose_gate(content: str, *, force: bool) -> bool:
+    """Run the prose gate on a note or learning body (``prose/gate.py``).
+
+    Prints the gate's message to stderr, exits 1 when the gate is fatal (the
+    per-repo ``prose-gate`` flag is on, an error-level tell was found and
+    ``--force`` was not given), and returns True when ``--force`` waved an
+    error through so the caller can tag the note. A checkout without the
+    ``prose`` package, or a gate that raises, degrades to "no opinion": a
+    prose check must never lose a note.
+    """
+    try:
+        from prose import gate as prose_gate
+
+        message, fatal = prose_gate.gate(content, force=force, label="content")
+    except SystemExit:
+        raise
+    except Exception:  # noqa: BLE001 — see docstring
+        return False
+    if message:
+        print(message, file=sys.stderr)
+    if fatal:
+        sys.exit(1)
+    return prose_gate.forced(message)
+
+
 MAX_CONTENT_LENGTH = 100_000  # bytes; prevents runaway JSONL file growth
 MAX_SUMMARY_LENGTH = 300  # chars; keeps index.jsonl lines small and startup injection cheap
 MAX_LAST = 10_000  # upper bound for --last to prevent misleading output
@@ -176,9 +204,15 @@ def cmd_add(args):
     if fatal:
         sys.exit(1)
 
+    # Prose gate: advisory until the per-repo `prose-gate` flag is on, then an
+    # error-level tell stops the add unless --force, which tags the note.
+    prose_forced = _prose_gate(content, force=getattr(args, "force", False))
+
     # --unique-tag skips the add (exit 0) when an active note already carries
     # the tag; otherwise the tag is added to this note (spec §5.14).
     tags = tag_list(args)
+    if prose_forced and PROSE_FORCED_TAG not in tags:
+        tags.append(PROSE_FORCED_TAG)
     unique_tag = (getattr(args, "unique_tag", "") or "").strip()
     if unique_tag:
         existing = store.find_active_with_tag(unique_tag)
@@ -467,6 +501,9 @@ def cmd_learn(args):
     tags = tag_list(args)
     areas = [a for a in (getattr(args, "area", None) or []) if a]
     tags, areas = infer.resolve(args, content, store, tags, areas)
+
+    if _prose_gate(content, force=getattr(args, "force", False)) and PROSE_FORCED_TAG not in tags:
+        tags.append(PROSE_FORCED_TAG)
 
     if not tags and not areas:
         print(

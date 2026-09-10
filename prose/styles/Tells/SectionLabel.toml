@@ -1,0 +1,14 @@
+extends = "existence"
+message = "Section-label sentence '%s': a fragment announcing what the next sentences cover. Delete it; the reader finds out by reading them."
+summary = "No section-label fragments ('On the schema question.'). Start with the content."
+level = "warning"
+scope = ["text"]
+raw = [
+  '(?:\A|(?<=[.!?]\s))(?:On|As for|Regarding|A note on|A word on|About)\s+[a-z][^.!?\n]{0,44}\.(?=\s+[A-Z])',
+]
+why = """A short sentence that announces what the next few sentences will cover. Three
+parts do the work: anchoring to the start of the block or a preceding full stop
+keeps it from firing mid-sentence, the 44-character cap keeps it to fragments
+(a real sentence starting with "On" runs longer), and the trailing lookahead for
+a capital confirms another sentence follows, which is what makes the fragment a
+label. Case-sensitive on purpose: the opener is capitalised and the topic is not."""

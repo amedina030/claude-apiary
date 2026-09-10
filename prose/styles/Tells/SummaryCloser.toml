@@ -1,0 +1,13 @@
+extends = "existence"
+message = "Summary closer '%s': a sentence restating the paragraph above it. Delete it, or make it say something new."
+summary = "No 'In summary' / 'In conclusion' / 'Overall,' closers. End on the last fact."
+level = "warning"
+scope = ["text"]
+ignorecase = true
+raw = [
+  '(?:\A|(?<=[.!?]\s))(?:In summary|In conclusion|To summarize|To summarise|To sum up|All in all|Ultimately,|Overall,)',
+]
+why = """A closing sentence that summarises what the reader just read. In a working
+document the last fact is the ending. Anchored to a sentence start so
+"overall latency" and "the summary line" are untouched."""
+credit = "pattern from the public Wikipedia page 'Signs of AI writing'"

@@ -176,6 +176,12 @@ Inside a bootstrapped repo:
 /budgeter session-warn   # nudge to wrap up once the context gets long
 ```
 
+```bash
+# Turn the prose gate from advisory into blocking: an error-level tell then
+# stops a scribe add/learn or a markdown write until it is fixed or --force'd.
+python .claude/apiary/launch.py core/flags.py enable prose-gate
+```
+
 Toggles persist per-repo at `<repo>/.claude/apiary/flags/<flag-name>-enabled`.
 
 ---

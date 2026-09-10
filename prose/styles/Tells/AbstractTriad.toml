@@ -1,0 +1,14 @@
+extends = "existence"
+message = "Abstract-noun triad '%s': three abstractions arriving by reflex. Name one concrete thing."
+summary = "No reflexive triads of abstract nouns ('trust, rigor, and clarity')."
+level = "suggestion"
+scope = ["text"]
+ignorecase = true
+raw = [
+  '\b(?:[a-z-]+(?:ity|ness|tion|sion|ance|ence|ism|ship|ility)|trust|rigor|rigour|clarity|calm|craft|care|focus|discipline|taste|speed|scale|intent|judgment|judgement|courage|candor|candour|warmth|depth|proof),\s+(?:[a-z-]+(?:ity|ness|tion|sion|ance|ence|ism|ship|ility)|trust|rigor|rigour|clarity|calm|craft|care|focus|discipline|taste|speed|scale|intent|judgment|judgement|courage|candor|candour|warmth|depth|proof),?\s+and\s+(?:[a-z-]+(?:ity|ness|tion|sion|ance|ence|ism|ship|ility)|trust|rigor|rigour|clarity|calm|craft|care|focus|discipline|taste|speed|scale|intent|judgment|judgement|courage|candor|candour|warmth|depth|proof)\b',
+]
+why = """The rule of three in its most mechanical form: three abstract nouns joined by
+commas and "and", where one would carry the meaning. This is the only part of
+the rule of three with a countable shape; a triad of clauses needs a reader.
+Suggestion level, because sometimes there are exactly three things."""
+credit = "adapted from vale-ai-tells AbstractTriad (MIT)"

@@ -122,8 +122,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_add.add_argument(
         "--force",
         action="store_true",
-        help="Bypass the template gate's required-section check "
-        "(logs a line to stderr naming what was missing).",
+        help="Bypass the template gate's required-section check and the prose "
+        "gate's error-level findings (each logs a line to stderr; a prose bypass "
+        "tags the note prose-forced).",
     )
 
     p_template = sub.add_parser(
@@ -211,6 +212,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_learn.add_argument("--tags", default="", help="Comma-separated tag list.")
     p_learn.add_argument(
         "--area", action="append", default=[], help="Area glob pattern (repeatable)."
+    )
+    p_learn.add_argument(
+        "--force",
+        action="store_true",
+        help="Bypass the prose gate's error-level findings (logs a line to stderr and "
+        "tags the learning prose-forced).",
     )
     p_learn.add_argument(
         "--supersedes", default="", help="ID of a prior learning this one replaces (e.g. L-2026-5)."

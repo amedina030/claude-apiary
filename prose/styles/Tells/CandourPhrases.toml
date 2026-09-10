@@ -1,0 +1,30 @@
+extends = "existence"
+message = "Announced candour '%s': cut the announcement and state the thing."
+summary = "No announcing candour (worth noting, to be fair, full disclosure, in all honesty). Say the thing."
+level = "error"
+scope = ["text"]
+ignorecase = true
+tokens = [
+  "worth noting",
+  "worth mentioning",
+  "worth saying",
+  "say so plainly",
+  "will not pretend",
+  "not going to pretend",
+  "won't pretend",
+  "in all honesty",
+  "honestly speaking",
+  "frankly speaking",
+  "to be fair",
+  "full disclosure",
+  "truth be told",
+  "the honest answer",
+  "the honest truth",
+  "candidly",
+]
+why = """Saying that you are about to be honest is weaker than being honest, and it
+draws attention to the performance. These are the fixed idioms; the productive
+shape ("I want to be exact, because...") is CandourShape. Kept as a literal list
+rather than a regex so a new one can be added the moment a reader catches it.
+Error level: the corpus measurement found no legitimate use in technical notes."""
+credit = "list extended with phrases from vale-ai-tells VirtueHonest (MIT)"

@@ -1,0 +1,17 @@
+extends = "occurrence"
+message = "%s semicolon(s) in one paragraph or bullet (none allowed outside code). Split the sentence, or split the bullet."
+summary = "No semicolons outside code, in paragraphs or bullets. Split the sentence or the bullet."
+level = "error"
+scope = ["paragraph", "list", "blockquote", "heading"]
+token = ";"
+max = 0
+why = """A semicolon joining two clauses for effect rather than because they are
+coordinate. The second clause is usually the correction (see NegationCorrection).
+
+Shipped 2026-09-10 at warning level and paragraph scope, because the corpus
+measurement found nearly every semicolon inside a bullet ("T-1 done; T-2
+filed"). Promoted to error and extended to bullets the same day by decision:
+that corpus was itself mostly machine-written, so hits there are the habit the
+rule exists to break, not accepted human prose. The user's rule is that a
+semicolon outside code is a tell, full stop. Tables stay out of scope, since a
+cell is the one place a terse "a; b" list has no room to become two sentences."""

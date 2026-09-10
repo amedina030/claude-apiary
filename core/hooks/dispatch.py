@@ -131,6 +131,7 @@ def _registry() -> dict[str, tuple[Hook, ...]]:
             Hook("pre_push_secret_scan", "core.hooks.pre_push_secret_scan", "Bash"),
             Hook("budgeter_pre", "budgeter.hooks.pre_tool_use", budgeter),
             Hook("remind_standards", "docs/hooks/remind_standards.py", "Write|Edit"),
+            Hook("prose_check", "prose.hooks.pre_tool_use", "Write|Edit|Bash"),
             # duplicate-helper hook goes here — §5a-C(2). Before Write/Edit,
             # if the content defines a function whose name already exists
             # elsewhere in the repo, inject "X already exists at path:line —

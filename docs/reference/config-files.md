@@ -4,7 +4,7 @@ title: Config Files
 scope: project
 description: Every config file, with the key tables generated from the shipped JSON
 framework_version: "1.0"
-last_verified: "2026-09-06"
+last_verified: "2026-09-10"
 ---
 
 # Config Files
@@ -160,6 +160,33 @@ deliberately **absent from the shipped file** — their defaults live in
 ## .claude/budgeter.json (per-project)
 
 Optional per-project budgeter override. Hand-authored — the global install flow that created it was retired in the per-repo migration. Same schema as `budgeter/config.json`. `logger.load_config` reads whichever single file applies — there is no merge with `budgeter/config.json`, so a per-project file must restate every key it wants. Its presence also redirects the log and baseline paths into `<project>/.claude/`.
+
+## prose/config.json
+
+Prose linter defaults. Read by `prose/engine.py`'s `load_config`, which
+shallow-merges `<repo>/.claude/prose.json` on top when that file exists (a
+list in the override replaces the list below it, so a repo can narrow the
+checked paths or disable rules without inheriting).
+
+The Field / Type / Default columns below are **generated from the shipped
+`prose/config.json`** by `docs/generate_reference.py`. Only the Description
+column is hand-written.
+
+<!-- generated:start: config:prose/config.json -->
+| Field | Type | Default | Description |
+|-----|----|-------|-----------|
+| `styles` | array | `["Tells"]` | Style directories under `prose/styles/` to load rules from |
+| `style_paths` | array | `[]` | Extra absolute or repo-relative directories of `*.toml` rules (a per-target extension point) |
+| `min_level` | string | `"suggestion"` | Lowest level `check` reports by default |
+| `disabled_rules` | array | `[]` | Rule ids to skip |
+| `include_globs` | array | `["**/*.md"]` | Paths the hook checks on Write/Edit (fnmatch, repo-relative) |
+| `exclude_globs` | array | `[".repos/**", "_tmp_*/**", "node_modules/**", ".venv/**", ".git/**"]` | Paths the hook and `calibrate` skip |
+| `context_chars` | int | `40` | Characters of surrounding text kept on each side of a finding |
+<!-- generated:end: config:prose/config.json -->
+
+## .claude/prose.json (per-project)
+
+Optional per-repo override for the prose linter, same keys as `prose/config.json`. Hand-authored. Unlike `.claude/budgeter.json` it **is** merged: only the keys present override the shipped defaults. The usual uses are `disabled_rules` and a narrower `include_globs`.
 
 ## .claude/settings.json
 

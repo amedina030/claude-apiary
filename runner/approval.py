@@ -110,9 +110,24 @@ MERGED_LOCALLY_NOTE = (
 
 
 def write_scribe_note(note_type: str, content: str):
-    """Write a scribe note. Warn on failure but don't abort."""
+    """Write a scribe note. Warn on failure but don't abort.
+
+    ``--force`` waves the note past the prose gate when the repo has
+    ``prose-gate`` enabled: an unattended run must not lose its record over a
+    semicolon, and the bypass tags the note ``prose-forced`` so it stays
+    visible for the morning check (T-2026-326).
+    """
     result = subprocess.run(
-        [sys.executable, str(NOTES_SCRIPT), "add", "--type", note_type, "--content", content],
+        [
+            sys.executable,
+            str(NOTES_SCRIPT),
+            "add",
+            "--type",
+            note_type,
+            "--content",
+            content,
+            "--force",
+        ],
         capture_output=True,
         text=True,
         encoding="utf-8",
