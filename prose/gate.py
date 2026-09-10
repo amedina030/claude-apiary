@@ -25,7 +25,10 @@ STANDARD_DOC = "docs/standards/prose-style.md"
 #: through; the caller tags the note ``FORCED_TAG``.
 BYPASS_PREFIX = "[prose gate bypassed via --force"
 
-READ_REMINDER = "Aphoristic closers, mirror constructions and reflexive triads need a read; a clean report is necessary, not sufficient."
+READ_REMINDER = (
+    "Aphoristic closers, mirror constructions and reflexive triads need a read. "
+    "A clean report does not mean the text passed one."
+)
 
 
 def forced(message: "str | None") -> bool:
