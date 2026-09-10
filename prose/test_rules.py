@@ -90,12 +90,20 @@ class KnownFalsePositivesTest(unittest.TestCase):
     def test_let_me_mid_sentence_is_fine(self):
         self.assertNotIn("ProcessNarration", self.rules_hit("The flag will let me skip the check."))
 
-    def test_structural_punctuation_in_lists_and_tables_is_fine(self):
-        text = "- T-1 done; T-2 filed — see the note\n- Owner — platform\n\n| a — b | c; d |\n|---|---|\n| e | f |\n"
+    def test_structural_punctuation_in_lists_and_tables(self):
+        # A label dash in a bullet or a cell is layout; a semicolon in a bullet
+        # is not (decision 2026-09-10), while a table cell keeps its exemption.
+        text = "- Owner — platform\n- Next — the rota\n\n| a — b | c; d |\n|---|---|\n| e | f |\n"
         hits = self.rules_hit(text)
         self.assertNotIn("Semicolon", hits)
         self.assertNotIn("EmDashDensity", hits)
         self.assertNotIn("EmDashList", hits)
+        self.assertIn("Semicolon", self.rules_hit("- T-1 done; T-2 filed"))
+
+    def test_punctuation_rules_are_error_level(self):
+        levels = {r.id: r.level for r in self.rules}
+        self.assertEqual(levels["Semicolon"], "error")
+        self.assertEqual(levels["EmDashDensity"], "error")
 
     def test_a_single_dash_in_a_short_paragraph_is_fine(self):
         self.assertNotIn(

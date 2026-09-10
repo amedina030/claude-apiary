@@ -1,7 +1,7 @@
 extends = "density"
 message = "Em-dashes: %s in %s words of paragraph prose, allowed %s at this length (one per %s words). Use a comma, a period or a colon."
 summary = "Em-dashes in paragraphs: at most one per 100 words. A comma or a period is usually right."
-level = "warning"
+level = "error"
 scope = ["paragraph"]
 token = "—"
 per_words = 100
@@ -13,4 +13,9 @@ A budget rather than a fixed count, because a long document earns more than a
 short one and a fixed maximum flags a short note while passing a long one. The
 floor of one keeps a single dash in a short paragraph unflagged. Paragraph scope
 only: a dash separating a label from its value in a bullet or a table cell is a
-layout device and carries no cadence (see EmDashList)."""
+layout device and carries no cadence (see EmDashList).
+
+Shipped 2026-09-10 at warning level, promoted to error the same day by decision:
+the calibration corpus was itself mostly machine-written, so the 165 files it
+flagged there are the habit, not accepted human prose. The budget itself was
+kept at one per 100 words."""

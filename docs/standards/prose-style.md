@@ -31,8 +31,8 @@ Levels: `error` blocks when the gate is on, `warning` and `suggestion` are print
 |------|-------|-------|-----------------|
 | `CandourPhrases` | error | text | Fixed idioms that announce honesty: `worth noting`, `to be fair`, `full disclosure`, `in all honesty`, `truth be told` |
 | `CandourShape` | error | sentence | The productive form: `I want to be clear/exact/honest`, `to be honest,`, `let me be direct` |
-| `EmDashDensity` | warning | paragraph | More than one em-dash per 100 words of paragraph prose (floor of one) |
-| `Semicolon` | warning | paragraph | Any semicolon in a paragraph |
+| `EmDashDensity` | error | paragraph | More than one em-dash per 100 words of paragraph prose (floor of one) |
+| `Semicolon` | error | paragraph, list, blockquote, heading | Any semicolon outside code and table cells |
 | `NegationCorrection` | warning | text | `not X, it is Y`, `not just X but Y`, `X rather than being Y`, `It wasn't X. It was Y.` |
 | `SectionLabel` | warning | text | A fragment announcing the next sentences: `On the schema question.` |
 | `SummaryCloser` | warning | text | `In summary`, `In conclusion`, `Overall,` opening a sentence |
@@ -138,6 +138,6 @@ Do not ship a threshold without measuring it:
 python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" prose/cli.py calibrate <dir>... --min-level warning
 ```
 
-Run it over prose a reader has already accepted. Every hit on that corpus from an `error`-level rule is a false positive: tighten the pattern or demote the rule, and record what the fix was in its `why`. Every miss on a draft a reader called machine-written is a gap: widen the pattern or add a rule. The step that gets skipped, and the one that validates the whole thing, is rewriting a flagged draft until the tool reports clean and then having a person read it. If it still reads machine-written, the gap is in this document rather than in the tool.
+Run it over prose a reader has already accepted. Every hit on that corpus from an `error`-level rule is a false positive: tighten the pattern or demote the rule, and record what the fix was in its `why`. The exception is a corpus that is itself machine-written, which is what apiary's own notes were at the first release. The two punctuation rules were promoted to `error` on that basis, by decision, with the hits recorded in their `why`. Every miss on a draft a reader called machine-written is a gap: widen the pattern or add a rule. The step that gets skipped, and the one that validates the whole thing, is rewriting a flagged draft until the tool reports clean and then having a person read it. If it still reads machine-written, the gap is in this document rather than in the tool.
 
-Measured at the first release (2026-09-10) over 918 notes, learnings, memory files and docs: the unscoped checker flagged 61% of files, almost all on structural punctuation in bullets. With scoping, 44% carry a warning-level finding and none carry an error-level one.
+Measured at the first release (2026-09-10) over 918 notes, learnings, memory files and docs: the unscoped checker flagged 61% of files, almost all on structural punctuation in bullets. With scoping, 44% carried a warning-level finding and none an error-level one. Later that day `Semicolon` and `EmDashDensity` became `error` and `Semicolon` took in bullets, so the same corpus now carries error-level findings in roughly half its files. That is the intended bite: the gate is on in main-apiary, and a note with a semicolon or a dash-joined paragraph does not save until it is rewritten.
