@@ -21,7 +21,7 @@ The underlying failure is writing that performs a quality instead of having it. 
 
 The linter parses the Markdown before it counts anything. Paragraphs, list items, headings, blockquotes and table cells are separate scopes, and code spans, fenced blocks, front matter and HTML are never scored. Each rule names the scopes it applies to.
 
-This matters because most of apiary's prose is bullet-shaped. A semicolon joining two items inside a bullet (`T-1 done; T-2 filed`) and an em-dash separating a label from its value (`Owner — platform`) are layout devices, and the first measurement without scoping flagged 70% of accepted notes on exactly those. With scoping the punctuation rules apply to paragraphs only, and the phrase rules apply everywhere a reader reads.
+This matters because most of apiary's prose is bullet-shaped, and because code must never be scored: a semicolon in a shell command or a dash in a code span is not prose. The first measurement without any scoping flagged 70% of notes, much of it on code and table syntax. With scoping, each rule names where it applies. The two punctuation rules apply everywhere outside code by decision (D-2026-63): an em-dash in prose is a tell wherever it sits, including a label in a bullet (`Owner — platform` reads as well with a colon), and a semicolon is a tell everywhere but a table cell.
 
 ## Rules
 
@@ -31,7 +31,7 @@ Levels: `error` blocks when the gate is on, `warning` and `suggestion` are print
 |------|-------|-------|-----------------|
 | `CandourPhrases` | error | text | Fixed idioms that announce honesty: `worth noting`, `to be fair`, `full disclosure`, `in all honesty`, `truth be told` |
 | `CandourShape` | error | sentence | The productive form: `I want to be clear/exact/honest`, `to be honest,`, `let me be direct` |
-| `EmDashDensity` | error | paragraph | More than one em-dash per 100 words of paragraph prose (floor of one) |
+| `EmDash` | error | text | Any em-dash outside code: paragraphs, bullets, headings, blockquotes, table cells |
 | `Semicolon` | error | paragraph, list, blockquote, heading | Any semicolon outside code and table cells |
 | `NegationCorrection` | warning | text | `not X, it is Y`, `not just X but Y`, `X rather than being Y`, `It wasn't X. It was Y.` |
 | `SectionLabel` | warning | text | A fragment announcing the next sentences: `On the schema question.` |
@@ -39,7 +39,6 @@ Levels: `error` blocks when the gate is on, `warning` and `suggestion` are print
 | `ProcessNarration` | warning | paragraph | A paragraph opening with `Let me`, `I'll now`, `Certainly,`, `Here's a` |
 | `AiVocabulary` | warning | text | `delve`, `tapestry`, `testament to`, `pivotal`, `seamless`, `meticulous`, `holistic`, `deep dive`, `game-changer`, `it's important to note` |
 | `Repetition` | warning | paragraph, list, heading, blockquote | A word doubled (`the the`) |
-| `EmDashList` | suggestion | list | A chain of em-dashes inside one bullet (more than two per 100 words, floor of three) |
 | `EpigramContrast` | suggestion | sentence | `X is a Y, not a Z` |
 | `AbstractTriad` | suggestion | text | Three abstract nouns joined by commas and `and` |
 | `JargonSwaps` | suggestion | text | `utilize`, `leverage`, `facilitate`, `in order to`, `prior to`, `a number of` |
@@ -140,4 +139,4 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" prose/cli.py 
 
 Run it over prose a reader has already accepted. Every hit on that corpus from an `error`-level rule is a false positive: tighten the pattern or demote the rule, and record what the fix was in its `why`. The exception is a corpus that is itself machine-written, which is what apiary's own notes were at the first release. The two punctuation rules were promoted to `error` on that basis, by decision, with the hits recorded in their `why`. Every miss on a draft a reader called machine-written is a gap: widen the pattern or add a rule. The step that gets skipped, and the one that validates the whole thing, is rewriting a flagged draft until the tool reports clean and then having a person read it. If it still reads machine-written, the gap is in this document rather than in the tool.
 
-Measured at the first release (2026-09-10) over 918 notes, learnings, memory files and docs: the unscoped checker flagged 61% of files, almost all on structural punctuation in bullets. With scoping, 44% carried a warning-level finding and none an error-level one. Later that day `Semicolon` and `EmDashDensity` became `error` and `Semicolon` took in bullets, so the same corpus now carries error-level findings in roughly half its files. That is the intended bite: the gate is on in main-apiary, and a note with a semicolon or a dash-joined paragraph does not save until it is rewritten.
+Measured at the first release (2026-09-10) over 918 notes, learnings, memory files and docs: the unscoped checker flagged 61% of files, almost all on structural punctuation in bullets. With scoping, 44% carried a warning-level finding and none an error-level one. Later that day the punctuation rules became `error` with no budget at all. `EmDash` allows none outside code, and `Semicolon` allows none outside code and table cells. The same corpus now carries error-level findings in most of its files. That is the intended bite: the gate is on in main-apiary, and a note with a semicolon or an em-dash does not save until it is rewritten.

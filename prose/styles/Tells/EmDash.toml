@@ -1,0 +1,18 @@
+extends = "occurrence"
+message = "%s em-dash(es) in this block (none allowed outside code). Use a comma, a period, a colon or parentheses."
+summary = "No em-dashes outside code, anywhere: paragraphs, bullets, headings, table cells."
+level = "error"
+scope = ["text"]
+token = "—"
+max = 0
+why = """The em-dash as the default joint between clauses is the loudest cadence tell:
+a person reaching for punctuation picks a comma or a full stop most of the time.
+
+History. Shipped 2026-09-10 as EmDashDensity, a paragraph-only budget of one per
+100 words with a floor of one, plus a looser EmDashList for bullets, on the
+reasoning that a label dash in a bullet ("Owner — platform") is layout. Both were
+replaced the same day by decision D-2026-63, amended: no em-dashes, period. An
+em-dash in prose is a machine-writing indicator wherever it sits, and a label
+in a bullet reads as well with a colon. Code spans and fenced blocks are never
+scored, so a dash inside code is untouched. The en-dash (U+2013) and the
+double hyphen are deliberately not counted."""

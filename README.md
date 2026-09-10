@@ -155,7 +155,7 @@ The `/research` skill is expected to be invoked **before** `WebSearch` on any to
 
 ### Prose
 
-Markup-aware linter for machine-writing tells in notes and documents: announced candour (`worth noting`, `to be clear`), negation-correction (`not X, it is Y`), em-dash and semicolon density in paragraphs, summary closers, process openers, machine vocabulary. Rules are TOML files under `prose/styles/Tells/`, each with the reason its threshold has the value it has. The parser scores paragraphs, list items, headings and table cells separately, so a label dash in a bullet is never counted as prose.
+Markup-aware linter for machine-writing tells in notes and documents: announced candour (`worth noting`, `to be clear`), negation-correction (`not X, it is Y`), any em-dash or semicolon outside code, summary closers, process openers, machine vocabulary. Rules are TOML files under `prose/styles/Tells/`, each with the reason its threshold has the value it has. The parser scores paragraphs, list items, headings and table cells separately, so a label dash in a bullet is never counted as prose.
 
 - **Hook** — on every markdown Write/Edit the findings are injected as context; on the session's first note or document write the rule list is injected once
 - **Scribe gate** — `notes.py add` and `learn` run the same check; advisory until `core/flags.py enable prose-gate`, then an error-level tell stops the write unless `--force` (which tags the note `prose-forced`)

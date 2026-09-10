@@ -90,26 +90,30 @@ class KnownFalsePositivesTest(unittest.TestCase):
     def test_let_me_mid_sentence_is_fine(self):
         self.assertNotIn("ProcessNarration", self.rules_hit("The flag will let me skip the check."))
 
-    def test_structural_punctuation_in_lists_and_tables(self):
-        # A label dash in a bullet or a cell is layout; a semicolon in a bullet
-        # is not (decision 2026-09-10), while a table cell keeps its exemption.
-        text = "- Owner — platform\n- Next — the rota\n\n| a — b | c; d |\n|---|---|\n| e | f |\n"
+    def test_punctuation_in_code_and_table_semicolons_are_exempt(self):
+        # Code is never scored. A table cell keeps its semicolon exemption
+        # (decision D-2026-63); nothing else does.
+        text = "Run `a; b — c` now.\n\n```\nx; y — z\n```\n\n| a | c; d |\n|---|---|\n| e | f |\n"
         hits = self.rules_hit(text)
         self.assertNotIn("Semicolon", hits)
-        self.assertNotIn("EmDashDensity", hits)
-        self.assertNotIn("EmDashList", hits)
+        self.assertNotIn("EmDash", hits)
         self.assertIn("Semicolon", self.rules_hit("- T-1 done; T-2 filed"))
+
+    def test_any_em_dash_outside_code_is_an_error(self):
+        # D-2026-63 amended: no em-dashes, period. Bullets, headings and cells included.
+        for text in (
+            "The cache was removed in the last release — nobody noticed.",
+            "- Owner — platform",
+            "# Title — subtitle",
+            "| a — b |\n|---|\n| c |",
+        ):
+            with self.subTest(text=text):
+                self.assertIn("EmDash", self.rules_hit(text))
 
     def test_punctuation_rules_are_error_level(self):
         levels = {r.id: r.level for r in self.rules}
         self.assertEqual(levels["Semicolon"], "error")
-        self.assertEqual(levels["EmDashDensity"], "error")
-
-    def test_a_single_dash_in_a_short_paragraph_is_fine(self):
-        self.assertNotIn(
-            "EmDashDensity",
-            self.rules_hit("The cache was removed in the last release — nobody noticed."),
-        )
+        self.assertEqual(levels["EmDash"], "error")
 
     def test_allowed_doublings(self):
         self.assertNotIn(
