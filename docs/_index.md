@@ -24,6 +24,7 @@ Framework version: **1.0** | Last updated: 2026-04-02
 - [Code Style](standards/code-style.md) — Naming, structure, testing patterns
 - [Doc Style](standards/doc-style.md) — How to write docs for this project
 - [New Tool Checklist](standards/new-tool-checklist.md) — What a new tool needs
+- [Prose Style](standards/prose-style.md) — The machine-writing tells the prose linter checks, the scope rule, and how to add or calibrate a rule
 - [Report Style](standards/report-style.md) — How to write acceptance, validation, and post-mortem reports
 - [Schema Migration](standards/schema-migration.md) — How to bump a runner stage-artifact schema version
 

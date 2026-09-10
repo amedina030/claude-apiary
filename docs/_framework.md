@@ -208,3 +208,4 @@ When `_framework.md` needs to change:
 | Version | Date | Change | Affected |
 |---------|------|--------|----------|
 | 1.0 | 2026-04-02 | Initial framework | — |
+| 1.0 | 2026-09-10 | `prose/config.json` joins the generated config tables; `docs/standards/prose-style.md` added as the standard the prose linter enforces | `docs/generate_reference.py`, `docs/reference/config-files.md` |

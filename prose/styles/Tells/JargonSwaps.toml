@@ -1,0 +1,30 @@
+extends = "substitution"
+message = "Jargon '%s': write '%s'."
+summary = "Plain words over jargon: use, not utilize or leverage; to, not in order to; before, not prior to."
+level = "suggestion"
+scope = ["text"]
+ignorecase = true
+why = """Plain-English substitutions every style guide agrees on. Suggestion level
+because each has an honest technical use somewhere ("leverage" in finance,
+"facilitate" as a role name). The message names the replacement so the fix is
+one word."""
+
+[swap]
+utilize = "use"
+utilizes = "uses"
+utilizing = "using"
+leverage = "use"
+leverages = "uses"
+leveraging = "using"
+facilitate = "help"
+facilitates = "helps"
+"in order to" = "to"
+"prior to" = "before"
+"subsequent to" = "after"
+"a number of" = "some"
+"at this point in time" = "now"
+"due to the fact that" = "because"
+"in the event that" = "if"
+"has the ability to" = "can"
+"it should be noted that" = "(cut it)"
+"in terms of" = "(rephrase)"

@@ -90,6 +90,7 @@ class DispatchTest(unittest.TestCase):
                 "pre_push_secret_scan",
                 "budgeter_pre",
                 "remind_standards",
+                "prose_check",
             ],
         )
 

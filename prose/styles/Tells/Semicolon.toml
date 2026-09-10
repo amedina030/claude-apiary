@@ -1,0 +1,12 @@
+extends = "occurrence"
+message = "%s semicolon(s) in one paragraph (target zero). Split the sentence, or use a comma if the clauses are genuinely coordinate."
+summary = "Semicolons in paragraphs: near zero. Split the sentence instead."
+level = "warning"
+scope = ["paragraph"]
+token = ";"
+max = 0
+why = """A semicolon joining two clauses for effect rather than because they are
+coordinate. The second clause is usually the correction (see NegationCorrection).
+Paragraph scope only: a semicolon separating items inside a bullet ("T-1 done;
+T-2 filed") is a list joint, not a dramatic pause, and the corpus measurement
+showed that was where nearly all of them lived."""

@@ -1,0 +1,9 @@
+{
+  "styles": ["Tells"],
+  "style_paths": [],
+  "min_level": "suggestion",
+  "disabled_rules": [],
+  "include_globs": ["**/*.md"],
+  "exclude_globs": [".repos/**", "_tmp_*/**", "node_modules/**", ".venv/**", ".git/**"],
+  "context_chars": 40
+}

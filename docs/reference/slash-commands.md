@@ -4,7 +4,7 @@ title: Slash Commands
 scope: project
 description: Every slash command apiary installs, generated from the command files' frontmatter
 framework_version: "1.0"
-last_verified: 2026-09-06
+last_verified: "2026-09-10"
 ---
 
 # Slash Commands
@@ -31,6 +31,7 @@ longer note has been written here.
 | `/incubator` | `incubator/commands/incubator.md` | Spawn a new side-project repo wired up with the apiary toolkit — refines the idea, creates a git repo, drops a Python+poetry skeleton, migrates the spec into the new repo's scribe |
 | `/note` | `scribe/commands/note.md` | Add a note via the scribe tool |
 | `/notes` | `scribe/commands/notes.md` | List and retrieve notes from the scribe tool |
+| `/prose` | `prose/commands/prose.md` | Check a markdown file or note text for machine-writing tells with the prose linter, then rewrite until it reads like a person wrote it |
 | `/refine` | `refiner/commands/refine.md` | Refine a fuzzy idea into a structured handoff spec through value-first adversarial questioning |
 | `/research` | `researcher/commands/research.md` | Add, find, list, show, verify, or register tags for research findings stored per-target under <state-dir>/research/ |
 | `/review` | `docs/commands/review.md` | Review changed code for standards conformance, quality, and efficiency, then fix any issues found |

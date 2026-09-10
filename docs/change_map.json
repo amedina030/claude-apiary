@@ -29,7 +29,7 @@
     },
     {
       "id": "hook-modules",
-      "code": ["core/hooks/*.py", "budgeter/hooks/*.py", "docs/hooks/*.py"],
+      "code": ["core/hooks/*.py", "budgeter/hooks/*.py", "docs/hooks/*.py", "prose/hooks/*.py"],
       "docs": ["docs/reference/hooks.md"],
       "why": "Every hook has a row in hooks.md describing what it does."
     },
@@ -94,6 +94,12 @@
       ],
       "docs": ["docs/architecture/compass-rules.md", "compass/CLAUDE.md"],
       "why": "The event vocabulary, the aggregation math, the row format and the delivery paths are what the doc describes."
+    },
+    {
+      "id": "prose-rules",
+      "code": ["prose/styles/**/*.toml", "prose/engine.py", "prose/markdown.py"],
+      "docs": ["docs/standards/prose-style.md"],
+      "why": "The rule table, the levels and the scope rule are what the standard describes; a rule change must update it."
     },
     {
       "id": "config-files",

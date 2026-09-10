@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-09-06"
+last_verified: "2026-09-10"
 ---
 
 # CLI Tools
@@ -523,6 +523,41 @@ Manage visual captures (screenshots, UI mockups, viewport shots, etc.) per repo.
 | `3` | Config error: invalid YAML in `tags.yaml` or sidecar frontmatter |
 
 State is auto-created on first `add` or `register-tag`: `<state-dir>/captures/` directory and a default `tags.yaml` with empty tag list.
+
+## prose/cli.py
+
+Markup-aware prose linter for machine-writing tells (see [Prose Style](../standards/prose-style.md)). Rules are TOML files under `prose/styles/Tells/`. The parser (`prose/markdown.py`) scores paragraphs, list items, headings, blockquotes and table cells as separate scopes and never scores code, front matter or HTML. The same engine runs from the `prose_check` hook on markdown writes and from `scribe/notes.py add`/`learn`.
+
+```bash
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" prose/cli.py check docs/guides/adding-a-tool.md
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" prose/cli.py check --stdin --format json < draft.md
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" prose/cli.py calibrate docs --min-level warning
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" prose/cli.py rules --verbose
+```
+
+### Subcommands
+
+<!-- generated:start: cli:prose/cli.py:sub -->
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `check` | `cli.py check <path>... [--format text\|json] [--min-level L]` / `cli.py check --stdin` | Check markdown files (directories are walked for `*.md`) or stdin. Exit 1 when any finding is at `error` level; warnings and suggestions print but do not fail |
+| `calibrate` | `cli.py calibrate <dir>... [--min-level L] [--top N]` | Per-rule hit counts and worst files over a corpus of accepted prose. An `error`-level rule that fires there is miscalibrated. Always exits 0 |
+| `rules` | `cli.py rules [--verbose]` | List the loaded rules (id, level, scopes, summary); `--verbose` adds each rule's `why` and `credit` |
+<!-- generated:end: cli:prose/cli.py:sub -->
+
+### Flags
+
+<!-- generated:start: cli:prose/cli.py:flag -->
+| Flag | Subcommand | Description |
+|------|------------|-------------|
+| `--stdin` | `check` | Read the text to check from stdin instead of paths |
+| `--format {text,json}` | `check` | Output format (default `text`) |
+| `--min-level {suggestion,warning,error}` | `check`, `calibrate` | Lowest level to report (default: `min_level` from `prose/config.json`, or `suggestion` for `calibrate`) |
+| `--top N` | `calibrate` | Worst files to list per directory (default 3) |
+| `--verbose` | `rules` | Also print each rule's `why` and `credit` |
+<!-- generated:end: cli:prose/cli.py:flag -->
+
+Config: `prose/config.json` (shipped defaults) shallow-merged with `<repo>/.claude/prose.json` when present. Blocking is a per-repo flag: `core/flags.py enable prose-gate`.
 
 ## harden/orchestrate.py
 

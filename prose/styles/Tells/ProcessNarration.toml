@@ -1,0 +1,14 @@
+extends = "existence"
+message = "Process narration '%s' opens the paragraph. A note records outcomes; start with what is true now."
+summary = "No process openers in durable prose ('Let me', 'I'll now', 'Certainly,', 'Here's a'). Lead with the outcome."
+level = "warning"
+scope = ["paragraph"]
+ignorecase = true
+raw = [
+  '\A(?:Let me\b|Let\x27s\b|I\x27ll (?:now|start|begin|go ahead)\b|I will now\b|Now I\x27ll\b|Now,? let\b|Great question|Good question|Certainly[,!]|Absolutely[,!]|Sure(?: thing)?[,!]|Of course[,!]|Here\x27s (?:a|an|the|what|how)\b|Here is (?:a|an|the|what|how)\b|First,? (?:let|I\x27ll)\b)',
+]
+why = """Chat-turn openers that leak into notes and documents: the assistant narrating
+what it is about to do, or greeting the question. The list is the same family
+as the process-opener heuristic the compass logs on final messages; there it is
+measured, here in durable prose it warns. Anchored to the paragraph start with
+\\A, since "let me" mid-sentence is ordinary English."""
