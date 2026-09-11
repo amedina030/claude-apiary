@@ -55,7 +55,8 @@ STORAGE_DOC = DOCS_DIR / "reference" / "file-storage.md"
 SCRIBE_DOC = REPO_ROOT / "scribe" / "CLAUDE.md"
 
 #: Config files with a generated key table, in the order they appear in the doc.
-CONFIG_FILES = ("runner/config.json", "budgeter/config.json", "prose/config.json")
+CONFIG_FILES = ("runner/config.json", "budgeter/config.json", "prose/config.json",
+                "telephone/config.json")
 
 STATE = "&lt;state-dir&gt;"
 REPO = "&lt;repo&gt;"
@@ -372,6 +373,11 @@ def storage_records() -> list[docgen.Record]:
             import gui.paths as gui_paths
             rows.append(("gui", _rel_to(gui_paths.state_dir(), gui_paths.main_apiary(), MAIN),
                          "`gui.paths.state_dir`"))
+
+            # Central, not per-target: a call has two sides and neither owns it.
+            import telephone.store as telephone_store
+            rows.append(("telephone", _rel_to(telephone_store.store_dir(repo), repo, MAIN),
+                         "`telephone.store.store_dir`"))
 
             # `LOG_PATH` / `TMP_DIR` are module globals that
             # `configure_for_project()` rebinds, so reading them here would

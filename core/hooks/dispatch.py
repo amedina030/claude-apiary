@@ -151,6 +151,7 @@ def _registry() -> dict[str, tuple[Hook, ...]]:
         "UserPromptSubmit": (
             Hook("startup_prompt", "core.hooks.startup_prompt_hook"),
             Hook("compass_rules", "core.hooks.compass_rules"),
+            Hook("telephone_grant", "telephone.hooks.user_prompt"),
         ),
         # No SessionStart hooks yet; the verb exists so one can be registered
         # without another settings.json migration.

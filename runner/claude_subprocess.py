@@ -41,6 +41,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from .config_loader import get as cfg
@@ -49,6 +50,26 @@ from .cost_emit import emit_usage_xml
 RUNNER_SUBPROCESS_ENV_VAR = "APIARY_RUNNER_SUBPROCESS"
 ALLOW_ALL_ENV_VAR = "APIARY_RUNNER_ALLOW_ALL_ENV"
 CLAUDE_BIN_ENV_VAR = "APIARY_CLAUDE_BIN"
+
+# Variables a live Claude Code session exports that mark its children as
+# sub-invocations. A child that keeps them is treated as part of the parent
+# session and never prompts, which is why ``scripts/probe_permission_prompt.py``
+# has stripped them since it was written. Named here so the probe, the runner
+# and telephone all strip the same set.
+CLAUDE_CODE_ENV_NAMES = ("CLAUDECODE",)
+CLAUDE_CODE_ENV_PREFIXES = ("CLAUDE_CODE_",)
+
+
+def scrub_claude_code_env(env: dict[str, str]) -> dict[str, str]:
+    """*env* without ``CLAUDECODE`` or any ``CLAUDE_CODE_*`` variable.
+
+    Returns a new dict; the input is left alone.
+    """
+    return {
+        k: v
+        for k, v in env.items()
+        if k not in CLAUDE_CODE_ENV_NAMES and not k.startswith(CLAUDE_CODE_ENV_PREFIXES)
+    }
 
 
 def resolve_claude_bin(env: dict[str, str] | None = None) -> str:
@@ -268,6 +289,107 @@ DEFAULT_MAX_TURNS = 150
 _FROM_CONFIG = object()
 
 
+#: How long the post-kill drain waits for a killed child's pipes to close.
+#: Only reached on a timeout, and only when the caller asked for the partial.
+_PARTIAL_DRAIN_TIMEOUT = 15
+
+#: ``claude -p`` output formats this module knows how to read back.
+OUTPUT_FORMATS = ("json", "stream-json")
+
+
+def envelope_text(stdout: str) -> str:
+    """The result envelope in *stdout*, whichever output format produced it.
+
+    ``--output-format json`` prints one object, so the whole text is the
+    envelope. ``stream-json`` prints one event per line and the envelope is the
+    last ``"type": "result"`` line. Returns ``""`` when neither shape is found,
+    which is what :func:`emit_usage_xml` and :func:`describe_failure` treat as
+    "no envelope".
+    """
+    text = (stdout or "").strip()
+    if not text:
+        return ""
+    try:
+        whole = json.loads(text)
+    except ValueError:
+        whole = None
+    if isinstance(whole, dict):
+        return text
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("type") == "result":
+            return line
+    return ""
+
+
+def _kill_tree(proc: "subprocess.Popen") -> None:
+    """Kill *proc* and, on Windows, everything it spawned.
+
+    ``Popen.kill`` reaches only the direct child. When ``claude`` is an npm
+    ``claude.cmd`` shim that child is ``cmd.exe``, and the node process doing
+    the work survives the kill, holding the pipes open and the API call
+    running. ``taskkill /T`` walks the tree. The one platform branch in this
+    module, because process trees are the one thing the stdlib has no
+    portable spelling for.
+    """
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True,
+                timeout=15,
+            )
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass
+    proc.kill()
+
+
+def _run_capturing_partial(
+    cmd: list[str],
+    *,
+    prompt_bytes: bytes,
+    timeout: int | None,
+    env: dict[str, str],
+    cwd: str | None,
+):
+    """``subprocess.run``, but a timeout keeps what the child had written.
+
+    ``subprocess.run`` drops that text on POSIX: its ``TimeoutExpired`` handler
+    kills the child and waits, and only the Windows branch drains the pipes
+    into the exception. Telephone records the partial reply, so the drain
+    happens here instead, on both platforms.
+
+    Returns ``(CompletedProcess | None, timed_out, partial_stdout_bytes)``.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        cwd=cwd,
+    )
+    try:
+        out, err = proc.communicate(prompt_bytes, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)
+        try:
+            out, _err = proc.communicate(timeout=_PARTIAL_DRAIN_TIMEOUT)
+        except (subprocess.TimeoutExpired, OSError, ValueError):
+            # A grandchild still holding the write end (the Windows .bat shim
+            # case) must not turn a timeout into a hang.
+            out = b""
+        return None, True, out or b""
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err), False, b""
+
+
 def describe_failure(stdout: str, returncode: int) -> str:
     """Human-readable reason for a non-zero exit when stderr was empty."""
     try:
@@ -296,6 +418,11 @@ def run_claude(
     allowed_tools=_FROM_CONFIG,
     permission_mode=_FROM_CONFIG,
     rules: bool = True,
+    resume: str | None = None,
+    cwd: "os.PathLike[str] | str | None" = None,
+    env: dict[str, str] | None = None,
+    capture_partial_on_timeout: bool = False,
+    output_format: str = "json",
 ) -> tuple[int, str, str]:
     """Run a `claude -p` subprocess and return (returncode, stdout, stderr).
 
@@ -329,6 +456,33 @@ def run_claude(
         Passed as ``--permission-mode``. Defaults to
         ``subprocess.permission_mode`` in runner/config.json, else
         ``acceptEdits``. ``None`` sends no flag.
+    resume:
+        A prior run's ``session_id``, passed as ``--resume <id>`` so this call
+        continues that conversation. Verified live (L-2026-190): a session
+        resumes from any working directory, not only the one that started it.
+    cwd:
+        Working directory for the subprocess. ``None`` (the default, and every
+        runner caller) inherits the parent's, which is what runner stages want
+        because the stage has already chdir'd into its worktree.
+    env:
+        The subprocess environment, used verbatim. ``None`` (the default, and
+        every runner caller) builds the runner allowlist env — the
+        ``APIARY_RUNNER_SUBPROCESS=1`` one. Callers outside the runner pass
+        their own so they can keep the callee's hook chain alive; see
+        ``telephone/cli.py``.
+    capture_partial_on_timeout:
+        On a timeout, return whatever the killed process had already written
+        instead of an empty stdout. Off for runner callers, which treat a
+        timeout as a total loss. Note this is only what the CLI *flushed*: with
+        ``--output-format json`` the envelope is written in one go at the end,
+        so a real timeout yields nothing unless ``output_format`` is
+        ``stream-json``, which writes every assistant turn as it happens.
+    output_format:
+        ``json`` (the default, and every runner caller): one envelope object on
+        stdout. ``stream-json``: one event per line with the envelope last,
+        which the CLI only accepts together with ``--verbose``, added here.
+        Either way ``<usage>`` is read from the envelope, never the whole
+        stream (see :func:`envelope_text`).
 
     Returns
     -------
@@ -351,9 +505,16 @@ def run_claude(
     if permission_mode is _FROM_CONFIG:
         permission_mode = cfg("subprocess", "permission_mode", DEFAULT_PERMISSION_MODE)
 
-    env = _build_subprocess_env()
+    if env is None:
+        env = _build_subprocess_env()
 
-    cmd = [resolve_claude_bin(env), "-p", "-", "--output-format", "json"]
+    if output_format not in OUTPUT_FORMATS:
+        raise ValueError(f"output_format must be one of {OUTPUT_FORMATS}, got {output_format!r}")
+    cmd = [resolve_claude_bin(env), "-p", "-", "--output-format", output_format]
+    if output_format == "stream-json":
+        cmd.append("--verbose")
+    if resume:
+        cmd.extend(["--resume", str(resume)])
     if model:
         cmd.extend(["--model", model])
     if permission_mode:
@@ -372,16 +533,29 @@ def run_claude(
     if rules:
         prompt = rules_preamble() + prompt
 
+    timeout_msg = f"claude subprocess timed out after {timeout}s"
     try:
-        result = subprocess.run(
-            cmd,
-            input=prompt.encode("utf-8"),
-            capture_output=True,
-            timeout=timeout,
-            env=env,
-        )
+        if capture_partial_on_timeout:
+            result, timed_out, partial_bytes = _run_capturing_partial(
+                cmd,
+                prompt_bytes=prompt.encode("utf-8"),
+                timeout=timeout,
+                env=env,
+                cwd=None if cwd is None else str(cwd),
+            )
+            if timed_out:
+                partial = partial_bytes[:_MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+                return -1, partial, timeout_msg
+        else:
+            result = subprocess.run(
+                cmd,
+                input=prompt.encode("utf-8"),
+                capture_output=True,
+                timeout=timeout,
+                env=env,
+                cwd=None if cwd is None else str(cwd),
+            )
     except subprocess.TimeoutExpired:
-        timeout_msg = f"claude subprocess timed out after {timeout}s"
         return -1, "", timeout_msg
     except (FileNotFoundError, PermissionError) as exc:
         return -2, "", f"could not launch claude subprocess: {exc}"
@@ -392,7 +566,7 @@ def run_claude(
         # `claude -p` reports max-turns / budget / API stops only inside its
         # JSON envelope and exits 1 with nothing on stderr; without this the
         # stage log says "stderr: " and the reason is lost.
-        stderr = describe_failure(stdout, result.returncode)
+        stderr = describe_failure(envelope_text(stdout), result.returncode)
 
     # Emitted regardless of exit code. `<usage>` used to be emitted only on
     # success, so a call that hit --max-turns, was stopped by the API, or
@@ -401,7 +575,7 @@ def run_claude(
     # (review runner Bug 8). emit_usage_xml is a no-op when stdout carries no
     # envelope, which is the timeout / could-not-launch case.
     try:
-        emit_usage_xml(stdout)
+        emit_usage_xml(envelope_text(stdout))
     except Exception:
         # Cost emission failure must never discard a result, good or bad.
         pass

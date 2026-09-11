@@ -70,6 +70,7 @@ COMMAND_TOOLS = (
     "runner",
     "incubator",
     "prose",
+    "telephone",
 )
 
 # Env vars a live Claude Code session exports that would otherwise reach a

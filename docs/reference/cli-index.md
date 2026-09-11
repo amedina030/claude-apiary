@@ -4,7 +4,7 @@ title: CLI Tools Index
 scope: project
 description: Generated one-line index of every CLI entry point — use cli_lookup.py for full details
 framework_version: "1.0"
-last_verified: "2026-09-10"
+last_verified: "2026-09-11"
 ---
 
 # CLI Tools Index
@@ -40,6 +40,7 @@ flag — `--check` runs in `docs/hooks/pre-commit` and in CI.
 | `python researcher/cli.py` | Manage structured research findings (apiary researcher subsystem). | add, find, list, register-tag, show, verify |
 | `python captures/cli.py` | Manage visual captures (apiary captures subsystem). | add, find, list, path, register-tag, show |
 | `python prose/cli.py` | Markup-aware prose linter for machine-writing tells | calibrate, check, rules |
+| `python telephone/cli.py` | Place a Claude-to-Claude call into another registered repo | call, hangup, list, reply, show, status |
 | `python harden/orchestrate.py` | /harden control flow: plan, prompts, worktree, retry policy, budget, todos | budget, file-todos, plan, prompt, round, save-summary, validate, worktree |
 | `python harden/validate_and_assign.py` | Validate + assign IDs in one step | consolidation, findings, response |
 | `python harden/lenses.py` | Harden 7-lens taxonomy | codes, json, list |

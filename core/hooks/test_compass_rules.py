@@ -172,7 +172,10 @@ class CompassRulesHookTests(unittest.TestCase):
     def test_registered_for_both_events(self):
         registry = dispatch._registry()
         prompt_names = [h.name for h in registry["UserPromptSubmit"]]
-        self.assertEqual(prompt_names, ["startup_prompt", "compass_rules"])
+        # What compass needs is its position: the pin goes out right after the
+        # startup block. Hooks other tools register later in the chain are not
+        # this test's business, so only the first two names are pinned here.
+        self.assertEqual(prompt_names[:2], ["startup_prompt", "compass_rules"])
         pre = {h.name: h for h in registry["PreToolUse"]}
         self.assertEqual(pre["compass_rules"].matcher, compass_rules.MATCHER)
         for tool in ("Agent", "Task", "AskUserQuestion"):

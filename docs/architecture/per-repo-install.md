@@ -4,7 +4,7 @@ title: Per-Repo Install Model
 scope: project
 description: How apiary is installed, where state lives, and how drift is detected after the per-repo migration (2026-05)
 framework_version: "1.0"
-last_verified: "2026-09-06"
+last_verified: "2026-09-11"
 ---
 
 # Per-Repo Install Model
@@ -87,6 +87,7 @@ where it lives, and how the parts coordinate.
 |---|---|---|
 | Hook entries | `<repo>/.claude/settings.json` | per-repo |
 | Slash command sources | `<main-apiary>/<tool>/commands/*.md`; copied to `<repo>/.claude/commands/` | per-repo (copies) |
+| Tool dirs whose commands are copied | `core/install._slash_command_sources`; a new tool goes in the list, and `core/test_install.py::CommandSourceCoverageTests` fails when one is missing | main-apiary |
 | Per-repo launcher | `<repo>/.claude/apiary/launch.py` | per-repo (regenerable) |
 | Bootstrap pointer to main-apiary | `<repo>/.claude/apiary/main-apiary-pointer.json` | per-repo |
 | Self-location pointer | `<repo>/.claude/apiary/self-pointer.json` | per-repo |
