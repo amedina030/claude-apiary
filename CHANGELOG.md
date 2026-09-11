@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `apiary install` now copies `prose/commands/prose.md`. The installer's
+  tool allowlist (`core/install._slash_command_sources`) had no `prose`
+  entry, so the `/prose` skill from PR #59 reached no repo and `doctor
+  stale` could not tell, since it hashes the same list. A new test fails
+  when any `<tool>/commands/*.md` in the checkout is outside the list.
 - Compass rule table, step 2 of D-2026-62 (T-2026-320): delivery and
   retirement. The startup hook injects `<state-dir>/compass/rules.md` in
   place of `personality.md`; the new `core/hooks/compass_rules.py` pins the
