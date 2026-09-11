@@ -46,10 +46,11 @@ ANSWER_RULES = (
 )
 
 ACT_RULES = (
-    "This is an act-mode call. You may change files in this checkout. Before your "
-    "first edit, create and switch to the branch named below, and leave the checkout "
-    "back on the branch it started on when you are done. Never push, never open or "
-    "merge a pull request, and never touch a remote."
+    "This is an act-mode call. You may change files in this checkout. The checkout is "
+    "already on the work branch named below, created for this call. Commit your work "
+    "there and leave nothing uncommitted. Do not switch branches and do not delete the "
+    "branch. Never push, never open or merge a pull request, and never touch a remote. "
+    "The caller's tooling puts the checkout back on its original branch afterwards."
 )
 
 NO_NESTED_CALLS = (

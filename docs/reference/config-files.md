@@ -207,11 +207,12 @@ column is hand-written.
 |-------|-----|----|-------|-----------|
 |  | `max_autonomous_calls_per_session` | int | `3` | Calls one session may place without the user typing `/telephone`. The count lives in a `session-tmp` flag file, not in the model's head |
 |  | `max_autonomous_exchanges_per_line` | int | `6` | Exchanges one call may reach before a follow-up without a grant is refused and the model is told to bring the thread to the user |
+|  | `grant_ttl_seconds` | int | `900` |  |
 |  | `model` | string | `""` | Model for every callee run. Empty means the claude CLI's own default. `--model` overrides it per call |
 | `answer` | `timeout_seconds` | int | `600` | Wall-clock limit for an answer-mode run before it is killed and the record is marked `timed_out` |
 | `answer` | `max_turns` | int | `30` | Agentic turns the callee gets, passed as `--max-turns` |
 | `answer` | `permission_mode` | string | `""` | Empty sends no `--permission-mode`, so the callee's only grants are the ones below |
-| `answer` | `allowed_tools` | array | `["Read", "Glob", "Grep", "Bash(git log *)", "Bash(git show *)", "Bash(git status *)", "Bash(git diff *)", "Bash(python *)"]` | Read-only exploration. The callee's own `permissions.allow` does not apply in an untrusted workspace, so a headless call gets what it needs here |
+| `answer` | `allowed_tools` | array | `["Read", "Glob", "Grep", "Bash(git log *)", "Bash(git show *)", "Bash(git status *)", "Bash(git diff *)", "Bash(python * scribe/notes.py *)"]` | Read-only exploration. The callee's own `permissions.allow` does not apply in an untrusted workspace, so a headless call gets what it needs here |
 | `answer` | `disallowed_tools` | array | `["Write", "Edit", "NotebookEdit", "Bash(git push *)", "Bash(git push:*)", "Bash(git commit *)", "Bash(git commit:*)", "Bash(gh pr merge *)", "Bash(gh pr create *)"]` | A deny at any level beats an allow at every other level, so answer mode cannot write, commit, push or open a pull request |
 | `act` | `timeout_seconds` | int | `1800` | Wall-clock limit for an act-mode run |
 | `act` | `max_turns` | int | `150` | Agentic turns the callee gets, the same ceiling the runner's executor uses |

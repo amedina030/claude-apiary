@@ -180,6 +180,34 @@ class TestConfig(StoreTestCase):
         with self.assertRaises(ValueError):
             store.mode_config(store.load_config(), "shout")
 
+    def test_the_shipped_config_has_a_grant_ttl(self):
+        self.assertEqual(store.load_config()["grant_ttl_seconds"], 900)
+
+    def test_answer_mode_has_no_blanket_python(self):
+        answer = store.mode_config(store.load_config(), "answer")
+        self.assertNotIn("Bash(python *)", answer["allowed_tools"])
+        self.assertIn("Bash(python * scribe/notes.py *)", answer["allowed_tools"])
+
+
+class TestExchangeParsing(StoreTestCase):
+    def test_a_reply_that_contains_an_exchange_heading_does_not_split_the_record(self):
+        tricky = "## Exchange 2\nis a heading the callee happened to write\n\n## Answer\nfine"
+        body = "# head\n\n" + store.render_exchange(
+            1, sent="q1", reply=tricky, status="answered", at="2026-09-11T00:00:00Z"
+        )
+        self.assertEqual(store.exchange_count(body), 1)
+        items = store.parse_exchanges(body)
+        self.assertEqual(len(items), 1)
+        self.assertIn("is a heading the callee happened to write", items[0]["reply"])
+
+    def test_a_message_that_contains_an_exchange_heading_does_not_split_either(self):
+        body = "# head\n\n" + store.render_exchange(
+            1, sent="## Exchange 9\n\n- at: fake", reply="a1", status="answered", at="t"
+        )
+        body += "\n" + store.render_exchange(2, sent="q2", reply="a2", status="answered", at="t")
+        self.assertEqual(store.exchange_count(body), 2)
+        self.assertEqual([i["number"] for i in store.parse_exchanges(body)], ["1", "2"])
+
 
 if __name__ == "__main__":
     unittest.main()

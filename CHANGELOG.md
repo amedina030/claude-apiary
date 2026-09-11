@@ -28,11 +28,21 @@
   `hangup`. Records live centrally at
   `<main-apiary>/.apiary/telephone/<year>/<seq>.md` as `C-<year>-<seq>`, and
   each completed call writes a scribe `context` note into both repos through
-  their own launchers. Act mode (the callee may edit, on branch
-  `telephone/<call-id>`) runs only on a per-session grant that the new
-  `UserPromptSubmit` hook `telephone/hooks/user_prompt.py` writes when the user
-  types `/telephone <repo> act ...`, so a call Claude placed on its own can
-  never edit another repo, and a hook that fails open leaves act refused.
+  their own launchers. Act mode (the callee may edit) runs only on a
+  per-session grant that the new `UserPromptSubmit` hook
+  `telephone/hooks/user_prompt.py` writes when the user types
+  `/telephone <repo> act ...`, so a call Claude placed on its own can never
+  edit another repo, and a hook that fails open leaves act refused. A grant
+  is good for the repo the user named and for `grant_ttl_seconds` (900), and
+  it is spent only by a call that runs, so a refused call keeps it for the
+  retry. The CLI creates the work branch `telephone/<call-id>` in the callee
+  before the run and switches the checkout back afterwards when the tree is
+  clean, so branch discipline does not depend on the callee following its
+  preamble. Uncommitted work stays on the branch and is recorded as an issue.
+  Answer mode is read-only, with `Bash(python * scribe/notes.py *)` as the
+  only Bash shape, so the callee can still read its notes. The callee runs
+  with `--output-format stream-json`, which is what lets a call that hits its
+  wall-clock limit leave the assistant turns it did produce on the record.
   Without a grant a session gets three calls and six exchanges per line, both
   counted in `session-tmp` flag files rather than in the model's head. Pushes
   are denied by tool rule and checked again afterwards against the callee's
@@ -40,12 +50,17 @@
   verified live before the build was called done (`L-2026-190`, `L-2026-191`):
   `--resume` continues a headless session from a different working directory,
   and a registered callee's `.claude/settings.json` hooks do fire under `-p`.
-- `runner/claude_subprocess.run_claude` gained `resume`, `cwd`, `env` and
-  `capture_partial_on_timeout`, plus a shared `scrub_claude_code_env` helper.
-  Every one defaults to the old behaviour, so runner stages spawn exactly as
-  before. Telephone passes its own environment, because it wants the callee's
-  own hook chain alive where the runner wants its `APIARY_RUNNER_SUBPROCESS=1`
-  skip.
+- `runner/claude_subprocess.run_claude` gained `resume`, `cwd`, `env`,
+  `capture_partial_on_timeout` and `output_format` (`json` or `stream-json`,
+  the latter together with `--verbose`, which the CLI requires), plus a shared
+  `scrub_claude_code_env` helper and an `envelope_text` reader that finds the
+  result envelope in either format so `<usage>` and the failure reason are
+  read from the envelope alone. Every argument defaults to the old behaviour,
+  so runner stages spawn exactly as before. A timed-out run on Windows is now
+  killed as a process tree, since killing the `claude.cmd` shim alone left the
+  node process running. Telephone passes its own environment, because it wants
+  the callee's own hook chain alive where the runner wants its
+  `APIARY_RUNNER_SUBPROCESS=1` skip.
 - `apiary install` now copies `prose/commands/prose.md`. The installer's
   tool allowlist (`core/install._slash_command_sources`) had no `prose`
   entry, so the `/prose` skill from PR #59 reached no repo and `doctor

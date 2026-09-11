@@ -1,6 +1,7 @@
 {
   "max_autonomous_calls_per_session": 3,
   "max_autonomous_exchanges_per_line": 6,
+  "grant_ttl_seconds": 900,
   "model": "",
   "answer": {
     "timeout_seconds": 600,
@@ -14,7 +15,7 @@
       "Bash(git show *)",
       "Bash(git status *)",
       "Bash(git diff *)",
-      "Bash(python *)"
+      "Bash(python * scribe/notes.py *)"
     ],
     "disallowed_tools": [
       "Write",

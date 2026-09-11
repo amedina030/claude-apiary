@@ -61,6 +61,40 @@ def envelope(text, session_id, is_error=False, subtype="success"):
     })
 
 
+def streaming():
+    return "stream-json" in sys.argv[1:]
+
+
+def assistant_event(text, session_id):
+    return json.dumps({
+        "type": "assistant",
+        "session_id": session_id,
+        "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
+    })
+
+
+def emit(text, session_id, is_error=False, subtype="success", envelope_too=True):
+    """Write the reply the way the requested output format would.
+
+    `json` is one envelope. `stream-json` is a system line, one assistant
+    event per turn, then the envelope, each on its own line, flushed as it
+    goes, which is what lets a killed run leave text behind.
+    """
+    if not streaming():
+        if envelope_too:
+            sys.stdout.write(envelope(text, session_id, is_error, subtype))
+        else:
+            sys.stdout.write(text)
+        sys.stdout.flush()
+        return
+    sys.stdout.write(json.dumps({"type": "system", "subtype": "init", "session_id": session_id}) + "\n")
+    if text:
+        sys.stdout.write(assistant_event(text, session_id) + "\n")
+    if envelope_too:
+        sys.stdout.write(envelope(text, session_id, is_error, subtype) + "\n")
+    sys.stdout.flush()
+
+
 def git(*args):
     return subprocess.run(
         ["git", *args], cwd=os.getcwd(), capture_output=True, text=True, encoding="utf-8"
@@ -68,19 +102,25 @@ def git(*args):
 
 
 def do_act(spec):
-    started_on = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    """What an act-mode callee does. The CLI has already put the checkout on
+    the work branch, so the fake only edits and commits where it stands."""
+    work_branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    # Unique content every time, so a follow-up on the same branch has
+    # something to commit rather than hitting "nothing to commit".
+    Path("telephone_work.txt").write_text(f"done {time.time_ns()}\n", encoding="utf-8")
+    if spec.get("dirty"):
+        return
+    git("add", "telephone_work.txt")
+    git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "work")
     work_head = git("rev-parse", "HEAD").stdout.strip()
-    branch = spec.get("branch") or ""
-    if branch and not spec.get("no_branch"):
-        git("checkout", "-b", branch)
-        Path("telephone_work.txt").write_text("done\n", encoding="utf-8")
-        git("add", "telephone_work.txt")
-        git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "work")
-        work_head = git("rev-parse", "HEAD").stdout.strip()
-        if not spec.get("stay"):
-            git("checkout", started_on)
     if spec.get("push"):
         git("update-ref", spec.get("push_ref", "refs/remotes/origin/master"), work_head)
+    back_to = spec.get("switch_back")
+    if back_to:
+        git("checkout", back_to)
+    if spec.get("delete_branch"):
+        git("checkout", spec.get("delete_branch"))
+        git("branch", "-D", work_branch)
 
 
 def main():
@@ -97,6 +137,7 @@ def main():
             "prompt": prompt,
             "env_keys": sorted(os.environ),
             "telephone_call": os.environ.get("APIARY_TELEPHONE_CALL", ""),
+            "branch_at_start": git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip(),
         }
         with open(log, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(row) + "\n")
@@ -111,15 +152,12 @@ def main():
     session_id = script.get("session_id", "99999999-8888-7777-6666-555544443333")
 
     if mode == "sleep":
-        sys.stdout.write(script.get("partial", "partial text before the limit"))
-        sys.stdout.flush()
+        emit(script.get("partial", "partial text before the limit"), session_id, envelope_too=False)
         time.sleep(float(script.get("sleep", 3)))
         return 1
 
     if mode == "error":
-        sys.stdout.write(
-            envelope(script.get("reply", ""), session_id, is_error=True, subtype="error_max_turns")
-        )
+        emit(script.get("reply", ""), session_id, is_error=True, subtype="error_max_turns")
         return 1
 
     if mode == "act":
@@ -128,7 +166,7 @@ def main():
     reply = script.get("resume_reply") if resumed and script.get("resume_reply") else None
     if reply is None:
         reply = script.get("reply", "## Answer\nok\n\n## Questions for the caller\nnone\n\n## Changes made\nnone\n")
-    sys.stdout.write(envelope(reply, session_id))
+    emit(reply, session_id)
     return 0
 
 
@@ -307,7 +345,13 @@ class TestAnswerCall(TelephoneCliTestCase):
         self.assertIn("Read", argv)
         self.assertIn("Write", argv[argv.index("--disallowedTools") :])
         self.assertNotIn("--permission-mode", argv)
-        self.assertIn("--output-format", argv)
+        # Streamed so a killed run still leaves its assistant turns behind;
+        # the CLI insists on --verbose for that format in print mode.
+        self.assertEqual(argv[argv.index("--output-format") + 1], "stream-json")
+        self.assertIn("--verbose", argv)
+        # Answer mode is read-only: no blanket python, only the scribe shape.
+        self.assertNotIn("Bash(python *)", argv)
+        self.assertIn("Bash(python * scribe/notes.py *)", argv)
 
     def test_the_callee_environment_is_scrubbed_and_marked(self):
         self.grant()
@@ -412,45 +456,83 @@ class TestReply(TelephoneCliTestCase):
 
 
 class TestActMode(TelephoneCliTestCase):
+    """The CLI owns the work branch: it creates it before the callee runs and
+    restores the checkout afterwards. The fake callee only edits and commits
+    where it finds itself, the way a real one is told to."""
+
+    def setUp(self):
+        super().setUp()
+        self.started_on = self.git(self.callee, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+        self.next_id = store.format_id(int(store.now_iso()[:4]), 1)
+        self.work_branch = f"telephone/{self.next_id}"
+
+    def head_of(self, repo: Path) -> str:
+        return self.git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+
     def test_an_act_call_with_a_grant_branches_and_comes_back(self):
         self.grant(act=True)
-        started_on = self.git(self.callee, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-        self.set_script(mode="act", reply=STRUCTURED_REPLY, act={"branch": "PLACEHOLDER"})
-        # The branch name is only known once the id is allocated, so the fake
-        # reads it out of the preamble instead: rewrite the script after a dry
-        # allocation is not possible, so drive it off the known next id.
-        next_id = store.format_id(int(store.now_iso()[:4]), 1)
-        self.set_script(mode="act", reply=STRUCTURED_REPLY, act={"branch": f"telephone/{next_id}"})
+        self.set_script(mode="act", reply=STRUCTURED_REPLY, act={})
 
         code, out, err = self.run_cli("call", "callee", "fix the installer gap", "--act")
         self.assertEqual(code, 0, err)
 
-        _path, meta, _body = self.only_record()
-        self.assertEqual(meta["id"], next_id)
+        _path, meta, body = self.only_record()
+        self.assertEqual(meta["id"], self.next_id)
         self.assertEqual(meta["mode"], "act")
-        self.assertEqual(meta["branch"], f"telephone/{next_id}")
+        self.assertEqual(meta["branch"], self.work_branch)
         self.assertEqual(meta["initiated_by"], "user")
-        self.assertTrue(cli.branch_exists(self.callee, f"telephone/{next_id}"))
-        self.assertEqual(
-            self.git(self.callee, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), started_on
-        )
-        self.assertIn(f"branch=telephone/{next_id}", out)
+        self.assertEqual(meta["issue"], "")
+        self.assertTrue(cli.branch_exists(self.callee, self.work_branch))
+        self.assertEqual(self.head_of(self.callee), self.started_on)
+        ahead = self.git(
+            self.callee, "rev-list", "--count", f"{self.started_on}..{self.work_branch}"
+        ).stdout.strip()
+        self.assertEqual(ahead, "1")
+        self.assertIn(f"branch={self.work_branch}", out)
+        self.assertIn(f"commits on {self.work_branch}: 1", body)
+        self.assertIn(f"checkout restored to {self.started_on}", body)
 
         argv = self.calls_made()[0]["argv"]
         self.assertIn("--permission-mode", argv)
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "acceptEdits")
         self.assertIn("Write", argv[argv.index("--allowedTools") :])
 
+    def test_the_cli_puts_the_callee_on_the_work_branch_before_it_runs(self):
+        self.grant(act=True)
+        self.set_script(mode="act", reply=STRUCTURED_REPLY, act={})
+        self.run_cli("call", "callee", "do the work", "--act")
+        self.assertEqual(self.calls_made()[0]["branch_at_start"], self.work_branch)
+        # And the preamble no longer asks the callee to create it.
+        self.assertIn("already on the work branch", self.calls_made()[0]["prompt"])
+
+    def test_uncommitted_work_stays_on_the_branch_and_is_flagged(self):
+        self.grant(act=True)
+        self.set_script(mode="act", reply=STRUCTURED_REPLY, act={"dirty": True})
+        code, out, err = self.run_cli("call", "callee", "do the work", "--act")
+        self.assertEqual(code, 0, err)
+        _path, meta, body = self.only_record()
+        self.assertEqual(meta["issue"], f"uncommitted changes left on {self.work_branch}")
+        self.assertIn("issue: uncommitted changes left on", body)
+        self.assertIn("uncommitted changes left on", out)
+        # Switching would have carried the edits along, so the checkout stays.
+        self.assertEqual(self.head_of(self.callee), self.work_branch)
+        self.assertTrue((self.callee / "telephone_work.txt").is_file())
+
+    def test_a_callee_that_switched_back_itself_is_noted_not_failed(self):
+        self.grant(act=True)
+        self.set_script(mode="act", reply=STRUCTURED_REPLY, act={"switch_back": self.started_on})
+        code, _out, err = self.run_cli("call", "callee", "do the work", "--act")
+        self.assertEqual(code, 0, err)
+        _path, meta, body = self.only_record()
+        self.assertEqual(meta["issue"], "")
+        self.assertIn("callee moved the checkout to", body)
+        self.assertEqual(self.head_of(self.callee), self.started_on)
+
     def test_a_moved_remote_tracking_ref_is_recorded_as_a_push(self):
         self.grant(act=True)
         head = self.git(self.callee, "rev-parse", "HEAD").stdout.strip()
         self.git(self.callee, "update-ref", "refs/remotes/origin/master", head)
-        next_id = store.format_id(int(store.now_iso()[:4]), 1)
-        self.set_script(
-            mode="act",
-            reply=STRUCTURED_REPLY,
-            act={"branch": f"telephone/{next_id}", "push": True},
-        )
+        self.set_script(mode="act", reply=STRUCTURED_REPLY, act={"push": True})
         code, out, err = self.run_cli("call", "callee", "do the work", "--act")
         self.assertEqual(code, 0, err)
         _path, meta, body = self.only_record()
@@ -470,18 +552,41 @@ class TestActMode(TelephoneCliTestCase):
         )
         self.assertIn("push detected", note)
 
-    def test_a_missing_branch_is_recorded(self):
+    def test_a_deleted_work_branch_is_recorded_as_missing(self):
         self.grant(act=True)
-        next_id = store.format_id(int(store.now_iso()[:4]), 1)
-        self.set_script(
-            mode="act",
-            reply=STRUCTURED_REPLY,
-            act={"branch": f"telephone/{next_id}", "no_branch": True},
-        )
+        self.set_script(mode="act", reply=STRUCTURED_REPLY, act={"delete_branch": self.started_on})
         code, _out, err = self.run_cli("call", "callee", "do the work", "--act")
         self.assertEqual(code, 0, err)
-        _path, _meta, body = self.only_record()
+        _path, meta, body = self.only_record()
         self.assertIn("branch missing", body)
+        self.assertIn("work branch missing", meta["issue"])
+
+    def test_an_act_follow_up_returns_to_the_work_branch_and_back(self):
+        self.grant(act=True)
+        self.set_script(mode="act", reply=STRUCTURED_REPLY, act={})
+        self.run_cli("call", "callee", "first", "--act")
+        self.assertEqual(self.head_of(self.callee), self.started_on)
+
+        self.grant(act=True)
+        self.set_script(mode="act", reply=STRUCTURED_REPLY, act={})
+        code, _out, err = self.run_cli("reply", self.next_id, "and now this")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.calls_made()[-1]["branch_at_start"], self.work_branch)
+        self.assertEqual(self.head_of(self.callee), self.started_on)
+        ahead = self.git(
+            self.callee, "rev-list", "--count", f"{self.started_on}..{self.work_branch}"
+        ).stdout.strip()
+        self.assertEqual(ahead, "2")
+
+    def test_an_act_follow_up_on_a_dirty_tree_is_refused(self):
+        self.grant(act=True)
+        self.set_script(mode="act", reply=STRUCTURED_REPLY, act={"dirty": True})
+        self.run_cli("call", "callee", "first", "--act")
+        self.grant(act=True)
+        code, _out, err = self.run_cli("reply", self.next_id, "and now this")
+        self.assertEqual(code, 1)
+        self.assertIn("tree is dirty", err)
+        self.assertEqual(len(self.calls_made()), 1)
 
 
 # --------------------------------------------------------------------------- #
@@ -568,6 +673,98 @@ class TestRefusals(TelephoneCliTestCase):
         self.assertEqual(code, cli.EXIT_NO_BINARY)
         self.assertIn("could not launch", err)
         self.assertEqual(self.calls_made(), [])
+
+
+class TestGrantBinding(TelephoneCliTestCase):
+    """A grant is spent only on the repo the user named, only while fresh, and
+    only by a call that actually runs."""
+
+    def grants_left(self):
+        return list(self.flags.glob(f"*_{user_prompt.GRANT_SUFFIX}"))
+
+    def counter(self):
+        with mock.patch.object(cli, "session_tmp_dir", return_value=self.flags):
+            return cli.auto_call_count(SESSION[:8])
+
+    def test_a_grant_for_another_repo_does_not_unlock_act(self):
+        self.grant(act=True, repo="caller")
+        code, _out, err = self.run_cli("call", "callee", "fix it", "--act")
+        self.assertEqual(code, 1)
+        self.assertIn("act needs the user to type", err)
+        self.assertIn("the grant is for caller", err)
+        self.assertEqual(self.calls_made(), [])
+        # Left in place: the user may still want the call they typed.
+        self.assertEqual(len(self.grants_left()), 1)
+
+    def test_a_grant_for_another_repo_makes_an_answer_call_autonomous(self):
+        self.grant(repo="caller")
+        code, out, err = self.run_cli("call", "callee", "hello")
+        self.assertEqual(code, 0, err)
+        self.assertIn("initiated_by=model", out)
+        self.assertEqual(self.counter(), 1)
+        self.assertEqual(len(self.grants_left()), 1)
+
+    def test_a_grant_typed_as_a_path_binds_to_the_same_checkout(self):
+        self.grant(act=True, repo=str(self.callee))
+        self.set_script(mode="act", reply=STRUCTURED_REPLY, act={})
+        code, out, err = self.run_cli("call", "callee", "fix it", "--act")
+        self.assertEqual(code, 0, err)
+        self.assertIn("initiated_by=user", out)
+
+    def test_an_expired_grant_is_ignored_and_removed(self):
+        path = self.grant(act=True)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["granted_at"] = "2020-01-01T00:00:00Z"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        code, _out, err = self.run_cli("call", "callee", "fix it", "--act")
+        self.assertEqual(code, 1)
+        self.assertIn("expired", err)
+        self.assertEqual(self.grants_left(), [])
+        self.assertEqual(self.calls_made(), [])
+
+    def test_a_grant_without_a_timestamp_is_not_trusted(self):
+        path = self.grant(act=True)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        del data["granted_at"]
+        path.write_text(json.dumps(data), encoding="utf-8")
+        code, _out, err = self.run_cli("call", "callee", "fix it", "--act")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.grants_left(), [])
+
+    def test_a_refused_act_call_keeps_the_grant_for_the_retry(self):
+        self.grant(act=True)
+        (self.callee / "scratch.txt").write_text("x", encoding="utf-8")
+        code, _out, err = self.run_cli("call", "callee", "fix it", "--act")
+        self.assertEqual(code, 1)
+        self.assertIn("tree is dirty", err)
+        self.assertEqual(len(self.grants_left()), 1)
+        (self.callee / "scratch.txt").unlink()
+        self.set_script(mode="act", reply=STRUCTURED_REPLY, act={})
+        code, _out, err = self.run_cli("call", "callee", "fix it", "--act")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.grants_left(), [])
+
+    def test_a_refused_self_call_keeps_the_grant(self):
+        self.grant(repo="caller")
+        self.run_cli("call", "caller", "hi")
+        self.assertEqual(len(self.grants_left()), 1)
+
+    def test_a_reply_grant_is_bound_to_the_records_callee(self):
+        self.grant()
+        self.run_cli("call", "callee", "first")
+        call_id = store.list_records(self.apiary)[0]["id"]
+        path = store.record_path(call_id, self.apiary)
+        meta, body = store.read_record(path)
+        meta["mode"] = store.MODE_ACT
+        meta["branch"] = f"telephone/{call_id}"
+        store.write_record(path, meta, body)
+
+        self.grant(act=True, repo="caller")
+        code, _out, err = self.run_cli("reply", call_id, "and now this")
+        self.assertEqual(code, 1)
+        self.assertIn("act follow-ups need the user to type", err)
+        self.assertIn("the grant is for caller", err)
+        self.assertEqual(len(self.calls_made()), 1)
 
 
 class TestActPreflight(TelephoneCliTestCase):
@@ -737,7 +934,11 @@ class TestCalleeFailures(TelephoneCliTestCase):
         _path, meta, body = self.only_record()
         self.assertEqual(meta["status"], store.STATUS_TIMED_OUT)
         self.assertIn("timed out", out)
+        # The assistant event streamed before the kill is the partial reply,
+        # as text, not as the raw event line.
         self.assertIn("halfway through the answer", body)
+        self.assertIn("halfway through the answer", out)
+        self.assertNotIn('"type": "assistant"', body)
 
     def test_an_error_envelope_becomes_a_failed_record_with_the_reason(self):
         self.set_script(mode="error", reply="the model gave up")

@@ -59,7 +59,10 @@ MODE_ANSWER = "answer"
 MODE_ACT = "act"
 
 _ID_RE = re.compile(r"^C-(\d{4})-(\d+)$", re.IGNORECASE)
-_EXCHANGE_RE = re.compile(r"^## Exchange (\d+)\b", re.MULTILINE)
+#: An exchange header is the heading plus the ``- at:`` line render_exchange
+#: always puts two lines under it. Anchoring on both means a callee reply that
+#: happens to contain a line reading ``## Exchange 2`` cannot split a record.
+_EXCHANGE_RE = re.compile(r"^## Exchange (\d+)\n\n- at: ", re.MULTILINE)
 
 #: Defaults used when ``config.json`` is missing or malformed. Mirrors the
 #: shipped file so a broken read degrades to working behaviour rather than a
@@ -67,6 +70,7 @@ _EXCHANGE_RE = re.compile(r"^## Exchange (\d+)\b", re.MULTILINE)
 DEFAULT_CONFIG: dict[str, Any] = {
     "max_autonomous_calls_per_session": 3,
     "max_autonomous_exchanges_per_line": 6,
+    "grant_ttl_seconds": 900,
     "model": "",
     "answer": {
         "timeout_seconds": 600,
@@ -312,9 +316,31 @@ def open_act_call(callee: str, apiary_repo: Path | None = None) -> str | None:
 # --------------------------------------------------------------------------- #
 
 
+_FENCE_RE = re.compile(r"<(message|reply)>\n(.*?)\n</\1>", re.DOTALL)
+
+
+def _mask_fences(body: str) -> str:
+    """*body* with the inside of every message and reply fence blanked.
+
+    Same length as the input, so a match position found on the masked text
+    is valid on the original. Whatever a caller or callee wrote inside a
+    fence can then never look like a section header to the parser.
+    """
+
+    def blank(match: re.Match) -> str:
+        tag, inner = match.group(1), match.group(2)
+        return f"<{tag}>\n{'x' * len(inner)}\n</{tag}>"
+
+    return _FENCE_RE.sub(blank, body or "")
+
+
+def _exchange_headers(body: str) -> list[re.Match]:
+    return list(_EXCHANGE_RE.finditer(_mask_fences(body)))
+
+
 def exchange_count(body: str) -> int:
     """How many ``## Exchange N`` sections *body* holds."""
-    return len(_EXCHANGE_RE.findall(body or ""))
+    return len(_exchange_headers(body))
 
 
 def render_exchange(
@@ -365,7 +391,7 @@ def parse_exchanges(body: str) -> list[dict[str, str]]:
     Used when a resume fails and the follow-up has to quote the line so far.
     """
     out: list[dict[str, str]] = []
-    matches = list(_EXCHANGE_RE.finditer(body or ""))
+    matches = _exchange_headers(body)
     for i, match in enumerate(matches):
         end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
         chunk = body[match.start() : end]

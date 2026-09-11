@@ -35,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -43,7 +44,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from core.session import session_tmp_dir  # noqa: E402
 from core.utils import state  # noqa: E402
-from core.utils.timeutil import now_iso  # noqa: E402
+from core.utils.timeutil import now_iso, parse_iso  # noqa: E402
 from runner.claude_subprocess import (  # noqa: E402
     describe_failure,
     run_claude,
@@ -264,16 +265,65 @@ def read_grant(prefix: str) -> dict | None:
     return None
 
 
-def consume_grant(prefix: str) -> dict | None:
-    """Read and delete the newest grant. A grant is good for exactly one call."""
+def grant_age_seconds(grant: dict) -> float | None:
+    """Seconds since the hook wrote *grant*, or ``None`` when it has no stamp."""
+    stamp = parse_iso(grant.get("granted_at"))
+    if stamp is None:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - stamp).total_seconds()
+
+
+def usable_grant(
+    prefix: str, callee_path: Path, apiary: Path, config: dict
+) -> tuple[dict | None, str]:
+    """The grant this call may spend, and the reason when there is none.
+
+    A grant is spent only on the repo the user named and only while it is
+    fresh. Two consequences: a grant typed for one repo never unlocks act mode
+    on another, and a grant the model never used cannot be picked up later in
+    the session as if the user had just asked. An expired grant is deleted. A
+    grant for another repo is left where it is, because the user may still
+    want that call placed.
+    """
     grant = read_grant(prefix)
     if grant is None:
-        return None
+        return None, "no grant for this session"
+    ttl = int(config.get("grant_ttl_seconds") or 0)
+    age = grant_age_seconds(grant)
+    if ttl and (age is None or age > ttl):
+        _discard_grant(grant)
+        shown = "unknown" if age is None else f"{int(age)}s"
+        return None, f"the grant had expired (age {shown}, limit {ttl}s)"
+    named = str(grant.get("repo") or "").strip()
+    if not named:
+        return None, "the grant names no repo"
+    try:
+        named_name, named_path = resolve_callee(apiary, named)
+    except LookupError:
+        return None, f"the grant names {named!r}, which is not a registered repo"
+    if named_path != callee_path:
+        return None, f"the grant is for {named_name}, not this callee"
+    return grant, ""
+
+
+def _discard_grant(grant: dict) -> None:
     try:
         Path(grant["_path"]).unlink()
-    except OSError:
+    except (KeyError, OSError):
         pass
-    return grant
+
+
+def consume_grant(grant: dict | None) -> None:
+    """Spend *grant*. One typed command buys exactly one call.
+
+    Called only after every refusal check has passed, so a call that never
+    started (dirty tree, self call, unknown repo) leaves the user's grant in
+    place for the retry.
+    """
+    if grant is not None:
+        _discard_grant(grant)
 
 
 def _counter_path(prefix: str) -> Path:
@@ -365,15 +415,65 @@ def spawn_callee(
         cwd=callee_path,
         env=child_env(call_id),
         capture_partial_on_timeout=True,
+        output_format="stream-json",
     )
 
 
+def _json_lines(stdout: str) -> list[dict]:
+    """Every JSON object on its own line in *stdout*, in order."""
+    rows: list[dict] = []
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(data, dict):
+            rows.append(data)
+    return rows
+
+
 def read_envelope(stdout: str) -> dict:
+    """The result envelope in *stdout*, from either claude output format.
+
+    ``json`` prints one object. ``stream-json`` (what the callee runs with)
+    prints one event per line, and the last ``type: result`` line is the
+    envelope. A killed run has no envelope and returns ``{}``.
+    """
     try:
         data = json.loads(stdout or "")
     except (TypeError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+        data = None
+    if isinstance(data, dict):
+        return data
+    for row in reversed(_json_lines(stdout)):
+        if row.get("type") == "result":
+            return row
+    return {}
+
+
+def partial_text(stdout: str) -> str:
+    """Assistant text a ``stream-json`` run wrote before it stopped.
+
+    This is what makes a timed-out call leave something on the record: each
+    assistant turn arrives as its own event while the run is still going, so
+    the text is on disk even when the envelope never came.
+    """
+    parts: list[str] = []
+    for row in _json_lines(stdout):
+        if row.get("type") != "assistant":
+            continue
+        message = row.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(str(block.get("text") or ""))
+    return "\n".join(p for p in parts if p).strip()
 
 
 # --------------------------------------------------------------------------- #
@@ -527,15 +627,15 @@ def cmd_call(args) -> int:
         return _fail(f"refusing a self call: {callee} is the repo this session is already in")
 
     prefix = session_prefix(args.session_id)
-    grant = consume_grant(prefix)
-    initiated_by = "user" if grant else "model"
     config = store.load_config()
+    grant, why_not = usable_grant(prefix, callee_path, apiary, config)
+    initiated_by = "user" if grant else "model"
 
     if args.act and not (grant and grant.get("act")):
+        detail = why_not if grant is None else "the grant the user typed was for answer mode"
         return _fail(
             "act needs the user to type `/telephone "
-            f"{callee} act <message>` themselves. No grant for this session, so the call "
-            "was not placed."
+            f"{callee} act <message>` themselves ({detail}), so the call was not placed."
         )
     mode = store.MODE_ACT if args.act else store.MODE_ANSWER
 
@@ -552,10 +652,12 @@ def cmd_call(args) -> int:
         if refusal:
             return _fail(refusal)
 
-    # Past every refusal: the counter moves only now, so a refused call never
-    # costs the session one of its three.
+    # Past every refusal. The grant is spent and the counter moves only now, so
+    # a refused call costs neither the user's grant nor one of the model's slots.
     if grant is None:
         bump_auto_calls(prefix)
+    else:
+        consume_grant(grant)
 
     call_id = store.allocate_id(apiary)
     branch = f"{BRANCH_PREFIX}{call_id}" if mode == store.MODE_ACT else ""
@@ -582,10 +684,21 @@ def cmd_call(args) -> int:
         "exchanges": "0",
         "issue": "",
     }
-    store.write_record(path, meta, f"# Call {call_id}: {caller} to {callee}\n")
+    header = f"# Call {call_id}: {caller} to {callee}\n"
+    store.write_record(path, meta, header)
 
-    before_refs = remote_refs(callee_path) if mode == store.MODE_ACT else {}
-    start_branch = current_branch(callee_path) if mode == store.MODE_ACT else ""
+    before_refs: dict[str, str] = {}
+    start_branch = ""
+    if mode == store.MODE_ACT:
+        # The CLI owns the branch, not the callee's good behaviour: it is
+        # created here, before the run, and put back by _settle_act after it.
+        start_branch = current_branch(callee_path)
+        before_refs = remote_refs(callee_path)
+        problem = _enter_work_branch(callee_path, branch)
+        if problem:
+            meta.update({"status": store.STATUS_FAILED, "ended_at": now_iso(), "issue": problem})
+            store.write_record(path, meta, header)
+            return _fail(f"{problem} in {callee}, so the call was not placed")
 
     prompt = protocol.build_preamble(
         caller=caller,
@@ -615,7 +728,7 @@ def cmd_call(args) -> int:
     notes: list[str] = []
     issue = ""
     if mode == store.MODE_ACT:
-        issue, act_notes = _verify_act(callee_path, callee, branch, start_branch, before_refs)
+        issue, act_notes = _settle_act(callee_path, callee, branch, start_branch, before_refs)
         notes.extend(act_notes)
 
     return _finish_exchange(
@@ -635,27 +748,78 @@ def cmd_call(args) -> int:
     )
 
 
-def _verify_act(
+def _enter_work_branch(callee_path: Path, branch: str) -> str | None:
+    """Check the callee out on *branch*, creating it when needed.
+
+    Returns the problem as text, or ``None`` when the checkout is on the
+    branch. The preflight has already established a clean tree on the default
+    branch for a first call; a follow-up finds the branch already there.
+    """
+    if not branch:
+        return None
+    if branch_exists(callee_path, branch):
+        switched = _git(callee_path, "checkout", branch)
+    else:
+        switched = _git(callee_path, "checkout", "-b", branch)
+    if switched.returncode != 0:
+        detail = " ".join((switched.stderr or switched.stdout or "").split())[:160]
+        return f"could not check out the work branch {branch} ({detail})"
+    return None
+
+
+def _settle_act(
     callee_path: Path, callee: str, branch: str, start_branch: str, before_refs: dict
 ) -> tuple[str, list[str]]:
-    """Check what an act call left behind. Returns ``(issue, record notes)``."""
+    """Put the callee's checkout back and report what the act call left behind.
+
+    The CLI created the work branch, so it also owns the way back. A clean tree
+    is switched to the branch the checkout started on. A dirty tree stays on
+    the work branch and is flagged, because switching would carry the
+    uncommitted edits along. Returns ``(issue, record notes)``, where *issue*
+    is empty when nothing needs a human.
+    """
     notes: list[str] = []
-    issue = ""
-    if branch and not branch_exists(callee_path, branch):
-        notes.append(f"branch missing: {branch} was not created in {callee}")
-    ended_on = current_branch(callee_path)
-    if start_branch and ended_on and ended_on != start_branch:
-        notes.append(f"checkout left on {ended_on}, started on {start_branch}")
+    issues: list[str] = []
+
     after_refs = remote_refs(callee_path)
     if before_refs != after_refs:
-        issue = "push detected"
         moved = sorted(
             ref
             for ref in set(before_refs) | set(after_refs)
             if before_refs.get(ref) != after_refs.get(ref)
         )
+        issues.append("push detected")
         notes.append(f"issue: push detected ({', '.join(moved[:5])})")
-    return issue, notes
+
+    has_branch = bool(branch) and branch_exists(callee_path, branch)
+    if branch and not has_branch:
+        issues.append("work branch missing")
+        notes.append(f"branch missing: {branch} is gone from {callee}")
+
+    ended_on = current_branch(callee_path)
+    if branch and ended_on and ended_on != branch:
+        notes.append(f"callee moved the checkout to {ended_on} during the call")
+
+    if has_branch and start_branch:
+        count = _git(callee_path, "rev-list", "--count", f"{start_branch}..{branch}")
+        if count.returncode == 0:
+            notes.append(f"commits on {branch}: {count.stdout.strip() or '0'}")
+
+    dirty = dirty_paths(callee_path)
+    if dirty:
+        where = ended_on or branch
+        issues.append(f"uncommitted changes left on {where}")
+        notes.append(f"issue: uncommitted changes left on {where} ({len(dirty)} path(s))")
+    elif start_branch and ended_on != start_branch:
+        back = _git(callee_path, "checkout", start_branch)
+        if back.returncode == 0:
+            notes.append(f"checkout restored to {start_branch}")
+        else:
+            detail = " ".join((back.stderr or "").split())[:120]
+            issues.append(f"checkout left on {ended_on}")
+            notes.append(f"issue: could not restore {start_branch} ({detail})")
+
+    return " and ".join(issues), notes
 
 
 # --------------------------------------------------------------------------- #
@@ -690,9 +854,11 @@ def _finish_exchange(
 
     if rc == -1:
         status = store.STATUS_TIMED_OUT
-        # A killed run rarely leaves a parseable envelope, so whatever raw text
-        # it flushed is the partial reply.
-        partial = text or (stdout or "").strip()
+        # A killed run leaves no envelope. The stream-json events it did write
+        # carry every assistant turn so far, and that text is the partial reply.
+        partial = text or partial_text(stdout)
+        if not partial and (stdout or "").strip() and not (stdout or "").lstrip().startswith("{"):
+            partial = (stdout or "").strip()
         reply_text = partial or "(no text was flushed before the limit)"
         printed = (
             f"The line to {meta.get('callee')} timed out after {timeout}s and the run was killed."
@@ -702,7 +868,8 @@ def _finish_exchange(
         parsed = {"answer": printed, "questions": [], "changes": [], "structured": False}
     elif rc != 0 or envelope.get("is_error"):
         status = store.STATUS_FAILED
-        reason = (stderr or "").strip() or describe_failure(stdout, rc)
+        envelope_json = json.dumps(envelope) if envelope else stdout
+        reason = (stderr or "").strip() or describe_failure(envelope_json, rc)
         reply_text = text or (stdout or "").strip() or reason
         notes.append(f"failure: {' '.join(reason.split())[:300]}")
         parsed = {
@@ -812,17 +979,24 @@ def cmd_reply(args) -> int:
 
     prefix = session_prefix(args.session_id)
     config = store.load_config()
+    grant, why_not = usable_grant(prefix, callee_path, apiary, config)
 
     if mode == store.MODE_ACT:
-        grant = consume_grant(prefix)
         if not (grant and grant.get("act")):
+            detail = why_not if grant is None else "the grant the user typed was for answer mode"
             return _fail(
                 "act follow-ups need the user to type `/telephone "
-                f"{callee} act <message>` again. No fresh grant, so nothing was sent."
+                f"{callee} act <message>` again ({detail}), so nothing was sent."
             )
         initiated_by = "user"
+        dirty = dirty_paths(callee_path)
+        if dirty:
+            listed = ", ".join(line.strip() for line in dirty[:5])
+            return _fail(
+                f"act follow-up refused: {callee}'s tree is dirty "
+                f"({len(dirty)} path(s): {listed}). Commit or discard that first."
+            )
     else:
-        grant = consume_grant(prefix)
         initiated_by = "user" if grant else "model"
         if grant is None:
             cap = int(config.get("max_autonomous_exchanges_per_line") or 0)
@@ -833,6 +1007,9 @@ def cmd_reply(args) -> int:
                     f"limit of {cap} on one line. Bring the thread to the user instead."
                 )
 
+    # Past every refusal, so the grant is spent only for a follow-up that runs.
+    consume_grant(grant)
+
     mode_cfg = store.mode_config(config, mode)
     timeout = int(args.timeout or mode_cfg.get("timeout_seconds") or 600)
     model = args.model or str(meta.get("model") or config.get("model") or "")
@@ -840,8 +1017,14 @@ def cmd_reply(args) -> int:
     resume_id = str(meta.get("callee_session_id") or "").strip()
     branch = str(meta.get("branch") or "") or None
 
-    before_refs = remote_refs(callee_path) if mode == store.MODE_ACT else {}
-    start_branch = current_branch(callee_path) if mode == store.MODE_ACT else ""
+    before_refs: dict[str, str] = {}
+    start_branch = ""
+    if mode == store.MODE_ACT:
+        start_branch = current_branch(callee_path)
+        before_refs = remote_refs(callee_path)
+        problem = _enter_work_branch(callee_path, branch or "")
+        if problem:
+            return _fail(f"{problem} in {callee}, so nothing was sent")
 
     prior = store.parse_exchanges(body) if not resume_id else None
     prompt = protocol.build_preamble(
@@ -897,7 +1080,7 @@ def cmd_reply(args) -> int:
     issue = ""
     notes: list[str] = []
     if mode == store.MODE_ACT:
-        issue, notes = _verify_act(callee_path, callee, branch or "", start_branch, before_refs)
+        issue, notes = _settle_act(callee_path, callee, branch or "", start_branch, before_refs)
 
     caller_path_raw = str(meta.get("caller_path") or "")
     caller_path = (
