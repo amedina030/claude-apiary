@@ -103,12 +103,13 @@ def run(payload: dict) -> HookResult | None:
 
     write_grant(sid, invocation)
     mode = "act" if invocation["act"] else "answer"
+    repo = invocation.get("repo") or "the named repo"
     return HookResult(
         context=context_block(
             CONTEXT_NAMESPACE,
-            f"the user asked for a {mode}-mode call, so this turn holds one grant. "
-            "It is consumed by the first `telephone/cli.py call` or `reply` that runs, "
-            "and it is the only thing that unlocks act mode.",
+            f"the user asked for an {mode}-mode call to {repo}, so this turn holds one "
+            "grant for that repo. It is spent by the first `telephone/cli.py call` or "
+            "`reply` that runs against it, and it is the only thing that unlocks act mode.",
         )
     )
 
