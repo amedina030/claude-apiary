@@ -4,7 +4,7 @@ title: CLI Tools
 scope: project
 description: All Python CLI entry points with subcommands, flags, and usage examples
 framework_version: "1.0"
-last_verified: "2026-09-10"
+last_verified: "2026-09-11"
 ---
 
 # CLI Tools
@@ -558,6 +558,60 @@ python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" prose/cli.py 
 <!-- generated:end: cli:prose/cli.py:flag -->
 
 Config: `prose/config.json` (shipped defaults) shallow-merged with `<repo>/.claude/prose.json` when present. Blocking is a per-repo flag: `core/flags.py enable prose-gate`.
+
+## telephone/cli.py
+
+Places a Claude-to-Claude call into another registered repo: a headless `claude -p` run with the callee's checkout as its working directory, so the callee answers with its own `CLAUDE.md`, hooks and scribe notes. Only the reply text comes back. Every call is recorded at `<main-apiary>/.apiary/telephone/<year>/<seq>.md` under the id `C-<year>-<seq>`, and both repos get a scribe `context` note pointing at it.
+
+```bash
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" telephone/cli.py call spanish-citizenship "what documents did we submit"
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" telephone/cli.py reply C-2026-1 "the 2024 filing"
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" telephone/cli.py show C-2026-1
+python "$(git rev-parse --show-toplevel)/.claude/apiary/launch.py" telephone/cli.py list --status open
+```
+
+### Subcommands
+
+<!-- generated:start: cli:telephone/cli.py:sub -->
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `call` | `cli.py call <repo> <message> [--act] [--wait] [--model M] [--timeout N]` | Place a call. Resolves the callee in the registry, checks the mode and the caps, runs the callee, blocks until the reply or the wall-clock limit, writes the record, prints the reply |
+| `reply` | `cli.py reply <call-id> <message> [--wait] [--model M] [--timeout N]` | Send a follow-up on an existing call. Resumes the callee's own session when the record holds its id, and otherwise starts a fresh run with the earlier exchanges quoted |
+| `status` | `cli.py status [<call-id>]` | One call's state, or the open calls plus this session's remaining autonomous allowance |
+| `show` | `cli.py show <call-id>` | Print one call's exchanges, each reply capped so a long answer cannot flood the caller's context |
+| `list` | `cli.py list [--limit N] [--status S] [--callee NAME] [--mode M]` | List calls on record, newest first |
+| `hangup` | `cli.py hangup <call-id> [--kill]` | Mark an open call's record closed. `--kill` also signals the recorded pid |
+<!-- generated:end: cli:telephone/cli.py:sub -->
+
+### Flags
+
+<!-- generated:start: cli:telephone/cli.py:flag -->
+| Flag | Subcommand | Description |
+|------|------------|-------------|
+| `--act` | `call` | Let the callee change files. Refused unless the user typed `/telephone <repo> act ...` this session, which is what writes the grant |
+| `--wait` | `call`, `reply` | Run in the foreground. The CLI always blocks, so this only says which way the skill meant to run it |
+| `--model M` | `call`, `reply` | Model for the callee run (default: `model` in `telephone/config.json`, else the CLI's own default) |
+| `--timeout N` | `call`, `reply` | Wall-clock limit in seconds (default: the mode's `timeout_seconds`) |
+| `--limit N` | `list` | How many rows to print (default 20) |
+| `--status S` | `list` | Only calls with this status: `open`, `answered`, `timed_out`, `failed`, `hung_up` |
+| `--callee NAME` | `list` | Only calls to this repo |
+| `--mode M` | `list` | Only calls in this mode: `answer` or `act` |
+| `--kill` | `hangup` | Also send a terminate signal to the pid on the record |
+| `--apiary-repo DIR` | every subcommand | Main-apiary checkout that owns the record store (default: resolved from the pins) |
+| `--session-id SID` | every subcommand | Caller session id, which is how the grant and the counters are found (default: the newest identity file) |
+<!-- generated:end: cli:telephone/cli.py:flag -->
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | The call completed: answered, timed out, or the callee reported an error |
+| `1` | Refused before any callee run started, or a bad argument |
+| `2` | The `claude` binary could not be launched |
+
+Two limits are enforced in code, not by asking the model to behave. Act mode (`--act`) runs only on a per-session grant that `telephone/hooks/user_prompt.py` writes when the **user** types `/telephone <repo> act ...`, so a call Claude placed on its own can never edit another repo. Without a grant a session gets `max_autonomous_calls_per_session` calls and `max_autonomous_exchanges_per_line` follow-ups, both counted in flag files under `<repo>/.claude/apiary/session-tmp/`.
+
+Config: `telephone/config.json` (timeouts, caps, per-mode tool lists). See [config-files.md](config-files.md#telephoneconfigjson) and the [/telephone command](slash-commands.md).
 
 ## harden/orchestrate.py
 

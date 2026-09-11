@@ -1,0 +1,53 @@
+{
+  "max_autonomous_calls_per_session": 3,
+  "max_autonomous_exchanges_per_line": 6,
+  "model": "",
+  "answer": {
+    "timeout_seconds": 600,
+    "max_turns": 30,
+    "permission_mode": "",
+    "allowed_tools": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(python *)"
+    ],
+    "disallowed_tools": [
+      "Write",
+      "Edit",
+      "NotebookEdit",
+      "Bash(git push *)",
+      "Bash(git push:*)",
+      "Bash(git commit *)",
+      "Bash(git commit:*)",
+      "Bash(gh pr merge *)",
+      "Bash(gh pr create *)"
+    ]
+  },
+  "act": {
+    "timeout_seconds": 1800,
+    "max_turns": 150,
+    "permission_mode": "acceptEdits",
+    "allowed_tools": [
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Bash(git *)",
+      "Bash(python *)",
+      "Bash(poetry *)",
+      "Bash(pytest *)"
+    ],
+    "disallowed_tools": [
+      "Bash(git push *)",
+      "Bash(git push:*)",
+      "Bash(gh pr merge *)",
+      "Bash(gh pr create *)"
+    ]
+  }
+}

@@ -4,7 +4,7 @@ title: Slash Commands
 scope: project
 description: Every slash command apiary installs, generated from the command files' frontmatter
 framework_version: "1.0"
-last_verified: "2026-09-10"
+last_verified: "2026-09-11"
 ---
 
 # Slash Commands
@@ -37,6 +37,7 @@ longer note has been written here.
 | `/review` | `docs/commands/review.md` | Review changed code for standards conformance, quality, and efficiency, then fix any issues found |
 | `/review-learnings` | `scribe/commands/review-learnings.md` | Walk through all learnings grouped by tag, archive or supersede stale entries, stamp last_review timestamp |
 | `/runner-prep` | `runner/commands/runner-prep.md` | Audit active scribe todos and prepare automation-ready intake JSONs for the runner pipeline, with dependency ordering and safety classification |
+| `/telephone` | `telephone/commands/telephone.md` | Ask another registered repo a question, or have it do a piece of work, without leaving this session |
 | `/wrapup` | `core/commands/wrapup.md` | Commit, capture learnings + TODOs, and generate a session handoff note |
 <!-- generated:end: slash-commands -->
 

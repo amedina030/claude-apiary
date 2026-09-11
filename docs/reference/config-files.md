@@ -189,6 +189,37 @@ column is hand-written.
 | `context_chars` | int | `40` | Characters of surrounding text kept on each side of a finding |
 <!-- generated:end: config:prose/config.json -->
 
+## telephone/config.json
+
+Per-mode limits and tool grants for a cross-repo call, read by
+`telephone/store.py`'s `load_config`. A missing or malformed file falls back to
+the in-module `DEFAULT_CONFIG`, and a file that sets only part of a mode block
+keeps the shipped values for the rest. There is no per-repo override: the caps
+exist to bound what an unattended session in another repo can do, so a repo
+cannot raise its own.
+
+The Field / Type / Default columns below are **generated from the shipped
+`telephone/config.json`** by `docs/generate_reference.py`. Only the Description
+column is hand-written.
+
+<!-- generated:start: config:telephone/config.json -->
+| Section | Field | Type | Default | Description |
+|-------|-----|----|-------|-----------|
+|  | `max_autonomous_calls_per_session` | int | `3` | Calls one session may place without the user typing `/telephone`. The count lives in a `session-tmp` flag file, not in the model's head |
+|  | `max_autonomous_exchanges_per_line` | int | `6` | Exchanges one call may reach before a follow-up without a grant is refused and the model is told to bring the thread to the user |
+|  | `model` | string | `""` | Model for every callee run. Empty means the claude CLI's own default. `--model` overrides it per call |
+| `answer` | `timeout_seconds` | int | `600` | Wall-clock limit for an answer-mode run before it is killed and the record is marked `timed_out` |
+| `answer` | `max_turns` | int | `30` | Agentic turns the callee gets, passed as `--max-turns` |
+| `answer` | `permission_mode` | string | `""` | Empty sends no `--permission-mode`, so the callee's only grants are the ones below |
+| `answer` | `allowed_tools` | array | `["Read", "Glob", "Grep", "Bash(git log *)", "Bash(git show *)", "Bash(git status *)", "Bash(git diff *)", "Bash(python *)"]` | Read-only exploration. The callee's own `permissions.allow` does not apply in an untrusted workspace, so a headless call gets what it needs here |
+| `answer` | `disallowed_tools` | array | `["Write", "Edit", "NotebookEdit", "Bash(git push *)", "Bash(git push:*)", "Bash(git commit *)", "Bash(git commit:*)", "Bash(gh pr merge *)", "Bash(gh pr create *)"]` | A deny at any level beats an allow at every other level, so answer mode cannot write, commit, push or open a pull request |
+| `act` | `timeout_seconds` | int | `1800` | Wall-clock limit for an act-mode run |
+| `act` | `max_turns` | int | `150` | Agentic turns the callee gets, the same ceiling the runner's executor uses |
+| `act` | `permission_mode` | string | `"acceptEdits"` | Sent as `--permission-mode`, because a headless run has no one to answer a prompt |
+| `act` | `allowed_tools` | array | `["Read", "Edit", "Write", "Glob", "Grep", "Bash(git *)", "Bash(python *)", "Bash(poetry *)", "Bash(pytest *)"]` | File tools plus the command families an act call needs to branch, test and commit |
+| `act` | `disallowed_tools` | array | `["Bash(git push *)", "Bash(git push:*)", "Bash(gh pr merge *)", "Bash(gh pr create *)"]` | An unattended session in another repo must never publish. The CLI also compares the callee's remote tracking refs before and after, and records `issue: push detected` when one moved |
+<!-- generated:end: config:telephone/config.json -->
+
 ## .claude/prose.json (per-project)
 
 Optional per-repo override for the prose linter, same keys as `prose/config.json`. Hand-authored. Unlike `.claude/budgeter.json` it **is** merged: only the keys present override the shipped defaults. The usual uses are `disabled_rules` and a narrower `include_globs`.
