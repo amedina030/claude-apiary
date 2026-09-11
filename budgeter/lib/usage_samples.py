@@ -43,6 +43,23 @@ WINDOWS = ("five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet")
 
 _DEFAULT_SAMPLES_PATH = SAMPLES_PATH
 _TAIL_BYTES = 4096
+SAMPLES_PATH_ENV = "APIARY_BUDGETER_SAMPLES_PATH"
+
+
+def samples_path(path: Optional[Path] = None) -> Path:
+    """Which samples file to act on: explicit *path*, else the
+    ``APIARY_BUDGETER_SAMPLES_PATH`` override, else the default.
+
+    The override exists because the PreToolUse usage nudge reads this file
+    with no path of its own to pass — hook tests set the env var so they
+    read a fixture instead of the developer's real usage log. It redirects
+    readers and writers alike, so a redirected sampler stays self-consistent;
+    the isolation guard below still fires when nothing redirected it.
+    """
+    if path is not None:
+        return Path(path)
+    override = os.environ.get(SAMPLES_PATH_ENV, "").strip()
+    return Path(override) if override else SAMPLES_PATH
 
 
 def _assert_isolated_in_test_mode(path: Path) -> None:
@@ -103,9 +120,16 @@ def parse_ts(value) -> Optional[datetime]:
     return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
 
 
-def last_sample_ts(path: Optional[Path] = None) -> Optional[datetime]:
-    """Timestamp of the last well-formed sample, reading only the file's tail."""
-    target = Path(path or SAMPLES_PATH)
+def latest_sample(path: Optional[Path] = None) -> Optional[dict]:
+    """The newest well-formed sample, with its parsed ``_ts``, or None.
+
+    Reads only the file's tail, so a caller on the path of every monitored
+    tool call (the PreToolUse usage nudge) never pays for the whole log. A
+    truncated first line in the tail window simply fails to parse and is
+    skipped, which is why the scan walks backwards line by line rather than
+    trusting the window's first newline.
+    """
+    target = samples_path(path)
     try:
         size = target.stat().st_size
         with open(target, "rb") as fh:
@@ -121,10 +145,20 @@ def last_sample_ts(path: Optional[Path] = None) -> Optional[datetime]:
             rec = json.loads(line)
         except json.JSONDecodeError:
             continue
-        ts = parse_ts(rec.get("ts")) if isinstance(rec, dict) else None
-        if ts is not None:
-            return ts
+        if not isinstance(rec, dict):
+            continue
+        ts = parse_ts(rec.get("ts"))
+        if ts is None:
+            continue
+        rec["_ts"] = ts
+        return rec
     return None
+
+
+def last_sample_ts(path: Optional[Path] = None) -> Optional[datetime]:
+    """Timestamp of the last well-formed sample, reading only the file's tail."""
+    rec = latest_sample(path)
+    return rec["_ts"] if rec is not None else None
 
 
 def is_due(
@@ -148,7 +182,7 @@ def record_sample(
     path: Optional[Path] = None,
 ) -> Optional[dict]:
     """Append one sample; returns the record, or None if it could not be written."""
-    target = Path(path or SAMPLES_PATH)
+    target = samples_path(path)
     _assert_isolated_in_test_mode(target)
     now = now or datetime.now(timezone.utc)
     record = {"ts": now.astimezone(timezone.utc).isoformat(), "source": source, **compact(payload)}
@@ -171,7 +205,7 @@ def record_if_due(
     path: Optional[Path] = None,
 ) -> Optional[dict]:
     """For callers that already hold a payload (the GUI poller)."""
-    target = Path(path or SAMPLES_PATH)
+    target = samples_path(path)
     _assert_isolated_in_test_mode(target)
     if not isinstance(payload, dict) or not is_due(min_interval_s, now, target):
         return None
@@ -190,7 +224,7 @@ def sample_if_due(
     The isolation guard runs before *fetch*, so a hook test can never reach
     the network by accident.
     """
-    target = Path(path or SAMPLES_PATH)
+    target = samples_path(path)
     _assert_isolated_in_test_mode(target)
     if not is_due(min_interval_s, now, target):
         return None
@@ -206,7 +240,7 @@ def sample_if_due(
 
 def iter_samples(path: Optional[Path] = None, since: Optional[datetime] = None) -> Iterator[dict]:
     """Yield well-formed samples in file order, each with a parsed ``_ts``."""
-    target = Path(path or SAMPLES_PATH)
+    target = samples_path(path)
     try:
         with open(target, encoding="utf-8", errors="replace") as fh:
             for line in fh:

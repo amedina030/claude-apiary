@@ -8,6 +8,11 @@
   "session_warn_soft_tokens": 600000,
   "session_warn_hard_tokens": 800000,
   "usage_sample_interval_seconds": 300,
+  "usage_warn_five_hour_soft_pct": 75,
+  "usage_warn_five_hour_hard_pct": 90,
+  "usage_warn_seven_day_soft_pct": 75,
+  "usage_warn_seven_day_hard_pct": 90,
+  "usage_warn_max_sample_age_seconds": 1800,
   "model_weights": {
     "claude-fable-5-1": {
       "input": 10.0,

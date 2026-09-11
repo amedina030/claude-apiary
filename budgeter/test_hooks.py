@@ -10,6 +10,8 @@ Covers:
   - Agent PostToolUse: logs Agent token cost from tool_response.totalTokens
   - No double-count: PRE skips logging when prev_tool_name == "Agent"
   - Session-length nudge tiers, and its one-shot behaviour in the PRE hook
+  - Usage-limit nudge: thresholds, staleness guards, and its one-shot /
+    re-arm behaviour in the PRE hook
   - Reading log entries written before the warning feature was deleted
 """
 
@@ -448,6 +450,70 @@ def main():
         test_session_length_nudge_skipped_when_session_warn_disabled(tmp_path)
         print("OK")
 
+        print("Unit: usage nudge below threshold .............. ", end="")
+        test_usage_limit_nudge_below_threshold(tmp_path)
+        print("OK")
+
+        print("Unit: usage nudge soft/hard tiers .............. ", end="")
+        test_usage_limit_nudge_soft_and_hard_tiers(tmp_path)
+        print("OK")
+
+        print("Unit: usage nudge both windows ................. ", end="")
+        test_usage_limit_nudge_reports_both_windows_independently(tmp_path)
+        print("OK")
+
+        print("Unit: usage nudge ignores stale sample ......... ", end="")
+        test_usage_limit_nudge_ignores_stale_sample(tmp_path)
+        print("OK")
+
+        print("Unit: usage nudge skips window past reset ...... ", end="")
+        test_usage_limit_nudge_skips_window_past_its_reset(tmp_path)
+        print("OK")
+
+        print("Unit: usage nudge malformed input .............. ", end="")
+        test_usage_limit_nudge_handles_missing_and_malformed(tmp_path)
+        print("OK")
+
+        print("Unit: usage nudge unparseable reset ............ ", end="")
+        test_usage_limit_nudge_unparseable_reset_still_warns(tmp_path)
+        print("OK")
+
+        print("Unit: usage nudge configurable thresholds ...... ", end="")
+        test_usage_limit_nudge_thresholds_are_configurable(tmp_path)
+        print("OK")
+
+        print("Unit: usage nudge ignores model sub-meters ..... ", end="")
+        test_usage_limit_nudge_ignores_model_specific_windows(tmp_path)
+        print("OK")
+
+        print("Unit: latest_sample reads newest ............... ", end="")
+        test_latest_sample_reads_newest_and_skips_malformed(tmp_path)
+        print("OK")
+
+        print("Unit: samples path env override ................ ", end="")
+        test_samples_path_env_override(tmp_path)
+        print("OK")
+
+        print("Integration: usage nudge fires once ............ ", end="")
+        test_usage_nudge_fires_and_is_one_shot(tmp_path)
+        print("OK")
+
+        print("Integration: usage nudge re-arms on reset ...... ", end="")
+        test_usage_nudge_rearms_when_the_window_resets(tmp_path)
+        print("OK")
+
+        print("Integration: usage nudge kill switch ........... ", end="")
+        test_usage_nudge_silenced_by_kill_switch(tmp_path)
+        print("OK")
+
+        print("Integration: usage nudge skipped if detached ... ", end="")
+        test_usage_nudge_skipped_when_detached(tmp_path)
+        print("OK")
+
+        print("Integration: usage nudge with no samples file .. ", end="")
+        test_usage_nudge_absent_when_no_samples_file(tmp_path)
+        print("OK")
+
         print("Unit: cumulative tokens dedupe + cache creation . ", end="")
         test_cumulative_tokens_dedupes_by_message_id_and_counts_cache_creation(tmp_path)
         print("OK")
@@ -657,6 +723,297 @@ def test_session_length_nudge_skipped_when_session_warn_disabled(tmp_path):
     assert "Session context" not in ctx, (
         f"Nudge must not fire when session-warn disabled; got: {ctx!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Usage-limit nudge: the pure heuristic
+# ---------------------------------------------------------------------------
+
+
+def _sample(five=None, seven=None, age_s=0, reset_in_s=3600, now=None):
+    """A usage sample as ``latest_sample`` returns it — parsed ``_ts`` included.
+
+    *five* / *seven* are utilization percentages; None omits the window.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    now = now or datetime.now(timezone.utc)
+    resets_at = (now + timedelta(seconds=reset_in_s)).isoformat()
+    rec = {"_ts": now - timedelta(seconds=age_s), "source": "test"}
+    for key, util in (("five_hour", five), ("seven_day", seven)):
+        rec[key] = None if util is None else {"utilization": util, "resets_at": resets_at}
+    return rec
+
+
+def test_usage_limit_nudge_below_threshold(tmp_path):
+    """Under the soft threshold on both windows returns nothing."""
+    from budgeter.lib.estimator import usage_limit_nudge
+
+    assert usage_limit_nudge(_sample(five=10, seven=20), {}) == []
+    assert usage_limit_nudge(_sample(five=74.9, seven=74.9), {}) == []
+
+
+def test_usage_limit_nudge_soft_and_hard_tiers(tmp_path):
+    """75 is soft, 90 is hard, and the message names the window and number."""
+    from budgeter.lib.estimator import usage_limit_nudge
+
+    (soft,) = usage_limit_nudge(_sample(five=75), {})
+    assert (soft.window, soft.tier) == ("five_hour", "soft")
+    assert "5-hour limit at 75%" in soft.message
+    assert "resets" in soft.message
+
+    (hard,) = usage_limit_nudge(_sample(five=91.4), {})
+    assert (hard.window, hard.tier) == ("five_hour", "hard")
+    assert "5-hour limit at 91%" in hard.message
+
+
+def test_usage_limit_nudge_reports_both_windows_independently(tmp_path):
+    """A healthy 5-hour window does not suppress a spent 7-day one."""
+    from budgeter.lib.estimator import usage_limit_nudge
+
+    nudges = usage_limit_nudge(_sample(five=12, seven=95), {})
+    assert [(n.window, n.tier) for n in nudges] == [("seven_day", "hard")]
+
+    nudges = usage_limit_nudge(_sample(five=80, seven=95), {})
+    assert [(n.window, n.tier) for n in nudges] == [
+        ("five_hour", "soft"),
+        ("seven_day", "hard"),
+    ]
+
+
+def test_usage_limit_nudge_ignores_stale_sample(tmp_path):
+    """A sample older than the max age is not worth warning from."""
+    from budgeter.lib.estimator import usage_limit_nudge
+
+    assert usage_limit_nudge(_sample(five=99, age_s=1801), {}) == []
+    assert usage_limit_nudge(_sample(five=99, age_s=1799), {}) != []
+    # Configurable.
+    cfg = {"usage_warn_max_sample_age_seconds": 60}
+    assert usage_limit_nudge(_sample(five=99, age_s=61), cfg) == []
+
+
+def test_usage_limit_nudge_skips_window_past_its_reset(tmp_path):
+    """A window whose resets_at has passed reports the *previous* window's
+    high-water mark — the number most likely to produce a wrong warning."""
+    from budgeter.lib.estimator import usage_limit_nudge
+
+    assert usage_limit_nudge(_sample(five=99, reset_in_s=-1), {}) == []
+    # The other window is unaffected: only the expired one drops out.
+    rolled = _sample(five=99, seven=99, reset_in_s=-1)
+    rolled["seven_day"]["resets_at"] = _sample(seven=1)["seven_day"]["resets_at"]
+    assert [n.window for n in usage_limit_nudge(rolled, {})] == ["seven_day"]
+
+
+def test_usage_limit_nudge_handles_missing_and_malformed(tmp_path):
+    """Anything we cannot substantiate yields no warning rather than a guess."""
+    from budgeter.lib.estimator import usage_limit_nudge
+
+    assert usage_limit_nudge(None, {}) == []
+    assert usage_limit_nudge({}, {}) == []
+    assert usage_limit_nudge({"_ts": "not-a-datetime", "five_hour": {}}, {}) == []
+    # Window present but utilization missing or non-numeric.
+    bad = _sample(five=99)
+    bad["five_hour"]["utilization"] = None
+    assert usage_limit_nudge(bad, {}) == []
+    bad["five_hour"]["utilization"] = "99"
+    assert usage_limit_nudge(bad, {}) == []
+    # Booleans are ints in Python; they are not a utilization.
+    bad["five_hour"]["utilization"] = True
+    assert usage_limit_nudge(bad, {}) == []
+
+
+def test_usage_limit_nudge_unparseable_reset_still_warns(tmp_path):
+    """No reset time is a reason to say less, not to stay silent."""
+    from budgeter.lib.estimator import usage_limit_nudge
+
+    sample = _sample(five=99)
+    sample["five_hour"]["resets_at"] = None
+    (nudge,) = usage_limit_nudge(sample, {})
+    assert "5-hour limit at 99%" in nudge.message
+    assert "resets" not in nudge.message
+    assert nudge.resets_at == ""
+
+
+def test_usage_limit_nudge_thresholds_are_configurable(tmp_path):
+    """Per-window config keys override the defaults."""
+    from budgeter.lib.estimator import usage_limit_nudge
+
+    cfg = {"usage_warn_five_hour_soft_pct": 10, "usage_warn_five_hour_hard_pct": 20}
+    assert usage_limit_nudge(_sample(five=9), cfg) == []
+    assert usage_limit_nudge(_sample(five=15), cfg)[0].tier == "soft"
+    assert usage_limit_nudge(_sample(five=25), cfg)[0].tier == "hard"
+    # The 7-day window keeps its own defaults.
+    assert usage_limit_nudge(_sample(seven=15), cfg) == []
+
+
+def test_usage_limit_nudge_ignores_model_specific_windows(tmp_path):
+    """seven_day_opus / seven_day_sonnet are deliberately not covered."""
+    from budgeter.lib.estimator import usage_limit_nudge
+
+    sample = _sample(five=1, seven=1)
+    sample["seven_day_opus"] = dict(sample["five_hour"], utilization=99)
+    sample["seven_day_sonnet"] = dict(sample["five_hour"], utilization=99)
+    assert usage_limit_nudge(sample, {}) == []
+
+
+def test_latest_sample_reads_newest_and_skips_malformed(tmp_path):
+    """The reader walks the tail backwards past junk to the newest good line."""
+    from budgeter.lib import usage_samples
+
+    path = tmp_path / "usage_samples.jsonl"
+    path.write_text(
+        '{"ts": "2026-09-11T10:00:00+00:00", "five_hour": {"utilization": 10}}\n'
+        '{"ts": "2026-09-11T11:00:00+00:00", "five_hour": {"utilization": 40}}\n'
+        "not json at all\n"
+        "[1, 2, 3]\n"
+        '{"no_ts": true}\n',
+        encoding="utf-8",
+    )
+    rec = usage_samples.latest_sample(path)
+    assert rec["five_hour"]["utilization"] == 40
+    assert rec["_ts"].isoformat() == "2026-09-11T11:00:00+00:00"
+    assert usage_samples.last_sample_ts(path) == rec["_ts"]
+    assert usage_samples.latest_sample(tmp_path / "nope.jsonl") is None
+
+
+def test_samples_path_env_override(tmp_path):
+    """The env override redirects the reader away from the production file."""
+    from budgeter.lib import usage_samples
+
+    fixture = tmp_path / "elsewhere.jsonl"
+    prev = os.environ.get(usage_samples.SAMPLES_PATH_ENV)
+    os.environ[usage_samples.SAMPLES_PATH_ENV] = str(fixture)
+    try:
+        assert usage_samples.samples_path() == fixture
+        assert usage_samples.samples_path(tmp_path / "explicit.jsonl") != fixture
+    finally:
+        if prev is None:
+            os.environ.pop(usage_samples.SAMPLES_PATH_ENV, None)
+        else:
+            os.environ[usage_samples.SAMPLES_PATH_ENV] = prev
+    assert usage_samples.samples_path() == usage_samples.SAMPLES_PATH
+
+
+# ---------------------------------------------------------------------------
+# Usage-limit nudge: the PRE hook
+# ---------------------------------------------------------------------------
+
+
+def _write_samples_file(tmp_path, name, *, five=None, seven=None, reset_in_s=3600, age_s=0):
+    """A one-line samples fixture for the hook to read via the env override."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    rec = {"ts": (now - timedelta(seconds=age_s)).isoformat(), "source": "test"}
+    resets_at = (now + timedelta(seconds=reset_in_s)).isoformat()
+    for key, util in (("five_hour", five), ("seven_day", seven)):
+        rec[key] = None if util is None else {"utilization": util, "resets_at": resets_at}
+    path = tmp_path / name
+    path.write_text(json.dumps(rec) + "\n", encoding="utf-8")
+    return path
+
+
+def _usage_payload(tmp_path, project_dir, session_id):
+    return {
+        "tool_name": "Bash",
+        "session_id": session_id,
+        "transcript_path": str(_write_transcript(tmp_path, input_tokens=10)),
+        "cwd": str(project_dir),
+    }
+
+
+def test_usage_nudge_fires_and_is_one_shot(tmp_path):
+    """On by default, and it does not repeat for the same window and reset."""
+    project_dir = make_test_project(tmp_path / "project_usage_fires")
+    session_id = make_session_id()
+    samples = _write_samples_file(tmp_path, "fires.jsonl", five=93)
+    payload = _usage_payload(tmp_path, project_dir, session_id)
+    env = {"APIARY_BUDGETER_SAMPLES_PATH": str(samples)}
+
+    # No flag file enables this — it is on by default, unlike session-warn.
+    assert not flag_file(project_dir, "budgeter-usage-warn-off").exists()
+    r = run_hook("pre_tool_use.py", payload, env_extra=env)
+    assert r.returncode == 0, f"PRE failed: {r.stderr}"
+    ctx = _extract_additional_context(r.stdout)
+    assert "5-hour limit at 93%" in ctx, f"expected usage nudge; got: {ctx!r}"
+
+    r = run_hook("pre_tool_use.py", payload, env_extra=env)
+    assert r.returncode == 0, f"PRE failed: {r.stderr}"
+    assert "5-hour limit" not in _extract_additional_context(r.stdout), (
+        "usage nudge must fire only once per window/tier/reset"
+    )
+
+
+def test_usage_nudge_rearms_when_the_window_resets(tmp_path):
+    """A session outliving its 5-hour window warns again in the next one."""
+    project_dir = make_test_project(tmp_path / "project_usage_rearm")
+    session_id = make_session_id()
+    payload = _usage_payload(tmp_path, project_dir, session_id)
+
+    first = _write_samples_file(tmp_path, "rearm_a.jsonl", five=93, reset_in_s=600)
+    r = run_hook("pre_tool_use.py", payload, env_extra={"APIARY_BUDGETER_SAMPLES_PATH": str(first)})
+    assert "5-hour limit at 93%" in _extract_additional_context(r.stdout)
+
+    # Same tier, new window: a different resets_at must re-arm the sentinel.
+    second = _write_samples_file(tmp_path, "rearm_b.jsonl", five=95, reset_in_s=18000)
+    r = run_hook(
+        "pre_tool_use.py", payload, env_extra={"APIARY_BUDGETER_SAMPLES_PATH": str(second)}
+    )
+    assert r.returncode == 0, f"PRE failed: {r.stderr}"
+    assert "5-hour limit at 95%" in _extract_additional_context(r.stdout), (
+        "nudge must re-arm once the window it fired for has rolled over"
+    )
+
+
+def test_usage_nudge_silenced_by_kill_switch(tmp_path):
+    """budgeter-usage-warn-off suppresses it for the repo."""
+    project_dir = make_test_project(tmp_path / "project_usage_off")
+    session_id = make_session_id()
+    samples = _write_samples_file(tmp_path, "off.jsonl", five=99, seven=99)
+    payload = _usage_payload(tmp_path, project_dir, session_id)
+
+    _with_flag_enabled("budgeter-usage-warn-off", project_dir)
+    r = run_hook(
+        "pre_tool_use.py", payload, env_extra={"APIARY_BUDGETER_SAMPLES_PATH": str(samples)}
+    )
+    assert r.returncode == 0, f"PRE failed: {r.stderr}"
+    ctx = _extract_additional_context(r.stdout)
+    assert "limit at" not in ctx, f"kill switch must silence the nudge; got: {ctx!r}"
+
+
+def test_usage_nudge_skipped_when_detached(tmp_path):
+    """Headless runner subprocesses have nobody to tell."""
+    project_dir = make_test_project(tmp_path / "project_usage_detached")
+    session_id = make_session_id()
+    samples = _write_samples_file(tmp_path, "detached.jsonl", five=99)
+    payload = _usage_payload(tmp_path, project_dir, session_id)
+
+    r = run_hook(
+        "pre_tool_use.py",
+        payload,
+        env_extra={
+            "APIARY_BUDGETER_SAMPLES_PATH": str(samples),
+            "APIARY_RUNNER_SUBPROCESS": "1",
+        },
+    )
+    assert r.returncode == 0, f"PRE failed: {r.stderr}"
+    ctx = _extract_additional_context(r.stdout)
+    assert "limit at" not in ctx, f"nudge must not fire in detached runner; got: {ctx!r}"
+
+
+def test_usage_nudge_absent_when_no_samples_file(tmp_path):
+    """A machine that has never sampled gets silence, not a crash."""
+    project_dir = make_test_project(tmp_path / "project_usage_nofile")
+    session_id = make_session_id()
+    payload = _usage_payload(tmp_path, project_dir, session_id)
+
+    r = run_hook(
+        "pre_tool_use.py",
+        payload,
+        env_extra={"APIARY_BUDGETER_SAMPLES_PATH": str(tmp_path / "missing.jsonl")},
+    )
+    assert r.returncode == 0, f"PRE failed: {r.stderr}"
+    assert "limit at" not in _extract_additional_context(r.stdout)
 
 
 # ---------------------------------------------------------------------------

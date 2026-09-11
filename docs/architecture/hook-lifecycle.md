@@ -2,9 +2,9 @@
 type: architecture
 title: Hook Lifecycle
 scope: budgeter
-description: PRE-to-PRE delta pattern, the Agent special case, task attribution, baselines and the session-length nudge
+description: PRE-to-PRE delta pattern, the Agent special case, task attribution, baselines, and the session-length and usage-limit nudges
 framework_version: "1.0"
-last_verified: "2026-09-05"
+last_verified: "2026-09-11"
 ---
 
 # Hook Lifecycle
@@ -104,10 +104,11 @@ by the fetcher's 5-second timeout, and refused outright under
 
 ## Warnings
 
-There are none any more, beyond the session-length nudge below. The
-rule-based "this task looks expensive" warning was measured at 9% precision
-over 3,717 tasks against a 25% base rate and deleted in the 2026-08 review,
-along with `budgeter/tune.py`, the feedback log and the `budgeter-warn` flag.
+The two nudges below are the whole of it. Both warn about a ceiling that has
+been measured, never about a prediction. The rule-based "this task looks
+expensive" warning was measured at 9% precision over 3,717 tasks against a
+25% base rate and deleted in the 2026-08 review, along with
+`budgeter/tune.py`, the feedback log and the `budgeter-warn` flag.
 
 ## Session-length nudge
 
@@ -120,3 +121,46 @@ the suggestion is only actionable in a live session.
 
 **Files:** `budgeter/lib/estimator.py` (`session_length_nudge`),
 `budgeter/config.json` (thresholds)
+
+## Usage-limit nudge
+
+The session-length nudge measures how full the context window is. This one
+measures how much of the subscription is left, which is the other ceiling a
+long session runs into.
+
+On each PRE the hook reads the newest line of
+`budgeter/data/usage_samples.jsonl` and compares the `five_hour` and
+`seven_day` utilizations against `usage_warn_<window>_soft_pct` and
+`usage_warn_<window>_hard_pct`. Each window warns independently, so a spent
+7-day limit still surfaces during a fresh 5-hour one. The model-specific
+`seven_day_opus` and `seven_day_sonnet` sub-meters are deliberately not
+covered: they move with whichever model is in use, and a warning about a
+meter you are not drawing down is noise.
+
+It reads the sample file rather than calling the usage endpoint. A fetch
+carries the fetcher's 5-second timeout, and paying that on the path of every
+monitored tool call is not a trade worth making. The Stop hook already
+refreshes the file at the end of every turn, so the cost is only that within
+one long turn the number is frozen at the turn's start.
+
+Reading a file instead of fetching means the sample can describe a world that
+no longer exists, so two staleness guards apply. A sample older than
+`usage_warn_max_sample_age_seconds` is ignored outright. A window whose
+`resets_at` has already passed is skipped individually, because its
+utilization is the previous window's high-water mark and would otherwise
+produce a confident, wrong warning.
+
+Unlike the session-length nudge this is **on by default** in every repo. The
+limits are per account, so a per-repo opt-in would leave most repos silent
+about a ceiling that stops work everywhere. The `budgeter-usage-warn-off`
+flag silences it per repo, matching the sampler's kill switch.
+`APIARY_RUNNER_SUBPROCESS=1` skips it for the same reason the session nudge
+does: there is nobody there to act on it.
+
+The per-session sentinel stores the `resets_at` it fired for, so a sample
+carrying a new reset time re-arms the nudge. A session that outlives its
+5-hour window therefore warns again in the next one.
+
+**Files:** `budgeter/lib/estimator.py` (`usage_limit_nudge`),
+`budgeter/lib/usage_samples.py` (`latest_sample`), `budgeter/config.json`
+(thresholds)
