@@ -17,11 +17,20 @@ argument: `log` or `session-warn`.
 Each flag is a sentinel file at `<repo>/.claude/apiary/flags/<flag-name>-enabled`.
 Toggles are per-repo and persist across sessions.
 
-Usage-limit sampling (the Stop hook recording the 5-hour and 7-day
-utilization to `budgeter/data/usage_samples.jsonl`) is on by default and is
-not in the table: the numbers are per account, not per repo. If a user asks to
-silence it in a repo, enable the kill switch instead of toggling:
-`core/flags.py enable budgeter-usage-sample-off` (disable it to resume).
+Two usage-limit features are on by default and are not in the table above:
+the numbers are per account, not per repo, so a per-repo opt-in would leave
+most repos silent about a ceiling that stops work everywhere. Each is
+controlled by a kill switch you enable to turn the feature off.
+
+| Feature | Kill switch | What it does |
+|---------|-------------|--------------|
+| Sampling | `budgeter-usage-sample-off` | The Stop hook records the 5-hour and 7-day utilization to `budgeter/data/usage_samples.jsonl` |
+| Warning | `budgeter-usage-warn-off` | The PreToolUse hook warns once per window when the newest sample crosses the `usage_warn_*_pct` thresholds in `budgeter/config.json` |
+
+To silence one in a repo, enable its switch, for example `core/flags.py
+enable budgeter-usage-warn-off`. Disable the switch to resume. Watch the
+inversion when reporting state back: a kill switch reading `ON` means the
+feature is **off**.
 
 ## Steps
 
