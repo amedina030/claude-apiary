@@ -614,3 +614,34 @@ class GitignoreSemanticsTests(unittest.TestCase):
             "a blanket .claude/ should defeat the re-include — if this fails, "
             "git's semantics changed and the stepwise block may be unnecessary",
         )
+
+
+class CommandSourceCoverageTests(unittest.TestCase):
+    """Every ``<tool>/commands/*.md`` in this checkout must reach the installer.
+
+    ``_slash_command_sources`` is an allowlist of tool directories. A tool that
+    ships a slash command but is missing from the list is installed nowhere,
+    and ``doctor stale`` cannot notice because it hashes the same list. The
+    ``/prose`` skill sat in that gap for a day after PR #59.
+    """
+
+    def test_every_tool_commands_dir_is_in_the_source_list(self):
+        yielded = {p.resolve() for p in install_mod._slash_command_sources(REPO_ROOT)}
+        on_disk = {
+            p.resolve()
+            for p in REPO_ROOT.glob("*/commands/*.md")
+            if not p.parts[-3].startswith(".")
+        }
+        missing = sorted(str(p.relative_to(REPO_ROOT)) for p in on_disk - yielded)
+        self.assertEqual(missing, [], f"commands not reached by the installer: {missing}")
+
+    def test_the_testing_mirror_matches_the_installer(self):
+        from core.testing import COMMAND_TOOLS
+
+        with tempfile.TemporaryDirectory() as tmp:
+            apiary = Path(tmp)
+            for tool in COMMAND_TOOLS:
+                (apiary / tool / "commands").mkdir(parents=True)
+                (apiary / tool / "commands" / f"{tool}.md").write_text("x", encoding="utf-8")
+            names = {p.parts[-3] for p in install_mod._slash_command_sources(apiary)}
+        self.assertEqual(names, set(COMMAND_TOOLS))
