@@ -35,7 +35,10 @@
   edit another repo, and a hook that fails open leaves act refused. A grant
   is good for the repo the user named and for `grant_ttl_seconds` (900), and
   it is spent only by a call that runs, so a refused call keeps it for the
-  retry. The CLI creates the work branch `telephone/<call-id>` in the callee
+  retry. The CLI learns its own session from `CLAUDE_CODE_SESSION_ID`, which
+  Claude Code exports to every Bash tool process, rather than from the newest
+  identity file on the repo, which named another session the first time a
+  typed call was tried live. The CLI creates the work branch `telephone/<call-id>` in the callee
   before the run and switches the checkout back afterwards when the tree is
   clean, so branch discipline does not depend on the callee following its
   preamble. Uncommitted work stays on the branch and is recorded as an issue.

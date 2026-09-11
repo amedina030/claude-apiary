@@ -851,6 +851,41 @@ class TestAutonomousCaps(TelephoneCliTestCase):
         self.run_cli("call", "nonexistent-repo", "hi")
         self.assertEqual(self.counter(), 0)
 
+    def test_the_session_comes_from_the_claude_code_env_when_no_flag_is_passed(self):
+        # The Bash tool exports CLAUDE_CODE_SESSION_ID. That, not the newest
+        # identity file on the repo, is how the CLI finds the hook's grant.
+        self.grant()
+        code, out, err = self.run_cli(
+            "call", "callee", "hi", env={cli.SESSION_ENV_VAR: SESSION}, session=None
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("initiated_by=user", out)
+        self.assertEqual(self.counter(), 0)
+
+    def test_an_explicit_session_id_beats_the_env(self):
+        self.grant()
+        other = "99999999-0000-0000-0000-000000000000"
+        code, out, err = self.run_cli(
+            "call", "callee", "hi", env={cli.SESSION_ENV_VAR: SESSION}, session=other
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("initiated_by=model", out)
+
+    def test_no_session_at_all_is_autonomous_and_still_capped(self):
+        self.grant()
+        env = {k: v for k, v in os.environ.items() if k != cli.SESSION_ENV_VAR}
+        with mock.patch.dict(os.environ, env, clear=True):
+            for _ in range(3):
+                code, out, err = self.run_cli("call", "callee", "hi", session=None)
+                self.assertEqual(code, 0, err)
+                self.assertIn("initiated_by=model", out)
+            code, _out, err = self.run_cli("call", "callee", "one more", session=None)
+        self.assertEqual(code, 1)
+        self.assertIn("autonomous call cap reached", err)
+        self.assertTrue(list(self.flags.glob(f"{cli.NO_SESSION_KEY}_*")))
+        # The grant the hook wrote for the real session is untouched.
+        self.assertEqual(len(list(self.flags.glob(f"*_{user_prompt.GRANT_SUFFIX}"))), 1)
+
 
 class TestExchangeCap(TelephoneCliTestCase):
     def _record_with(self, exchanges: int, mode: str = store.MODE_ANSWER):

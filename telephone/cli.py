@@ -221,18 +221,28 @@ def caller_identity(apiary: Path) -> tuple[str, Path | None]:
 # --------------------------------------------------------------------------- #
 
 
+#: Claude Code exports the running session's id to every Bash tool process.
+#: It is the one deterministic way for a CLI outside the hook chain to know
+#: which session it serves. ``core.session.load_identity()`` was tried first
+#: and picked the most recently started session on the repo, which turned a
+#: user-typed call into an autonomous one the moment a second session had
+#: touched the checkout (seen live 2026-09-11).
+SESSION_ENV_VAR = "CLAUDE_CODE_SESSION_ID"
+
+#: Counter key when no session id is known at all, so the autonomous cap still
+#: applies to a CLI run from outside any session.
+NO_SESSION_KEY = "nosession"
+
+
 def session_prefix(explicit: str | None = None) -> str:
     """The caller session's 8-char id prefix, or ``""`` when none is known.
 
-    ``core.session.load_identity`` reads identity files named by the prefix, so
-    the prefix is all a CLI outside the hook chain can learn. The grant file the
-    hook wrote is named with the full uuid, which is why lookups below glob.
+    *explicit* (``--session-id``) wins, then :data:`SESSION_ENV_VAR`. Nothing
+    is guessed from identity files. The grant file the hook wrote is named
+    with the full uuid, which is why lookups below glob on the prefix.
     """
-    if explicit:
-        return explicit.strip()[:8].lower()
-    from core.session import load_identity
-
-    return str(load_identity().get("session_id") or "").strip()[:8].lower()
+    raw = (explicit or os.environ.get(SESSION_ENV_VAR) or "").strip()
+    return raw[:8].lower()
 
 
 def _flag_dir() -> Path:
@@ -327,15 +337,14 @@ def consume_grant(grant: dict | None) -> None:
 
 
 def _counter_path(prefix: str) -> Path:
-    existing = _flag_matches(prefix, COUNTER_SUFFIX)
+    key = prefix or NO_SESSION_KEY
+    existing = _flag_matches(key, COUNTER_SUFFIX)
     if existing:
         return existing[0]
-    return _flag_dir() / f"{prefix}_{COUNTER_SUFFIX}"
+    return _flag_dir() / f"{key}_{COUNTER_SUFFIX}"
 
 
 def auto_call_count(prefix: str) -> int:
-    if not prefix:
-        return 0
     try:
         return int(_counter_path(prefix).read_text(encoding="utf-8").strip() or 0)
     except (OSError, ValueError):
@@ -346,10 +355,9 @@ def bump_auto_calls(prefix: str) -> int:
     """Increment the session's autonomous-call count and return the new value.
 
     Same shape as ``core/hooks/compass_rules.py::bump_counter``: the count
-    lives on disk because a model cannot be asked to keep its own tally.
+    lives on disk because a model cannot be asked to keep its own tally. A
+    run with no session id at all shares the :data:`NO_SESSION_KEY` counter.
     """
-    if not prefix:
-        return 0
     path = _counter_path(prefix)
     count = auto_call_count(prefix) + 1
     try:

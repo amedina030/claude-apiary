@@ -207,7 +207,7 @@ column is hand-written.
 |-------|-----|----|-------|-----------|
 |  | `max_autonomous_calls_per_session` | int | `3` | Calls one session may place without the user typing `/telephone`. The count lives in a `session-tmp` flag file, not in the model's head |
 |  | `max_autonomous_exchanges_per_line` | int | `6` | Exchanges one call may reach before a follow-up without a grant is refused and the model is told to bring the thread to the user |
-|  | `grant_ttl_seconds` | int | `900` |  |
+|  | `grant_ttl_seconds` | int | `900` | How long a grant the `UserPromptSubmit` hook wrote stays usable. Older grants are deleted unread, so a typed command the model never acted on cannot be picked up later in the session |
 |  | `model` | string | `""` | Model for every callee run. Empty means the claude CLI's own default. `--model` overrides it per call |
 | `answer` | `timeout_seconds` | int | `600` | Wall-clock limit for an answer-mode run before it is killed and the record is marked `timed_out` |
 | `answer` | `max_turns` | int | `30` | Agentic turns the callee gets, passed as `--max-turns` |
