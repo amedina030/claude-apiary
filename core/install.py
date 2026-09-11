@@ -493,6 +493,7 @@ def _slash_command_sources(apiary: Path) -> Iterable[Path]:
         "runner",
         "incubator",
         "prose",
+        "telephone",
     ):
         cmd_dir = apiary / tool / "commands"
         if cmd_dir.is_dir():
