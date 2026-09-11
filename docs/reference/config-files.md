@@ -4,7 +4,7 @@ title: Config Files
 scope: project
 description: Every config file, with the key tables generated from the shipped JSON
 framework_version: "1.0"
-last_verified: "2026-09-10"
+last_verified: "2026-09-11"
 ---
 
 # Config Files
@@ -144,6 +144,11 @@ deliberately **absent from the shipped file** — their defaults live in
 |  | `session_warn_soft_tokens` | int | `600000` | Prompt size at which the session-length nudge suggests wrapping up |
 |  | `session_warn_hard_tokens` | int | `800000` | Prompt size at which it suggests starting a new session now |
 |  | `usage_sample_interval_seconds` | int | `300` | Minimum seconds between two usage-limit samples in `budgeter/data/usage_samples.jsonl`; the Stop hook and the GUI each check the last sample's age before recording |
+|  | `usage_warn_five_hour_soft_pct` | int | `75` | 5-hour limit utilization at which the usage nudge suggests preferring the cheaper path |
+|  | `usage_warn_five_hour_hard_pct` | int | `90` | 5-hour utilization at which it tells Claude to raise the limit with the user before going further |
+|  | `usage_warn_seven_day_soft_pct` | int | `75` | Same soft threshold for the 7-day limit. The model-specific `seven_day_opus` / `seven_day_sonnet` sub-meters are deliberately not warned on, since they move with whichever model is in use |
+|  | `usage_warn_seven_day_hard_pct` | int | `90` | Same hard threshold for the 7-day limit |
+|  | `usage_warn_max_sample_age_seconds` | int | `1800` | Ignore the newest usage sample once it is older than this. The nudge reads `usage_samples.jsonl` rather than fetching, so a stale sample may describe a window that has since reset |
 | `model_weights` | `claude-fable-5-1` | object | `{"input": 10.0, "output": 50.0, "cache_read": 0.25}` | Relative weight per million tokens used by `bill.py` and `usage_calibrate.py` to compare models (API list-price ratios, not a price); `cache_read` is an absolute rate here because Fable 5.1 prices cache reads flat |
 | `model_weights` | `claude-fable-5` | object | `{"input": 10.0, "output": 50.0}` | Same table, Fable 5; cache reads fall back to `cache_read_factor` x `input` |
 | `model_weights` | `claude-opus-5` | object | `{"input": 5.0, "output": 25.0}` | Same table, Opus 5 |

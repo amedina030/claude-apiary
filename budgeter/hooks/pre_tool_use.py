@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # claude-apiary root
 
-from budgeter.lib import estimator, logger
+from budgeter.lib import estimator, logger, usage_samples
 from core import flags
 from core.hook_context import HookResult, context_block, join_contexts, run_standalone
 from core.session import SessionId
@@ -158,11 +158,15 @@ def run(payload: dict):
 
     blocks = []
 
+    # Both nudges below are advice for a person, so neither fires in a headless
+    # runner subprocess: there is nobody there to act on it.
+    live_session = os.environ.get("APIARY_RUNNER_SUBPROCESS") != "1"
+
     # Session-length nudge: one-shot suggestion to wrap up when the current
     # prompt size crosses configured thresholds. Skipped for headless runner
     # subprocesses — the suggestion is only actionable in live sessions.
     session_warn_enabled = flags.is_enabled("budgeter-session-warn")
-    if session_warn_enabled and os.environ.get("APIARY_RUNNER_SUBPROCESS") != "1":
+    if session_warn_enabled and live_session:
         # Prompt size = everything the last call read: uncached input, cache
         # reads and cache writes. Leaving cache writes out read a full
         # context as nearly empty on a cache-miss turn (review B5).
@@ -179,6 +183,42 @@ def run(payload: dict):
                     blocks.append(context_block("budgeter", nudge_msg))
             except ValueError:
                 pass
+
+    # Usage-limit nudge: warns when the account's 5-hour or 7-day limit is
+    # running low. On by default, unlike session-warn — the limits are per
+    # account, so a per-repo opt-in would leave most repos silent about a
+    # ceiling that stops work everywhere. `budgeter-usage-warn-off` silences
+    # it, matching the sampler's kill switch.
+    #
+    # Reads the newest line of the sample file the Stop hook keeps warm rather
+    # than fetching: a 5 s network timeout on the path of every monitored tool
+    # call is not a trade worth making. The cost is that within one long turn
+    # the number is frozen at the turn's start, since only Stop refreshes it.
+    if live_session and not flags.is_enabled("budgeter-usage-warn-off"):
+        nudges = estimator.usage_limit_nudge(usage_samples.latest_sample(), config)
+        try:
+            sid_for_flag = SessionId(session_id) if nudges else None
+        except ValueError:
+            sid_for_flag = None
+        for nudge in nudges if sid_for_flag is not None else []:
+            # The sentinel holds the reset timestamp it fired for, so the nudge
+            # re-arms when the window rolls over instead of going quiet for the
+            # rest of a session that outlives it. "-" stands in for a missing
+            # reset time so that "no sentinel yet" stays distinguishable from
+            # "fired for a window with no known reset".
+            stamp = nudge.resets_at or "-"
+            flag_file = sid_for_flag.flag_path(f"budgeter_usage_{nudge.window}_{nudge.tier}_fired")
+            try:
+                fired_for = (
+                    flag_file.read_text(encoding="utf-8").strip() if flag_file.exists() else None
+                )
+                if fired_for == stamp:
+                    continue
+                flag_file.parent.mkdir(parents=True, exist_ok=True)
+                flag_file.write_text(stamp, encoding="utf-8")
+            except OSError:
+                continue
+            blocks.append(context_block("budgeter", nudge.message))
 
     return HookResult(context=join_contexts(*blocks) or None)
 

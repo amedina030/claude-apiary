@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- The budgeter now warns on subscription usage, not only on context length.
+  On each PreToolUse the hook reads the newest line of
+  `budgeter/data/usage_samples.jsonl` (already written by the Stop hook every
+  turn) and injects one advisory per window when `five_hour` or `seven_day`
+  utilization crosses `usage_warn_<window>_soft_pct` (75) or the matching
+  `_hard_pct` (90). It reads the file instead of fetching, which keeps the
+  endpoint's 5-second timeout off the path of every tool call. Two staleness
+  guards keep it honest: a sample older than
+  `usage_warn_max_sample_age_seconds` (1800) is ignored, and a window whose
+  `resets_at` has passed is skipped, because its utilization is the previous
+  window's high-water mark. The per-session sentinel stores the `resets_at`
+  it fired for, so a session outliving its 5-hour window warns again in the
+  next one. It is on by default in every repo, since the limits are per
+  account. The `budgeter-usage-warn-off` flag silences it per repo and
+  `APIARY_RUNNER_SUBPROCESS=1` skips it. The model-specific
+  `seven_day_opus` and `seven_day_sonnet` sub-meters are deliberately not
+  covered.
+
 - `apiary install` now copies `prose/commands/prose.md`. The installer's
   tool allowlist (`core/install._slash_command_sources`) had no `prose`
   entry, so the `/prose` skill from PR #59 reached no repo and `doctor
