@@ -30,6 +30,33 @@ class TestRunClaudeCommand(unittest.TestCase):
         self.assertEqual(rc, 1)
         return captured["cmd"]
 
+    def test_stream_json_adds_verbose_and_json_stays_bare(self):
+        from runner import claude_subprocess as cs
+
+        streamed = self._argv(output_format="stream-json")
+        self.assertEqual(streamed[1:6], ["-p", "-", "--output-format", "stream-json", "--verbose"])
+        plain = self._argv()
+        self.assertNotIn("--verbose", plain)
+        with self.assertRaises(ValueError):
+            cs.run_claude("hello", output_format="yaml")
+
+    def test_envelope_text_reads_both_output_formats(self):
+        from runner import claude_subprocess as cs
+
+        result = '{"type": "result", "result": "done", "usage": {"input_tokens": 1}}'
+        self.assertEqual(cs.envelope_text(result), result)
+        stream = "\n".join(
+            [
+                '{"type": "system", "subtype": "init"}',
+                '{"type": "assistant", "message": {"content": []}}',
+                result,
+                "",
+            ]
+        )
+        self.assertEqual(cs.envelope_text(stream), result)
+        self.assertEqual(cs.envelope_text('{"type": "assistant"}\nnot json\n'), "")
+        self.assertEqual(cs.envelope_text(""), "")
+
     def test_default_denies_git_push_and_caps_turns(self):
         from runner import claude_subprocess as cs
 

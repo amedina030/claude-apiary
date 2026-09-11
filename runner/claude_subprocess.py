@@ -41,6 +41,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from .config_loader import get as cfg
@@ -292,6 +293,63 @@ _FROM_CONFIG = object()
 #: Only reached on a timeout, and only when the caller asked for the partial.
 _PARTIAL_DRAIN_TIMEOUT = 15
 
+#: ``claude -p`` output formats this module knows how to read back.
+OUTPUT_FORMATS = ("json", "stream-json")
+
+
+def envelope_text(stdout: str) -> str:
+    """The result envelope in *stdout*, whichever output format produced it.
+
+    ``--output-format json`` prints one object, so the whole text is the
+    envelope. ``stream-json`` prints one event per line and the envelope is the
+    last ``"type": "result"`` line. Returns ``""`` when neither shape is found,
+    which is what :func:`emit_usage_xml` and :func:`describe_failure` treat as
+    "no envelope".
+    """
+    text = (stdout or "").strip()
+    if not text:
+        return ""
+    try:
+        whole = json.loads(text)
+    except ValueError:
+        whole = None
+    if isinstance(whole, dict):
+        return text
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("type") == "result":
+            return line
+    return ""
+
+
+def _kill_tree(proc: "subprocess.Popen") -> None:
+    """Kill *proc* and, on Windows, everything it spawned.
+
+    ``Popen.kill`` reaches only the direct child. When ``claude`` is an npm
+    ``claude.cmd`` shim that child is ``cmd.exe``, and the node process doing
+    the work survives the kill, holding the pipes open and the API call
+    running. ``taskkill /T`` walks the tree. The one platform branch in this
+    module, because process trees are the one thing the stdlib has no
+    portable spelling for.
+    """
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True,
+                timeout=15,
+            )
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass
+    proc.kill()
+
 
 def _run_capturing_partial(
     cmd: list[str],
@@ -321,7 +379,7 @@ def _run_capturing_partial(
     try:
         out, err = proc.communicate(prompt_bytes, timeout=timeout)
     except subprocess.TimeoutExpired:
-        proc.kill()
+        _kill_tree(proc)
         try:
             out, _err = proc.communicate(timeout=_PARTIAL_DRAIN_TIMEOUT)
         except (subprocess.TimeoutExpired, OSError, ValueError):
@@ -364,6 +422,7 @@ def run_claude(
     cwd: "os.PathLike[str] | str | None" = None,
     env: dict[str, str] | None = None,
     capture_partial_on_timeout: bool = False,
+    output_format: str = "json",
 ) -> tuple[int, str, str]:
     """Run a `claude -p` subprocess and return (returncode, stdout, stderr).
 
@@ -416,7 +475,14 @@ def run_claude(
         instead of an empty stdout. Off for runner callers, which treat a
         timeout as a total loss. Note this is only what the CLI *flushed*: with
         ``--output-format json`` the envelope is written in one go at the end,
-        so a real timeout usually still yields nothing.
+        so a real timeout yields nothing unless ``output_format`` is
+        ``stream-json``, which writes every assistant turn as it happens.
+    output_format:
+        ``json`` (the default, and every runner caller): one envelope object on
+        stdout. ``stream-json``: one event per line with the envelope last,
+        which the CLI only accepts together with ``--verbose``, added here.
+        Either way ``<usage>`` is read from the envelope, never the whole
+        stream (see :func:`envelope_text`).
 
     Returns
     -------
@@ -442,7 +508,11 @@ def run_claude(
     if env is None:
         env = _build_subprocess_env()
 
-    cmd = [resolve_claude_bin(env), "-p", "-", "--output-format", "json"]
+    if output_format not in OUTPUT_FORMATS:
+        raise ValueError(f"output_format must be one of {OUTPUT_FORMATS}, got {output_format!r}")
+    cmd = [resolve_claude_bin(env), "-p", "-", "--output-format", output_format]
+    if output_format == "stream-json":
+        cmd.append("--verbose")
     if resume:
         cmd.extend(["--resume", str(resume)])
     if model:
@@ -496,7 +566,7 @@ def run_claude(
         # `claude -p` reports max-turns / budget / API stops only inside its
         # JSON envelope and exits 1 with nothing on stderr; without this the
         # stage log says "stderr: " and the reason is lost.
-        stderr = describe_failure(stdout, result.returncode)
+        stderr = describe_failure(envelope_text(stdout), result.returncode)
 
     # Emitted regardless of exit code. `<usage>` used to be emitted only on
     # success, so a call that hit --max-turns, was stopped by the API, or
@@ -505,7 +575,7 @@ def run_claude(
     # (review runner Bug 8). emit_usage_xml is a no-op when stdout carries no
     # envelope, which is the timeout / could-not-launch case.
     try:
-        emit_usage_xml(stdout)
+        emit_usage_xml(envelope_text(stdout))
     except Exception:
         # Cost emission failure must never discard a result, good or bad.
         pass
