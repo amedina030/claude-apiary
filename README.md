@@ -169,6 +169,21 @@ The standard is [`docs/standards/prose-style.md`](docs/standards/prose-style.md)
 
 ---
 
+### Telephone
+
+Cross-repo Claude-to-Claude calls. A session in one registered repo asks another repo a question by starting a headless `claude -p` run with that repo's checkout as the working directory, so it answers with its own `CLAUDE.md`, hooks and scribe notes. Only the reply text crosses back, which is the point: one window, one context, and the far repo's files never enter this session.
+
+- **Skill**: `/telephone <repo> <message>` runs the call in the background and reports the answer with its call id
+- **Record**: every call lands at `<main-apiary>/.apiary/telephone/<year>/<seq>.md` as `C-<year>-<seq>`, and both repos get a scribe `context` note pointing at it
+- **Act mode**: `/telephone <repo> act <message>` lets the callee change files on branch `telephone/<call-id>`. It runs only on a grant the `UserPromptSubmit` hook writes from the user's own keystrokes, so a call Claude placed on its own can never edit another repo
+- **Caps**: three autonomous calls per session and six exchanges per line, counted in flag files. Pushes are denied by tool rule and checked again afterwards against the callee's remote tracking refs
+
+```
+/telephone spanish-citizenship what documents did we submit
+```
+
+---
+
 ### Runner
 
 Autonomous six-stage orchestrator that takes a backlog ticket from fuzzy idea to review-ready code without a human in the loop. Designed to run overnight via cron.

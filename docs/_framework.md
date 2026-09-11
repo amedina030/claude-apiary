@@ -209,3 +209,4 @@ When `_framework.md` needs to change:
 |---------|------|--------|----------|
 | 1.0 | 2026-04-02 | Initial framework | — |
 | 1.0 | 2026-09-10 | `prose/config.json` joins the generated config tables; `docs/standards/prose-style.md` added as the standard the prose linter enforces | `docs/generate_reference.py`, `docs/reference/config-files.md` |
+| 1.0 | 2026-09-11 | `telephone/config.json` joins the generated config tables, and the telephone record store joins the generated path table | `docs/generate_reference.py`, `docs/reference/config-files.md`, `docs/reference/file-storage.md` |

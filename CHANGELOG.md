@@ -20,6 +20,32 @@
   `seven_day_opus` and `seven_day_sonnet` sub-meters are deliberately not
   covered.
 
+- New tool: **telephone** (`C-2026-72`), cross-repo Claude-to-Claude calls. A
+  session in one registered repo asks another by spawning `claude -p` with the
+  callee's checkout as cwd, so the callee answers with its own `CLAUDE.md`,
+  hooks and scribe notes, and only the reply text comes back into the caller's
+  context. `telephone/cli.py` has `call`, `reply`, `status`, `show`, `list` and
+  `hangup`. Records live centrally at
+  `<main-apiary>/.apiary/telephone/<year>/<seq>.md` as `C-<year>-<seq>`, and
+  each completed call writes a scribe `context` note into both repos through
+  their own launchers. Act mode (the callee may edit, on branch
+  `telephone/<call-id>`) runs only on a per-session grant that the new
+  `UserPromptSubmit` hook `telephone/hooks/user_prompt.py` writes when the user
+  types `/telephone <repo> act ...`, so a call Claude placed on its own can
+  never edit another repo, and a hook that fails open leaves act refused.
+  Without a grant a session gets three calls and six exchanges per line, both
+  counted in `session-tmp` flag files rather than in the model's head. Pushes
+  are denied by tool rule and checked again afterwards against the callee's
+  remote tracking refs, which records `issue: push detected`. Two claims were
+  verified live before the build was called done (`L-2026-190`, `L-2026-191`):
+  `--resume` continues a headless session from a different working directory,
+  and a registered callee's `.claude/settings.json` hooks do fire under `-p`.
+- `runner/claude_subprocess.run_claude` gained `resume`, `cwd`, `env` and
+  `capture_partial_on_timeout`, plus a shared `scrub_claude_code_env` helper.
+  Every one defaults to the old behaviour, so runner stages spawn exactly as
+  before. Telephone passes its own environment, because it wants the callee's
+  own hook chain alive where the runner wants its `APIARY_RUNNER_SUBPROCESS=1`
+  skip.
 - `apiary install` now copies `prose/commands/prose.md`. The installer's
   tool allowlist (`core/install._slash_command_sources`) had no `prose`
   entry, so the `/prose` skill from PR #59 reached no repo and `doctor

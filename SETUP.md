@@ -315,6 +315,18 @@ secret-scan hook explicitly if you want it gone:
 python .claude/apiary/launch.py scripts/install_git_hooks.py --uninstall
 ```
 
+Telephone records are **central**, not per-target, so `--remove-data` does not
+touch them: a call has two sides and neither repo owns it. Delete them yourself
+when you want them gone.
+
+```bash
+rm -rf "<main-apiary>/.apiary/telephone"          # every call ever recorded
+rm -rf "<main-apiary>/.apiary/telephone/2026"     # or one year
+```
+
+The scribe `context` notes each call wrote into the two repos are ordinary
+notes and go with that repo's per-target state.
+
 **Everything:**
 
 Uninstall each repo (above), then delete the `claude-apiary` checkout. Apiary writes nothing to `~/.claude/`.
