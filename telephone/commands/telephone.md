@@ -15,7 +15,7 @@ Starts a headless Claude Code run in another registered repo, with that repo as 
 /telephone <repo> act <message>      # act mode: the callee may change files
 ```
 
-`<repo>` is the registry name (`apiary doctor registry` lists them) or a path to the checkout.
+`<repo>` is the registry name (`apiary version --all` lists them) or a path to the checkout.
 
 ## Steps
 
@@ -40,7 +40,7 @@ Starts a headless Claude Code run in another registered repo, with that repo as 
 ## Rules you have to follow
 
 - **Name every call you placed on your own.** When you call another repo without the user typing `/telephone`, say so in your reply to the user, with the call id and what you asked. A call costs the user's subscription and they get no other signal that it happened.
-- **Act mode is never yours to choose.** It runs only on a grant the `UserPromptSubmit` hook writes when the user types `/telephone <repo> act ...`. Running `call --act` without one exits 1, and so does a follow-up on an act call. If act mode is what the work needs, ask the user to type the command.
+- **Act mode is never yours to choose.** It runs only on a grant the `UserPromptSubmit` hook writes when the user types `/telephone <repo> act ...`. The grant is good for that repo only and for fifteen minutes, so place the call straight away and to the repo the user named. Running `call --act` without a matching grant exits 1, and so does a follow-up on an act call. If act mode is what the work needs, ask the user to type the command.
 - **You get three calls of your own per session.** After that `call` exits 1 and tells you to ask the user. A call the user typed does not count against it.
 - **One line holds six autonomous exchanges.** A seventh `reply` without a fresh grant exits 1. Bring the thread to the user instead of trying again.
 - **Never call from inside a call.** A callee run has `APIARY_TELEPHONE_CALL` in its environment and `call` refuses there. If the answer needs a third repo, say so and let the caller decide.
@@ -48,7 +48,7 @@ Starts a headless Claude Code run in another registered repo, with that repo as 
 
 ## What the callee sees
 
-A preamble naming the caller, the mode, the call id and the reply format, then the message. In answer mode its tools are read-only. In act mode it works on branch `telephone/<call-id>`, and the CLI checks afterwards that the branch exists, that the checkout came back to its original branch, and that no remote tracking ref moved. A moved ref is recorded as `issue: push detected` on the record and in both repos' notes.
+A preamble naming the caller, the mode, the call id and the reply format, then the message. In answer mode its tools are read-only, with one Bash shape allowed so it can read its own scribe notes. In act mode the CLI creates branch `telephone/<call-id>` in the callee before the run and switches the checkout back to its original branch afterwards, as long as the tree is clean. Uncommitted work leaves the checkout on the work branch and is recorded as an issue. A moved remote tracking ref is recorded as `issue: push detected` on the record and in both repos' notes.
 
 ## Where it is written down
 
