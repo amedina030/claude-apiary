@@ -29,7 +29,13 @@
     },
     {
       "id": "hook-modules",
-      "code": ["core/hooks/*.py", "budgeter/hooks/*.py", "docs/hooks/*.py", "prose/hooks/*.py"],
+      "code": [
+        "core/hooks/*.py",
+        "budgeter/hooks/*.py",
+        "docs/hooks/*.py",
+        "prose/hooks/*.py",
+        "telephone/hooks/*.py"
+      ],
       "docs": ["docs/reference/hooks.md"],
       "why": "Every hook has a row in hooks.md describing what it does."
     },
